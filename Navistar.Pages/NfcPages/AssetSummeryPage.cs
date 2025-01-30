@@ -1,0 +1,108 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection.Emit;
+using System.Text;
+using System.Threading.Tasks;
+using Navistar.Navistar.core;
+using OpenQA.Selenium;
+using OpenQA.Selenium.DevTools.V129;
+
+namespace Navistar.Navistar.Pages.NfcPages
+{
+    public class AssetSummeryPage : BasePage
+    {
+        public AssetSummeryPage(WebDriver driver) : base(driver)
+        {
+        }
+        private IWebElement vinSearchField => Find(By.XPath("//input[@placeholder=\"Enter VIN to Search\"]"));
+        private IWebElement vinSearchButton => Find(By.XPath("//button[@class='p-ripple p-element p-button p-component p-button-icon-only']"));
+        private IWebElement addAssetManuallyButton => Find(By.XPath("//p-button[@label='Add Asset Manually']//button[@type='button']"));
+        private IWebElement assetEditButton => Find(By.XPath("//span[@class='p-button-icon fa-regular fa-pen ng-star-inserted']"));
+        private IWebElement yearField => Find(By.XPath("//p-calendar[@view='year']//input"));
+        private IWebElement newOrUserDropdown => Find(By.XPath("//p-dropdown[@formcontrolname='conditionOfGood']//span"));
+        private IWebElement assetDropdown => Find(By.XPath("//p-dropdown[@formcontrolname='assetTypeId']//span"));
+        private IWebElement categoryDropdown => Find(By.XPath("//p-dropdown[@formcontrolname='category']//span"));
+        private IWebElement purchasePrice => Find(By.XPath("//p-inputnumber[@formcontrolname='cost']//input"));
+        private IWebElement saveAsset => Find(By.XPath("//span[@class='p-button-icon ng-star-inserted fa-solid fa-check']"));
+        private IWebElement deleteAsset => Find(By.XPath("//span[@class='p-button-icon fa-regular fa-trash-can ng-star-inserted']"));
+        private IWebElement enterVIN => Find(By.XPath("//input[@formcontrolname='vin']"));
+        private IWebElement enterOdometer => Find(By.XPath("//p-inputnumber[@formcontrolname='odometer']//input"));
+        private IWebElement enterISCAmount => Find(By.XPath("//p-inputnumber[@formcontrolname='intServCountAmt']//input[@role='spinbutton']"));
+        private IWebElement enterBodySerialNumber => Find(By.XPath("//input[@formcontrolname='bodySerialNumber']"));
+        private IWebElement deleteVehicleDetailsButton => Find(By.XPath("//i[@class='fa-regular fa-trash-can']"));
+        private IWebElement cancelButton => Find(By.XPath("//span[normalize-space()='CANCEL']"));
+        private IWebElement saveButton => Find(By.XPath("//span[normalize-space()='SAVE']"));
+        By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
+
+        public void SearchByVinNo(string vinNo)
+        {
+            vinSearchField.SendKeys(vinNo);
+            vinSearchButton.Click();
+            ReportingManager.LogPass("User entered " + vinNo + " and clicked on search successfully");
+        }
+        public void ClickOnAddAssetManuallyButton()
+        {
+            SetImplicitWait(15);
+            addAssetManuallyButton.Click();
+            ReportingManager.LogPass("Clicked on Add Asset Manually Button.");
+        }
+        public void ClickOnAssetEditButton()
+        {
+            assetEditButton.Click();
+            ReportingManager.LogPass("Clicked on Edit Asset Button");
+        }
+        public void SelectyearField(string year)
+        {
+            yearField.SendKeys(year);
+            ReportingManager.LogPass("Entered " + year + " year in the field.");
+        }
+        public void SelectNewOrUsed(string value)
+        {
+            dropdown.SelectCustomDropdown(newOrUserDropdown, value, optionsLocator);
+        }
+        public void SelectAssetDropdown(String value)
+        {
+            dropdown.SelectCustomDropdown(assetDropdown, value, optionsLocator);
+            ReportingManager.LogPass("Selected asset " + value + " from the dropdown.");
+        }
+        public void SelectCategory(String value)
+        {
+            dropdown.SelectCustomDropdown(categoryDropdown, value, optionsLocator);
+            ReportingManager.LogPass("Selected category" + value + " from the dropdown.");
+        }
+        public void EnterPurchasePriceValue(String value)
+        {
+            purchasePrice.SendKeys(value);
+            ReportingManager.LogPass("Entered purchase price value as " + value + ".");
+        }
+        public void SaveTheAsset()
+        {
+            saveAsset.Click();
+            ReportingManager.LogPass("Dealer clicked on Save Asset Button");
+        }
+        public void EnterOdometer(string value)
+        {
+            enterOdometer.SendKeys(value);
+            ReportingManager.LogPass("Entered Odometer value as " + value + ".");
+        }
+        public void ClickOnSaveButton()
+        {
+            saveButton.Click();
+            ReportingManager.LogPass("Dealer clicked on Save button.");
+        }
+        public void AddAsset()
+        {
+            ClickOnAddAssetManuallyButton();
+            ClickOnAssetEditButton();
+            SelectyearField("2020");
+            SelectNewOrUsed("Used");
+            SelectAssetDropdown("LT Series/International/Heavy/Vehicles/All Asset Types");
+            SelectCategory("Day Cab");
+            EnterPurchasePriceValue("11000");
+            EnterOdometer("12345");
+            SaveTheAsset();
+            ClickOnSaveButton();
+        }
+    }
+}
