@@ -1,0 +1,19 @@
+{
+    "CustomerRole": "Borrower",
+    "Classification": "Individual",
+    "FirstName": "John",
+    "MiddleName": "I",
+    "LastName": "DoE",
+    "Email": "Johndoe@gmail.com",
+    "Phone": "+1 (234) 567 8912",
+    "DateOfBirth": "04/03/1996",
+    "SocialSecurityNumber": "979300869",
+    "Vocation": "Agriculture",
+    "FleetSize": 1234,
+    "PriorBankruptcy": "No",
+    "PriorRepossession": "No",
+    "PriorFiscalYearGrossAnnualRevenueOver5M": "No",
+    "BusinessOrOwnerOpenSince": "04/01/2025",
+    "CommercialDriversLicenseNumber": "923464564",
+    "FromDate": "04/08/2025"
+}

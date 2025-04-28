@@ -1,37 +1,41 @@
 using System;
 using Navistar.Navistar.core;
 using Navistar.Navistar.Pages.NfcPages;
-using TechTalk.SpecFlow;
+using NUnit.Framework;
+using Reqnroll;
+
 
 namespace Navistar.StepDefinitions
 {
     [Binding]
     public class CreateQuickQuoteStepDefinitions
     {
-        private NFCLoginPage _loginPage;
-        private DashboardPage _dashboardPage;
-        private QuickQuotePage _quickQuotePage;
+        private readonly PageObjectContainer _pageObjects;
+
+        public CreateQuickQuoteStepDefinitions(PageObjectContainer pageObjects)
+        {
+            _pageObjects = pageObjects;
+        }
 
         [Given(@"Login into the Portal")]
         public void GivenLoginIntoThePortal()
         {
-            
+
             ReportingManager.LogInfo("Navigating to the login page.");
-            DriverContext.InitDriver();
+            //DriverContext.InitDriver();
             DriverContext.Driver.Navigate().GoToUrl("https://testnfcportal:81/authentication");
-            _loginPage = new NFCLoginPage(DriverContext.Driver);
-            _dashboardPage = new DashboardPage(DriverContext.Driver);
-            _quickQuotePage = new QuickQuotePage(DriverContext.Driver);
+
         }
 
         [When(@"Navigate to the Dashboard")]
         public void WhenNavigateToTheDashboard()
         {
             ReportingManager.LogInfo("Entering valid credentials.");
-            _loginPage.EnterUserName("testuser");
-            _loginPage.EnterPassword("password123");
+            _pageObjects.LoginPage.EnterUserName("testuser");
+            _pageObjects.LoginPage.EnterPassword("password123");
+            ReportingManager.AddScreenshotToReport("Loginpage");
             ReportingManager.LogInfo("Attempting login.");
-            _loginPage.ClickLoginButton();
+            _pageObjects.LoginPage.ClickLoginButton();
             ReportingManager.LogPass("Navigated to the dashboard successfully");
         }
 
@@ -39,41 +43,43 @@ namespace Navistar.StepDefinitions
         public void WhenClickOnTheCreateQuickQuoteButton()
         {
             ReportingManager.LogInfo("Click on Create Quick Quote");
-            _dashboardPage.ClickOnCreateQuickQuote();
+            ReportingManager.AddScreenshotToReport("Navigated to dashboard");
+            _pageObjects.DashboardPage.ClickOnCreateQuickQuote();
         }
 
         [When(@"Navigate to the Quick Comparision screen'")]
         public void WhenNavigateToTheQuickComparisionScreen()
         {
-            _quickQuotePage.SelectProgramDropDown("Finance Leases Program");
-            _quickQuotePage.SelectProductDropdown("Finance Lease");
-            _quickQuotePage.SelectAssetDropdown("LT Series/International/Heavy/Vehicles/All Asset Types");
+            _pageObjects.QuickQuotePage.SelectProgramDropDown("Finance Leases Program");
+            _pageObjects.QuickQuotePage.SelectProductDropdown("Finance Lease");
+            _pageObjects.QuickQuotePage.SelectAssetDropdown("LT Series/International/Heavy/Vehicles/All Asset Types");
+            ReportingManager.AddScreenshotToReport("Entered program and product combination");
         }
 
         [When(@"Enter the data in all required field")]
         public void WhenEnterTheDataInAllRequiredField()
         {
-            _quickQuotePage.PurchasePrice("10,000.00");
-            _quickQuotePage.Frequency("Monthly");
-            _quickQuotePage.TermInMonths("24");
+            _pageObjects.QuickQuotePage.PurchasePrice(10000);
+            _pageObjects.QuickQuotePage.FrequencyDropdown("Monthly");
+            _pageObjects.QuickQuotePage.TermInMonths(24);
         }
 
         [When(@"click on the Calculate button")]
         public void WhenClickOnTheCalculateButton()
         {
-            _quickQuotePage.CalcutateButton();
+            _pageObjects.QuickQuotePage.ClickOnCalcutateButton();
         }
 
         [Then(@"Quick Quote is generated")]
         public void ThenQuickQuoteIsGenerated()
         {
-            
+            ReportingManager.LogInfo("Quick quote is created successfully");
         }
 
         [Then(@"click on the Create Quote Button")]
         public void ThenClickOnTheCreateQuoteButton()
         {
-           
+            _pageObjects.QuickQuotePage.ClickOnCreateQuoteButton();
         }
 
         [Then(@"Navigate to the Standard Quick Quote")]

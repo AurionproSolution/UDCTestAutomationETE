@@ -8,11 +8,14 @@ using System.Text;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyModel;
+using OpenQA.Selenium.Support.UI;
+
 namespace Navistar.Navistar.core
 {
     public class AssertionsHelper
     {
         private readonly WebDriver Driver;
+        private readonly WebDriverWait Wait;
 
         public AssertionsHelper(WebDriver driver)
         {
@@ -21,8 +24,8 @@ namespace Navistar.Navistar.core
 
         public void AssertElementIsVisible(IWebElement element)
         {
-           // Assert.IsTrue(element.Displayed, $"Element '{element}' is not visible.");
             Assert.Pass($"Element '{element}' is not visible.");
+            ReportingManager.LogPass($"Element '{element}' is not visible.");
         }
 
         public void AssertElementTextEquals(IWebElement element, string expectedText)
@@ -39,16 +42,15 @@ namespace Navistar.Navistar.core
             Assert.Pass($"Element '{currentUrl}' is not visible.");
         }
 
-        public void AssertPageTitleEquals(string expectedTitle)
+        public void AssertPageTitleEquals(string expectedTitle, int timeoutInSeconds = 5)
         {
-            var actualTitle = Driver.Title;
-            //Assert.AreEqual(expectedTitle, actualTitle, $"Expected page title '{expectedTitle}' but found '{actualTitle}'.");
-            Assert.Equals(expectedTitle, actualTitle);
+            string actual = Driver.Title;
+            Driver.Title.Should().Be(expectedTitle, $"Expected title: '{expectedTitle}', but found: '{Driver.Title}'");
         }
 
         public void AssertElementIsEnabled(IWebElement element)
         {
-           // Assert.IsTrue(element.Enabled, $"Element '{element}' is not enabled.");
+            // Assert.IsTrue(element.Enabled, $"Element '{element}' is not enabled.");
             Assert.Pass($"Element '{element}' is not visible.");
         }
     }

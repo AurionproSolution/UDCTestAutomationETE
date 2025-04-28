@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 using SeleniumExtras.WaitHelpers;
 using OpenQA.Selenium.BiDi.Modules.BrowsingContext;
+using OpenQA.Selenium.Interactions;
 
 namespace Navistar.Navistar.core
 {
@@ -18,23 +19,35 @@ namespace Navistar.Navistar.core
         {
             Driver = driver;
         }
-
         public void SelectCustomDropdown(IWebElement dropdownTrigger, string optionText, By optionsLocator)
         {
+            WebDriverWait wait = new WebDriverWait(Driver, TimeSpan.FromSeconds(10));
+            Actions actions = new Actions(Driver);
+
+            // Ensure dropdown trigger is clickable before clicking
+           // wait.Until(ExpectedConditions.ElementToBeClickable(dropdownTrigger)).Click();
             dropdownTrigger.Click();
+            // Wait for dropdown options to be visible
+            wait.Until(ExpectedConditions.ElementIsVisible(optionsLocator));
+
             var options = Driver.FindElements(optionsLocator);
             foreach (var option in options)
             {
                 if (option.Text.Trim().Equals(optionText, StringComparison.OrdinalIgnoreCase))
                 {
-                    //Driver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(10);
-                    option.Click();
+                    wait.Until(ExpectedConditions.ElementToBeClickable(option));
+
+                    // Use Actions to ensure smooth interaction
+                    actions.MoveToElement(option).Click().Perform();
                     //ReportingManager.LogPass($"Selected option '{option.Text}' from the '{dropdownTrigger.Text}' dropdown.");
                     return;
+
                 }
             }
-            throw new NoSuchElementException($"Option with text '{optionText}' not found.");
+
+            throw new NoSuchElementException($"Option '{optionText}' not found.");
         }
+
         // Method to select an option by text
         public void SelectByText(IWebElement dropdownElement, string text)
         {
@@ -68,6 +81,7 @@ namespace Navistar.Navistar.core
             var selectElement = new SelectElement(element);
             return selectElement.IsMultiple;
         }
+
         // Get the selected option
         public string GetSelectedOption(IWebElement element)
         {

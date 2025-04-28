@@ -3,7 +3,7 @@
 A short summary of the feature
 
 @tag1
-Scenario: Creating a new 
+Scenario: Creating a new Quick quote
 	Given Login into the Portal
 	When Navigate to the Dashboard
 	And Click on the Create Quick Quote button

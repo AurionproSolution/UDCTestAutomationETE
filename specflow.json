@@ -1,11 +1,22 @@
 {
-  "$schema": "https://specflow.org/specflow-config.json"
-
-  {
+    "$schema": "https://specflow.org/specflow-config.json",
     "bindingCulture": {
-      "language": "en-us"
+        "language": "en-us"
     },
-    "stepAssemblies": []
-  }
-
+    "language": {
+        "feature": "en-us"
+    },
+    "unitTestProvider": {
+        "name": "NUnit"
+    },
+    "stepAssemblies": [
+        {
+            "assembly": "Navistar"
+        }
+    ],
+    "trace": {
+        "traceSuccessfulSteps": true,
+        "traceTimings": true,
+        "minTracedDuration": "0:00:00.1"
+    }
 }

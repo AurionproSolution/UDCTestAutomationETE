@@ -1,7 +1,7 @@
 using Navistar.Navistar.core;
 using Navistar.Navistar.Pages.NfcPages;
+using Reqnroll;
 using System;
-using TechTalk.SpecFlow;
 
 namespace Navistar.StepDefinitions
 {
@@ -16,7 +16,7 @@ namespace Navistar.StepDefinitions
         public void GivenINavigateToTheLoginPage()
         {
             ReportingManager.LogInfo("Navigating to the login page.");
-            DriverContext.InitDriver();
+            //DriverContext.InitDriver("edge");
             DriverContext.Driver.Navigate().GoToUrl("https://testnfcportal:81/authentication");
             _loginPage = new NFCLoginPage(DriverContext.Driver);
             _dashboardPage = new DashboardPage(DriverContext.Driver);
@@ -40,10 +40,10 @@ namespace Navistar.StepDefinitions
             _quickQuotePage.SelectProgramDropDown("Finance Leases Program");
             _quickQuotePage.SelectProductDropdown("Finance Lease");
             _quickQuotePage.SelectAssetDropdown("LT Series/International/Heavy/Vehicles/All Asset Types");
-            _quickQuotePage.PurchasePrice("10,000.00");
-            _quickQuotePage.Frequency("Monthly");
-            _quickQuotePage.TermInMonths("24");
-            _quickQuotePage.CalcutateButton();
+            _quickQuotePage.PurchasePrice(10000);
+            _quickQuotePage.FrequencyDropdown("Monthly");
+            _quickQuotePage.TermInMonths(24);
+            _quickQuotePage.ClickOnCalcutateButton();
             _quickQuotePage.ClickOnCreateQuoteButton();
         }
     }

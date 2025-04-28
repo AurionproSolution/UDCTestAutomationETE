@@ -1,7 +1,8 @@
 using System;
 using Navistar.Navistar.core;
 using Navistar.Navistar.Pages.NfcPages;
-using TechTalk.SpecFlow;
+using Reqnroll;
+
 
 namespace Navistar.StepDefinitions
 {
@@ -14,12 +15,15 @@ namespace Navistar.StepDefinitions
         private AssetSummeryPage _assetSummeryPage;
         private CustomerDetailsPage _customerDetailsPage;
         private SearchCustomerPage _searchCustomerPage;
+        private AddNewCustomerPage _addNewCustomerPage;
+        private ContractSummaryPage _contractSummaryPage;
+        private MenuSlidebarPage _menuSlidebarPage;
 
         [Given(@"Dealer navigates to the Login page using a URL")]
         public void GivenDealerNavigatesToTheLoginPageUsingAURL()
         {
             ReportingManager.LogInfo("Navigating to the login page.");
-            DriverContext.InitDriver();
+            //DriverContext.InitDriver();
             DriverContext.Driver.Navigate().GoToUrl("https://testnfcportal:81/authentication");
             _loginPage = new NFCLoginPage(DriverContext.Driver);
             _dashboardPage = new DashboardPage(DriverContext.Driver);
@@ -27,6 +31,9 @@ namespace Navistar.StepDefinitions
             _assetSummeryPage = new AssetSummeryPage(DriverContext.Driver);
             _customerDetailsPage = new CustomerDetailsPage(DriverContext.Driver);
             _searchCustomerPage = new SearchCustomerPage(DriverContext.Driver);
+            _addNewCustomerPage = new AddNewCustomerPage(DriverContext.Driver);
+            _contractSummaryPage = new ContractSummaryPage(DriverContext.Driver);
+            _menuSlidebarPage = new MenuSlidebarPage(DriverContext.Driver);
         }
 
         [When(@"Dealer enters valid credentials")]
@@ -74,43 +81,45 @@ namespace Navistar.StepDefinitions
         public void ThenDealerNavigatesToTheCustomerPage()
         {
             _customerDetailsPage.ClickOnAddContractPartiesButton();
-            _searchCustomerPage.AddNewCustomer();
         }
 
         [Then(@"Validates that a Contract ID is generated")]
         public void ThenValidatesThatAContractIDIsGenerated()
         {
-            throw new PendingStepException();
+            _searchCustomerPage.ClickOnAddNewCustomerButton();
         }
 
         [Then(@"Fills in the required fields, adds Customer Parties, and saves Customer details")]
         public void ThenFillsInTheRequiredFieldsAddsCustomerPartiesAndSavesCustomerDetails()
         {
-            throw new PendingStepException();
+            _addNewCustomerPage.AddNewIndividualCustomer();
+            _addNewCustomerPage.ClickOnNextButton();
         }
 
         [When(@"Dealer navigates to the Customer Summary page")]
         public void WhenDealerNavigatesToTheCustomerSummaryPage()
         {
-            throw new PendingStepException();
+            _addNewCustomerPage.ClickOnSubmitButton();
+            _addNewCustomerPage.ClickOnNextButton();
         }
 
         [When(@"Clicks on Next")]
         public void WhenClicksOnNext()
         {
-            throw new PendingStepException();
+            _contractSummaryPage.ValidateContractIdIsGenerated();
         }
 
         [Then(@"The contract status should change to Application Submitted")]
         public void ThenTheContractStatusShouldChangeToApplicationSubmitted()
         {
-            throw new PendingStepException();
+            _contractSummaryPage.ClickOnNextButton();
+            _contractSummaryPage.ValidateApplicationSubmittedStatus();
         }
 
         [When(@"Dealer navigates to the Dashboard page")]
         public void WhenDealerNavigatesToTheDashboardPage()
         {
-            throw new PendingStepException();
+            _menuSlidebarPage.ClickOnDashboard();
         }
 
         [When(@"Searches using the Contract ID")]

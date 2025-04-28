@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Navistar.Navistar.core;
 using OpenQA.Selenium;
 
 namespace Navistar.Navistar.Pages.NfcPages
@@ -34,10 +35,11 @@ namespace Navistar.Navistar.Pages.NfcPages
         {
             searchByValue.SendKeys(name);
         }
-        public void AddNewCustomer()
+        public void ClickOnAddNewCustomerButton()
         {
+            Thread.Sleep(1000);
             addNewCustomer.Click();
+            ReportingManager.LogPass("Dealer clicked on Add New Customer Button.");
         }
-
     }
 }

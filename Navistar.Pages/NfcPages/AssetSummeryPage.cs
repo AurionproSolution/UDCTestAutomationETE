@@ -6,7 +6,9 @@ using System.Text;
 using System.Threading.Tasks;
 using Navistar.Navistar.core;
 using OpenQA.Selenium;
-using OpenQA.Selenium.DevTools.V129;
+
+using OpenQA.Selenium.Support.UI;
+using SeleniumExtras.WaitHelpers;
 
 namespace Navistar.Navistar.Pages.NfcPages
 {
@@ -43,18 +45,37 @@ namespace Navistar.Navistar.Pages.NfcPages
         }
         public void ClickOnAddAssetManuallyButton()
         {
+            Thread.Sleep(1000);
             SetImplicitWait(15);
             addAssetManuallyButton.Click();
             ReportingManager.LogPass("Clicked on Add Asset Manually Button.");
         }
         public void ClickOnAssetEditButton()
         {
-            assetEditButton.Click();
-            ReportingManager.LogPass("Clicked on Edit Asset Button");
+            WebDriverWait wait = new WebDriverWait(Driver, TimeSpan.FromSeconds(15));
+
+            // 1️⃣ Wait for the assetEditButton to be visible and clickable
+            var assetEditButtonElement = wait.Until(ExpectedConditions.ElementToBeClickable(By.XPath("//span[@class='p-button-icon fa-regular fa-pen ng-star-inserted']")));
+
+            // 2️⃣ Try clicking directly
+            try
+            {
+                assetEditButtonElement.Click();
+                ReportingManager.LogPass("Clicked on Edit Asset Button");
+            }
+            catch (ElementClickInterceptedException)
+            {
+                // If click is intercepted, retry with JavaScript
+                IJavaScriptExecutor js = (IJavaScriptExecutor)Driver;
+                js.ExecuteScript("arguments[0].click();", assetEditButtonElement);
+                ReportingManager.LogPass("Clicked on Edit Asset Button using JavaScript");
+            }
+            //assetEditButton.Click();
+            //ReportingManager.LogPass("Clicked on Edit Asset Button");
         }
-        public void SelectyearField(string year)
+        public void SelectyearField(int year)
         {
-            yearField.SendKeys(year);
+            yearField.SendKeys(year.ToString());
             ReportingManager.LogPass("Entered " + year + " year in the field.");
         }
         public void SelectNewOrUsed(string value)
@@ -68,6 +89,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         }
         public void SelectCategory(String value)
         {
+            Thread.Sleep(500);
             dropdown.SelectCustomDropdown(categoryDropdown, value, optionsLocator);
             ReportingManager.LogPass("Selected category" + value + " from the dropdown.");
         }
@@ -81,9 +103,13 @@ namespace Navistar.Navistar.Pages.NfcPages
             saveAsset.Click();
             ReportingManager.LogPass("Dealer clicked on Save Asset Button");
         }
-        public void EnterOdometer(string value)
+        public void EnterVinNumber(string value)
         {
-            enterOdometer.SendKeys(value);
+            enterVIN.SendKeys(value);
+        }
+        public void EnterOdometer(int value)
+        {
+            enterOdometer.SendKeys(value.ToString());
             ReportingManager.LogPass("Entered Odometer value as " + value + ".");
         }
         public void ClickOnSaveButton()
@@ -95,12 +121,12 @@ namespace Navistar.Navistar.Pages.NfcPages
         {
             ClickOnAddAssetManuallyButton();
             ClickOnAssetEditButton();
-            SelectyearField("2020");
+            SelectyearField(2020);
             SelectNewOrUsed("Used");
             SelectAssetDropdown("LT Series/International/Heavy/Vehicles/All Asset Types");
             SelectCategory("Day Cab");
             EnterPurchasePriceValue("11000");
-            EnterOdometer("12345");
+            EnterOdometer(12345);
             SaveTheAsset();
             ClickOnSaveButton();
         }
