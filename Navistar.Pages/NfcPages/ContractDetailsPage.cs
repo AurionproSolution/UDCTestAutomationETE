@@ -36,8 +36,9 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement installment => Find(By.XPath("//label[text()='Installment']/following-sibling::span"));
         private IWebElement totalInterest => Find(By.XPath("//label[text()='Total Interest']/following-sibling::span"));
         private IWebElement totalAmountToRepay => Find(By.XPath("//label[text()='Total Amount to Repay']/following-sibling::span"));
-
         private IWebElement element => Find(By.XPath("//p-dropdown[@class='p-element p-inputwrapper ng-pristine ng-invalid ng-star-inserted ng-touched']//span[@role='combobox']"));
+        private IWebElement AnnualMileage => Find(By.XPath("//label[contains(text(),'Annual Mileage ')]//following::span/input"));
+
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
         public void SelectProgramDropDown(string value)
         {
@@ -172,6 +173,12 @@ namespace Navistar.Navistar.Pages.NfcPages
             }
 
             return details;
+        }
+        public void EnterAnnualMileage(string value)
+        {
+            SetImplicitWait(10);
+            AnnualMileage.SendKeys(value);
+            ReportingManager.LogPass("Annual Mileage entered " + value + "");
         }
     }
 }

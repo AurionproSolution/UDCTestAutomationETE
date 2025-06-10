@@ -177,8 +177,13 @@ namespace Navistar.StepDefinitions
         public void WhenTheUserEntersDaysToFirstPaymentAndClicksOnTheNextButton()
         {
             //_pageObjects.ContractDetailsPage.EnterDaysToFirstPayment("31");
-            _pageObjects.ContractDetailsPage.ClickOnCalcutateButton();
             string product = ScenarioContext.Current["Product"].ToString();
+
+            if(product.Equals("Operating Lease"))
+            {
+                _pageObjects.ContractDetailsPage.EnterAnnualMileage("100");
+            }
+            _pageObjects.ContractDetailsPage.ClickOnCalcutateButton();
             standardQuoteValues = _pageObjects.ContractDetailsPage.StandardQuoteDetails(product);
 
             var assertionErrors = new List<string>(); // Store failed assertions
