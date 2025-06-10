@@ -17,7 +17,9 @@ namespace Navistar.Navistar.Pages.NfcPages
         }
         private IWebElement clickOnNextButton => Find(By.XPath("//span[text()='Next']"));
         private IWebElement contractIdElement => Find(By.XPath("//label[text()=' Contract ID  ']/following-sibling::div/span"));
-        private IWebElement StatusElement => Driver.FindElement(By.XPath("//div[@class='status-container']/span"));
+        private IWebElement StatusElement => Driver.FindElement(By.XPath("//div[@class='status-container mt-2']/span"));
+
+        private IWebElement labelPaymentSummary => Driver.FindElement(By.XPath("//p[contains(text(),' Total Amount Borrowed ')]"));
 
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
         public void ClickOnNextButton()
@@ -29,25 +31,27 @@ namespace Navistar.Navistar.Pages.NfcPages
         }
         public void AdditionalApprovalConditionStatus(string value)
         {
+            ScrollAndClickElement(labelPaymentSummary);
             int i = 1; // XPath indexes start from 1
-            int j = i + 1;
+           // int j = i + 1;
 
             while (true)
             {
                 try
                 {
                     // Find the dropdown and OK button using XPath index
+                    Thread.Sleep(3000);
                     IWebElement dropdownele = Driver.FindElement(By.XPath($"(//div[@class='haulerSourceBody']//div[@class='p-dropdown p-component p-inputwrapper p-inputwrapper-filled']/span)[{i}]"));
-                    IWebElement okButton = Driver.FindElement(By.XPath($"(//span[text()='OK'])[ {j} ]"));
+                    //IWebElement okButton = Driver.FindElement(By.XPath($"(//span[text()='OK'])[ {j} ]"));
 
-                    MoveToElement(okButton);
+                    //MoveToElement(okButton);
                     dropdown.SelectCustomDropdown(dropdownele, value, optionsLocator);
-                    Thread.Sleep(300);
-                    okButton.Click();
+               //     Thread.Sleep(300);
+              //      okButton.Click();
                     Thread.Sleep(500);
 
-                    i++; // Move to the next dropdown and button
-                    j++;
+                    //i++; // Move to the next dropdown and button
+                    //j++;
                 }
                 catch (NoSuchElementException)
                 {
@@ -62,13 +66,13 @@ namespace Navistar.Navistar.Pages.NfcPages
             Assert.That(contractId, Is.Not.Null.Or.Empty, "Contract ID was not generated.");
             ReportingManager.LogPass($" Contract ID Generated: {contractId}");
         }
-        public void ValidateApplicationSubmittedStatus()
+        public void ValidateApplicationSubmittedStatus(string status="")
         {
             WebDriverWait wait = new WebDriverWait(Driver, TimeSpan.FromSeconds(10));
             wait.Until(drv => StatusElement.Displayed);  // Wait until the status appears
 
             string actualStatus = StatusElement.Text.Trim();
-            string expectedStatus = "Status : Application Submitted";
+            string expectedStatus = status; 
 
             if (actualStatus != expectedStatus)
             {

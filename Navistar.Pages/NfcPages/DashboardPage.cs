@@ -21,7 +21,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement resetBtn => Find(By.XPath("//span[text()='Reset']"));
         private IWebElement searchQuoteField => Find(By.XPath("//input[@placeholder='Search Quote']"));
         private IWebElement dashboardElement => Find(By.XPath("//a/span[text()='Dashboard']"));
-        private IWebElement DealerDropdown => Find(By.XPath("//span[text()='Dealer ']"));
+        private IWebElement DealerDropdown => Find(By.XPath("//span[text()='Dealer']"));
         
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
 

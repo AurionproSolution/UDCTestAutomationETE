@@ -47,7 +47,7 @@ namespace Navistar.StepDefinitions
             ReportingManager.LogPass("Logged in usign URL : -" + dashboardurl + " .");
             // _pageObjects.DashboardPage.VerifyDashboardPage();
             ReportingManager.LogPass("Navigated to the dashboard successfully");
-            _pageObjects.DashboardPage.SelectDealer("36000005 -");
+            _pageObjects.DashboardPage.SelectDealer("36000005");
         }
 
         [Then("the user navigate to the Create Quick Quote page")]
@@ -74,7 +74,7 @@ namespace Navistar.StepDefinitions
         [When("the user selects the {string} from the Asset dropdown")]
         public void WhenTheUserSelectsTheFromTheAssetDropdown(string asset)
         {
-            _pageObjects.QuickQuotePage.SelectAssetDropdown("LT Series/International/Heavy/Vehicles");
+            _pageObjects.QuickQuotePage.SelectAssetDropdown("LT/INTERNATIONAL/Heavy/Vehicles");
         }
 
         [Then("user enters {string}")]

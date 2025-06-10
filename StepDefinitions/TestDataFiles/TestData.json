@@ -1,7 +1,7 @@
 ﻿{
     "BaseUrl": "https://nfcui.aurionpro.com",
     "BaseQaUrl": "https://nfcui.aurionpro.com/authentication",
-    "QAUrl": "https://testnfcportal:81/authentication",
+    "QAUrl": "https://testnfcportal:81/",
     "FisSandboxUrl": "https://aurpr-ua.assetfinance.myfis.cloud/UANFCPortal/authentication",
     "NFCSandboxUrl": "https://navistar-test.fiscloudservices.com/DANFCPortal/authentication"
 }

@@ -8,6 +8,7 @@ using System;
 using NUnit.Framework;
 using static NUnit.Framework.Internal.OSPlatform;
 using Reqnroll;
+using AventStack.ExtentReports;
 
 
 namespace Navistar.StepDefinitions
@@ -65,7 +66,7 @@ namespace Navistar.StepDefinitions
             ReportingManager.LogPass("Logged in usign URL : -" + dashboardurl + " .");
             // _pageObjects.DashboardPage.VerifyDashboardPage();
             ReportingManager.LogPass("Navigated to the dashboard successfully");
-            _pageObjects.DashboardPage.SelectDealer("36000005 -");
+            _pageObjects.DashboardPage.SelectDealer("36000005");
         }
 
         [When(@"the user clicks on Create Quick Quote")]
@@ -233,18 +234,31 @@ namespace Navistar.StepDefinitions
         public void ThenTheUserEntersAllTheRequiredFieldsInPartyDetailsPage()
         {
             ReportingManager.LogInfo("Dealer adding New customer or party.");
+            Thread.Sleep(10000);
             _pageObjects.AddNewCustomerPage.EnterFirstName(_pageObjects.CustomerPartiesTestData.FirstName);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.EnterMiddleName(_pageObjects.CustomerPartiesTestData.MiddleName);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.EnterLastName(_pageObjects.CustomerPartiesTestData.LastName);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.EnterEmailAddress(_pageObjects.CustomerPartiesTestData.Email);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.EnterPhone(_pageObjects.CustomerPartiesTestData.Phone);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.EnterDateOfBirth(_pageObjects.CustomerPartiesTestData.DateOfBirth);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.EnterSocialSecurityNo(_pageObjects.CustomerPartiesTestData.SocialSecurityNumber);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.SelectVocationDropdown(_pageObjects.CustomerPartiesTestData.Vocation);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.EnterFleetSize(_pageObjects.CustomerPartiesTestData.FleetSize);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.SelectPriorBankrupcyDropdown(_pageObjects.CustomerPartiesTestData.PriorBankruptcy);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.SelectPriorRepossessionDropdown(_pageObjects.CustomerPartiesTestData.PriorRepossession);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.SelectGrossAnnaulDropdown(_pageObjects.CustomerPartiesTestData.PriorFiscalYearGrossAnnualRevenueOver5M);
+            Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.EnterBusinessOwnerOpenSince(_pageObjects.CustomerPartiesTestData.BusinessOrOwnerOpenSince);
             _pageObjects.AddNewCustomerPage.EnterCommercialDrLicense(_pageObjects.CustomerPartiesTestData.CommercialDriversLicenseNumber);
         }
@@ -280,6 +294,8 @@ namespace Navistar.StepDefinitions
         {
             _pageObjects.AddressPage.AddAddress();
             _pageObjects.AddNewCustomerPage.EnterFromDate("01/15/2020");
+            _pageObjects.AddNewCustomerPage.clickOnDate();
+            Thread.Sleep(5000);
         }
         [Then(@"the user clicks on the Next button")]
         public void ThenTheUserClicksOnTheNextButton()
@@ -295,8 +311,18 @@ namespace Navistar.StepDefinitions
             _pageObjects.ContractSummaryPage.ValidateContractIdIsGenerated();
             _pageObjects.ContractSummaryPage.AdditionalApprovalConditionStatus("Completed");
             _pageObjects.ContractSummaryPage.ClickOnNextButton();
-            _pageObjects.ContractSummaryPage.ValidateApplicationSubmittedStatus();
+         // _pageObjects.ContractSummaryPage.ValidateApplicationSubmittedStatus();
         }
+
+
+        [Then("Verify Appllication Status {string}")]
+        public void ThenVerifyAppllicationStatus(string status)
+        {
+             Thread.Sleep(15000);
+            _pageObjects.ContractSummaryPage.ValidateApplicationSubmittedStatus(status);
+        }
+
+
 
     }
 }

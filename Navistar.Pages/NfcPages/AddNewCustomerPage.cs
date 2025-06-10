@@ -26,7 +26,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement enterLastName => Find(By.XPath("//label[text()='Last Name ']/following-sibling::span/input"));
         private IWebElement enterEmailAddress => Find(By.XPath("//label[text()='Email ']/following-sibling::span/input"));
         private IWebElement enterDateOfBirth => Find(By.XPath("//label[text()=' Date Of Birth ']/following-sibling::p-calendar//span/input"));
-        private IWebElement enterSocialSecurityNo => Find(By.XPath("//label[text()='Social Security No.']/following-sibling::p-inputnumber/span/input"));
+        private IWebElement enterSocialSecurityNo => Find(By.XPath("//label[text()='Social Security No. ']/following-sibling::span/input"));
         private IWebElement selectEntityTypeDropdown => Find(By.XPath("//label[text()='Entity Type']/following-sibling::p-dropdown//div[@role='button']"));
         private IWebElement selectVocationDropdown => Find(By.XPath("//label[text()='Vocation']/following-sibling::p-dropdown//div[@role='button']"));
         private IWebElement enterFleetSize => Find(By.XPath("//label[text()='# Fleet Size ']/following-sibling::span/input"));
@@ -34,7 +34,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement selectPriorBankruptcyDropdown => Find(By.XPath("//label[text()='Prior Bankruptcy']/following-sibling::p-dropdown//div[@role='button']"));
         private IWebElement selectPriorRepossesionDropdown => Find(By.XPath("//label[text()='Prior Repossession']/following-sibling::p-dropdown//div[@role='button']"));
         private IWebElement selectGrossAnnaulDropdown => Find(By.XPath("//label[text()='Pr.FY.Gross Annual Rev.>$5M']/following-sibling::p-dropdown//div[@role='button']"));
-        private IWebElement enterBusinessOwnerOpenSinceCalendar => Find(By.XPath("//label[text()=' Business/Owner Open.Since ']/following-sibling::p-calendar//span/input"));
+        private IWebElement enterBusinessOwnerOpenSinceCalendar => Find(By.XPath("//label[text()=' Business/Owner Oper. Since ']/following-sibling::p-calendar//span/input"));
         private IWebElement enterCommercialDrLicense => Find(By.XPath("//label[text()='Commercial Dr.License # ']/following-sibling::span//input"));
         private IWebElement addAddressManually => Find(By.XPath("//span[text()='ADD ADDRESS MANUALLY']"));
         private IWebElement enterFromDate => Find(By.XPath("//p-calendar[@formcontrolname='effectDtFrom']//input"));
@@ -46,6 +46,9 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement enterEmail => Find(By.XPath("//label[text()='Email ']/following-sibling::span/input"));
         private IWebElement enterEstablishedDateCalendar => Find(By.XPath("//label[text()='Established Date']/following-sibling::p-calendar//span/input"));
 
+        private IWebElement clickOnSaveButton => Find(By.XPath("//span[text()='Save']"));
+
+        private IWebElement fromDate => Find(By.XPath("//span[@data-date='2020-0-15' ]"));
 
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
         public void EnterFirstName(string value)
@@ -222,6 +225,20 @@ namespace Navistar.Navistar.Pages.NfcPages
             EnterCommercialDrLicense("123456789");
             ClickOnAddAddressManually();
             addressPage.AddAddress();
+        }
+
+        public void ClickOnSaveButton()
+        {
+            clickOnSaveButton.Click();
+            WaitTillTheLoadSpinnerDisappears();
+            Thread.Sleep(10000);
+        }
+
+        public void clickOnDate()
+        {
+            Thread.Sleep(1000);
+            fromDate.Click();
+
         }
     }
 }

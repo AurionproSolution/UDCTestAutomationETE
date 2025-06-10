@@ -24,6 +24,11 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement clickOnOkButton => Find(By.XPath("//span[text()='OK']"));
         private IWebElement clickOnCancleButton => Find(By.XPath("//span[text()='CANCEL']"));
 
+        private IWebElement AddressFieldTextBox => Find(By.XPath("//input[@name='undefined']"));
+
+        private IWebElement AddressFieldDropdwonOption => Find(By.XPath("//input[@name='undefined']//following::span"));
+
+        
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
         public void SelectAddressTypeDropdown(string value)
         {
@@ -65,17 +70,32 @@ namespace Navistar.Navistar.Pages.NfcPages
         {
             clickOnOkButton.Click();
         }
+
+        private void AddressFieldTextbox()
+        {
+            Thread.Sleep(3000);
+            AddressFieldTextBox.SendKeys("Navistar");
+            Thread.Sleep(5000);
+            IJavaScriptExecutor js = (IJavaScriptExecutor)Driver;
+            //  js.ExecuteScript("arguments[0].click();", AddressFieldDropdwonOption);
+            js.ExecuteScript(@"const element = arguments[0];element.click();element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));", AddressFieldDropdwonOption);
+            //   AddressFieldDropdwonOption.Click();
+            Thread.Sleep(2000);
+        }
         public void AddAddress()
         {
-            //SelectAddressTypeDropdown("Street");
-            EnterStreet("main");
-            EnterSuburb("main");
-            EnterCity("Los Alamitos");
-           // EnterCounty("Orange");
-            //EnterState("California");
-            EnterPostalCodeOrZipCode("21703");
+            AddressFieldTextbox();
+       //     SelectAddressTypeDropdown("Street");
+            //EnterStreet("main");
+            //EnterSuburb("main");
+            //EnterCity("Auckland, New Zealand");
+            //EnterCounty("Orange");
+            //EnterState("Auckland, New Zealand");
+            //EnterPostalCodeOrZipCode("816");
             //EnterCountryOrRegion("United States");
-            ClickOnOkButton();
+            //ClickOnOkButton();
+
         }
     }
 }

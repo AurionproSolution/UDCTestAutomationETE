@@ -20,7 +20,6 @@ namespace Navistar.Navistar.core
         {
             var chromeOptions = new ChromeOptions();
             var edgeOptions = new EdgeOptions();
-
             try
             {
                 if (browserType.Equals("chrome", StringComparison.OrdinalIgnoreCase))

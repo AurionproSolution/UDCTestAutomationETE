@@ -106,18 +106,19 @@ Scenario Outline: Loan Programs
 	When the user enters Days to First Payment and clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
 	Then the user enters all the required fields in party details page
-	Then the user clicks on Add Address Manually
+	#Then the user clicks on Add Address Manually
 	And on the next page, enters all the required fields in address
 	Then the user clicks on the Next button
 	And the user lands on the contract summary page
+	Then Verify Appllication Status "<Status>"
 
 
 Examples:
-	| Username          | Password       | Program                         | Product               |
-	| deepak.paramanick | Happywork@1212 | Loan Program                    | Finance Included Loan |
-	| deepak.paramanick | Happywork@1212 | Credit Line Loan Takedown       | Finance Included Loan |
-	| deepak.paramanick | Happywork@1212 | UTC - 1.9% Buy Down             | Finance Included Loan |
-	| deepak.paramanick | Happywork@1212 | UTC - 1.9% Buy Down Credit Line | Finance Included Loan |
+	| Username          | Password       | Program                         | Product               | Status |
+	| deepak.paramanick | Happywork@1212 | Loan Program                    | Finance Included Loan | Status : Application Submitted      |
+	| deepak.paramanick | Happywork@1212 | Credit Line Loan Takedown       | Finance Included Loan | Status : Credit Line Takedown Submitted  |
+	| deepak.paramanick | Happywork@1212 | UTC - 1.9% Buy Down             | Finance Included Loan | c      |
+	| deepak.paramanick | Happywork@1212 | UTC - 1.9% Buy Down Credit Line | Finance Included Loan | d      |
 
 @Sanity
 Scenario Outline: Lease Programs
@@ -138,18 +139,20 @@ Scenario Outline: Lease Programs
 	When the user enters Days to First Payment and clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
 	Then the user enters all the required fields in party details page
-	Then the user clicks on Add Address Manually
+    #Then the user clicks on Add Address Manually
 	And on the next page, enters all the required fields in address
 	Then the user clicks on the Next button
 	And the user lands on the contract summary page
+	Then Verify Appllication Status "<Status>"
 
 
 Examples:
-	| Username          | Password       | Program                    | Product       |
-	| deepak.paramanick | Happywork@1212 | Finance Leases Program     | Finance Lease |
-	| deepak.paramanick | Happywork@1212 | Finance Leases Program     | TRAC Lease    |
-	| deepak.paramanick | Happywork@1212 | Credit Line Lease Takedown | Finance Lease |
-	| deepak.paramanick | Happywork@1212 | Credit Line Lease Takedown | TRAC Lease    |
+| Username          | Password       | Program                    | Product       | Status  |
+| deepak.paramanick | Happywork@1212 | Finance Leases Program     | Finance Lease | Status : Application Submitted  |
+| deepak.paramanick | Happywork@1212 | Finance Leases Program     | TRAC Lease    | Status : Application Submitted |
+| deepak.paramanick | Happywork@1212 | Credit Line Lease Takedown | Finance Lease | Status : Credit Line Takedown Submitted |
+| deepak.paramanick | Happywork@1212 | Credit Line Lease Takedown | TRAC Lease    | Status : Credit Line Takedown Submitted |
+
 @Sanity
 Scenario Outline: OperatingLease Programs
 	Given the user is on the login page
@@ -168,16 +171,17 @@ Scenario Outline: OperatingLease Programs
 	When the user enters Days to First Payment and clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
 	Then the user enters all the required fields in party details page
-	Then the user clicks on Add Address Manually
+	#Then the user clicks on Add Address Manually
 	And on the next page, enters all the required fields in address
 	Then the user clicks on the Next button
 	And the user lands on the contract summary page
+	Then Verify Appllication Status "<Status>"
 
 
 Examples:
-	| Username          | Password       | Program                    | Product         |
-	| deepak.paramanick | Happywork@1212 | FMV Program                | Operating Lease |
-	| deepak.paramanick | Happywork@1212 | Credit Line Lease Takedown | Operating Lease |
+	| Username          | Password       | Program                    | Product         | Status |
+	| deepak.paramanick | Happywork@1212 | FMV Program                | Operating Lease | abc    |
+	| deepak.paramanick | Happywork@1212 | Credit Line Lease Takedown | Operating Lease | cd     |
 
 
 
