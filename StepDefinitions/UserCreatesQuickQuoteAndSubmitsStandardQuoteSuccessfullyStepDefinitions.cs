@@ -306,8 +306,11 @@ namespace Navistar.StepDefinitions
         public void ThenTheUserClicksOnTheNextButton()
         {
             _pageObjects.AddNewCustomerPage.ClickOnNextButton();
+            Thread.Sleep(10000);
             _pageObjects.AddNewCustomerPage.ClickOnSubmitButton();
+            Thread.Sleep(15000);
             _pageObjects.AddNewCustomerPage.ClickOnNextButton();
+            Thread.Sleep(15000);
         }
 
         [Then(@"the user lands on the contract summary page")]
