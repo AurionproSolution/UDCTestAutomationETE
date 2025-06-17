@@ -25,7 +25,6 @@ namespace Navistar.Navistar.core
             Actions actions = new Actions(Driver);
 
             // Ensure dropdown trigger is clickable before clicking
-           // wait.Until(ExpectedConditions.ElementToBeClickable(dropdownTrigger)).Click();
             dropdownTrigger.Click();
             // Wait for dropdown options to be visible
             wait.Until(ExpectedConditions.ElementIsVisible(optionsLocator));

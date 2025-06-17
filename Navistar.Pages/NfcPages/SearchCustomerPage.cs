@@ -39,6 +39,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         {
             Thread.Sleep(1000);
             addNewCustomer.Click();
+            WaitTillTheLoadSpinnerDisappears(10);
             ReportingManager.LogPass("Dealer clicked on Add New Customer Button.");
         }
     }

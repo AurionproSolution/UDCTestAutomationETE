@@ -73,7 +73,7 @@ namespace Navistar.Navistar.Pages.NfcPages
 
         private void AddressFieldTextbox()
         {
-            Thread.Sleep(3000);
+            Thread.Sleep(2000);
             AddressFieldTextBox.SendKeys("Navistar");
             Thread.Sleep(5000);
             IJavaScriptExecutor js = (IJavaScriptExecutor)Driver;

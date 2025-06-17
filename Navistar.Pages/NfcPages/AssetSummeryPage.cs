@@ -56,7 +56,7 @@ namespace Navistar.Navistar.Pages.NfcPages
 
             // 1️⃣ Wait for the assetEditButton to be visible and clickable
             var assetEditButtonElement = wait.Until(ExpectedConditions.ElementToBeClickable(By.XPath("//span[@class='p-button-icon fa-regular fa-pen ng-star-inserted']")));
-
+            WaitTillTheLoadSpinnerDisappears(10);
             // 2️⃣ Try clicking directly
             try
             {
@@ -115,6 +115,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         public void ClickOnSaveButton()
         {
             saveButton.Click();
+            WaitTillTheLoadSpinnerDisappears(10);
             ReportingManager.LogPass("Dealer clicked on Save button.");
         }
         public void AddAsset()

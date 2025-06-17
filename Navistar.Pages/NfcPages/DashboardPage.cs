@@ -56,6 +56,7 @@ namespace Navistar.Navistar.Pages.NfcPages
             wait.Until(ExpectedConditions.ElementToBeClickable(createQuickQuoteElement));
             IJavaScriptExecutor js = (IJavaScriptExecutor)Driver;
             js.ExecuteScript("arguments[0].click();", createQuickQuoteElement);
+            WaitTillTheLoadSpinnerDisappears(10);
             ReportingManager.LogPass("User clicked the 'Create Quick Quote' button successfully.");
         }
         public void ClickOnCreateStandardQuote()

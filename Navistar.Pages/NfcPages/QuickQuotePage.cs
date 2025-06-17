@@ -39,11 +39,13 @@ namespace Navistar.Navistar.Pages.NfcPages
             WaitTillTheLoadSpinnerDisappearsAndElementExist(By.XPath("(//div[@class='col-12 ng-star-inserted']//span[@role='combobox'])[1]"));
             SetImplicitWait(15);
             dropdown.SelectCustomDropdown(programDropdown, value, optionsLocator);
+            WaitTillTheLoadSpinnerDisappears();
         }
         public void SelectProductDropdown(string value)
         {
             Thread.Sleep(800);
             dropdown.SelectCustomDropdown(productDropdown, value, optionsLocator);
+            WaitTillTheLoadSpinnerDisappears();
         }
         public void SelectAssetDropdown(string value)
         {
@@ -96,6 +98,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         public void ClickOnCreateQuoteButton()
         {
             createQuoteButton.Click();
+            WaitTillTheLoadSpinnerDisappears();
             ReportingManager.LogPass("Clicked on Create Quote Button");
         }
         public void GetQuickQuoteDetails()

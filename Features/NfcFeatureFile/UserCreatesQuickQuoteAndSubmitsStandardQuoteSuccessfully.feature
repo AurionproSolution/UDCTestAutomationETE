@@ -31,10 +31,9 @@ Scenario Outline: Loan Programs
 
 Examples:
 	| Username          | Password       | Program                         | Product               | Status |
-	| deepak.paramanick | Happywork@1212 | Loan Program                    | Finance Included Loan | Status : Application Submitted      |
-	| deepak.paramanick | Happywork@1212 | Credit Line Loan Takedown       | Finance Included Loan | Status : Credit Line Takedown Submitted  |
-	| deepak.paramanick | Happywork@1212 | UTC - 1.9% Buy Down             | Finance Included Loan | c      |
-	| deepak.paramanick | Happywork@1212 | UTC - 1.9% Buy Down Credit Line | Finance Included Loan | d      |
+	| deepak.paramanick | Pramuriwondaskfhh@9898 | Loan Program                    | Finance Included Loan | Status : Application Submitted      |
+	| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Loan Takedown       | Finance Included Loan | Status : Credit Line Takedown Submitted  |
+	
 
 @Sanity
 Scenario Outline: Lease Programs
@@ -64,10 +63,10 @@ Scenario Outline: Lease Programs
 
 Examples:
 | Username          | Password       | Program                    | Product       | Status  |
-| deepak.paramanick | Happywork@1212 | Finance Leases Program     | Finance Lease | Status : Application Submitted  |
-| deepak.paramanick | Happywork@1212 | Finance Leases Program     | TRAC Lease    | Status : Application Submitted |
-| deepak.paramanick | Happywork@1212 | Credit Line Lease Takedown | Finance Lease | Status : Credit Line Takedown Submitted |
-| deepak.paramanick | Happywork@1212 | Credit Line Lease Takedown | TRAC Lease    | Status : Credit Line Takedown Submitted |
+| deepak.paramanick | Pramuriwondaskfhh@9898 | Finance Leases Program     | Finance Lease | Status : Application Submitted  |
+| deepak.paramanick | Pramuriwondaskfhh@9898 | Finance Leases Program     | TRAC Lease    | Status : Application Submitted |
+| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Lease Takedown | Finance Lease | Status : Credit Line Takedown Submitted |
+| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Lease Takedown | TRAC Lease    | Status : Credit Line Takedown Submitted |
 
 @Sanity
 Scenario Outline: OperatingLease Programs
@@ -95,6 +94,8 @@ Scenario Outline: OperatingLease Programs
 
 
 Examples:
-	| Username          | Password       | Program                    | Product         | Status |
-	| deepak.paramanick | Happywork@1212 | FMV Program                | Operating Lease | Status : Application Submitted    |
-	| deepak.paramanick | Happywork@1212 | Credit Line Lease Takedown | Operating Lease | Status : Credit Line Takedown Submitted     |
+	| Username          | Password       | Program                    | Product         | Status                                      |
+	| deepak.paramanick | Pramuriwondaskfhh@9898 | FMV Program                | Operating Lease | Status : Application Submitted              |
+	| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Lease Takedown | Operating Lease | Status : Credit Line Takedown Submitted     |
+	| deepak.paramanick | Pramuriwondaskfhh@9898 | IdeaLease Program          | Idealease      | Status : Credit Line Takedown Submitted     |
+	| deepak.paramanick | Pramuriwondaskfhh@9898 | IdeaLease Programn         | Finance Included Loan | Status : Credit Line Takedown Submitted     |

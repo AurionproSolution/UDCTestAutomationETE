@@ -152,6 +152,7 @@ namespace Navistar.StepDefinitions
         public void ThenTheCalculationsShouldMatchTheQuickQuoteAndStandardQuote()
         {
             _pageObjects.ContractDetailsPage.ClickOnCalcutateButton();
+            Thread.Sleep(10000);
             string product = ScenarioContext.Current["Product"].ToString();
             standardQuoteValues = _pageObjects.ContractDetailsPage.StandardQuoteDetails(product);
 

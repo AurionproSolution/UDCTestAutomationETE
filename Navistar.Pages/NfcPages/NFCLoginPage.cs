@@ -58,6 +58,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         {
             WaitForPageToLoad(LoginButton, 20);
             LoginButton.Click();
+            WaitTillTheLoadSpinnerDisappears(15);
             ReportingManager.LogPass("Clicked on login button successfully.");
         }
         public void ClickLoginWithNfcButton()

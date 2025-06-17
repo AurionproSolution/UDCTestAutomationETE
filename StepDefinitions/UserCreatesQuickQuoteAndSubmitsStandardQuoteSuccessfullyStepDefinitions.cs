@@ -37,15 +37,16 @@ namespace Navistar.StepDefinitions
         public void WhenTheUserEntersAndAndClicksOnTheLoginButton(string username, string password)
         {
             ReportingManager.LogInfo("User trying to login with valid credentials.");
-            //_pageObjects.LoginPage.ClickLoginWithNfcButton();
-            //_pageObjects.LoginPage.EnterNfcUserName(username);
-            //_pageObjects.LoginPage.ClickOnProceedButton();
-            //_pageObjects.LoginPage.EnterNfcPassword(password);
-            //_pageObjects.LoginPage.ClickonSignInButton();
-            _pageObjects.LoginPage.EnterUserName(username);
-            _pageObjects.LoginPage.EnterPassword(password);
-            ReportingManager.LogInfo("Attempting login.");
-            _pageObjects.LoginPage.ClickLoginButton();
+            _pageObjects.LoginPage.ClickLoginWithNfcButton();
+            _pageObjects.LoginPage.EnterNfcUserName(username);
+            _pageObjects.LoginPage.ClickOnProceedButton();
+            _pageObjects.LoginPage.EnterNfcPassword(password);
+            _pageObjects.LoginPage.ClickonSignInButton();
+            //_pageObjects.LoginPage.EnterUserName(username);
+            //_pageObjects.LoginPage.EnterPassword(password);
+            //ReportingManager.LogInfo("Attempting login.");
+            //_pageObjects.LoginPage.ClickLoginButton();
+            Thread.Sleep(5000);
         }
 
         [When(@"the user enters ""([^""]*)"" and ""([^""]*)"" and clicks on the Non-fis Login button")]
@@ -73,7 +74,8 @@ namespace Navistar.StepDefinitions
         public void WhenTheUserClicksOnCreateQuickQuote()
         {
             ReportingManager.LogInfo("Click on Create Quick Quote");
-            _pageObjects.DashboardPage.ClickOnCreateQuickQuote();
+            _pageObjects.DashboardPage.ClickOnCreateQuickQuote();          
+            Thread.Sleep(2000);
             ReportingManager.LogInfo("Verified dashboard page.");
         }
 
@@ -88,6 +90,7 @@ namespace Navistar.StepDefinitions
         public void WhenTheUserSelectsTheDataInTheProgrameFieldFromTheDropdown(string p0)
         {
             _pageObjects.QuickQuotePage.SelectProgramDropDown(p0);
+            Thread.Sleep(3000);
         }
 
         [When(@"the user selects the data in the product ""([^""]*)"" field from the dropdown")]
@@ -95,6 +98,7 @@ namespace Navistar.StepDefinitions
         {
             _pageObjects.QuickQuotePage.SelectProductDropdown(product);
             ScenarioContext.Current["Product"] = product;
+            Thread.Sleep(3000);
         }
 
 
@@ -149,6 +153,7 @@ namespace Navistar.StepDefinitions
             string product = ScenarioContext.Current["Product"].ToString();
             quickQuoteValues = _pageObjects.QuickQuotePage.QuoteDetails(product);
             _pageObjects.QuickQuotePage.ClickOnCreateQuoteButton();
+            Thread.Sleep(3000);
         }
 
         [Then(@"the user should be redirected to the Contract Details page")]
@@ -171,6 +176,7 @@ namespace Navistar.StepDefinitions
             _pageObjects.AssetSummeryPage.EnterOdometer(_pageObjects.AssetSummaryTestData.Odometer);
             _pageObjects.AssetSummeryPage.SaveTheAsset();
             _pageObjects.AssetSummeryPage.ClickOnSaveButton();
+            Thread.Sleep(5000);
         }
 
         [When(@"the user enters Days to First Payment and clicks on the Next button")]
@@ -225,6 +231,7 @@ namespace Navistar.StepDefinitions
             }
 
             _pageObjects.ContractDetailsPage.ClickOnNextButton();
+            Thread.Sleep(10000);
         }
 
         [When(@"the user clicks on Add Contract Parties and then clicks on Add New Customer button")]
@@ -232,6 +239,7 @@ namespace Navistar.StepDefinitions
         {
             _pageObjects.CustomerDetailsPage.ValidateContractIdIsGenerated();
             _pageObjects.CustomerDetailsPage.ClickOnAddContractPartiesButton();
+            Thread.Sleep(2000);
             _pageObjects.SearchCustomerPage.ClickOnAddNewCustomerButton();
         }
 
@@ -302,10 +310,12 @@ namespace Navistar.StepDefinitions
             _pageObjects.AddNewCustomerPage.clickOnDate();
             Thread.Sleep(5000);
         }
+
         [Then(@"the user clicks on the Next button")]
         public void ThenTheUserClicksOnTheNextButton()
         {
             _pageObjects.AddNewCustomerPage.ClickOnNextButton();
+
             Thread.Sleep(10000);
             _pageObjects.AddNewCustomerPage.ClickOnSubmitButton();
             Thread.Sleep(15000);
@@ -319,7 +329,7 @@ namespace Navistar.StepDefinitions
             _pageObjects.ContractSummaryPage.ValidateContractIdIsGenerated();
             _pageObjects.ContractSummaryPage.AdditionalApprovalConditionStatus("Completed");
             _pageObjects.ContractSummaryPage.ClickOnNextButton();
-         // _pageObjects.ContractSummaryPage.ValidateApplicationSubmittedStatus();
+            Thread.Sleep(10000);
         }
 
 

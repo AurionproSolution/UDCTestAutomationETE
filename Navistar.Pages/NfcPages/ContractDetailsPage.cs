@@ -56,6 +56,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         {
             MoveToElement(calculateBtn);
             calculateBtn.Click();
+            WaitTillTheLoadSpinnerDisappears();
             Thread.Sleep(2000);
             ReportingManager.LogPass("Clicked on Calculate Button");
             ReportingManager.AddScreenshotToReport("Contract details page Calculation grid.");
@@ -122,7 +123,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         }
         public void ClickOnNextButton()
         {
-            //WaitTillTheLoadSpinnerDisappears();
+            WaitTillTheLoadSpinnerDisappears();
             SetImplicitWait(15);
             nextButton.Click();
             WaitTillTheLoadSpinnerDisappears();
