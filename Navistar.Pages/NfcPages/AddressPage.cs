@@ -75,12 +75,10 @@ namespace Navistar.Navistar.Pages.NfcPages
         {
             Thread.Sleep(2000);
             AddressFieldTextBox.SendKeys("Navistar");
-            Thread.Sleep(5000);
+            Thread.Sleep(2000);
             IJavaScriptExecutor js = (IJavaScriptExecutor)Driver;
-            //  js.ExecuteScript("arguments[0].click();", AddressFieldDropdwonOption);
             js.ExecuteScript(@"const element = arguments[0];element.click();element.dispatchEvent(new Event('input', { bubbles: true }));
             element.dispatchEvent(new Event('change', { bubbles: true }));", AddressFieldDropdwonOption);
-            //   AddressFieldDropdwonOption.Click();
             Thread.Sleep(2000);
         }
         public void AddAddress()

@@ -32,20 +32,22 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement payment => Find(By.XPath("//p[text()='Payment']/following-sibling::p"));
         private IWebElement totalInterest => Find(By.XPath("//p[text()='Total Interest']/following-sibling::p"));
         private IWebElement totalCost => Find(By.XPath("//p[text()='Total Cost']/following-sibling::p"));
-
+        private IWebElement validationMessageText => Find(By.XPath("//div[contains(text(),'Please fill required Fields')]"));
+        private IWebElement validationMessageTextForFieldTermInMonth => Find(By.XPath("(//label[contains(text(),' Customer Rate ')]//preceding::small[@class='p-error'])[2]"));
+        private IWebElement labelAssetCost => Find(By.XPath("//p[@class='px-2 p-inline asset-text-sub-black']//child::span"));
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
         public void SelectProgramDropDown(string value)
         {
             WaitTillTheLoadSpinnerDisappearsAndElementExist(By.XPath("(//div[@class='col-12 ng-star-inserted']//span[@role='combobox'])[1]"));
             SetImplicitWait(15);
             dropdown.SelectCustomDropdown(programDropdown, value, optionsLocator);
-            WaitTillTheLoadSpinnerDisappears();
+          //  WaitTillTheLoadSpinnerDisappears();
         }
         public void SelectProductDropdown(string value)
         {
             Thread.Sleep(800);
             dropdown.SelectCustomDropdown(productDropdown, value, optionsLocator);
-            WaitTillTheLoadSpinnerDisappears();
+          //  WaitTillTheLoadSpinnerDisappears();
         }
         public void SelectAssetDropdown(string value)
         {
@@ -126,7 +128,7 @@ namespace Navistar.Navistar.Pages.NfcPages
     };
 
             // Only add TotalCost if the product is NOT "Operating Lease", "TRAC Lease", or "Finance Lease"
-            var excludedProducts = new[] { "Operating Lease", "TRAC Lease", "Finance Lease" };
+            var excludedProducts = new[] { "Operating Lease", "TRAC Lease", "Finance Lease", "Idealease", "Finance Included Loan" };
             if (!excludedProducts.Any(p => p.Equals(product, StringComparison.OrdinalIgnoreCase)))
             {
                 quoteDetails.Add("TotalInterest", totalInterest.Text);
@@ -304,6 +306,65 @@ namespace Navistar.Navistar.Pages.NfcPages
             TermInMonths(24);
             ClickOnCalcutateButton();
             ClickOnCreateQuoteButton();
+        }
+
+        public void VerifyValidationMessage()
+        {
+
+            bool isDisplayed = validationMessageText.Displayed;
+            if(isDisplayed)
+            {
+                ReportingManager.LogPass("Validation Message is not Displayed");
+            }
+            else
+            {
+                Assert.Fail("Validation Message is not Displayed");
+                ReportingManager.LogFail("Validation Message is not Displayed");
+                ReportingManager.AddScreenshotToReport("Validation Message is Displayed");
+            }
+
+        }
+
+        public void VerifyValidationMessageForTermInMonthField()
+        {
+
+            bool isDisplayed = validationMessageTextForFieldTermInMonth.Displayed;
+            Thread.Sleep(1000);
+            if (isDisplayed)
+            {
+                ReportingManager.LogPass("Validation Message is Displayed for Term(In Months)");
+            }
+            else
+            {
+                Assert.Fail("Validation Message is not Displayed for Term(In Months) ");
+                ReportingManager.LogFail("Validation Message is not Displayed for Term(In Months)");
+                ReportingManager.AddScreenshotToReport("Validation Message is Displayed for Term(In Months)");
+            }
+
+        }
+
+        public void VerifyPurchasePriceAndAssetCost(int price)
+        {
+            ScrollAndClickElement(labelAssetCost);
+            string assetCost = labelAssetCost.Text;
+            String priceStr = "$" + price;
+
+            if (assetCost.Contains(priceStr))
+            {
+                ReportingManager.LogPass("Purchase Price and Asset cost are matched");
+                ReportingManager.AddScreenshotToReport("Purchase Price and Asset cost are matched");
+            }
+            else
+            {
+                Assert.Fail("Purchase Price and Asset cost are not matched");
+                ReportingManager.AddScreenshotToReport("Purchase Price and Asset cost are not matched");
+
+            }
+        }
+
+        public void ClickOnCalcutateButtonForValidationError()
+        {
+            calculateBtn.Click();
         }
 
     }

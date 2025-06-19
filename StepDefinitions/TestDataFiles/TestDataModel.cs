@@ -41,6 +41,7 @@ namespace Navistar.StepDefinitions.TestData
         public string VIN { get; set; }
         public int Odometer { get; set; }   
         public int PurchasePrice { get; set; }
+        public string VINNumber { get; set; }
     }
     public class CustomerPartiesDataModel
     {

@@ -1,10 +1,11 @@
 [
-    {
-        "Year": 2024,
-        "NU": "Used",
-        "Category": "Day Cab",
-        "VIN": "1HTEUMMLXRS734378",
-        "Odometer": 54323,
-        "PurchasePrice": 36000
-    }
+  {
+    "Year": 2024,
+    "NU": "Used",
+    "Category": "Day Cab",
+    "VIN": "1HTEUMMLXRS734378",
+    "Odometer": 54323,
+    "PurchasePrice": 36000,
+    "VINNumber": "3HAEUMMLXSL669688"
+  }
 ]

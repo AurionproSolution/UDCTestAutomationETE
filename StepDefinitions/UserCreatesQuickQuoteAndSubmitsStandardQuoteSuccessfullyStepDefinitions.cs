@@ -30,14 +30,14 @@ namespace Navistar.StepDefinitions
         public void GivenTheUserIsOnTheLoginPage()
         {
             ReportingManager.LogInfo("Navigating to the login page.");
-            DriverContext.Driver.Navigate().GoToUrl(_pageObjects.TestData.QAUrl);
+            DriverContext.Driver.Navigate().GoToUrl(_pageObjects.TestData.FisSandboxUrl);
         }
 
         [When(@"the user enters ""([^""]*)"" and ""([^""]*)"" and clicks on the Login button")]
         public void WhenTheUserEntersAndAndClicksOnTheLoginButton(string username, string password)
         {
             ReportingManager.LogInfo("User trying to login with valid credentials.");
-            _pageObjects.LoginPage.ClickLoginWithNfcButton();
+            //// _pageObjects.LoginPage.ClickLoginWithNfcButton();
             _pageObjects.LoginPage.EnterNfcUserName(username);
             _pageObjects.LoginPage.ClickOnProceedButton();
             _pageObjects.LoginPage.EnterNfcPassword(password);
@@ -153,7 +153,7 @@ namespace Navistar.StepDefinitions
             string product = ScenarioContext.Current["Product"].ToString();
             quickQuoteValues = _pageObjects.QuickQuotePage.QuoteDetails(product);
             _pageObjects.QuickQuotePage.ClickOnCreateQuoteButton();
-            Thread.Sleep(3000);
+            Thread.Sleep(1000);
         }
 
         [Then(@"the user should be redirected to the Contract Details page")]
@@ -166,16 +166,36 @@ namespace Navistar.StepDefinitions
 
             _pageObjects.ContractDetailsPage.ClickOnAssetSummery();
             //_pageObjects.AssetSummeryPage.AddAsset();
-            _pageObjects.AssetSummeryPage.ClickOnAssetEditButton();
-            _pageObjects.AssetSummeryPage.SelectyearField(_pageObjects.AssetSummaryTestData.Year);
-            _pageObjects.AssetSummeryPage.SelectNewOrUsed(_pageObjects.AssetSummaryTestData.NU);
-            //_pageObjects.AssetSummeryPage.SelectAssetDropdown("LT Series/International/Heavy");
-            _pageObjects.AssetSummeryPage.SelectCategory(_pageObjects.AssetSummaryTestData.Category);
-            //_pageObjects.AssetSummeryPage.EnterPurchasePriceValue("26000");
-            _pageObjects.AssetSummeryPage.EnterVinNumber(_pageObjects.AssetSummaryTestData.VIN);
-            _pageObjects.AssetSummeryPage.EnterOdometer(_pageObjects.AssetSummaryTestData.Odometer);
-            _pageObjects.AssetSummeryPage.SaveTheAsset();
-            _pageObjects.AssetSummeryPage.ClickOnSaveButton();
+            string product = ScenarioContext.Current["Product"].ToString();
+
+            if (product.Equals("Idealease") || product.Equals("Finance Included Loan"))
+            {
+                Thread.Sleep(3000);
+                _pageObjects.AssetSummeryPage.SearchVINNo(_pageObjects.AssetSummaryTestData.VINNumber);
+                _pageObjects.AssetSummeryPage.AddSearchAsset();
+                _pageObjects.AssetSummeryPage.ClickOnAssetEditButton();
+                Thread.Sleep(1000);
+                _pageObjects.AssetSummeryPage.SelectCategory(_pageObjects.AssetSummaryTestData.Category);
+                Thread.Sleep(1000);
+                _pageObjects.AssetSummeryPage.EnterPurchasePriceValue("26000");
+                Thread.Sleep(500);
+                _pageObjects.AssetSummeryPage.ClickOnSaveButton();
+                Thread.Sleep(2000);
+            }
+            else
+            {
+                _pageObjects.AssetSummeryPage.ClickOnAssetEditButton();
+                _pageObjects.AssetSummeryPage.SelectyearField(_pageObjects.AssetSummaryTestData.Year);
+                _pageObjects.AssetSummeryPage.SelectNewOrUsed(_pageObjects.AssetSummaryTestData.NU);
+                //_pageObjects.AssetSummeryPage.SelectAssetDropdown("LT Series/International/Heavy");
+                _pageObjects.AssetSummeryPage.SelectCategory(_pageObjects.AssetSummaryTestData.Category);
+                //_pageObjects.AssetSummeryPage.EnterPurchasePriceValue("26000");
+                _pageObjects.AssetSummeryPage.EnterVinNumber(_pageObjects.AssetSummaryTestData.VIN);
+                _pageObjects.AssetSummeryPage.EnterOdometer(_pageObjects.AssetSummaryTestData.Odometer);
+                _pageObjects.AssetSummeryPage.SaveTheAsset();
+                _pageObjects.AssetSummeryPage.ClickOnSaveButton();
+            }
+             
             Thread.Sleep(5000);
         }
 
@@ -231,7 +251,7 @@ namespace Navistar.StepDefinitions
             }
 
             _pageObjects.ContractDetailsPage.ClickOnNextButton();
-            Thread.Sleep(10000);
+            Thread.Sleep(2000);
         }
 
         [When(@"the user clicks on Add Contract Parties and then clicks on Add New Customer button")]
@@ -247,7 +267,7 @@ namespace Navistar.StepDefinitions
         public void ThenTheUserEntersAllTheRequiredFieldsInPartyDetailsPage()
         {
             ReportingManager.LogInfo("Dealer adding New customer or party.");
-            Thread.Sleep(10000);
+            Thread.Sleep(5000);
             _pageObjects.AddNewCustomerPage.EnterFirstName(_pageObjects.CustomerPartiesTestData.FirstName);
             Thread.Sleep(500);
             _pageObjects.AddNewCustomerPage.EnterMiddleName(_pageObjects.CustomerPartiesTestData.MiddleName);
@@ -308,19 +328,18 @@ namespace Navistar.StepDefinitions
             _pageObjects.AddressPage.AddAddress();
             _pageObjects.AddNewCustomerPage.EnterFromDate("01/15/2020");
             _pageObjects.AddNewCustomerPage.clickOnDate();
-            Thread.Sleep(5000);
+            Thread.Sleep(1000);
         }
 
         [Then(@"the user clicks on the Next button")]
         public void ThenTheUserClicksOnTheNextButton()
         {
             _pageObjects.AddNewCustomerPage.ClickOnNextButton();
-
-            Thread.Sleep(10000);
+            Thread.Sleep(1000);
             _pageObjects.AddNewCustomerPage.ClickOnSubmitButton();
-            Thread.Sleep(15000);
+            Thread.Sleep(5000);
             _pageObjects.AddNewCustomerPage.ClickOnNextButton();
-            Thread.Sleep(15000);
+            Thread.Sleep(5000);
         }
 
         [Then(@"the user lands on the contract summary page")]
@@ -329,7 +348,7 @@ namespace Navistar.StepDefinitions
             _pageObjects.ContractSummaryPage.ValidateContractIdIsGenerated();
             _pageObjects.ContractSummaryPage.AdditionalApprovalConditionStatus("Completed");
             _pageObjects.ContractSummaryPage.ClickOnNextButton();
-            Thread.Sleep(10000);
+            Thread.Sleep(5000);
         }
 
 
@@ -339,6 +358,55 @@ namespace Navistar.StepDefinitions
              Thread.Sleep(15000);
             _pageObjects.ContractSummaryPage.ValidateApplicationSubmittedStatus(status);
         }
+
+        [Then("the user enters all the required fields in party details page for Customer Role Sublease")]
+        public void ThenTheUserEntersAllTheRequiredFieldsInPartyDetailsPageForCustomerRoleSublease()
+        {
+            string product = ScenarioContext.Current["Product"].ToString();
+            if (product.Equals("Idealease"))
+            {
+                _pageObjects.AddNewCustomerPage.CustomerRole();
+            }
+            ReportingManager.LogInfo("Dealer adding New customer or party.");
+            Thread.Sleep(10000);
+            _pageObjects.AddNewCustomerPage.EnterFirstName(_pageObjects.CustomerPartiesTestData.FirstName);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.EnterMiddleName(_pageObjects.CustomerPartiesTestData.MiddleName);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.EnterLastName(_pageObjects.CustomerPartiesTestData.LastName);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.EnterEmailAddress(_pageObjects.CustomerPartiesTestData.Email);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.EnterPhone(_pageObjects.CustomerPartiesTestData.Phone);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.EnterDateOfBirth(_pageObjects.CustomerPartiesTestData.DateOfBirth);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.EnterSocialSecurityNo(_pageObjects.CustomerPartiesTestData.SocialSecurityNumber);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.SelectVocationDropdown(_pageObjects.CustomerPartiesTestData.Vocation);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.EnterFleetSize(_pageObjects.CustomerPartiesTestData.FleetSize);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.SelectPriorBankrupcyDropdown(_pageObjects.CustomerPartiesTestData.PriorBankruptcy);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.SelectPriorRepossessionDropdown(_pageObjects.CustomerPartiesTestData.PriorRepossession);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.SelectGrossAnnaulDropdown(_pageObjects.CustomerPartiesTestData.PriorFiscalYearGrossAnnualRevenueOver5M);
+            Thread.Sleep(500);
+            _pageObjects.AddNewCustomerPage.EnterBusinessOwnerOpenSince(_pageObjects.CustomerPartiesTestData.BusinessOrOwnerOpenSince);
+            _pageObjects.AddNewCustomerPage.EnterCommercialDrLicense(_pageObjects.CustomerPartiesTestData.CommercialDriversLicenseNumber);
+        }
+
+        [Then("the user clicks on the Next button of Customer Pager")]
+        public void ThenTheUserClicksOnTheNextButtonOfCustomerPager()
+        {
+            _pageObjects.AddNewCustomerPage.ClickOnNextButton();
+            Thread.Sleep(2000);
+            _pageObjects.AddNewCustomerPage.ClickOnSubmitButton();
+            Thread.Sleep(15000);
+        }
+
+
 
 
 

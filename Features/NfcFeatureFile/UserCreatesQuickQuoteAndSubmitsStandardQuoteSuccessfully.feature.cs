@@ -85,8 +85,9 @@ namespace Navistar.Features.NfcFeatureFile
         [NUnit.Framework.TestAttribute()]
         [NUnit.Framework.DescriptionAttribute("Loan Programs")]
         [NUnit.Framework.CategoryAttribute("Sanity")]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "Loan Program", "Finance Included Loan", "Status : Application Submitted", null)]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "Credit Line Loan Takedown", "Finance Included Loan", "Status : Credit Line Takedown Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Loan Program", "Finance Included Loan", "Status : Application Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Loan Takedown", "Finance Included Loan", "Status : Credit Line Takedown Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "IdeaLease Program", "Finance Included Loan", "Status : Credit Line Takedown Submitted", null)]
         public async System.Threading.Tasks.Task LoanPrograms(string username, string password, string program, string product, string status, string[] exampleTags)
         {
             string[] @__tags = new string[] {
@@ -184,10 +185,10 @@ this.ScenarioInitialize(scenarioInfo);
         [NUnit.Framework.TestAttribute()]
         [NUnit.Framework.DescriptionAttribute("Lease Programs")]
         [NUnit.Framework.CategoryAttribute("Sanity")]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "Finance Leases Program", "Finance Lease", "Status : Application Submitted", null)]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "Finance Leases Program", "TRAC Lease", "Status : Application Submitted", null)]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "Credit Line Lease Takedown", "Finance Lease", "Status : Credit Line Takedown Submitted", null)]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "Credit Line Lease Takedown", "TRAC Lease", "Status : Credit Line Takedown Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Finance Leases Program", "Finance Lease", "Status : Application Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Finance Leases Program", "TRAC Lease", "Status : Application Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "Finance Lease", "Status : Credit Line Takedown Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "TRAC Lease", "Status : Credit Line Takedown Submitted", null)]
         public async System.Threading.Tasks.Task LeasePrograms(string username, string password, string program, string product, string status, string[] exampleTags)
         {
             string[] @__tags = new string[] {
@@ -285,10 +286,8 @@ this.ScenarioInitialize(scenarioInfo);
         [NUnit.Framework.TestAttribute()]
         [NUnit.Framework.DescriptionAttribute("OperatingLease Programs")]
         [NUnit.Framework.CategoryAttribute("Sanity")]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "FMV Program", "Operating Lease", "Status : Application Submitted", null)]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "Credit Line Lease Takedown", "Operating Lease", "Status : Credit Line Takedown Submitted", null)]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "IdeaLease Program", "Idealease", "Status : Credit Line Takedown Submitted", null)]
-        [NUnit.Framework.TestCaseAttribute("deepak.paramanick", "Pramuriwondaskfhh@9898", "IdeaLease Programn", "Finance Included Loan", "Status : Credit Line Takedown Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "FMV Program", "Operating Lease", "Status : Application Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "Operating Lease", "Status : Credit Line Takedown Submitted", null)]
         public async System.Threading.Tasks.Task OperatingLeasePrograms(string username, string password, string program, string product, string status, string[] exampleTags)
         {
             string[] @__tags = new string[] {
@@ -374,6 +373,115 @@ this.ScenarioInitialize(scenarioInfo);
  await testRunner.AndAsync("the user lands on the contract summary page", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
 #line 93
+ await testRunner.ThenAsync(string.Format("Verify Appllication Status \"{0}\"", status), ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+            }
+            await this.ScenarioCleanupAsync();
+        }
+        
+        [NUnit.Framework.TestAttribute()]
+        [NUnit.Framework.DescriptionAttribute("IdealLease Programs")]
+        [NUnit.Framework.CategoryAttribute("Sanity")]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "IdeaLease Program", "Idealease", "Status : Credit Line Takedown Submitted", null)]
+        public async System.Threading.Tasks.Task IdealLeasePrograms(string username, string password, string program, string product, string status, string[] exampleTags)
+        {
+            string[] @__tags = new string[] {
+                    "Sanity"};
+            if ((exampleTags != null))
+            {
+                @__tags = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Concat(@__tags, exampleTags));
+            }
+            string[] tagsOfScenario = @__tags;
+            System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new System.Collections.Specialized.OrderedDictionary();
+            argumentsOfScenario.Add("Username", username);
+            argumentsOfScenario.Add("Password", password);
+            argumentsOfScenario.Add("Program", program);
+            argumentsOfScenario.Add("Product", product);
+            argumentsOfScenario.Add("Status", status);
+            global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("IdealLease Programs", null, tagsOfScenario, argumentsOfScenario, featureTags);
+#line 104
+this.ScenarioInitialize(scenarioInfo);
+#line hidden
+            if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
+            {
+                testRunner.SkipScenario();
+            }
+            else
+            {
+                await this.ScenarioStartAsync();
+#line 105
+ await testRunner.GivenAsync("the user is on the login page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
+#line hidden
+#line 106
+ await testRunner.WhenAsync(string.Format("the user enters \"{0}\" and \"{1}\" and clicks on the Login button", username, password), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 107
+ await testRunner.ThenAsync("the user should be successfully redirected to the dashboard page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 108
+ await testRunner.WhenAsync("the user clicks on Create Quick Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 109
+ await testRunner.ThenAsync("the user should be redirected to the Create Quick Quote page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 110
+ await testRunner.WhenAsync(string.Format("the user selects the data in the programe \"{0}\" field from the dropdown", program), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 111
+ await testRunner.AndAsync(string.Format("the user selects the data in the product \"{0}\" field from the dropdown", product), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 112
+ await testRunner.ThenAsync("the user selects the \"Asset\" value from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 113
+ await testRunner.AndAsync("the user enters the \"Purchase Price\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 114
+ await testRunner.ThenAsync("the user selects the Frequency from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 115
+ await testRunner.AndAsync("the user selects the Term from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 116
+ await testRunner.AndAsync("the user clicks on Create Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 117
+ await testRunner.ThenAsync("the user should be redirected to the Contract Details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 118
+ await testRunner.WhenAsync("the user enters Days to First Payment and clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 119
+ await testRunner.AndAsync("the user clicks on Add Contract Parties and then clicks on Add New Customer butto" +
+                        "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 120
+ await testRunner.ThenAsync("the user enters all the required fields in party details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 121
+ await testRunner.AndAsync("on the next page, enters all the required fields in address", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 122
+ await testRunner.ThenAsync("the user clicks on the Next button of Customer Pager", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 123
+ await testRunner.WhenAsync("the user clicks on Add Contract Parties and then clicks on Add New Customer butto" +
+                        "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 124
+ await testRunner.ThenAsync("the user enters all the required fields in party details page for Customer Role S" +
+                        "ublease", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 125
+ await testRunner.AndAsync("on the next page, enters all the required fields in address", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 126
+ await testRunner.ThenAsync("the user clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 127
+ await testRunner.AndAsync("the user lands on the contract summary page", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 128
  await testRunner.ThenAsync(string.Format("Verify Appllication Status \"{0}\"", status), ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
             }

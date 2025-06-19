@@ -162,7 +162,7 @@ namespace Navistar.Navistar.Pages.NfcPages
     };
 
             // Only add TotalInterest and TotalCost if the product is NOT "Operating Lease", "TRAC Lease", or "Finance Lease"
-            var excludedProducts = new[] { "Operating Lease", "TRAC Lease", "Finance Lease" };
+            var excludedProducts = new[] { "Operating Lease", "TRAC Lease", "Finance Lease", "Idealease", "Finance Included Loan" };
             if (!excludedProducts.Any(p => p.Equals(product, StringComparison.OrdinalIgnoreCase)))
             {
                 details.Add("TotalInterest", totalInterest.Text);

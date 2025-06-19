@@ -20,18 +20,18 @@ namespace Navistar.Features.NfcFeatureFile
     [System.CodeDom.Compiler.GeneratedCodeAttribute("Reqnroll", "2.0.0.0")]
     [System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     [NUnit.Framework.TestFixtureAttribute()]
-    [NUnit.Framework.DescriptionAttribute("CalculationModule")]
+    [NUnit.Framework.DescriptionAttribute("Quick Quote Creation and Validation")]
     [NUnit.Framework.FixtureLifeCycleAttribute(NUnit.Framework.LifeCycle.InstancePerTestCase)]
-    public partial class CalculationModuleFeature
+    public partial class QuickQuoteCreationAndValidationFeature
     {
         
         private global::Reqnroll.ITestRunner testRunner;
         
         private static string[] featureTags = ((string[])(null));
         
-        private static global::Reqnroll.FeatureInfo featureInfo = new global::Reqnroll.FeatureInfo(new System.Globalization.CultureInfo("en-US"), "Features/NfcFeatureFile", "CalculationModule", @"This feature verifies the end-to-end quote calculation process. It starts with a user logging in, navigating to the Quick Quote page, selecting quote parameters, creating a quote, and finally validating that the calculated values match on both the Quick Quote and Contract Details pages.", global::Reqnroll.ProgrammingLanguage.CSharp, featureTags);
+        private static global::Reqnroll.FeatureInfo featureInfo = new global::Reqnroll.FeatureInfo(new System.Globalization.CultureInfo("en-US"), "Features/NfcFeatureFile", "Quick Quote Creation and Validation", null, global::Reqnroll.ProgrammingLanguage.CSharp, featureTags);
         
-#line 1 "CalculationModule.feature"
+#line 1 "CreateQuickQuoteValidationI.feature"
 #line hidden
         
         [NUnit.Framework.OneTimeSetUpAttribute()]
@@ -83,7 +83,7 @@ namespace Navistar.Features.NfcFeatureFile
         }
         
         [NUnit.Framework.TestAttribute()]
-        [NUnit.Framework.DescriptionAttribute("Verify quote calculation from quick quote to contract details")]
+        [NUnit.Framework.DescriptionAttribute("User creates a quick quote and validates mandatory fields")]
         [NUnit.Framework.CategoryAttribute("Sanity")]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Finance Leases Program", "Finance Lease", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Finance Leases Program", "TRAC Lease", null)]
@@ -95,7 +95,7 @@ namespace Navistar.Features.NfcFeatureFile
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Loan Takedown", "Finance Included Loan", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "IdeaLease Program", "Finance Included Loan", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "IdeaLease Program", "Idealease", null)]
-        public async System.Threading.Tasks.Task VerifyQuoteCalculationFromQuickQuoteToContractDetails(string username, string password, string program, string product, string[] exampleTags)
+        public async System.Threading.Tasks.Task UserCreatesAQuickQuoteAndValidatesMandatoryFields(string username, string password, string program, string product, string[] exampleTags)
         {
             string[] @__tags = new string[] {
                     "Sanity"};
@@ -109,9 +109,9 @@ namespace Navistar.Features.NfcFeatureFile
             argumentsOfScenario.Add("Password", password);
             argumentsOfScenario.Add("Program", program);
             argumentsOfScenario.Add("Product", product);
-            global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Verify quote calculation from quick quote to contract details", null, tagsOfScenario, argumentsOfScenario, featureTags);
-#line 6
-this.ScenarioInitialize(scenarioInfo);
+            global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("User creates a quick quote and validates mandatory fields", null, tagsOfScenario, argumentsOfScenario, featureTags);
+#line 4
+  this.ScenarioInitialize(scenarioInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
             {
@@ -120,47 +120,64 @@ this.ScenarioInitialize(scenarioInfo);
             else
             {
                 await this.ScenarioStartAsync();
+#line 5
+    await testRunner.GivenAsync("user is on the login page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
+#line hidden
+#line 6
+    await testRunner.WhenAsync(string.Format("user logs in with \"{0}\" and \"{1}\"", username, password), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
 #line 7
-    await testRunner.GivenAsync("the user is on the loginpage", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
+    await testRunner.ThenAsync("user should be redirected to the dashboard", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
 #line 8
-    await testRunner.WhenAsync(string.Format("the user login with \"{0}\" and \"{1}\"", username, password), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+    await testRunner.WhenAsync("user navigates to the Create Quick Quote page", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
 #line 9
-    await testRunner.ThenAsync("the user should be redirect to the dashboard", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+    await testRunner.ThenAsync("user should be redirected to the Create Quick Quote page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 10
+    await testRunner.WhenAsync(string.Format("user selects \"{0}\" from the Program dropdown", program), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
 #line 11
-    await testRunner.AndAsync("the user navigate to the Create Quick Quote page", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+    await testRunner.AndAsync(string.Format("user selects \"{0}\" from the Product dropdown", product), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
 #line 12
-    await testRunner.WhenAsync(string.Format("the user selects the \"{0}\" from the Program dropdown", program), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+    await testRunner.AndAsync("user selects \"Asset\" from the Asset dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
 #line 13
-    await testRunner.AndAsync(string.Format("the user selects the \"{0}\" from the Product dropdown", product), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+    await testRunner.AndAsync("user clicks on the Calculate button", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
 #line 14
-    await testRunner.AndAsync("the user selects the \"Asset\" from the Asset dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+    await testRunner.ThenAsync("a validation message should be displayed for mandatory fields", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
 #line 15
-    await testRunner.ThenAsync("user enters \"Purchase Price\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+    await testRunner.WhenAsync("the user selects Frequency and clicks on the Calculate button", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
 #line 16
-    await testRunner.AndAsync("user enters \"Down Payment\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+    await testRunner.ThenAsync("a validation message should be displayed for mandatory fields", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 17
+    await testRunner.WhenAsync("the user selects Term in Months and clicks on the Calculate button", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
 #line 18
-    await testRunner.AndAsync("user enters \"Residual Value\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+    await testRunner.ThenAsync("a validation message should be displayed for mandatory fields", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
 #line 19
-    await testRunner.AndAsync("the user selects the Frequency and Term from dropdowns", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+    await testRunner.WhenAsync("the user enters Purchase Price and selects a term greater than 84 months", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
 #line 20
-    await testRunner.AndAsync("the user click on \"Create Quote\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+    await testRunner.ThenAsync("a validation message should be displayed for term selection", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 21
+    await testRunner.WhenAsync("the user selects a valid Term from the dropdown and clicks on the Calculate butto" +
+                        "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
 #line 22
-    await testRunner.ThenAsync("the user should be redirect to the Contract Details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+    await testRunner.AndAsync("the user clicks on the Create Quote button", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
 #line 23
-    await testRunner.AndAsync("the calculations should match the Quick Quote and Standard Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+    await testRunner.ThenAsync("the Purchase Price and Asset Cost should be the same on the Contract Details page" +
+                        "", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
             }
             await this.ScenarioCleanupAsync();

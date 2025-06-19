@@ -19,7 +19,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement clickOnNextButton => Find(By.XPath("//span[text()='Next']"));
         private IWebElement contractIdElement => Find(By.XPath("//label[text()=' Contract ID  ']/following-sibling::div/span"));
         private IWebElement StatusElement => Driver.FindElement(By.XPath("//div[@class='status-container mt-2']/span"));
-        private IWebElement labelPaymentSummary => Driver.FindElement(By.XPath("//p[contains(text(),' Total Amount Borrowed ')]"));
+        private IWebElement labelPaymentSummary => Driver.FindElement(By.XPath("//span[contains(text(),' Total Amount Borrowed ')]"));
         private IWebElement residualValueRequestButton => Driver.FindElement(By.XPath("//span[contains(text(),'Residual Value Request')]//parent::button"));
         private IWebElement uploadSpecificationandInvoiceButton => Driver.FindElement(By.XPath("//span[contains(text(),'Upload')]//parent::span"));
         private IWebElement nextStateDropdown => Driver.FindElement(By.XPath("//p-dropdown[@id='nextState']//child::span"));
@@ -49,7 +49,7 @@ namespace Navistar.Navistar.Pages.NfcPages
                 try
                 {
                     // Find the dropdown and OK button using XPath index
-                    Thread.Sleep(3000);
+                    Thread.Sleep(500);
                     IWebElement dropdownele = Driver.FindElement(By.XPath($"(//div[@class='haulerSourceBody']//div[@class='p-dropdown p-component p-inputwrapper p-inputwrapper-filled']/span)[{i}]"));
                     Thread.Sleep(500);
                     dropdown.SelectCustomDropdown(dropdownele, value, optionsLocator);

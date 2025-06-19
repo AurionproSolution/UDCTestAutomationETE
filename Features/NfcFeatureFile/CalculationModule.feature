@@ -24,15 +24,14 @@ Scenario Outline: Verify quote calculation from quick quote to contract details
     	
 
 Examples:
-	| Username          | Password       | Program                         | Product                    |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Finance Leases Program          | Finance Lease              |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Finance Leases Program          | TRAC Lease                 |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Loan Program                    | Finance Included Loan      |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | FMV Program                     | Operating Lease            |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Lease Takedown      | Finance Lease              |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Lease Takedown      | Operating Lease            |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Lease Takedown      | TRAC Lease                 |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Loan Takedown       | Finance Included Loan      |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | S13 Idealease Program           | Idealease |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | UTC - 1.9% Buy Down             | Finance Included Loan      |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | UTC - 1.9% Buy Down Credit Line | Finance Included Loan      |
+	| Username        | Password     | Program                         | Product                    |
+	| sandeep.bedekar | Testing@2211 | Finance Leases Program          | Finance Lease              |
+	| sandeep.bedekar | Testing@2211 | Finance Leases Program          | TRAC Lease                 |
+	| sandeep.bedekar | Testing@2211 | Loan Program                    | Finance Included Loan      |
+	| sandeep.bedekar | Testing@2211 | FMV Program                     | Operating Lease            |
+	| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown      | Finance Lease              |
+	| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown      | Operating Lease            |
+	| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown      | TRAC Lease                 |
+	| sandeep.bedekar | Testing@2211 | Credit Line Loan Takedown       | Finance Included Loan      |
+    | sandeep.bedekar | Testing@2211 | IdeaLease Program               | Finance Included Loan      |
+    | sandeep.bedekar | Testing@2211 | IdeaLease Program               | Idealease                  |

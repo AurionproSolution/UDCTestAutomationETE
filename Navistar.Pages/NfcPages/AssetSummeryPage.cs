@@ -35,6 +35,13 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement deleteVehicleDetailsButton => Find(By.XPath("//i[@class='fa-regular fa-trash-can']"));
         private IWebElement cancelButton => Find(By.XPath("//span[normalize-space()='CANCEL']"));
         private IWebElement saveButton => Find(By.XPath("//span[normalize-space()='SAVE']"));
+        private IWebElement deleteButton => Find(By.XPath("//span[contains(@class, 'fa-trash-can')]"));
+        private IWebElement searchBoxInput => Find(By.XPath("//input[@placeholder='Enter VIN to Search']"));
+        private IWebElement searchButton => Find(By.XPath("//input[@placeholder='Enter VIN to Search']//following::button"));
+        private IWebElement selectSearchAsset=> Find(By.XPath("//div[@class='p-radiobutton-box p-component']"));
+        private IWebElement addButton => Find(By.XPath("//span[contains(text(),'ADD')]"));
+        
+
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
 
         public void SearchByVinNo(string vinNo)
@@ -95,7 +102,10 @@ namespace Navistar.Navistar.Pages.NfcPages
         }
         public void EnterPurchasePriceValue(String value)
         {
-            purchasePrice.SendKeys(value);
+            purchasePrice.Click();
+            Thread.Sleep(500);
+            IJavaScriptExecutor js = (IJavaScriptExecutor)Driver;
+            js.ExecuteScript("arguments[0].value='32000';", purchasePrice);
             ReportingManager.LogPass("Entered purchase price value as " + value + ".");
         }
         public void SaveTheAsset()
@@ -130,6 +140,24 @@ namespace Navistar.Navistar.Pages.NfcPages
             EnterOdometer(12345);
             SaveTheAsset();
             ClickOnSaveButton();
+        }
+
+        public void SearchVINNo(string value)
+        {
+           deleteButton.Click();
+           Thread.Sleep(1000);
+           searchBoxInput.SendKeys(value);
+           Thread.Sleep(1000);
+           searchButton.Click();
+           WaitTillTheLoadSpinnerDisappears();
+        }
+
+        public void AddSearchAsset()
+        {
+            selectSearchAsset.Click();
+            Thread.Sleep(1000);
+            addButton.Click();
+            Thread.Sleep(2000);
         }
     }
 }

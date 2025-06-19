@@ -20,23 +20,24 @@ namespace Navistar.StepDefinitions
         public void GivenTheUserIsOnTheLoginpage()
         {
             ReportingManager.LogInfo("Navigating to the login page.");
-            string loginUrl = new PageObjectContainer().TestData.QAUrl;
+            string loginUrl = new PageObjectContainer().TestData.FisSandboxUrl;
             DriverContext.Driver.Navigate().GoToUrl(loginUrl);
         }
-
+        
         [When("the user login with {string} and {string}")]
         public void WhenTheUserLoginWithAnd(string username, string password)
         {
             ReportingManager.LogInfo("User trying to login with valid credentials.");
             //_pageObjects.LoginPage.ClickLoginWithNfcButton();
-            //_pageObjects.LoginPage.EnterNfcUserName(username);
-            //_pageObjects.LoginPage.ClickOnProceedButton();
-            //_pageObjects.LoginPage.EnterNfcPassword(password);
-            //_pageObjects.LoginPage.ClickonSignInButton();
-            _pageObjects.LoginPage.EnterUserName(username);
-            _pageObjects.LoginPage.EnterPassword(password);
-            ReportingManager.LogInfo("Attempting login.");
-            _pageObjects.LoginPage.ClickLoginButton();
+            _pageObjects.LoginPage.EnterNfcUserName(username);
+            _pageObjects.LoginPage.ClickOnProceedButton();
+            _pageObjects.LoginPage.EnterNfcPassword(password);
+            _pageObjects.LoginPage.ClickonSignInButton();
+            //Code for Internl User
+            //_pageObjects.LoginPage.EnterUserName(username);
+            //_pageObjects.LoginPage.EnterPassword(password);
+            //ReportingManager.LogInfo("Attempting login.");
+            //_pageObjects.LoginPage.ClickLoginButton();
         }
 
         [Then("the user should be redirect to the dashboard")]
@@ -138,7 +139,7 @@ namespace Navistar.StepDefinitions
             //_pageObjects.AssetSummeryPage.AddAsset();
             _pageObjects.AssetSummeryPage.ClickOnAssetEditButton();
             _pageObjects.AssetSummeryPage.SelectyearField(2024);
-            _pageObjects.AssetSummeryPage.SelectNewOrUsed("Used");
+            _pageObjects.AssetSummeryPage.SelectNewOrUsed("New");
             //_pageObjects.AssetSummeryPage.SelectAssetDropdown("LT Series/International/Heavy");
             _pageObjects.AssetSummeryPage.SelectCategory("Day Cab");
             _pageObjects.AssetSummeryPage.EnterPurchasePriceValue("26000");

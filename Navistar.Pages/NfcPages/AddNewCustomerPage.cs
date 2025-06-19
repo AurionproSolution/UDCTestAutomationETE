@@ -49,6 +49,9 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement clickOnSaveButton => Find(By.XPath("//span[text()='Save']"));
 
         private IWebElement fromDate => Find(By.XPath("//span[@data-date='2020-0-15' ]"));
+        private IWebElement customerRoleDropdown => Find(By.XPath("//label[contains(text(),'Customer Role ')]//following::div[@class='p-dropdown-trigger']"));
+        private IWebElement subLeaseOption => Find(By.XPath("//span[contains(text(),'Sub-Lessee')]"));
+
 
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
         public void EnterFirstName(string value)
@@ -239,6 +242,14 @@ namespace Navistar.Navistar.Pages.NfcPages
             Thread.Sleep(1000);
             fromDate.Click();
 
+        }
+
+        public void CustomerRole()
+        {
+            customerRoleDropdown.Click();
+            Thread.Sleep(1000);
+            subLeaseOption.Click();
+            Thread.Sleep(1000);
         }
     }
 }

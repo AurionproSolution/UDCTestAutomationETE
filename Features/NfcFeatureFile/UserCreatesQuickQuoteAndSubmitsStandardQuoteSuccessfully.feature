@@ -30,10 +30,10 @@ Scenario Outline: Loan Programs
 
 
 Examples:
-	| Username          | Password       | Program                         | Product               | Status |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Loan Program                    | Finance Included Loan | Status : Application Submitted      |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Loan Takedown       | Finance Included Loan | Status : Credit Line Takedown Submitted  |
-	
+	| Username        | Password     | Program                         | Product               | Status |
+	| sandeep.bedekar | Testing@2211 | Loan Program                    | Finance Included Loan | Status : Application Submitted      |
+	| sandeep.bedekar | Testing@2211 | Credit Line Loan Takedown       | Finance Included Loan | Status : Credit Line Takedown Submitted  |
+	| sandeep.bedekar | Testing@2211 | IdeaLease Program              | Finance Included Loan  | Status : Credit Line Takedown Submitted     |
 
 @Sanity
 Scenario Outline: Lease Programs
@@ -63,10 +63,10 @@ Scenario Outline: Lease Programs
 
 Examples:
 | Username          | Password       | Program                    | Product       | Status  |
-| deepak.paramanick | Pramuriwondaskfhh@9898 | Finance Leases Program     | Finance Lease | Status : Application Submitted  |
-| deepak.paramanick | Pramuriwondaskfhh@9898 | Finance Leases Program     | TRAC Lease    | Status : Application Submitted |
-| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Lease Takedown | Finance Lease | Status : Credit Line Takedown Submitted |
-| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Lease Takedown | TRAC Lease    | Status : Credit Line Takedown Submitted |
+| sandeep.bedekar | Testing@2211 | Finance Leases Program     | Finance Lease | Status : Application Submitted  |
+| sandeep.bedekar | Testing@2211 | Finance Leases Program     | TRAC Lease    | Status : Application Submitted |
+| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown | Finance Lease | Status : Credit Line Takedown Submitted |
+| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown | TRAC Lease    | Status : Credit Line Takedown Submitted |
 
 @Sanity
 Scenario Outline: OperatingLease Programs
@@ -94,8 +94,40 @@ Scenario Outline: OperatingLease Programs
 
 
 Examples:
-	| Username          | Password       | Program                    | Product         | Status                                      |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | FMV Program                | Operating Lease | Status : Application Submitted              |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | Credit Line Lease Takedown | Operating Lease | Status : Credit Line Takedown Submitted     |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | IdeaLease Program          | Idealease      | Status : Credit Line Takedown Submitted     |
-	| deepak.paramanick | Pramuriwondaskfhh@9898 | IdeaLease Programn         | Finance Included Loan | Status : Credit Line Takedown Submitted     |
+	| Username        | Password     | Program                    | Product               | Status                                      |
+	| sandeep.bedekar | Testing@2211 | FMV Program                | Operating Lease       | Status : Application Submitted              |
+	| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown | Operating Lease       | Status : Credit Line Takedown Submitted     |
+
+
+
+@Sanity
+Scenario Outline: IdealLease Programs
+	Given the user is on the login page
+	When the user enters "<Username>" and "<Password>" and clicks on the Login button
+	Then the user should be successfully redirected to the dashboard page
+	When the user clicks on Create Quick Quote
+	Then the user should be redirected to the Create Quick Quote page
+	When the user selects the data in the programe "<Program>" field from the dropdown
+	And the user selects the data in the product "<Product>" field from the dropdown
+	Then the user selects the "Asset" value from the dropdown
+	And the user enters the "Purchase Price"
+	Then the user selects the Frequency from the dropdown
+	And the user selects the Term from the dropdown
+	And the user clicks on Create Quote
+	Then the user should be redirected to the Contract Details page
+	When the user enters Days to First Payment and clicks on the Next button
+	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
+	Then the user enters all the required fields in party details page
+	And on the next page, enters all the required fields in address
+	Then the user clicks on the Next button of Customer Pager
+	When the user clicks on Add Contract Parties and then clicks on Add New Customer button
+	Then the user enters all the required fields in party details page for Customer Role Sublease
+	And on the next page, enters all the required fields in address
+	Then the user clicks on the Next button
+	And the user lands on the contract summary page
+	Then Verify Appllication Status "<Status>"
+
+
+Examples:
+	| Username        | Password     | Program                    | Product               | Status                                      |
+	| sandeep.bedekar | Testing@2211 | IdeaLease Program          | Idealease             | Status : Credit Line Takedown Submitted     |

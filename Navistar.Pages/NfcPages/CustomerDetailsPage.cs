@@ -21,10 +21,10 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement contractIdElement => Find(By.XPath("//label[text()=' Contract ID  ']/following-sibling::div/span"));
         public void ClickOnAddContractPartiesButton()
         {
-            WaitTillTheLoadSpinnerDisappears(10); 
+            WaitTillTheLoadSpinnerDisappears(); 
             addContractPartiesButton.Click();
             ReportingManager.LogPass("Dealer clicked on Add Contract Parties Button.");
-            WaitTillTheLoadSpinnerDisappears(10);
+            WaitTillTheLoadSpinnerDisappears();
         }
         public void ClickOnUploadDocumentsTab()
         {
