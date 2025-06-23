@@ -38,6 +38,19 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement totalAmountToRepay => Find(By.XPath("//label[text()='Total Amount to Repay']/following-sibling::span"));
         private IWebElement element => Find(By.XPath("//p-dropdown[@class='p-element p-inputwrapper ng-pristine ng-invalid ng-star-inserted ng-touched']//span[@role='combobox']"));
         private IWebElement AnnualMileage => Find(By.XPath("//label[contains(text(),'Annual Mileage ')]//following::span/input"));
+        private IWebElement labelTotalFess => Find(By.XPath("//p[contains(text(),' Total Fees ')]//child::span"));
+        private IWebElement addFessAndChargesButton => Find(By.XPath("//span[contains(text(),'Add Fees and Charges')]"));
+        private IWebElement labelInstallementFromPaymentSummary => Find(By.XPath("//label[contains(text(),'Installment')]//following-sibling::span"));
+        private IWebElement labeCalculatdAmount => Find(By.XPath("//div[contains(text(),' Monthly ')]//following::div"));
+        private IWebElement labeBuyRate => Find(By.XPath("//label[contains(text(),'Buy Rate')]//following::input"));
+        private IWebElement buttonDetailSchedule => Find(By.XPath("//label[contains(text(),' Detailed Schedule ')]"));
+        private IWebElement previousButton => Find(By.XPath("//span[contains(text(),'Previous')]//parent::button"));
+        private IWebElement editPaymentScheduleButton => Find(By.XPath("//span[contains(text(),'Edit Payment Schedule')]//parent::button"));
+        private IWebElement numberTextBox => Find(By.XPath("//input[@type='number']"));
+        private IWebElement applyButton => Find(By.XPath("(//span[contains(text(),'Calculate')]//parent::button)[2]"));
+        private IWebElement validationErrorMessage => Find(By.XPath("//div[@class='p-toast-detail ng-tns-c3576075022-1213' and @data-pc-section='detail']"));
+        private IWebElement frquancyTermDropdown => Find(By.XPath("//label[contains(text(),'Term (In Month)')]//following::input"));
+        private IWebElement frquancyTermDropdownValidationMessage => Find(By.XPath("//label[contains(text(),'Term (In Month)')]//following::input//following::small"));
 
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
         public void SelectProgramDropDown(string value)
@@ -127,7 +140,7 @@ namespace Navistar.Navistar.Pages.NfcPages
             SetImplicitWait(15);
             nextButton.Click();
             WaitTillTheLoadSpinnerDisappears();
-            //Thread.Sleep(15000);
+            Thread.Sleep(5000);
             ReportingManager.LogPass("Dealer clicked on Next button in contract details page");
         }
         public void CreateContract()
@@ -181,5 +194,110 @@ namespace Navistar.Navistar.Pages.NfcPages
             AnnualMileage.SendKeys(value);
             ReportingManager.LogPass("Annual Mileage entered " + value + "");
         }
+
+        public void ClickOnAddFeesAndChargesButton()
+        {
+            SetImplicitWait(10);
+            addFessAndChargesButton.Click();
+            Thread.Sleep(2000);
+            ReportingManager.LogPass("Add Fess And Charges Button click");
+        }
+
+        public string GetTotalFess()
+        {
+            string labelTotalCost = labelTotalFess.Text;
+            return labelTotalCost;
+            Thread.Sleep(500);
+        }
+        public string GetInstallementFromPaymentSummary()
+        {
+            string installementFromPaymentSummaryLabel = labelInstallementFromPaymentSummary.Text;
+            return installementFromPaymentSummaryLabel;
+            Thread.Sleep(500);
+        }
+
+        public string GetCalculateAmountFromContractPaymentSchedule()
+        {
+            string calculatdAmountLabel = labeCalculatdAmount.Text;
+            return calculatdAmountLabel;
+            Thread.Sleep(500);
+        }
+
+        public string GetBuyRate()
+        {
+            string buyRateLabel = Driver.FindElement(By.XPath("//label[contains(text(),'Buy Rate')]//following::input")).GetAttribute("aria-valuenow");
+            return buyRateLabel;
+            Thread.Sleep(500);
+        }
+
+        public string GetCalculateAmountFromDetailsScheduleTab()
+        {
+            ScrollAndClickElement(labelInstallementFromPaymentSummary);
+            buttonDetailSchedule.Click();
+            Thread.Sleep(1000);
+            string calculatdAmountLabel = labeCalculatdAmount.Text;
+            return calculatdAmountLabel;
+        }
+
+        public void clickonPreviousButton()
+        {
+            previousButton.Click();
+            WaitTillTheLoadSpinnerDisappears();
+            Thread.Sleep(3000);
+        }
+
+        public void clickOnEditPaymentButtonAndVerifyTerms(string expectedTerm)
+        {
+
+            ScrollAndClickElement(labelInstallementFromPaymentSummary);
+            editPaymentScheduleButton.Click();
+            Thread.Sleep(2000);
+            string actualNumberofTerms = Driver.FindElement(By.XPath("//input[@formcontrolname='installments']")).GetAttribute("value");
+            Thread.Sleep(1000);
+            if (actualNumberofTerms.Equals(expectedTerm))
+            {
+                ReportingManager.LogPass("Number of Term/Frequnacy is updated on Edit Payment Page"+ actualNumberofTerms);
+              //  ReportingManager.AddScreenshotToReport("Number of Term/Frequnacy is updated on Edit Payment Page");
+            }
+            else
+            {
+                ReportingManager.LogFail("Number of Term/Frequnacy is not updated on Edit Payment Page" + actualNumberofTerms);
+                ReportingManager.AddScreenshotToReport("Number of Term/Frequnacy is not updated on Edit Payment Page" + actualNumberofTerms);
+            }
+
+        }
+
+        public void EntreNumberinTermAndApply(string number)
+        {
+            numberTextBox.Clear();
+            
+        }
+
+        public void VerifyFrequancyTermErrorMessage()
+        {
+           bool isDisplayed = frquancyTermDropdownValidationMessage.Displayed;
+            if (isDisplayed)
+            {
+                ReportingManager.LogPass("Validation Message is Displayed");
+                ReportingManager.AddScreenshotToReport("Validation Message is Displayed");
+            }
+            else
+            {
+                Assert.Fail("Validation Message is not Displayed");
+                ReportingManager.LogFail("Validation Message is not Displayed");
+                ReportingManager.AddScreenshotToReport("Validation Message is not Displayed");
+            }
+        }
+
+        public void EntreFrquancyTermDropdown(string frquancyTerm)
+        {
+            frquancyTermDropdown.Clear();
+            Thread.Sleep(500);
+            frquancyTermDropdown.SendKeys(frquancyTerm);
+            calculateBtn.Click();
+            WaitTillTheLoadSpinnerDisappears();
+
+        }
+
     }
 }

@@ -26,7 +26,8 @@ namespace Navistar.StepDefinitions
         public QuickQuoteDataModel QuickQuoteTestData { get; }
         public AssetSummaryDataModel AssetSummaryTestData { get; }
         public CustomerPartiesDataModel CustomerPartiesTestData { get; }
-        
+
+        public AddFeesAndChargesPage AddFeesAndChargesPage { get; }
         public PageObjectContainer()
         {
             var driver = DriverContext.Driver;
@@ -46,7 +47,7 @@ namespace Navistar.StepDefinitions
             QuickQuoteTestData = JsonUtilities.ReadJson<QuickQuoteDataModel>("TestDatafiles/QuickQuote.json");
             AssetSummaryTestData = JsonUtilities.ReadJson<List<AssetSummaryDataModel>>("TestDatafiles/AssetSummary.json").FirstOrDefault();
             CustomerPartiesTestData = JsonUtilities.ReadJson<CustomerPartiesDataModel>("TestDatafiles/CustomerParties.json");
-
+            AddFeesAndChargesPage = new AddFeesAndChargesPage(driver);
         }
     }
 }
