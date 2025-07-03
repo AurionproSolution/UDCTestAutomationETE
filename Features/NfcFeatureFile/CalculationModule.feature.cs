@@ -129,37 +129,37 @@ this.ScenarioInitialize(scenarioInfo);
 #line 9
     await testRunner.ThenAsync("the user should be redirect to the dashboard", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 11
+#line 10
     await testRunner.AndAsync("the user navigate to the Create Quick Quote page", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 12
+#line 11
     await testRunner.WhenAsync(string.Format("the user selects the \"{0}\" from the Program dropdown", program), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 13
+#line 12
     await testRunner.AndAsync(string.Format("the user selects the \"{0}\" from the Product dropdown", product), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 14
+#line 13
     await testRunner.AndAsync("the user selects the \"Asset\" from the Asset dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 15
+#line 14
     await testRunner.ThenAsync("user enters \"Purchase Price\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 16
+#line 15
     await testRunner.AndAsync("user enters \"Down Payment\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 18
+#line 17
     await testRunner.AndAsync("user enters \"Residual Value\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 19
+#line 18
     await testRunner.AndAsync("the user selects the Frequency and Term from dropdowns", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 20
+#line 19
     await testRunner.AndAsync("the user click on \"Create Quote\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 22
+#line 20
     await testRunner.ThenAsync("the user should be redirect to the Contract Details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 23
+#line 21
     await testRunner.AndAsync("the calculations should match the Quick Quote and Standard Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
             }

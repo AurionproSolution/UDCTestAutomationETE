@@ -40,7 +40,8 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement searchButton => Find(By.XPath("//input[@placeholder='Enter VIN to Search']//following::button"));
         private IWebElement selectSearchAsset=> Find(By.XPath("//div[@class='p-radiobutton-box p-component']"));
         private IWebElement addButton => Find(By.XPath("//span[contains(text(),'ADD')]"));
-        
+        private IWebElement purchasePriceButtonValidationMessage => Find(By.XPath("//small[contains(text(),' This field is required.')]"));
+
 
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
 
@@ -105,7 +106,7 @@ namespace Navistar.Navistar.Pages.NfcPages
             purchasePrice.Click();
             Thread.Sleep(500);
             IJavaScriptExecutor js = (IJavaScriptExecutor)Driver;
-            js.ExecuteScript("arguments[0].value='32000';", purchasePrice);
+            js.ExecuteScript("arguments[0].value='"+ value + "';", purchasePrice);
             ReportingManager.LogPass("Entered purchase price value as " + value + ".");
         }
         public void SaveTheAsset()
@@ -158,6 +159,27 @@ namespace Navistar.Navistar.Pages.NfcPages
             Thread.Sleep(1000);
             addButton.Click();
             Thread.Sleep(2000);
+        }
+
+        public void VerifyValidationMessageForPurchasePrice()
+        {
+            Thread.Sleep(1000);
+            bool isErrorDisplay = purchasePriceButtonValidationMessage.Displayed;          
+            if (isErrorDisplay) 
+            {
+                ReportingManager.LogPass("Error Message is displayed for Currency Purchase Price empty value");
+                ReportingManager.AddScreenshotToReport("Error Message is displayed for Currency Purchase Price empty value");
+            }
+            else
+            {
+                ReportingManager.LogFail("Error Message is not displayed for Currency Purchase Price empty value");
+            }
+        }
+
+        public void ClearPurchasePriceValue()
+        {
+            purchasePrice.Clear();
+            Thread.Sleep(500);            
         }
     }
 }

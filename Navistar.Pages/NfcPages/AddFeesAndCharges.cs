@@ -36,7 +36,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         public void TitlingLienOtherTextboxDealer(string value)
         {
             Thread.Sleep(500);
-            textboxEntreExtendedServiceContracts.SendKeys(value);
+            textboxTitlingLienOther.SendKeys(value);
         }
 
         public void clickonAddButton()

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection.Emit;
 using System.Text;
 using System.Threading.Tasks;
 using Navistar.Navistar.core;
@@ -51,7 +52,10 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement validationErrorMessage => Find(By.XPath("//div[@class='p-toast-detail ng-tns-c3576075022-1213' and @data-pc-section='detail']"));
         private IWebElement frquancyTermDropdown => Find(By.XPath("//label[contains(text(),'Term (In Month)')]//following::input"));
         private IWebElement frquancyTermDropdownValidationMessage => Find(By.XPath("//label[contains(text(),'Term (In Month)')]//following::input//following::small"));
-
+        private IWebElement labelAssetCost => Find(By.XPath("//p[@class='px-2 p-inline asset-text-sub-black']//child::span"));
+        private IWebElement labelTotalAmountBorrowed => Find(By.XPath("//p[contains(text(),' Total Amount Borrowed ')]//child::span"));
+        private IWebElement labelMarkup => Find(By.XPath("//label[contains(text(),'Markup')]//following::input"));
+        private IWebElement textboxContractStartDate => Find(By.XPath("//label[contains(text(),' Contract Start Date ')]//following::input"));
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
         public void SelectProgramDropDown(string value)
         {
@@ -168,10 +172,19 @@ namespace Navistar.Navistar.Pages.NfcPages
         public Dictionary<string, string> StandardQuoteDetails(string product)
         {
             var details = new Dictionary<string, string>
-    {
+        {
         { "program", programDropdown.Text },
         { "product", productDropdown.Text },
-        { "Payment", installment.Text }
+        { "Payment", installment.Text },
+        { "BuyRate", labeBuyRate.Text },
+        { "AssetCost", labelAssetCost.Text },
+        { "TotalAmountBorrowed", labelTotalAmountBorrowed.Text },
+        { "TotalFess", labelTotalFess.Text },
+        { "TermInMonths", labelInstallementFromPaymentSummary.Text },
+        { "Markup", labelMarkup.Text },
+        { "TotalFess", labelTotalFess.Text },
+        { "Contract Start Date", labelTotalFess.Text },
+
     };
 
             // Only add TotalInterest and TotalCost if the product is NOT "Operating Lease", "TRAC Lease", or "Finance Lease"
@@ -297,6 +310,63 @@ namespace Navistar.Navistar.Pages.NfcPages
             calculateBtn.Click();
             WaitTillTheLoadSpinnerDisappears();
 
+        }
+
+        public string GetMarkup()
+        {
+            string makupValue = Driver.FindElement(By.XPath("//label[contains(text(),'Markup')]//following::input")).GetAttribute("aria-valuenow");
+            return makupValue;
+            Thread.Sleep(500);
+        }
+
+        public string GetCustomerRate()
+        {
+            string customerRateValue = Driver.FindElement(By.XPath("//label[contains(text(),'Customer Rate')]//following::input")).GetAttribute("aria-valuenow");
+            return customerRateValue;
+            Thread.Sleep(500);
+        }
+
+        public string GetAssetCost()
+        {
+            string assetCostValue = labelAssetCost.Text;
+            return assetCostValue;
+            Thread.Sleep(500);
+        }
+
+        public string GetTotalAmountBorrowed()
+        {
+            string assetCostValue = labelTotalAmountBorrowed.Text;
+            return assetCostValue;
+            Thread.Sleep(500);
+        }
+
+        public Dictionary<string, string> DetailsStandardQuote(string product)
+        {
+            var details = new Dictionary<string, string>
+        {
+        { "program", programDropdown.Text },
+        { "product", productDropdown.Text },
+        { "AssetCost", labelAssetCost.Text },
+        { "TotalAmountBorrowed", labelTotalAmountBorrowed.Text },
+        { "TermInMonths", labelInstallementFromPaymentSummary.Text },
+        { "Markup", labelMarkup.Text },
+        { "TotalFess", labelTotalFess.Text },
+        { "Contract Start Date", textboxContractStartDate.Text },
+
+    };
+
+           return details;
+        }
+
+
+        public void  EntreMarkup(string value)
+        {
+            MoveToElement(labelMarkup);
+            labelMarkup.Click();
+            Thread.Sleep(500);
+            IJavaScriptExecutor js = (IJavaScriptExecutor)Driver;
+            js.ExecuteScript("arguments[0].value='" + value + "';", labelMarkup);
+            ReportingManager.LogPass("Entered purchase price value as " + value + ".");
         }
 
     }
