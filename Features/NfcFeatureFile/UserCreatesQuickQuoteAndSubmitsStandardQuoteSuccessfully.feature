@@ -114,23 +114,31 @@ Scenario Outline: IdealLease Programs
 	Then the user selects the Frequency from the dropdown
 	And the user selects the Term from the dropdown
 	And the user clicks on Create Quote
-	Then the user should be redirected to the Contract Details page
-	When the user enters Days to First Payment and clicks on the Next button
+#//	Then the user should be redirected to the Contract Details page
+    Then the user should be redirected to the Contract Details page and Verify Validation Message for Asset Purchase Price
+	Given Add Fees and Charges 
+	When Click on Calculate Button
+	Then Veriy Addition of Buy Rate and Makrup is equal to Customer rate
+	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
+    And the Buy Rate should be verified before contract created and after contract created
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
 	Then the user enters all the required fields in party details page
 	And on the next page, enters all the required fields in address
 	Then the user clicks on the Next button of Customer Pager
+	Then Verify customer added or not
 	When the user clicks on Add Contract Parties and then clicks on Add New Customer button
 	Then the user enters all the required fields in party details page for Customer Role Sublease
 	And on the next page, enters all the required fields in address
 	Then the user clicks on the Next button
-	And the user lands on the contract summary page
-	Then Verify Appllication Status "<Status>"
-
+	Then Verify customer added or not
+	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup
+	Then Verify Appllication  "<BeforeContractStatus>" before submit 
+	When User click on Submit button 
+	Then Verify Appllication Status "<AfterContractStatus>"
 
 Examples:
-	| Username        | Password     | Program                    | Product               | Status                                      |
-	| sandeep.bedekar | Testing@2211 | IdeaLease Program          | Idealease             | Status : Credit Line Takedown Submitted     |
+	| Username        | Password     | Program           | Product   | AfterContractStatus                     | BeforeContractStatus                  |
+	| sandeep.bedekar | Testing@2211 | IdeaLease Program | Idealease | Status : Credit Line Takedown Submitted | Status : Quote from Credit Line       |
 
 
 

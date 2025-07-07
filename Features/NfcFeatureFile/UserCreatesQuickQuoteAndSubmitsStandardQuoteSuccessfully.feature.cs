@@ -382,8 +382,8 @@ this.ScenarioInitialize(scenarioInfo);
         [NUnit.Framework.TestAttribute()]
         [NUnit.Framework.DescriptionAttribute("IdealLease Programs")]
         [NUnit.Framework.CategoryAttribute("Sanity")]
-        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "IdeaLease Program", "Idealease", "Status : Credit Line Takedown Submitted", null)]
-        public async System.Threading.Tasks.Task IdealLeasePrograms(string username, string password, string program, string product, string status, string[] exampleTags)
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "IdeaLease Program", "Idealease", "Status : Credit Line Takedown Submitted", "Status : Quote from Credit Line", null)]
+        public async System.Threading.Tasks.Task IdealLeasePrograms(string username, string password, string program, string product, string afterContractStatus, string beforeContractStatus, string[] exampleTags)
         {
             string[] @__tags = new string[] {
                     "Sanity"};
@@ -397,7 +397,8 @@ this.ScenarioInitialize(scenarioInfo);
             argumentsOfScenario.Add("Password", password);
             argumentsOfScenario.Add("Program", program);
             argumentsOfScenario.Add("Product", product);
-            argumentsOfScenario.Add("Status", status);
+            argumentsOfScenario.Add("AfterContractStatus", afterContractStatus);
+            argumentsOfScenario.Add("BeforeContractStatus", beforeContractStatus);
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("IdealLease Programs", null, tagsOfScenario, argumentsOfScenario, featureTags);
 #line 104
 this.ScenarioInitialize(scenarioInfo);
@@ -445,44 +446,72 @@ this.ScenarioInitialize(scenarioInfo);
 #line 116
  await testRunner.AndAsync("the user clicks on Create Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 117
- await testRunner.ThenAsync("the user should be redirected to the Contract Details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
-#line hidden
 #line 118
- await testRunner.WhenAsync("the user enters Days to First Payment and clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+    await testRunner.ThenAsync("the user should be redirected to the Contract Details page and Verify Validation " +
+                        "Message for Asset Purchase Price", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
 #line 119
+ await testRunner.GivenAsync("Add Fees and Charges", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
+#line hidden
+#line 120
+ await testRunner.WhenAsync("Click on Calculate Button", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 121
+ await testRunner.ThenAsync("Veriy Addition of Buy Rate and Makrup is equal to Customer rate", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 122
+ await testRunner.ThenAsync("the Payment Summary (Installment) should match the Contract Payment Schedule sect" +
+                        "ion", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 123
+    await testRunner.AndAsync("the Buy Rate should be verified before contract created and after contract create" +
+                        "d", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 124
  await testRunner.AndAsync("the user clicks on Add Contract Parties and then clicks on Add New Customer butto" +
                         "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 120
+#line 125
  await testRunner.ThenAsync("the user enters all the required fields in party details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 121
+#line 126
  await testRunner.AndAsync("on the next page, enters all the required fields in address", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 122
+#line 127
  await testRunner.ThenAsync("the user clicks on the Next button of Customer Pager", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 123
+#line 128
+ await testRunner.ThenAsync("Verify customer added or not", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 129
  await testRunner.WhenAsync("the user clicks on Add Contract Parties and then clicks on Add New Customer butto" +
                         "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 124
+#line 130
  await testRunner.ThenAsync("the user enters all the required fields in party details page for Customer Role S" +
                         "ublease", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 125
+#line 131
  await testRunner.AndAsync("on the next page, enters all the required fields in address", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 126
+#line 132
  await testRunner.ThenAsync("the user clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 127
- await testRunner.AndAsync("the user lands on the contract summary page", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line 133
+ await testRunner.ThenAsync("Verify customer added or not", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 128
- await testRunner.ThenAsync(string.Format("Verify Appllication Status \"{0}\"", status), ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line 134
+ await testRunner.AndAsync("the user lands on the contract summary page and Verify Contract Start date.First " +
+                        "Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 135
+ await testRunner.ThenAsync(string.Format("Verify Appllication  \"{0}\" before submit", beforeContractStatus), ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 136
+ await testRunner.WhenAsync("User click on Submit button", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 137
+ await testRunner.ThenAsync(string.Format("Verify Appllication Status \"{0}\"", afterContractStatus), ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
             }
             await this.ScenarioCleanupAsync();
@@ -509,7 +538,7 @@ this.ScenarioInitialize(scenarioInfo);
             argumentsOfScenario.Add("AfterContractStatus", afterContractStatus);
             argumentsOfScenario.Add("BeforeContractStatus", beforeContractStatus);
             global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("Finance Leases Program and Finance Lease", null, tagsOfScenario, argumentsOfScenario, featureTags);
-#line 138
+#line 146
 this.ScenarioInitialize(scenarioInfo);
 #line hidden
             if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
@@ -519,90 +548,90 @@ this.ScenarioInitialize(scenarioInfo);
             else
             {
                 await this.ScenarioStartAsync();
-#line 139
+#line 147
  await testRunner.GivenAsync("the user is on the login page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-#line 140
+#line 148
  await testRunner.WhenAsync(string.Format("the user enters \"{0}\" and \"{1}\" and clicks on the Login button", username, password), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 141
+#line 149
  await testRunner.ThenAsync("the user should be successfully redirected to the dashboard page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 142
+#line 150
  await testRunner.WhenAsync("the user clicks on Create Quick Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 143
+#line 151
  await testRunner.ThenAsync("the user should be redirected to the Create Quick Quote page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 144
+#line 152
  await testRunner.WhenAsync(string.Format("the user selects the data in the programe \"{0}\" field from the dropdown", program), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 145
+#line 153
  await testRunner.AndAsync(string.Format("the user selects the data in the product \"{0}\" field from the dropdown", product), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 146
+#line 154
  await testRunner.ThenAsync("the user selects the \"Asset\" value from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 147
+#line 155
  await testRunner.AndAsync("the user enters the \"Purchase Price\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 148
+#line 156
  await testRunner.ThenAsync("the user selects the Frequency from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 149
+#line 157
  await testRunner.AndAsync("the user selects the Term from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 150
+#line 158
  await testRunner.AndAsync("the user clicks on Create Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 151
+#line 159
  await testRunner.ThenAsync("the user should be redirected to the Contract Details page and Verify Validation " +
                         "Message for Asset Purchase Price", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 152
+#line 160
  await testRunner.GivenAsync("Add Fees and Charges", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-#line 153
+#line 161
  await testRunner.WhenAsync("Click on Calculate Button", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 154
+#line 162
  await testRunner.ThenAsync("Veriy Addition of Buy Rate and Makrup is equal to Customer rate", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 156
+#line 164
  await testRunner.ThenAsync("the Payment Summary (Installment) should match the Contract Payment Schedule sect" +
                         "ion", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 157
+#line 165
     await testRunner.AndAsync("the Buy Rate should be verified before contract created and after contract create" +
                         "d", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 158
+#line 166
  await testRunner.AndAsync("the user clicks on Add Contract Parties and then clicks on Add New Customer butto" +
                         "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 159
+#line 167
  await testRunner.ThenAsync("the user enters all the required fields in party details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 160
+#line 168
  await testRunner.AndAsync("on the next page, enters all the required fields in address", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 161
+#line 169
  await testRunner.ThenAsync("the user clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 162
+#line 170
  await testRunner.AndAsync("the user lands on the contract summary page and Verify Contract Start date.First " +
                         "Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 163
+#line 171
  await testRunner.ThenAsync("Verify customer added or not", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 164
+#line 172
  await testRunner.ThenAsync(string.Format("Verify Appllication  \"{0}\" before submit", beforeContractStatus), ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 165
+#line 173
  await testRunner.WhenAsync("User click on Submit button", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 166
+#line 174
  await testRunner.ThenAsync(string.Format("Verify Appllication Status \"{0}\"", afterContractStatus), ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
             }

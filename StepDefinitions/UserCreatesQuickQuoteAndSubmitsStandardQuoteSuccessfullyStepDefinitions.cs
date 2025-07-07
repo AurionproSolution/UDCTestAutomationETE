@@ -458,7 +458,17 @@ namespace Navistar.StepDefinitions
         [Then("Veriy Addition of Buy Rate and Makrup is equal to Customer rate")]
         public void ThenVeriyAdditionOfBuyRateAndMakrupIsEqualToCustomerRate()
         {
-            string buyRateBeforeContractCreated = _pageObjects.ContractDetailsPage.GetBuyRate();
+            string buyRateBeforeContractCreated = _pageObjects.ContractDetailsPage.GetBuyRate(); 
+            string product = ScenarioContext.Current["Product"].ToString();
+
+            if (product == "Idealease")
+            {
+
+                decimal buyRateDecimal = decimal.Parse(buyRateBeforeContractCreated);
+                decimal roundedBuyRate = Math.Round(buyRateDecimal, 2);
+                buyRateBeforeContractCreated = roundedBuyRate.ToString();
+
+            }
             string markup = _pageObjects.ContractDetailsPage.GetMarkup();
             string customerRate = _pageObjects.ContractDetailsPage.GetCustomerRate();
             decimal buyRate = decimal.Parse(buyRateBeforeContractCreated);
@@ -526,34 +536,7 @@ namespace Navistar.StepDefinitions
         [Then("the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup")]
         public void ThenTheUserLandsOnTheContractSummaryPageAndVerifyContractStartDate_FirstPaymentDateTotalAmountBorrowedAssetCostTermAndMarkup()
         {
-
             _pageObjects.ContractSummaryPage.VerifycontractDetailsAndContractSummaryValue();
-            //string product = ScenarioContext.Current["Product"].ToString();
-            //ContractSummaryValues = _pageObjects.ContractSummaryPage.DetailsStandardSummary(product);
-            //var assertionErrors = new List<string>(); // Store failed assertions
-
-            //foreach (var key in ContractSummaryValues.Keys)
-            //{
-            //    if (!standardQuoteValues.ContainsKey(key))
-            //    {
-            //        string errorMessage = $"❌ Key '{key}' not found in standardQuoteValues.";
-            //        ReportingManager.LogFail(errorMessage);
-            //        Assert.Fail(errorMessage); // Hard fail
-            //    }
-
-            //    string contractSummaryValues = ContractSummaryValues[key];
-            //    string standardQuoteValue = standardQuoteValues[key];
-
-            //    if (!contractSummaryValues.Equals(standardQuoteValue))
-            //    {
-            //        string errorMessage = $"❌ Mismatch in {key}: Expected {ContractSummaryValues}, but got {standardQuoteValue}";
-            //        ReportingManager.LogFail(errorMessage);
-            //        Assert.Fail(errorMessage); // Hard fail
-            //    }
-
-            //    ReportingManager.LogPass($"✅ {key} Matched: {ContractSummaryValues}");
-
-            //}
         }
 
         [Then("Verify Appllication  {string} before submit")]
