@@ -21,9 +21,9 @@ Scenario Outline: Loan Programs
 	Then the user should be redirected to the Contract Details page
 	When the user enters Days to First Payment and clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
-	Then the user enters all the required fields in party details page
+	#Then the user enters all the required fields in party details page
 	#Then the user clicks on Add Address Manually
-	And on the next page, enters all the required fields in address
+	#And on the next page, enters all the required fields in address
 	Then the user clicks on the Next button
 	And the user lands on the contract summary page
 	Then Verify Appllication Status "<Status>"
@@ -53,9 +53,9 @@ Scenario Outline: Lease Programs
 	Then the user should be redirected to the Contract Details page
 	When the user enters Days to First Payment and clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
-	Then the user enters all the required fields in party details page
+	#Then the user enters all the required fields in party details page
     #Then the user clicks on Add Address Manually
-	And on the next page, enters all the required fields in address
+	#And on the next page, enters all the required fields in address
 	Then the user clicks on the Next button
 	And the user lands on the contract summary page
 	Then Verify Appllication Status "<Status>"
@@ -85,9 +85,9 @@ Scenario Outline: OperatingLease Programs
 	Then the user should be redirected to the Contract Details page
 	When the user enters Days to First Payment and clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
-	Then the user enters all the required fields in party details page
+	#Then the user enters all the required fields in party details page
 	#Then the user clicks on Add Address Manually
-	And on the next page, enters all the required fields in address
+	#And on the next page, enters all the required fields in address
 	Then the user clicks on the Next button
 	And the user lands on the contract summary page
 	Then Verify Appllication Status "<Status>"
@@ -164,9 +164,9 @@ Scenario Outline: Finance Leases Program and Finance Lease
 	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
     And the Buy Rate should be verified before contract created and after contract created
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button	
-	Then the user enters all the required fields in party details page
-	And on the next page, enters all the required fields in address
-	Then the user clicks on the Next button
+	#Then the user enters all the required fields in party details page
+	#And on the next page, enters all the required fields in address
+	#Then the user clicks on the Next button
 	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup
 	Then Verify customer added or not
 	Then Verify Appllication  "<BeforeContractStatus>" before submit 

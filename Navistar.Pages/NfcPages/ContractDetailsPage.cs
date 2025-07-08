@@ -179,7 +179,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         { "BuyRate", labeBuyRate.Text },
         { "AssetCost", labelAssetCost.Text },
         { "TotalAmountBorrowed", labelTotalAmountBorrowed.Text },
-        { "TotalFess", labelTotalFess.Text },
+        //{ "TotalFess", labelTotalFess.Text },
         { "TermInMonths", labelInstallementFromPaymentSummary.Text },
         { "Markup", labelMarkup.Text },
         { "TotalFess", labelTotalFess.Text },

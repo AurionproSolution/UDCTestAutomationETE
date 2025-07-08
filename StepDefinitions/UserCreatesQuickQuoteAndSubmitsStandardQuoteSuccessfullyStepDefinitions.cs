@@ -32,7 +32,7 @@ namespace Navistar.StepDefinitions
         public void GivenTheUserIsOnTheLoginPage()
         {
             ReportingManager.LogInfo("Navigating to the login page.");
-            DriverContext.Driver.Navigate().GoToUrl(_pageObjects.TestData.FisSandboxUrl);
+            DriverContext.Driver.Navigate().GoToUrl(_pageObjects.TestData.UatUrl);
         }
 
         [When(@"the user enters ""([^""]*)"" and ""([^""]*)"" and clicks on the Login button")]
@@ -77,7 +77,7 @@ namespace Navistar.StepDefinitions
         public void WhenTheUserClicksOnCreateQuickQuote()
         {
             ReportingManager.LogInfo("Click on Create Quick Quote");
-            _pageObjects.DashboardPage.ClickOnCreateQuickQuote();          
+            _pageObjects.DashboardPage.ClickOnCreateQuickQuote();
             Thread.Sleep(2000);
             ReportingManager.LogInfo("Verified dashboard page.");
         }
@@ -178,6 +178,8 @@ namespace Navistar.StepDefinitions
                 _pageObjects.AssetSummeryPage.AddSearchAsset();
                 _pageObjects.AssetSummeryPage.ClickOnAssetEditButton();
                 Thread.Sleep(1000);
+                _pageObjects.AssetSummeryPage.ClearPurchasePriceValue();
+                Thread.Sleep(1000);
                 _pageObjects.AssetSummeryPage.SelectCategory(_pageObjects.AssetSummaryTestData.Category);
                 Thread.Sleep(1000);
                 _pageObjects.AssetSummeryPage.ClickOnSaveButton();
@@ -201,7 +203,6 @@ namespace Navistar.StepDefinitions
                 _pageObjects.AssetSummeryPage.SaveTheAsset();
                 _pageObjects.AssetSummeryPage.ClickOnSaveButton();
             }
-             
             Thread.Sleep(5000);
         }
 
@@ -211,7 +212,7 @@ namespace Navistar.StepDefinitions
             //_pageObjects.ContractDetailsPage.EnterDaysToFirstPayment("31");
             string product = ScenarioContext.Current["Product"].ToString();
 
-            if(product.Equals("Operating Lease"))
+            if (product.Equals("Operating Lease"))
             {
                 _pageObjects.ContractDetailsPage.EnterAnnualMileage("100");
             }
@@ -244,7 +245,6 @@ namespace Navistar.StepDefinitions
                     assertionErrors.Add(errorMessage);
                 }
             }
-
             // Instead of Assert.Multiple(), fail at the end (without stopping execution)
             if (assertionErrors.Any())
             {
@@ -255,7 +255,6 @@ namespace Navistar.StepDefinitions
                     ReportingManager.LogPass(error);// Log errors in the console
                 }
             }
-
             _pageObjects.ContractDetailsPage.ClickOnNextButton();
             Thread.Sleep(2000);
         }
@@ -266,7 +265,8 @@ namespace Navistar.StepDefinitions
             _pageObjects.CustomerDetailsPage.ValidateContractIdIsGenerated();
             _pageObjects.CustomerDetailsPage.ClickOnAddContractPartiesButton();
             Thread.Sleep(2000);
-            _pageObjects.SearchCustomerPage.ClickOnAddNewCustomerButton();
+            //_pageObjects.SearchCustomerPage.ClickOnAddNewCustomerButton();
+            _pageObjects.SearchCustomerPage.CreateOrReuseCustomer();
         }
 
         [Then(@"the user enters all the required fields in party details page")]
@@ -321,7 +321,6 @@ namespace Navistar.StepDefinitions
             _pageObjects.AddNewCustomerPage.EnterCommercialDrLicense(_pageObjects.CustomerPartiesTestData.CommercialDriversLicenseNumber);
         }
 
-
         [Then(@"the user clicks on Add Address Manually")]
         public void ThenTheUserClicksOnAddAddressManually()
         {
@@ -340,10 +339,10 @@ namespace Navistar.StepDefinitions
         [Then(@"the user clicks on the Next button")]
         public void ThenTheUserClicksOnTheNextButton()
         {
-            _pageObjects.AddNewCustomerPage.ClickOnNextButton();
-            Thread.Sleep(1000);
-            _pageObjects.AddNewCustomerPage.ClickOnSubmitButton();
-            Thread.Sleep(5000);
+            //_pageObjects.AddNewCustomerPage.ClickOnNextButton();
+            //Thread.Sleep(1000);
+            //_pageObjects.AddNewCustomerPage.ClickOnSubmitButton();
+            //Thread.Sleep(5000);
             _pageObjects.AddNewCustomerPage.ClickOnNextButton();
             Thread.Sleep(5000);
         }
@@ -357,11 +356,10 @@ namespace Navistar.StepDefinitions
             Thread.Sleep(5000);
         }
 
-
         [Then("Verify Appllication Status {string}")]
         public void ThenVerifyAppllicationStatus(string status)
         {
-             Thread.Sleep(15000);
+            Thread.Sleep(15000);
             _pageObjects.ContractSummaryPage.ValidateApplicationSubmittedStatus(status);
         }
 
@@ -423,7 +421,7 @@ namespace Navistar.StepDefinitions
             _pageObjects.AssetSummeryPage.SearchVINNo(_pageObjects.AssetSummaryTestData.VINNumber);
             _pageObjects.AssetSummeryPage.AddSearchAsset();
             _pageObjects.AssetSummeryPage.ClickOnAssetEditButton();
-            Thread.Sleep(1000);      
+            Thread.Sleep(1000);
             _pageObjects.AssetSummeryPage.ClearPurchasePriceValue();
             Thread.Sleep(1000);
             _pageObjects.AssetSummeryPage.SelectCategory(_pageObjects.AssetSummaryTestData.Category);
@@ -475,12 +473,12 @@ namespace Navistar.StepDefinitions
             decimal markupText = decimal.Parse(markup);
             decimal customerRateText = decimal.Parse(customerRate);
 
-            decimal markupCustomerRateTotal=buyRate + markupText;
+            decimal markupCustomerRateTotal = buyRate + markupText;
 
-            if(customerRateText.Equals(markupCustomerRateTotal))
+            if (customerRateText.Equals(markupCustomerRateTotal))
             {
-                ReportingManager.LogPass("Addition of Buy Rate  and Markup :" + markupCustomerRateTotal + "is equal to customer rate :"+ customerRateText);
-               // ReportingManager.AddScreenshotToReport("Addition of Buy Rate  and Markup :" + markupCustomerRateTotal + "is equal to customer rate :" + customerRateText);
+                ReportingManager.LogPass("Addition of Buy Rate  and Markup :" + markupCustomerRateTotal + "is equal to customer rate :" + customerRateText);
+                // ReportingManager.AddScreenshotToReport("Addition of Buy Rate  and Markup :" + markupCustomerRateTotal + "is equal to customer rate :" + customerRateText);
             }
             else
             {
@@ -524,7 +522,8 @@ namespace Navistar.StepDefinitions
             _pageObjects.CustomerDetailsPage.ValidateContractIdIsGenerated();
             _pageObjects.CustomerDetailsPage.ClickOnAddContractPartiesButton();
             Thread.Sleep(2000);
-            _pageObjects.SearchCustomerPage.ClickOnAddNewCustomerButton();
+            //_pageObjects.SearchCustomerPage.ClickOnAddNewCustomerButton();
+            _pageObjects.SearchCustomerPage.CreateOrReuseCustomer();
         }
 
         [Then("Verify customer added or not")]

@@ -10,15 +10,13 @@
 // ------------------------------------------------------------------------------
 #region Designer generated code
 #pragma warning disable
+using Reqnroll;
 namespace Navistar.Features.NfcFeatureFile
 {
-    using Reqnroll;
-    using System;
-    using System.Linq;
     
     
-    [System.CodeDom.Compiler.GeneratedCodeAttribute("Reqnroll", "2.0.0.0")]
-    [System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Reqnroll", "2.0.0.0")]
+    [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
     [NUnit.Framework.TestFixtureAttribute()]
     [NUnit.Framework.DescriptionAttribute("QuickQuote_SubmitStandardQuote")]
     [NUnit.Framework.FixtureLifeCycleAttribute(NUnit.Framework.LifeCycle.InstancePerTestCase)]
@@ -29,41 +27,63 @@ namespace Navistar.Features.NfcFeatureFile
         
         private static string[] featureTags = ((string[])(null));
         
-        private static global::Reqnroll.FeatureInfo featureInfo = new global::Reqnroll.FeatureInfo(new System.Globalization.CultureInfo("en-US"), "Features/NfcFeatureFile", "QuickQuote_SubmitStandardQuote", "A short summary of the feature", global::Reqnroll.ProgrammingLanguage.CSharp, featureTags);
+        private static global::Reqnroll.FeatureInfo featureInfo = new global::Reqnroll.FeatureInfo(new global::System.Globalization.CultureInfo("en-US"), "Features/NfcFeatureFile", "QuickQuote_SubmitStandardQuote", "A short summary of the feature", global::Reqnroll.ProgrammingLanguage.CSharp, featureTags);
         
 #line 1 "UserCreatesQuickQuoteAndSubmitsStandardQuoteSuccessfully.feature"
 #line hidden
         
         [NUnit.Framework.OneTimeSetUpAttribute()]
-        public static async System.Threading.Tasks.Task FeatureSetupAsync()
+        public static async global::System.Threading.Tasks.Task FeatureSetupAsync()
         {
         }
         
         [NUnit.Framework.OneTimeTearDownAttribute()]
-        public static async System.Threading.Tasks.Task FeatureTearDownAsync()
+        public static async global::System.Threading.Tasks.Task FeatureTearDownAsync()
         {
         }
         
         [NUnit.Framework.SetUpAttribute()]
-        public async System.Threading.Tasks.Task TestInitializeAsync()
+        public async global::System.Threading.Tasks.Task TestInitializeAsync()
         {
             testRunner = global::Reqnroll.TestRunnerManager.GetTestRunnerForAssembly(featureHint: featureInfo);
-            if (((testRunner.FeatureContext != null) 
-                        && (testRunner.FeatureContext.FeatureInfo.Equals(featureInfo) == false)))
+            try
             {
-                await testRunner.OnFeatureEndAsync();
+                if (((testRunner.FeatureContext != null) 
+                            && (testRunner.FeatureContext.FeatureInfo.Equals(featureInfo) == false)))
+                {
+                    await testRunner.OnFeatureEndAsync();
+                }
             }
-            if ((testRunner.FeatureContext == null))
+            finally
             {
-                await testRunner.OnFeatureStartAsync(featureInfo);
+                if (((testRunner.FeatureContext != null) 
+                            && testRunner.FeatureContext.BeforeFeatureHookFailed))
+                {
+                    throw new global::Reqnroll.ReqnrollException("Scenario skipped because of previous before feature hook error");
+                }
+                if ((testRunner.FeatureContext == null))
+                {
+                    await testRunner.OnFeatureStartAsync(featureInfo);
+                }
             }
         }
         
         [NUnit.Framework.TearDownAttribute()]
-        public async System.Threading.Tasks.Task TestTearDownAsync()
+        public async global::System.Threading.Tasks.Task TestTearDownAsync()
         {
-            await testRunner.OnScenarioEndAsync();
-            global::Reqnroll.TestRunnerManager.ReleaseTestRunner(testRunner);
+            if ((testRunner == null))
+            {
+                return;
+            }
+            try
+            {
+                await testRunner.OnScenarioEndAsync();
+            }
+            finally
+            {
+                global::Reqnroll.TestRunnerManager.ReleaseTestRunner(testRunner);
+                testRunner = null;
+            }
         }
         
         public void ScenarioInitialize(global::Reqnroll.ScenarioInfo scenarioInfo)
@@ -72,12 +92,12 @@ namespace Navistar.Features.NfcFeatureFile
             testRunner.ScenarioContext.ScenarioContainer.RegisterInstanceAs<NUnit.Framework.TestContext>(NUnit.Framework.TestContext.CurrentContext);
         }
         
-        public async System.Threading.Tasks.Task ScenarioStartAsync()
+        public async global::System.Threading.Tasks.Task ScenarioStartAsync()
         {
             await testRunner.OnScenarioStartAsync();
         }
         
-        public async System.Threading.Tasks.Task ScenarioCleanupAsync()
+        public async global::System.Threading.Tasks.Task ScenarioCleanupAsync()
         {
             await testRunner.CollectScenarioErrorsAsync();
         }
@@ -88,7 +108,7 @@ namespace Navistar.Features.NfcFeatureFile
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Loan Program", "Finance Included Loan", "Status : Application Submitted", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Loan Takedown", "Finance Included Loan", "Status : Credit Line Takedown Submitted", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "IdeaLease Program", "Finance Included Loan", "Status : Credit Line Takedown Submitted", null)]
-        public async System.Threading.Tasks.Task LoanPrograms(string username, string password, string program, string product, string status, string[] exampleTags)
+        public async global::System.Threading.Tasks.Task LoanPrograms(string username, string password, string program, string product, string status, string[] exampleTags)
         {
             string[] @__tags = new string[] {
                     "Sanity"};
@@ -97,7 +117,7 @@ namespace Navistar.Features.NfcFeatureFile
                 @__tags = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Concat(@__tags, exampleTags));
             }
             string[] tagsOfScenario = @__tags;
-            System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new System.Collections.Specialized.OrderedDictionary();
+            global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             argumentsOfScenario.Add("Username", username);
             argumentsOfScenario.Add("Password", password);
             argumentsOfScenario.Add("Program", program);
@@ -163,12 +183,6 @@ this.ScenarioInitialize(scenarioInfo);
  await testRunner.AndAsync("the user clicks on Add Contract Parties and then clicks on Add New Customer butto" +
                         "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 24
- await testRunner.ThenAsync("the user enters all the required fields in party details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
-#line hidden
-#line 26
- await testRunner.AndAsync("on the next page, enters all the required fields in address", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
-#line hidden
 #line 27
  await testRunner.ThenAsync("the user clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
@@ -189,7 +203,7 @@ this.ScenarioInitialize(scenarioInfo);
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Finance Leases Program", "TRAC Lease", "Status : Application Submitted", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "Finance Lease", "Status : Credit Line Takedown Submitted", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "TRAC Lease", "Status : Credit Line Takedown Submitted", null)]
-        public async System.Threading.Tasks.Task LeasePrograms(string username, string password, string program, string product, string status, string[] exampleTags)
+        public async global::System.Threading.Tasks.Task LeasePrograms(string username, string password, string program, string product, string status, string[] exampleTags)
         {
             string[] @__tags = new string[] {
                     "Sanity"};
@@ -198,7 +212,7 @@ this.ScenarioInitialize(scenarioInfo);
                 @__tags = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Concat(@__tags, exampleTags));
             }
             string[] tagsOfScenario = @__tags;
-            System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new System.Collections.Specialized.OrderedDictionary();
+            global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             argumentsOfScenario.Add("Username", username);
             argumentsOfScenario.Add("Password", password);
             argumentsOfScenario.Add("Program", program);
@@ -264,12 +278,6 @@ this.ScenarioInitialize(scenarioInfo);
  await testRunner.AndAsync("the user clicks on Add Contract Parties and then clicks on Add New Customer butto" +
                         "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 56
- await testRunner.ThenAsync("the user enters all the required fields in party details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
-#line hidden
-#line 58
- await testRunner.AndAsync("on the next page, enters all the required fields in address", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
-#line hidden
 #line 59
  await testRunner.ThenAsync("the user clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
@@ -288,7 +296,7 @@ this.ScenarioInitialize(scenarioInfo);
         [NUnit.Framework.CategoryAttribute("Sanity")]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "FMV Program", "Operating Lease", "Status : Application Submitted", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "Operating Lease", "Status : Credit Line Takedown Submitted", null)]
-        public async System.Threading.Tasks.Task OperatingLeasePrograms(string username, string password, string program, string product, string status, string[] exampleTags)
+        public async global::System.Threading.Tasks.Task OperatingLeasePrograms(string username, string password, string program, string product, string status, string[] exampleTags)
         {
             string[] @__tags = new string[] {
                     "Sanity"};
@@ -297,7 +305,7 @@ this.ScenarioInitialize(scenarioInfo);
                 @__tags = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Concat(@__tags, exampleTags));
             }
             string[] tagsOfScenario = @__tags;
-            System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new System.Collections.Specialized.OrderedDictionary();
+            global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             argumentsOfScenario.Add("Username", username);
             argumentsOfScenario.Add("Password", password);
             argumentsOfScenario.Add("Program", program);
@@ -360,12 +368,6 @@ this.ScenarioInitialize(scenarioInfo);
  await testRunner.AndAsync("the user clicks on Add Contract Parties and then clicks on Add New Customer butto" +
                         "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 88
- await testRunner.ThenAsync("the user enters all the required fields in party details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
-#line hidden
-#line 90
- await testRunner.AndAsync("on the next page, enters all the required fields in address", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
-#line hidden
 #line 91
  await testRunner.ThenAsync("the user clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
@@ -382,8 +384,8 @@ this.ScenarioInitialize(scenarioInfo);
         [NUnit.Framework.TestAttribute()]
         [NUnit.Framework.DescriptionAttribute("IdealLease Programs")]
         [NUnit.Framework.CategoryAttribute("Sanity")]
-        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "IdeaLease Program", "Idealease", "Status : Credit Line Takedown Submitted", "Status : Quote from Credit Line", null)]
-        public async System.Threading.Tasks.Task IdealLeasePrograms(string username, string password, string program, string product, string afterContractStatus, string beforeContractStatus, string[] exampleTags)
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "IdeaLease Program", "Idealease", "Status : Credit Line Takedown Submitted", null)]
+        public async global::System.Threading.Tasks.Task IdealLeasePrograms(string username, string password, string program, string product, string status, string[] exampleTags)
         {
             string[] @__tags = new string[] {
                     "Sanity"};
@@ -392,7 +394,7 @@ this.ScenarioInitialize(scenarioInfo);
                 @__tags = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Concat(@__tags, exampleTags));
             }
             string[] tagsOfScenario = @__tags;
-            System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new System.Collections.Specialized.OrderedDictionary();
+            global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             argumentsOfScenario.Add("Username", username);
             argumentsOfScenario.Add("Password", password);
             argumentsOfScenario.Add("Program", program);
@@ -521,7 +523,7 @@ this.ScenarioInitialize(scenarioInfo);
         [NUnit.Framework.DescriptionAttribute("Finance Leases Program and Finance Lease")]
         [NUnit.Framework.CategoryAttribute("Sanity")]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Finance Leases Program", "Finance Lease", "Status : Application Submitted", "Status : Quote", null)]
-        public async System.Threading.Tasks.Task FinanceLeasesProgramAndFinanceLease(string username, string password, string program, string product, string afterContractStatus, string beforeContractStatus, string[] exampleTags)
+        public async global::System.Threading.Tasks.Task FinanceLeasesProgramAndFinanceLease(string username, string password, string program, string product, string afterContractStatus, string beforeContractStatus, string[] exampleTags)
         {
             string[] @__tags = new string[] {
                     "Sanity"};
@@ -530,7 +532,7 @@ this.ScenarioInitialize(scenarioInfo);
                 @__tags = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Concat(@__tags, exampleTags));
             }
             string[] tagsOfScenario = @__tags;
-            System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new System.Collections.Specialized.OrderedDictionary();
+            global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
             argumentsOfScenario.Add("Username", username);
             argumentsOfScenario.Add("Password", password);
             argumentsOfScenario.Add("Program", program);

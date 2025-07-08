@@ -11,6 +11,7 @@ namespace Navistar.StepDefinitions.TestData
         public User ValidUser { get; set; }
         public User InvalidUser { get; set; }
         public string BaseUrl { get; set; }
+        public string UatUrl { get; set; }
         public string QAUrl { get; set; }
         public string NFCSandboxUrl { get; set; }
         public string FisSandboxUrl { get; set; }

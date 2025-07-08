@@ -1,7 +1,6 @@
 using Navistar.Navistar.core;
 using Navistar.StepDefinitions.TestData;
 using NUnit.Framework;
-using OpenQA.Selenium.DevTools.V133.CSS;
 using Reqnroll;
 using System;
 using System.Diagnostics.Contracts;

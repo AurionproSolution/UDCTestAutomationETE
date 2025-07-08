@@ -13,7 +13,9 @@ namespace Navistar.Navistar.Pages.NfcPages
     {
         public CustomerDetailsPage(WebDriver driver) : base(driver)
         {
+
         }
+        
         private IWebElement addContractPartiesButton => Find(By.XPath("//span[normalize-space()='Add Contract Parties']"));
         private IWebElement uploadDocumentsTab => Find(By.XPath("//label[normalize-space()='Uploaded Documents']"));
         private IWebElement generatedDocumentsTab => Find(By.XPath("//label[normalize-space()='Generated Documents']"));
@@ -47,5 +49,6 @@ namespace Navistar.Navistar.Pages.NfcPages
             Assert.That(contractId, Is.Not.Null.Or.Empty, "Contract ID was not generated.");
             ReportingManager.LogPass($" Contract ID Generated: {contractId}");
         }
+        
     }
 }

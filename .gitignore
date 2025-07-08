@@ -361,3 +361,23 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/Features/NfcFeatureFile/CalculationModule.feature.cs
+/Features/NfcFeatureFile/ContractDetailsPageValidation.feature.cs
+/Features/NfcFeatureFile/CreateQuickQuoteValidationI.feature.cs
+/Features/NfcFeatureFile/UserCreatesQuickQuoteAndSubmitsStandardQuoteSuccessfully.feature
+/Features/NfcFeatureFile/UserCreatesQuickQuoteAndSubmitsStandardQuoteSuccessfully.feature.cs
+/Navistar.Pages/NfcPages/AddNewCustomerPage.cs
+/Navistar.Pages/NfcPages/ContractDetailsPage.cs
+/Navistar.Pages/NfcPages/CustomerDetailsPage.cs
+/Navistar.Pages/NfcPages/SearchCustomerPage.cs
+/StepDefinitions/TestDataFiles/QuickQuote.json
+/StepDefinitions/TestDataFiles/TestData.json
+/StepDefinitions/TestDataFiles/TestDataModel.cs
+/StepDefinitions/QuickQuoteCreationAndContractValidationStepDefinitions.cs
+/StepDefinitions/UserCreatesQuickQuoteAndSubmitsStandardQuoteSuccessfullyStepDefinitions.cs
+/.gitignore
+/global.json
+/.gitignore
+/Navistar.csproj
+/.gitignore
+/Navistar.core/DropdownHelper.cs
