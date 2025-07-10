@@ -4,8 +4,8 @@ This feature verifies the end-to-end quote calculation process. It starts with a
 
 @Sanity
 Scenario Outline: Verify quote calculation from quick quote to contract details
-    Given the user is on the loginpage
-    When the user login with "<Username>" and "<Password>"
+    #Given the user is on the loginpage
+    #When the user login with "<Username>" and "<Password>"
     Then the user should be redirect to the dashboard
 
     And the user navigate to the Create Quick Quote page

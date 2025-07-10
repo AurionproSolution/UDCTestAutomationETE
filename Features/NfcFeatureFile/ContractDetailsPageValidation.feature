@@ -4,13 +4,11 @@ A short summary of the feature
 
 @Sanity
 Scenario Outline: Contract Details Page Validation
-	Given User is on the login page
-	When  User logs in with "<Username>" and "<Password>"
-    Then  User should be redirected to the dashboard
-	
+	#Given User is on the login page
+	#When  User logs in with "<Username>" and "<Password>"
+    Then  User should be redirected to the dashboard	
     When User clicks on Create Quick Quote
     Then User should be redirected to the Create Quick Quote page
-
     When User selects "<Program>" from the Program dropdown
     And User selects "<Product>" from the Product dropdown
     And User selects "Asset" from the dropdown
@@ -39,7 +37,7 @@ Scenario Outline: Contract Details Page Validation
 	| sandeep.bedekar | Testing@2211 | Finance Leases Program          | Finance Lease              |
 	| sandeep.bedekar | Testing@2211 | Finance Leases Program          | TRAC Lease                 |
 	| sandeep.bedekar | Testing@2211 | Loan Program                    | Finance Included Loan      |
-	#| sandeep.bedekar | Testing@2211 | FMV Program                     | Operating Lease            |
+	| sandeep.bedekar | Testing@2211 | FMV Program                     | Operating Lease            |
 	| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown      | Finance Lease              |
 	#| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown      | Operating Lease            |
 	| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown      | TRAC Lease                 |

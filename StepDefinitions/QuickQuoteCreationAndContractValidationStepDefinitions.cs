@@ -248,6 +248,7 @@ namespace Navistar.StepDefinitions
             Thread.Sleep(1000);
             _pageObjects.ContractDetailsPage.ClickOnNextButton();
             _pageObjects.ContractDetailsPage.clickonPreviousButton();
+            Thread.Sleep(2000);
             string buyRateAfterContractCreated = _pageObjects.ContractDetailsPage.GetBuyRate();
             if (buyRateAfterContractCreated.Equals(buyRateBeforeContractCreated))
             {

@@ -140,12 +140,6 @@ this.ScenarioInitialize(scenarioInfo);
             else
             {
                 await this.ScenarioStartAsync();
-#line 7
-    await testRunner.GivenAsync("the user is on the loginpage", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
-#line hidden
-#line 8
-    await testRunner.WhenAsync(string.Format("the user login with \"{0}\" and \"{1}\"", username, password), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
-#line hidden
 #line 9
     await testRunner.ThenAsync("the user should be redirect to the dashboard", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden

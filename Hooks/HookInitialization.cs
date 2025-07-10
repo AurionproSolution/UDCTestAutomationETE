@@ -1,4 +1,6 @@
 ﻿using Navistar.Navistar.core;
+using Navistar.Navistar.Pages.NfcPages;
+using Navistar.StepDefinitions;
 using Navistar.StepDefinitions.TestData;
 using Reqnroll;
 using System;
@@ -10,13 +12,42 @@ namespace Navistar.Hooks
     [Binding]
     public class HookInitialization(ScenarioContext _scenarioContext)
     {
+
+        [BeforeFeature]
+        public static void BeforeFeature(FeatureContext featureContext)
+        {
+            DriverContext.InitDriver();
+            var driver = DriverContext.Driver;
+            var testData = new TestDataModel();
+            var _pageObjectCon = new PageObjectContainer();
+
+            // Navigate to login page
+            // ReportingManager.LogInfo("Navigating to the login page.");
+            DriverContext.Driver.Navigate().GoToUrl(_pageObjectCon.TestData.FisSandboxUrl);
+           // DriverContext.Driver.Navigate().GoToUrl("https://uatportal.aurionpro.com/UANFCPortal/");
+            ReportingManager.CreateTest($"Feature: {featureContext.FeatureInfo.Title}");
+            ReportingManager.LogInfo("Login page loaded successfully.");
+
+            var loginPage = new NFCLoginPage(driver);
+            ReportingManager.LogInfo("User trying to login with valid credentials.");
+            //// _pageObjects.LoginPage.ClickLoginWithNfcButton();
+            loginPage.EnterNfcUserName("sandeep.bedekar");
+            loginPage.ClickOnProceedButton();
+            loginPage.EnterNfcPassword("Testing@2211");
+            loginPage.ClickonSignInButton();
+            //_pageObjects.LoginPage.EnterUserName(username);
+            //_pageObjects.LoginPage.EnterPassword(password);
+            //ReportingManager.LogInfo("Attempting login.");
+            //_pageObjects.LoginPage.ClickLoginButton();
+            Thread.Sleep(5000);
+        }
         [BeforeTestRun]
         public static void SetupReporting() => ReportingManager.InitReport();
 
         [BeforeScenario]
         public void BeforeScenario()
         {
-            DriverContext.InitDriver();
+            //DriverContext.InitDriver();
             var scenarioTitle = _scenarioContext.ScenarioInfo.Title;
 
             string program = string.Empty;
@@ -78,6 +109,25 @@ namespace Navistar.Hooks
             {
                 ReportingManager.LogPass($"Scenario passed: {_scenarioContext.ScenarioInfo.Title}");
             }
+            try
+            {
+                ReportingManager.LogInfo("Navigating back to Dashboard...");
+                DriverContext.Driver.Navigate().Refresh();
+                var _pageObjectCon = new PageObjectContainer();
+                // Navigate back after each test case
+                DriverContext.Driver.Navigate().GoToUrl("https://aurpr-ua.assetfinance.myfis.cloud/UANFCPortal/dealer");
+                Thread.Sleep(15000);
+                ReportingManager.LogInfo("Successfully navigated to Dashboard.");
+            }
+            catch (Exception ex)
+            {
+                ReportingManager.LogFail($"Could not navigate to Dashboard. Error: {ex.Message}");
+            }
+        }
+        [AfterFeature]
+        public static void AfterFeature(FeatureContext featureContext)
+        {
+            ReportingManager.LogInfo($"Feature completed: {featureContext.FeatureInfo.Title}");
             DriverContext.CloseDriver();
         }
     }

@@ -2,8 +2,8 @@
 
 @Sanity
   Scenario Outline: User creates a quick quote and validates mandatory fields
-    Given  user is on the login page
-    When  user logs in with "<Username>" and "<Password>"
+    #Given  user is on the login page
+    #When  user logs in with "<Username>" and "<Password>"
     Then  user should be redirected to the dashboard
     When  user navigates to the Create Quick Quote page
     Then user should be redirected to the Create Quick Quote page

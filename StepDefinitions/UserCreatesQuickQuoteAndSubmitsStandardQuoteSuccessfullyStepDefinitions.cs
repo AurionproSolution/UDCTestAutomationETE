@@ -32,7 +32,7 @@ namespace Navistar.StepDefinitions
         public void GivenTheUserIsOnTheLoginPage()
         {
             ReportingManager.LogInfo("Navigating to the login page.");
-            DriverContext.Driver.Navigate().GoToUrl(_pageObjects.TestData.UatUrl);
+            DriverContext.Driver.Navigate().GoToUrl(_pageObjects.TestData.FisSandboxUrl);
         }
 
         [When(@"the user enters ""([^""]*)"" and ""([^""]*)"" and clicks on the Login button")]
@@ -334,6 +334,10 @@ namespace Navistar.StepDefinitions
             _pageObjects.AddNewCustomerPage.EnterFromDate("01/15/2020");
             _pageObjects.AddNewCustomerPage.clickOnDate();
             Thread.Sleep(1000);
+            _pageObjects.AddNewCustomerPage.ClickOnNextButton();
+            Thread.Sleep(1000);
+            _pageObjects.AddNewCustomerPage.ClickOnSubmitButton();
+            Thread.Sleep(5000);
         }
 
         [Then(@"the user clicks on the Next button")]
@@ -444,7 +448,16 @@ namespace Navistar.StepDefinitions
             _pageObjects.AddFeesAndChargesPage.TitlingLienOtherTextboxDealer("200");
             _pageObjects.AddFeesAndChargesPage.clickonAddButton();
             Thread.Sleep(1000);
-            _pageObjects.ContractDetailsPage.EntreMarkup("5");
+            string product = ScenarioContext.Current["Product"].ToString();
+            if (product == "Operating Lease")
+            {
+                ReportingManager.LogInfo("Markup textbox is not present");
+            }
+            else
+            {
+                _pageObjects.ContractDetailsPage.EntreMarkup("5");
+            }
+                
         }
 
         [When("Click on Calculate Button")]
@@ -554,11 +567,15 @@ namespace Navistar.StepDefinitions
             Thread.Sleep(5000);
         }
 
-        [Then("Application Submit sucessfully and Verify Status")]
-        public void ThenApplicationSubmitSucessfullyAndVerifyStatus()
+
+        [When("click on Add New Customer button")]
+        public void WhenClickOnAddNewCustomerButton()
         {
-            throw new PendingStepException();
+            _pageObjects.CustomerDetailsPage.ValidateContractIdIsGenerated();
+            _pageObjects.CustomerDetailsPage.ClickOnAddContractPartiesButton();
+            _pageObjects.SearchCustomerPage.ClickOnAddNewCustomerButton();
         }
+
 
 
 
