@@ -140,12 +140,6 @@ namespace Navistar.Features.NfcFeatureFile
             else
             {
                 await this.ScenarioStartAsync();
-#line 5
-    await testRunner.GivenAsync("user is on the login page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
-#line hidden
-#line 6
-    await testRunner.WhenAsync(string.Format("user logs in with \"{0}\" and \"{1}\"", username, password), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
-#line hidden
 #line 7
     await testRunner.ThenAsync("user should be redirected to the dashboard", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden

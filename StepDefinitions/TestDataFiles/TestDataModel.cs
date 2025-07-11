@@ -33,6 +33,7 @@ namespace Navistar.StepDefinitions.TestData
         public List<int> Balloons { get; set; }
         public List<string> Frequency { get; set; }
         public List<int> TermsInMonths { get; set; }
+        public List<int> PurchasePrices1 { get; set; }
     }
     public class AssetSummaryDataModel
     {

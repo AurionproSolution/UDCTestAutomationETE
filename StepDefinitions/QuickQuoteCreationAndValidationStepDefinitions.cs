@@ -118,7 +118,7 @@ namespace Navistar.StepDefinitions
         [When("the user enters Purchase Price and selects a term greater than {int} months")]
         public void WhenTheUserEntersPurchasePriceAndSelectsATermGreaterThanMonths(int p0)
         {
-            _pageObjects.QuickQuotePage.PurchasePrice(_pageObjects.QuickQuoteTestData.PurchasePrices[0]);
+            _pageObjects.QuickQuotePage.PurchasePrice(_pageObjects.QuickQuoteTestData.PurchasePrices1[0]);
             Thread.Sleep(1000);
             _pageObjects.QuickQuotePage.TermInMonths(100);
         }
@@ -152,7 +152,7 @@ namespace Navistar.StepDefinitions
         [Then("the Purchase Price and Asset Cost should be the same on the Contract Details page")]
         public void ThenThePurchasePriceAndAssetCostShouldBeTheSameOnTheContractDetailsPage()
         {
-            _pageObjects.QuickQuotePage.VerifyPurchasePriceAndAssetCost(_pageObjects.QuickQuoteTestData.PurchasePrices[0]);
+            _pageObjects.QuickQuotePage.VerifyPurchasePriceAndAssetCost(_pageObjects.QuickQuoteTestData.PurchasePrices1[0]);
         }
     }
 }

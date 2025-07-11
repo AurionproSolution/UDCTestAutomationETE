@@ -259,7 +259,7 @@ namespace Navistar.StepDefinitions
             {
                 Assert.Fail("Buy Rate is not Matched  before contract created " + buyRateBeforeContractCreated + "and after contract created" + buyRateAfterContractCreated);
             }
-            _pageObjects.ContractDetailsPage.ClickOnNextButton();
+        //    _pageObjects.ContractDetailsPage.ClickOnNextButton();
         }
 
         [Then("click on Edit Payment Schedule and change number of months more that {int}")]

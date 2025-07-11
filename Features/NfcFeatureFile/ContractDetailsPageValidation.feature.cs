@@ -108,6 +108,7 @@ namespace Navistar.Features.NfcFeatureFile
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Finance Leases Program", "Finance Lease", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Finance Leases Program", "TRAC Lease", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Loan Program", "Finance Included Loan", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "FMV Program", "Operating Lease", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "Finance Lease", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "TRAC Lease", null)]
         [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Loan Takedown", "Finance Included Loan", null)]
@@ -138,84 +139,78 @@ this.ScenarioInitialize(scenarioInfo);
             else
             {
                 await this.ScenarioStartAsync();
-#line 7
- await testRunner.GivenAsync("User is on the login page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
-#line hidden
-#line 8
- await testRunner.WhenAsync(string.Format("User logs in with \"{0}\" and \"{1}\"", username, password), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
-#line hidden
 #line 9
     await testRunner.ThenAsync("User should be redirected to the dashboard", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 11
+#line 10
     await testRunner.WhenAsync("User clicks on Create Quick Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 12
+#line 11
     await testRunner.ThenAsync("User should be redirected to the Create Quick Quote page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 14
+#line 12
     await testRunner.WhenAsync(string.Format("User selects \"{0}\" from the Program dropdown", program), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 15
+#line 13
     await testRunner.AndAsync(string.Format("User selects \"{0}\" from the Product dropdown", product), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 16
+#line 14
     await testRunner.AndAsync("User selects \"Asset\" from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 17
+#line 15
     await testRunner.AndAsync("User enters \"Purchase Price\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 18
+#line 16
     await testRunner.AndAsync("User enters \"Residual Value\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 19
+#line 17
     await testRunner.AndAsync("User selects Frequency from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 20
+#line 18
     await testRunner.AndAsync("User selects Term from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 21
+#line 19
     await testRunner.AndAsync("User clicks on Create Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 22
+#line 20
     await testRunner.ThenAsync("User should be redirected to the Contract Details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 23
+#line 21
     await testRunner.WhenAsync("User clicks on Add Fees and Charges", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
 #line hidden
-#line 24
+#line 22
     await testRunner.AndAsync("User enters value in Extended Service Contracts", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 25
+#line 23
     await testRunner.AndAsync("User enters value in Preventative Maintenance", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 26
+#line 24
     await testRunner.AndAsync("User enters value in Titling/Lien/Other (Dealer)", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 27
+#line 25
     await testRunner.AndAsync("User clicks on Add Button", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 28
+#line 26
     await testRunner.AndAsync("User clicks on Calculate button", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 29
+#line 27
     await testRunner.ThenAsync("the Payment Summary (Installment) should match the Contract Payment Schedule sect" +
                         "ion", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 30
+#line 28
     await testRunner.AndAsync("the Buy Rate should be verified before contract created and after contract create" +
                         "d", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 31
+#line 29
     await testRunner.AndAsync("Edit Frequncy number of months more that 90", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 32
+#line 30
     await testRunner.ThenAsync("verify error Message for Frquancy", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 33
+#line 31
  await testRunner.GivenAsync("Valid Frequncy number of months and click on calculate", ((string)(null)), ((global::Reqnroll.Table)(null)), "Given ");
 #line hidden
-#line 34
+#line 32
  await testRunner.ThenAsync("Frequncy number value will be update in Edit Payment Schedule", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
             }

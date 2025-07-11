@@ -142,7 +142,7 @@ namespace Navistar.StepDefinitions
             _pageObjects.AssetSummeryPage.SelectNewOrUsed("New");
             //_pageObjects.AssetSummeryPage.SelectAssetDropdown("LT Series/International/Heavy");
             _pageObjects.AssetSummeryPage.SelectCategory("Day Cab");
-            _pageObjects.AssetSummeryPage.EnterPurchasePriceValue("26000");
+            _pageObjects.AssetSummeryPage.EnterPurchasePriceValue("32000");
             _pageObjects.AssetSummeryPage.EnterVinNumber("1HTEUMMLXRS734378");
             _pageObjects.AssetSummeryPage.EnterOdometer(12345);
             _pageObjects.AssetSummeryPage.SaveTheAsset();
