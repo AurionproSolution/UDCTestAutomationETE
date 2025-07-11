@@ -150,6 +150,7 @@ Scenario Outline: Program: Finance Leases Program And Product : Finance Lease
 	#Then Verify Additon of Asset cost and Add fess and charges equal to Total Amount borrowed.
 	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
     And the Buy Rate should be verified before contract created and after contract created
+    Then the user clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button	
 	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup
 	Then Verify customer added or not
@@ -190,6 +191,7 @@ Scenario Outline: Program : Finance Leases  And Product: TRAC Lease
 	#Then Verify Additon of Asset cost and Add fess and charges equal to Total Amount borrowed.
 	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
     And the Buy Rate should be verified before contract created and after contract created
+    Then the user clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button	
 	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup
 	Then Verify customer added or not
@@ -228,6 +230,7 @@ Scenario Outline: Program: Credit Line Lease Takedown  and Product : Finance Lea
 	#Then Verify Additon of Asset cost and Add fess and charges equal to Total Amount borrowed.
 	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
     And the Buy Rate should be verified before contract created and after contract created
+    Then the user clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button	
 	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup
 	Then Verify customer added or not
@@ -266,6 +269,7 @@ Scenario Outline: Program: Credit Line Lease Takedown  and Product : TRAC Lease
 	Then Veriy Addition of Buy Rate and Makrup is equal to Customer rate
 	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
     And the Buy Rate should be verified before contract created and after contract created
+    Then the user clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button	
 	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup
 	Then Verify customer added or not
@@ -304,6 +308,7 @@ Scenario Outline: Program: Loan Program  And Product : Finance Included Loan
 	#Then Verify Additon of Asset cost and Add fess and charges equal to Total Amount borrowed.
 	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
     And the Buy Rate should be verified before contract created and after contract created
+    Then the user clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button	
 	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup
 	Then Verify customer added or not
@@ -339,6 +344,7 @@ Scenario Outline: Program: Credit Line Loan Takedown  And Product : Finance Incl
 	#Then Verify Additon of Asset cost and Add fess and charges equal to Total Amount borrowed.
 	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
     And the Buy Rate should be verified before contract created and after contract created
+	Then the user clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button	
 	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup
 	Then Verify customer added or not
@@ -373,6 +379,7 @@ Scenario Outline: Program: IdeaLease Program  And Product : Finance Included Loa
 	#Then Verify Additon of Asset cost and Add fess and charges equal to Total Amount borrowed.
 	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
     And the Buy Rate should be verified before contract created and after contract created
+    Then the user clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button	
 	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup
 	Then Verify customer added or not
@@ -407,6 +414,7 @@ Scenario Outline: Program : IdealLease And Product : Finance Included Loan
 	Then Veriy Addition of Buy Rate and Makrup is equal to Customer rate
 	Then the Payment Summary (Installment) should match the Contract Payment Schedule section
     And the Buy Rate should be verified before contract created and after contract created
+    Then the user clicks on the Next button
 	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
 	Then Verify customer added or not
 	And the user lands on the contract summary page and Verify Contract Start date.First Payment date,Total Amount Borrowed,Asset Cost ,Term and Markup

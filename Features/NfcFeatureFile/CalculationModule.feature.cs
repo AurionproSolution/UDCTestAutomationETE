@@ -170,10 +170,10 @@ this.ScenarioInitialize(scenarioInfo);
 #line 19
     await testRunner.AndAsync("the user click on \"Create Quote\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
-#line 21
+#line 20
     await testRunner.ThenAsync("the user should be redirect to the Contract Details page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
 #line hidden
-#line 22
+#line 21
     await testRunner.AndAsync("the calculations should match the Quick Quote and Standard Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
 #line hidden
             }
