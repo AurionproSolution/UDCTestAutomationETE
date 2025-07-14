@@ -28,7 +28,7 @@ namespace Navistar.Hooks
             var testData = new TestDataModel();
             var _pageObjectCon = new PageObjectContainer();
 
-            DriverContext.Driver.Navigate().GoToUrl(_pageObjectCon.TestData.FisSandboxUrl);
+            DriverContext.Driver.Navigate().GoToUrl(_pageObjectCon.TestData.UatUrl);
             ReportingManager.CreateTest($"Feature: {featureContext.FeatureInfo.Title}");
             ReportingManager.LogInfo("Login page loaded successfully.");
 
@@ -128,7 +128,8 @@ namespace Navistar.Hooks
                 ReportingManager.LogInfo("Navigating back to Dashboard...");
                 DriverContext.Driver.Navigate().Refresh();
                 var _pageObjectCon = new PageObjectContainer();
-                DriverContext.Driver.Navigate().GoToUrl(_pageObjectCon.TestData.FisSandboxUrl);
+                //DriverContext.Driver.Navigate().GoToUrl(_pageObjectCon.TestData.FisSandboxUrl);
+                DriverContext.Driver.Navigate().GoToUrl("https://uatportal.aurionpro.com/UANFCPortal/dealer");
                 Thread.Sleep(15000);
                 ReportingManager.LogInfo("Successfully navigated to Dashboard.");
             }
@@ -142,13 +143,13 @@ namespace Navistar.Hooks
         public static void TearDownReporting()
         {
             ReportingManager.FlushReport();
-            ExcelHelper.FlushToExcel(); // Save Excel to /bin/ExcelResults/...
         }
 
         [AfterFeature]
         public static void AfterFeature(FeatureContext featureContext)
         {
             ReportingManager.LogInfo($"Feature completed: {featureContext.FeatureInfo.Title}");
+            ExcelHelper.FlushCurrentFeatureToExcel();
             DriverContext.CloseDriver();
         }
     }

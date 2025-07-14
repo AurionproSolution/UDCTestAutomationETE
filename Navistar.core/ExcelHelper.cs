@@ -1,67 +1,85 @@
 ﻿using ClosedXML.Excel;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 public static class ExcelHelper
 {
     private static readonly object _eh_lock = new();
 
-    private static readonly Dictionary<string, Dictionary<string, string>> _eh_scenarioResults = new();
-    private static readonly HashSet<string> _eh_allStepNames = new();
+    private static readonly Dictionary<string, Dictionary<string, Dictionary<string, string>>> _eh_featureScenarioResults = new();
+    private static readonly Dictionary<string, HashSet<string>> _eh_featureStepNames = new();
 
     private static string _eh_project = "Navistar";
-    private static string _eh_feature = "DefaultFeature";
+    private static string _eh_currentFeature = "DefaultFeature";
 
     public static void SetProjectAndFeature(string project, string feature)
     {
         _eh_project = SanitizeFileName(project);
-        _eh_feature = SanitizeFileName(feature);
-    }
+        _eh_currentFeature = SanitizeFileName(feature);
 
-    public static void LogStepResult(string scenarioWithData, string step, string status)
-    {
         lock (_eh_lock)
         {
-            if (!_eh_scenarioResults.ContainsKey(scenarioWithData))
-                _eh_scenarioResults[scenarioWithData] = new Dictionary<string, string>();
+            if (!_eh_featureScenarioResults.ContainsKey(_eh_currentFeature))
+                _eh_featureScenarioResults[_eh_currentFeature] = new Dictionary<string, Dictionary<string, string>>();
 
-            _eh_scenarioResults[scenarioWithData][step] = status;
-            _eh_allStepNames.Add(step);
+            if (!_eh_featureStepNames.ContainsKey(_eh_currentFeature))
+                _eh_featureStepNames[_eh_currentFeature] = new HashSet<string>();
         }
     }
 
-    public static void FlushToExcel()
+    public static void LogStepResult(string scenario, string step, string status)
     {
         lock (_eh_lock)
         {
+            if (!_eh_featureScenarioResults.ContainsKey(_eh_currentFeature))
+                _eh_featureScenarioResults[_eh_currentFeature] = new Dictionary<string, Dictionary<string, string>>();
+
+            if (!_eh_featureScenarioResults[_eh_currentFeature].ContainsKey(scenario))
+                _eh_featureScenarioResults[_eh_currentFeature][scenario] = new Dictionary<string, string>();
+
+            _eh_featureScenarioResults[_eh_currentFeature][scenario][step] = status;
+            _eh_featureStepNames[_eh_currentFeature].Add(step);
+        }
+    }
+
+    public static void FlushCurrentFeatureToExcel()
+    {
+        lock (_eh_lock)
+        {
+            if (!_eh_featureScenarioResults.ContainsKey(_eh_currentFeature)) return;
+
             string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
             string folderPath = Path.Combine(baseDirectory, "ExcelResults");
-            Directory.CreateDirectory(folderPath); // Ensure folder exists
+            Directory.CreateDirectory(folderPath);
 
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-            string fileName = $"{_eh_project}_{_eh_feature}_{timestamp}.xlsx";
+            string fileName = $"{_eh_project}_{_eh_currentFeature}_{timestamp}.xlsx";
             string filePath = Path.Combine(folderPath, fileName);
+
+            var scenarioResults = _eh_featureScenarioResults[_eh_currentFeature];
+            var stepList = _eh_featureStepNames[_eh_currentFeature].ToList();
 
             using (var workbook = new XLWorkbook())
             {
                 var worksheet = workbook.Worksheets.Add("Results");
 
-                // Header row
                 worksheet.Cell(1, 1).Value = "Scenario Name";
-                var stepList = _eh_allStepNames.ToList();
                 for (int i = 0; i < stepList.Count; i++)
                 {
                     worksheet.Cell(1, i + 2).Value = stepList[i];
                 }
 
-                // Data rows
                 int row = 2;
-                foreach (var scenario in _eh_scenarioResults.Keys)
+                foreach (var scenario in scenarioResults.Keys)
                 {
                     worksheet.Cell(row, 1).Value = scenario;
-                    var stepResults = _eh_scenarioResults[scenario];
+                    var steps = scenarioResults[scenario];
                     for (int i = 0; i < stepList.Count; i++)
                     {
-                        string step = stepList[i];
-                        worksheet.Cell(row, i + 2).Value = stepResults.ContainsKey(step) ? stepResults[step] : "";
+                        var step = stepList[i];
+                        worksheet.Cell(row, i + 2).Value = steps.ContainsKey(step) ? steps[step] : "";
                     }
                     row++;
                 }
@@ -69,6 +87,9 @@ public static class ExcelHelper
                 worksheet.Columns().AdjustToContents();
                 workbook.SaveAs(filePath);
             }
+
+            _eh_featureScenarioResults.Remove(_eh_currentFeature);
+            _eh_featureStepNames.Remove(_eh_currentFeature);
         }
     }
 

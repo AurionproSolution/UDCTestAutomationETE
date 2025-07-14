@@ -1,11 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Linq;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
-using System.Threading.Tasks;
-using Navistar.Navistar.core;
+﻿using Navistar.Navistar.core;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
 using SeleniumExtras.WaitHelpers;
@@ -196,7 +189,7 @@ namespace Navistar.Navistar.Pages.NfcPages
             EnterMiddleName("I");
             EnterLastName("Doe");
             EnterEmailAddress("Johndoe@gmail.com");
-            EnterPhone("+1 (234) 567 8912"); 
+            EnterPhone("+1 (234) 567 8912");
             EnterDateOfBirth("01/01/1996");
             EnterSocialSecurityNo("919782968");
             SelectVocationDropdown("Agriculture");
