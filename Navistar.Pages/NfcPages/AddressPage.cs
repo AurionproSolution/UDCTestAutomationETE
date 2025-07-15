@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using OpenQA.Selenium;
+﻿using OpenQA.Selenium;
 
 namespace Navistar.Navistar.Pages.NfcPages
 {
@@ -28,7 +23,7 @@ namespace Navistar.Navistar.Pages.NfcPages
 
         private IWebElement AddressFieldDropdwonOption => Find(By.XPath("//input[@name='undefined']//following::span"));
 
-        
+
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
         public void SelectAddressTypeDropdown(string value)
         {
@@ -84,7 +79,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         public void AddAddress()
         {
             AddressFieldTextbox();
-       //     SelectAddressTypeDropdown("Street");
+            //     SelectAddressTypeDropdown("Street");
             //EnterStreet("main");
             //EnterSuburb("main");
             //EnterCity("Auckland, New Zealand");
