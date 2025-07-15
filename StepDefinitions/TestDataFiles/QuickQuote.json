@@ -1,63 +1,66 @@
 {
-    "Programs": [
-        "Finance Leases Program",
-        "Loan Program",
-        "Idealease Program",
-        "FMV Program",
-        "Credit Line Lease Takedown",
-        "Credit Line Loan Takedown",
-        "Promissory Loan Program",
-        "National Account Idealease Program",
-        "S13 Idealease Program",
-        "UTC - 1.9% Buy Down",
-        "UTC - 1.9% Buy Down Credit Line"
-    ],
-    "Products": [
-        "Finance Lease",
-        "TRAC Lease",
-        "Finance Included Loan",
-        "Idealease",
-        "Operating Lease"
-    ],
-    "Assets": [
-        "LT Series/International/Heavy/Vehicles",
-        "LoneStar/INTERNATIONAL/Heavy/Vehicles",
-        "RH Series/International/Heavy/Vehicles",
-        "ProStar Series/International/Heavy/Vehicles",
-        "8600 Series/International/Heavy/Vehicles",
-        "Other/Other/Heavy/Vehicles",
-        "HV Series/International/Severe/Vehicles",
-        "HX Series/International/Severe/Vehicles",
-        "7000 Series/International/Severe/Vehicles",
-        "5000 Series/International/Severe/Vehicles",
-        "MV Series/International/Medium/Vehicles",
-        "CV Series/International/Medium/Vehicles",
-        "4000 Series/International/Medium/Vehicles",
-        "Other/Other/Medium/Vehicles",
-        "Other/Other/Bus/Vehicles",
-        "Other/Other/Other/Vehicles",
-        "Other/Other/Trailer/Vehicles"
-    ],
-    "PurchasePrices": [
-        32,000
-    ],
-    "ResidualValues": [
-        20
-    ],
-    "DownPayments": [
-        20
-    ],
-    "Balloons": [
-        20
-    ],
-    "Frequency": [
-        "Monthly"
-    ],
-    "TermsInMonths": [
-        12,
-        24,
-        36,
-        48,
-        60
-    ]
+  "Programs": [
+    "Finance Leases Program",
+    "Loan Program",
+    "Idealease Program",
+    "FMV Program",
+    "Credit Line Lease Takedown",
+    "Credit Line Loan Takedown",
+    "Promissory Loan Program",
+    "National Account Idealease Program",
+    "S13 Idealease Program",
+    "UTC - 1.9% Buy Down",
+    "UTC - 1.9% Buy Down Credit Line"
+  ],
+  "Products": [
+    "Finance Lease",
+    "TRAC Lease",
+    "Finance Included Loan",
+    "Idealease",
+    "Operating Lease"
+  ],
+  "Assets": [
+    "LT Series/International/Heavy/Vehicles",
+    "LoneStar/INTERNATIONAL/Heavy/Vehicles",
+    "RH Series/International/Heavy/Vehicles",
+    "ProStar Series/International/Heavy/Vehicles",
+    "8600 Series/International/Heavy/Vehicles",
+    "Other/Other/Heavy/Vehicles",
+    "HV Series/International/Severe/Vehicles",
+    "HX Series/International/Severe/Vehicles",
+    "7000 Series/International/Severe/Vehicles",
+    "5000 Series/International/Severe/Vehicles",
+    "MV Series/International/Medium/Vehicles",
+    "CV Series/International/Medium/Vehicles",
+    "4000 Series/International/Medium/Vehicles",
+    "Other/Other/Medium/Vehicles",
+    "Other/Other/Bus/Vehicles",
+    "Other/Other/Other/Vehicles",
+    "Other/Other/Trailer/Vehicles"
+  ],
+  "PurchasePrices": [
+    32000
+  ],
+  "ResidualValues": [
+    20
+  ],
+  "DownPayments": [
+    20
+  ],
+  "Balloons": [
+    20
+  ],
+  "Frequency": [
+    "Monthly"
+  ],
+  "TermsInMonths": [
+    12,
+    24,
+    36,
+    48,
+    60
+  ],
+  "PurchasePrices1": [
+    32,000
+  ]
 }

@@ -1,11 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Linq;
-using System.Security.Cryptography.X509Certificates;
-using System.Text;
-using System.Threading.Tasks;
-using Navistar.Navistar.core;
+﻿using Navistar.Navistar.core;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
 using SeleniumExtras.WaitHelpers;
@@ -21,7 +14,6 @@ namespace Navistar.Navistar.Pages.NfcPages
         }
         private IWebElement classificationRole => Find(By.XPath("//span[@aria-label='Individual']"));
         private IWebElement enterFirstName => Find(By.XPath("//label[text()='First Name ']/following-sibling::span/input"));
-
         private IWebElement enterMiddleName => Find(By.XPath("//label[text()='Middle Name ']/following-sibling::span/input"));
         private IWebElement enterLastName => Find(By.XPath("//label[text()='Last Name ']/following-sibling::span/input"));
         private IWebElement enterEmailAddress => Find(By.XPath("//label[text()='Email ']/following-sibling::span/input"));
@@ -190,15 +182,16 @@ namespace Navistar.Navistar.Pages.NfcPages
             enterEmail.SendKeys(value);
             ReportingManager.LogPass("Dealer entered name as " + value + ".");
         }
-        public void AddNewIndividualCustomer()
+        public void AddNewIndividualCustomer(string customerName)
         {
             ReportingManager.LogInfo("Dealer adding New customer or party.");
-            EnterFirstName("John");
+            EnterFirstName(customerName);
             EnterMiddleName("I");
             EnterLastName("Doe");
             EnterEmailAddress("Johndoe@gmail.com");
+            EnterPhone("+1 (234) 567 8912");
             EnterDateOfBirth("01/01/1996");
-            EnterSocialSecurityNo("123456789");
+            EnterSocialSecurityNo("919782968");
             SelectVocationDropdown("Agriculture");
             EnterFleetSize(1234);
             SelectPriorBankrupcyDropdown("No");
@@ -206,8 +199,15 @@ namespace Navistar.Navistar.Pages.NfcPages
             SelectGrossAnnaulDropdown("No");
             EnterBusinessOwnerOpenSince("02/08/2022");
             EnterCommercialDrLicense("123456789");
-            ClickOnAddAddressManually();
+            //ClickOnAddAddressManually();
             addressPage.AddAddress();
+            EnterFromDate("01/15/2020");
+            clickOnDate();
+            Thread.Sleep(1000);
+            ClickOnNextButton();
+            Thread.Sleep(1000);
+            ClickOnSubmitButton();
+            Thread.Sleep(5000);
         }
         public void AddNewBusinessCustomer()
         {

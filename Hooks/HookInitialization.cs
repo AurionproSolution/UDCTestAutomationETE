@@ -1,22 +1,55 @@
 ﻿using Navistar.Navistar.core;
+using Navistar.Navistar.Pages.NfcPages;
+using Navistar.StepDefinitions;
 using Navistar.StepDefinitions.TestData;
 using Reqnroll;
-using System;
 using System.Collections;
-
 
 namespace Navistar.Hooks
 {
     [Binding]
-    public class HookInitialization(ScenarioContext _scenarioContext)
+    public class HookInitialization
     {
+        private readonly ScenarioContext _scenarioContext;
+
+        public HookInitialization(ScenarioContext scenarioContext)
+        {
+            _scenarioContext = scenarioContext;
+        }
+
+        [BeforeFeature]
+        public static void BeforeFeature(FeatureContext featureContext)
+        {
+            // Set project and feature name for Excel file
+            ExcelHelper.SetProjectAndFeature("Navistar", featureContext.FeatureInfo.Title);
+
+            DriverContext.InitDriver();
+            var driver = DriverContext.Driver;
+            var testData = new TestDataModel();
+            var _pageObjectCon = new PageObjectContainer();
+
+            DriverContext.Driver.Navigate().GoToUrl(_pageObjectCon.TestData.UatUrl);
+            ReportingManager.CreateTest($"Feature: {featureContext.FeatureInfo.Title}");
+            ReportingManager.LogInfo("Login page loaded successfully.");
+
+            var loginPage = new NFCLoginPage(driver);
+            ReportingManager.LogInfo("User trying to login with valid credentials.");
+            loginPage.EnterNfcUserName("seema.chaple");
+            loginPage.ClickOnProceedButton();
+            loginPage.EnterNfcPassword("Happywork@98");
+            loginPage.ClickonSignInButton();
+            Thread.Sleep(5000);
+        }
+
         [BeforeTestRun]
-        public static void SetupReporting() => ReportingManager.InitReport();
+        public static void SetupReporting()
+        {
+            ReportingManager.InitReport();
+        }
 
         [BeforeScenario]
         public void BeforeScenario()
         {
-            DriverContext.InitDriver();
             var scenarioTitle = _scenarioContext.ScenarioInfo.Title;
 
             string program = string.Empty;
@@ -26,7 +59,7 @@ namespace Navistar.Hooks
             {
                 Console.WriteLine($"Key: {entry.Key} | Value: {entry.Value}");
 
-                string keyString = entry.Key?.ToString() ?? string.Empty;  // Prevents null reference
+                string keyString = entry.Key?.ToString() ?? string.Empty;
 
                 if (keyString.Equals("Program", StringComparison.OrdinalIgnoreCase))
                 {
@@ -38,23 +71,28 @@ namespace Navistar.Hooks
                 }
             }
 
-            // Custom test name for reporting
             string customTestName = !string.IsNullOrEmpty(program) && !string.IsNullOrEmpty(product)
                 ? $"{scenarioTitle} - {program} - {product}"
                 : scenarioTitle;
 
-            // Initialize Extent Report test
+            // Store the unique name for this scenario instance
+            _scenarioContext["CustomScenarioName"] = customTestName;
+
             ReportingManager.CreateTest(customTestName);
             ReportingManager.LogInfo($"Starting scenario: {customTestName}");
         }
-
-        [AfterTestRun]
-        public static void TearDownReporting() => ReportingManager.FlushReport();
 
         [AfterStep]
         public void AfterStep()
         {
             var stepInfo = _scenarioContext.StepContext.StepInfo;
+
+            string scenarioWithData = _scenarioContext.ContainsKey("CustomScenarioName")
+                ? _scenarioContext["CustomScenarioName"].ToString()
+                : _scenarioContext.ScenarioInfo.Title;
+
+            string status = _scenarioContext.TestError == null ? "Passed" : "Failed";
+
             if (_scenarioContext.TestError == null)
             {
                 ReportingManager.LogPass($"Step passed: {stepInfo.Text}");
@@ -65,19 +103,53 @@ namespace Navistar.Hooks
                 var screenshotPath = DriverContext.TakeScreenshot(stepInfo.Text);
                 ReportingManager.LogFail($"Step failed: {stepInfo.Text}. Error: {errorMessage}", screenshotPath);
             }
+
+            ExcelHelper.LogStepResult(scenarioWithData, stepInfo.Text, status);
         }
 
         [AfterScenario]
         public void TearDownDriver()
         {
+            string scenarioName = _scenarioContext.ContainsKey("CustomScenarioName")
+                ? _scenarioContext["CustomScenarioName"].ToString()
+                : _scenarioContext.ScenarioInfo.Title;
+
             if (_scenarioContext.TestError != null)
             {
-                ReportingManager.LogFail($"Scenario failed: {_scenarioContext.ScenarioInfo.Title}");
+                ReportingManager.LogFail($"Scenario failed: {scenarioName}");
             }
             else
             {
-                ReportingManager.LogPass($"Scenario passed: {_scenarioContext.ScenarioInfo.Title}");
+                ReportingManager.LogPass($"Scenario passed: {scenarioName}");
             }
+
+            try
+            {
+                ReportingManager.LogInfo("Navigating back to Dashboard...");
+                DriverContext.Driver.Navigate().Refresh();
+                var _pageObjectCon = new PageObjectContainer();
+                //DriverContext.Driver.Navigate().GoToUrl(_pageObjectCon.TestData.FisSandboxUrl);
+                DriverContext.Driver.Navigate().GoToUrl("https://uatportal.aurionpro.com/UANFCPortal/dealer");
+                Thread.Sleep(15000);
+                ReportingManager.LogInfo("Successfully navigated to Dashboard.");
+            }
+            catch (Exception ex)
+            {
+                ReportingManager.LogFail($"Could not navigate to Dashboard. Error: {ex.Message}");
+            }
+        }
+
+        [AfterTestRun]
+        public static void TearDownReporting()
+        {
+            ReportingManager.FlushReport();
+        }
+
+        [AfterFeature]
+        public static void AfterFeature(FeatureContext featureContext)
+        {
+            ReportingManager.LogInfo($"Feature completed: {featureContext.FeatureInfo.Title}");
+            ExcelHelper.FlushCurrentFeatureToExcel();
             DriverContext.CloseDriver();
         }
     }

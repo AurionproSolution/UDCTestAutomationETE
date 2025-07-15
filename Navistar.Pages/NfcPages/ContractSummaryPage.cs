@@ -1,13 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Microsoft.VisualStudio.TestPlatform.CommunicationUtilities;
 using Navistar.Navistar.core;
 using NUnit.Framework;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
 using Reqnroll;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace Navistar.Navistar.Pages.NfcPages
 {
@@ -25,8 +28,25 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement nextStateDropdown => Driver.FindElement(By.XPath("//p-dropdown[@id='nextState']//child::span"));
         private IWebElement rvAssessmentOption => Driver.FindElement(By.XPath("//span[contains(text(),'RV Assessment')]//parent::li"));
         private IWebElement submitButton => Driver.FindElement(By.XPath("//span[contains(text(),'Submit')]"));
+        private IWebElement contractDetailsPageTab => Driver.FindElement(By.XPath("//div[contains(text(),'Contract Details')]"));
+        private IWebElement lablelTotalAmountBorrowedOnContractSummaryPage => Driver.FindElement(By.XPath("//span[contains(text(),' Total Amount Borrowed ')]//following-sibling::span"));
+        private IWebElement lablelAssetCostOnContractSummaryPage => Driver.FindElement(By.XPath("//span[contains(text(),' Asset Cost')]//following::div/span[1]"));
+        private IWebElement contractSummaryDetailsPageTab => Driver.FindElement(By.XPath("//div[contains(text(),'Contract Summary')]"));
+        private IWebElement programDropdown => Find(By.XPath("//label[text()='Program']/following-sibling::p-dropdown//span"));
+        private IWebElement productDropdown => Find(By.XPath("//label[text()='Product']/following-sibling::p-dropdown//span"));
+        private IWebElement installment => Find(By.XPath("//label[text()='Installment']/following-sibling::span"));
+        private IWebElement labelMarkup => Find(By.XPath("//label[contains(text(),'Markup')]//following::input"));
+        private IWebElement labelTotalFess => Find(By.XPath("//p[contains(text(),' Total Fees ')]//child::span"));
+        private IWebElement textboxContractStartDate => Find(By.XPath("//label[contains(text(),' Contract Start Date ')]//following::input"));
+        private IWebElement labelInstallementFromPaymentSummary => Find(By.XPath("//label[contains(text(),'Term (In Month)')]//following::input"));
+        private IWebElement labelCustomerOnContractSummaryPage => Find(By.XPath("//th[contains(text(),'Customer Name')]//following::a"));
+        private IWebElement paymentSummaryDetailsPageTab => Driver.FindElement(By.XPath("//div[contains(text(),'Contract Summary')]"));
+        private IWebElement lablelAssetCostOnContractDetails => Driver.FindElement(By.XPath("//p[contains(text(),' Asset Cost')]//child::Span"));
+        private IWebElement lablelTotalAmountBorrowedOnContractDetailsPage => Driver.FindElement(By.XPath("//p[contains(text(),' Total Amount Borrowed ')]//child::span"));
+        private IWebElement notificationButton => Driver.FindElement(By.XPath("//button[@class='p-link layout-topbar-button setting-button']//preceding::div[@class='mr-2 bell-icon p-avatar p-component p-avatar-circle p-overlay-badge']"));
+        private IWebElement vinErrorMessage => Driver.FindElement(By.XPath("//label[contains(text(),'Errors: VIN is empty on the asset:  Asset1')]"));
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
-       
+
         By dropdownOptionsLocator = By.XPath("//span[contains(text(),'Completed')]//parent::li");
 
 
@@ -42,7 +62,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         {
             ScrollAndClickElement(labelPaymentSummary);
             int i = 1; // XPath indexes start from 1
-           // int j = i + 1;
+                       // int j = i + 1;
 
             while (true)
             {
@@ -65,7 +85,7 @@ namespace Navistar.Navistar.Pages.NfcPages
 
             string product = ScenarioContext.Current["Product"].ToString();
 
-            if(product == "Operating Lease")
+            if (product == "Operating Lease")
             {
                 EntreResidualValueRequest("Completed");
             }
@@ -76,13 +96,13 @@ namespace Navistar.Navistar.Pages.NfcPages
             Assert.That(contractId, Is.Not.Null.Or.Empty, "Contract ID was not generated.");
             ReportingManager.LogPass($" Contract ID Generated: {contractId}");
         }
-        public void ValidateApplicationSubmittedStatus(string status="")
+        public void ValidateApplicationSubmittedStatus(string status = "")
         {
             WebDriverWait wait = new WebDriverWait(Driver, TimeSpan.FromSeconds(10));
             wait.Until(drv => StatusElement.Displayed);  // Wait until the status appears
 
             string actualStatus = StatusElement.Text.Trim();
-            string expectedStatus = status; 
+            string expectedStatus = status;
 
             if (actualStatus != expectedStatus)
             {
@@ -120,7 +140,7 @@ namespace Navistar.Navistar.Pages.NfcPages
             Thread.Sleep(1000);
             uploadFile();
 
-            int i = 1; 
+            int i = 1;
 
             while (true)
             {
@@ -137,7 +157,7 @@ namespace Navistar.Navistar.Pages.NfcPages
                 {
                     // Stop the loop when there are no more dropdowns
                     break;
-                }             
+                }
 
             }
             nextStateDropdown.Click();
@@ -161,5 +181,165 @@ namespace Navistar.Navistar.Pages.NfcPages
             fileInput.SendKeys(filePath);
             WaitTillTheLoadSpinnerDisappears();
         }
+
+        public void VerifyContractSummaryDetails()
+        {
+            contractDetailsPageTab.Click();
+            Thread.Sleep(5000);
+            contractSummaryDetailsPageTab.Click();
+            Thread.Sleep(5000);
+
+        }
+
+        public Dictionary<string, string> DetailsStandardSummary(string product)
+        {
+            var details = new Dictionary<string, string>
+        {
+        { "program", programDropdown.Text },
+        { "product", productDropdown.Text },
+        { "AssetCost", lablelAssetCostOnContractSummaryPage.Text },
+        { "TotalAmountBorrowed", lablelTotalAmountBorrowedOnContractSummaryPage.Text },
+        { "TermInMonths", labelInstallementFromPaymentSummary.Text },
+        { "Markup", labelMarkup.Text },
+        { "Contract Start Date", textboxContractStartDate.Text },
+
+    };
+            return details;
+        }
+
+        public void VerifycontractDetailsAndContractSummaryValue()
+        {
+            contractDetailsPageTab.Click();
+            Thread.Sleep(3000);
+            string contractDetailsProgramDrodown = programDropdown.Text;
+            string contractDetailsProductDropdown = productDropdown.Text;
+            string contractDetailsAssetCost = lablelAssetCostOnContractDetails.Text;
+            string contractDetailsTotalAmountBorrowed = lablelTotalAmountBorrowedOnContractDetailsPage.Text;
+            string contractDetialsTermInMonths = Driver.FindElement(By.XPath("//label[contains(text(),'Term (In Month)')]//following::input")).GetAttribute("value");
+            string contractDetialsMarkup = Driver.FindElement(By.XPath("//label[contains(text(),'Markup')]//following::input")).GetAttribute("aria-valuenow");
+            string contractDetialsContractStartDate = Driver.FindElement(By.XPath("//label[contains(text(),' Contract Start Date ')]//following::input")).GetAttribute("value");
+            string contractDetialsFirstPaymentDate = Driver.FindElement(By.XPath("//label[contains(text(),' First Payment Date ')]//following::input")).GetAttribute("value");
+            contractSummaryDetailsPageTab.Click();
+            Thread.Sleep(3000);
+            string contractSummaryProgramDrodown = programDropdown.Text;
+            string contractSummaryProductDropdown = productDropdown.Text;
+            string contractSummaryAssetCost = lablelAssetCostOnContractSummaryPage.Text;
+            string contractSummaryTotalAmountBorrowed = lablelTotalAmountBorrowedOnContractSummaryPage.Text;
+            string contractSummaryTermInMonths = Driver.FindElement(By.XPath("//label[contains(text(),'Term (In Month)')]//following::input")).GetAttribute("value");
+            string contractSummaryMarkup = Driver.FindElement(By.XPath("//label[contains(text(),'Markup')]//following::input")).GetAttribute("aria-valuenow");
+            string contractSummaryContractStartDate = Driver.FindElement(By.XPath("//label[contains(text(),' Contract Start Date ')]//following::input")).GetAttribute("value");
+            string contractSummaryFirstPaymentDate = Driver.FindElement(By.XPath("//label[contains(text(),' First Payment Date ')]//following::input")).GetAttribute("value");
+
+            if (contractDetailsProgramDrodown.Equals(contractSummaryProgramDrodown))
+            {
+                ReportingManager.LogPass("Program value of Contract Summary Page : " + contractSummaryProgramDrodown + " and Contract Details Pages is Matched : " + contractDetailsProgramDrodown);
+            }
+            else
+            {
+                ReportingManager.LogFail("Program value of Contract Summary Page : " + contractSummaryProgramDrodown + " and Contract Details Pages is not Matched : " + contractDetailsProgramDrodown);
+            }
+
+            if (contractDetailsProductDropdown.Equals(contractSummaryProductDropdown))
+            {
+                ReportingManager.LogPass("Product value of Contract Summary Page : " + contractSummaryProductDropdown + " and Contract Details Pages is Matched : " + contractDetailsProductDropdown);
+            }
+            else
+            {
+                ReportingManager.LogFail("Product value of Contract Summary Page : " + contractSummaryProductDropdown + " and Contract Details Pages is not Matched : " + contractDetailsProductDropdown);
+            }
+
+            if (contractDetailsAssetCost.Equals(contractSummaryAssetCost))
+            {
+                ReportingManager.LogPass("Asset Cost value of Contract Summary Page : " + contractSummaryAssetCost + " and Contract Details Pages is Matched : " + contractDetailsAssetCost);
+            }
+            else
+            {
+                ReportingManager.LogFail("Asset Cost of Contract Summary Page : " + contractSummaryAssetCost + " and Contract Details Pages is not Matched : " + contractDetailsAssetCost);
+            }
+
+            if (contractDetailsTotalAmountBorrowed.Equals(contractSummaryTotalAmountBorrowed))
+            {
+                ReportingManager.LogPass("Total Amount Borrowed value of Contract Summary Page : " + contractSummaryTotalAmountBorrowed + " and Contract Details Pages is Matched : " + contractDetailsTotalAmountBorrowed);
+            }
+            else
+            {
+                ReportingManager.LogFail("Total Amount Borrowed Value of Contract Summary Page : " + contractSummaryTotalAmountBorrowed + " and Contract Details Pages is not Matched : " + contractDetailsTotalAmountBorrowed);
+            }
+
+            if (contractDetialsTermInMonths.Equals(contractSummaryTermInMonths))
+            {
+                ReportingManager.LogPass("Term in Months value of Contract Summary Page : " + contractSummaryTermInMonths + " and Contract Details Pages is Matched : " + contractDetialsTermInMonths);
+            }
+            else
+            {
+                ReportingManager.LogFail("Term in Months Value of Contract Summary Page : " + contractSummaryTermInMonths + " and Contract Details Pages is not Matched : " + contractDetialsTermInMonths);
+            }
+
+            if (contractDetialsMarkup.Equals(contractSummaryMarkup))
+            {
+                ReportingManager.LogPass("Markup value of Contract Summary Page : " + contractSummaryMarkup + " and Contract Details Pages is Matched : " + contractDetialsMarkup);
+            }
+            else
+            {
+                ReportingManager.LogFail("Markup Value of Contract Summary Page : " + contractSummaryMarkup + " and Contract Details Pages is not Matched : " + contractDetialsMarkup);
+            }
+
+
+            if (contractDetialsContractStartDate.Equals(contractSummaryContractStartDate))
+            {
+                ReportingManager.LogPass("Contract Start Date value of Contract Summary Page : " + contractSummaryContractStartDate + " and Contract Details Pages is Matched : " + contractDetialsContractStartDate);
+            }
+            else
+            {
+                ReportingManager.LogFail("\"Contract Start Date Value of Contract Summary Page : " + contractSummaryContractStartDate + " and Contract Details Pages is not Matched : " + contractDetialsContractStartDate);
+            }
+
+            if (contractDetialsFirstPaymentDate.Equals(contractSummaryFirstPaymentDate))
+            {
+                ReportingManager.LogPass("First Payment Date value of Contract Summary Page : " + contractSummaryFirstPaymentDate + " and Contract Details Pages is Matched : " + contractDetialsFirstPaymentDate);
+            }
+            else
+            {
+                ReportingManager.LogFail("First Payment Date Value of Contract Summary Page : " + contractSummaryFirstPaymentDate + " and Contract Details Pages is not Matched : " + contractDetialsFirstPaymentDate);
+            }
+        }
+
+        public void ValidateCustomerAddedOrNot()
+        {
+            bool isCustomerDisplay = labelCustomerOnContractSummaryPage.Displayed;
+
+            if (isCustomerDisplay)
+            {
+                ReportingManager.LogPass("Cusotmer Added Sucesfully");
+                ReportingManager.AddScreenshotToReport("Cusotmer Added Sucesfully");
+            }
+            else
+            {
+                ReportingManager.LogFail("Cusotmer not Added ");
+                ReportingManager.AddScreenshotToReport("Cusotmer not Added.");
+            }
+
+        }
+
+        public void VerifyVINAssetErrorMessage()
+        {
+            notificationButton.Click();
+            Thread.Sleep(1000);
+            bool isErrorMessageDisplay = vinErrorMessage.Displayed;
+            if (isErrorMessageDisplay)
+            {
+                ReportingManager.LogPass("Validation Message is Present for VIN Asset Number");
+                ReportingManager.AddScreenshotToReport("Validation Message is Present for VIN Asset Number");
+
+            }
+            else
+            {
+                ReportingManager.LogFail("Validation Message is not Present for VIN Asset Number");
+                ReportingManager.AddScreenshotToReport("Validation Message is not Present for VIN Asset Number");
+            }
+
+        }
+
     }
 }
+

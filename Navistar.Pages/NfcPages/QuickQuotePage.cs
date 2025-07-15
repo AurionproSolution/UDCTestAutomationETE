@@ -347,7 +347,7 @@ namespace Navistar.Navistar.Pages.NfcPages
         {
             ScrollAndClickElement(labelAssetCost);
             string assetCost = labelAssetCost.Text;
-            String priceStr = "$" + price;
+            String priceStr = "$" + price+".00";
 
             if (assetCost.Contains(priceStr))
             {

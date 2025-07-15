@@ -6,7 +6,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using SeleniumExtras.WaitHelpers;
-using OpenQA.Selenium.BiDi.Modules.BrowsingContext;
 using OpenQA.Selenium.Interactions;
 
 namespace Navistar.Navistar.core
