@@ -1,4 +1,5 @@
-﻿using Navistar.Navistar.core;
+﻿using Microsoft.VisualStudio.TestPlatform.CommunicationUtilities;
+using Navistar.Navistar.core;
 using NUnit.Framework;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
@@ -42,6 +43,8 @@ namespace Navistar.Navistar.Pages.NfcPages
         private IWebElement paymentSummaryDetailsPageTab => Driver.FindElement(By.XPath("//div[contains(text(),'Contract Summary')]"));
         private IWebElement lablelAssetCostOnContractDetails => Driver.FindElement(By.XPath("//p[contains(text(),' Asset Cost')]//child::Span"));
         private IWebElement lablelTotalAmountBorrowedOnContractDetailsPage => Driver.FindElement(By.XPath("//p[contains(text(),' Total Amount Borrowed ')]//child::span"));
+        private IWebElement notificationButton => Driver.FindElement(By.XPath("//button[@class='p-link layout-topbar-button setting-button']//preceding::div[@class='mr-2 bell-icon p-avatar p-component p-avatar-circle p-overlay-badge']"));
+        private IWebElement vinErrorMessage => Driver.FindElement(By.XPath("//label[contains(text(),'Errors: VIN is empty on the asset:  Asset1')]"));
         By optionsLocator = By.XPath("//p-dropdownitem[@class='p-element ng-star-inserted']");
 
         By dropdownOptionsLocator = By.XPath("//span[contains(text(),'Completed')]//parent::li");
@@ -212,7 +215,7 @@ namespace Navistar.Navistar.Pages.NfcPages
             string contractDetailsProductDropdown = productDropdown.Text;
             string contractDetailsAssetCost = lablelAssetCostOnContractDetails.Text;
             string contractDetailsTotalAmountBorrowed = lablelTotalAmountBorrowedOnContractDetailsPage.Text;
-            string contractDetialsTermInMonths= Driver.FindElement(By.XPath("//label[contains(text(),'Term (In Month)')]//following::input")).GetAttribute("value");
+            string contractDetialsTermInMonths = Driver.FindElement(By.XPath("//label[contains(text(),'Term (In Month)')]//following::input")).GetAttribute("value");
             string contractDetialsMarkup = Driver.FindElement(By.XPath("//label[contains(text(),'Markup')]//following::input")).GetAttribute("aria-valuenow");
             string contractDetialsContractStartDate = Driver.FindElement(By.XPath("//label[contains(text(),' Contract Start Date ')]//following::input")).GetAttribute("value");
             string contractDetialsFirstPaymentDate = Driver.FindElement(By.XPath("//label[contains(text(),' First Payment Date ')]//following::input")).GetAttribute("value");
@@ -227,9 +230,9 @@ namespace Navistar.Navistar.Pages.NfcPages
             string contractSummaryContractStartDate = Driver.FindElement(By.XPath("//label[contains(text(),' Contract Start Date ')]//following::input")).GetAttribute("value");
             string contractSummaryFirstPaymentDate = Driver.FindElement(By.XPath("//label[contains(text(),' First Payment Date ')]//following::input")).GetAttribute("value");
 
-            if(contractDetailsProgramDrodown.Equals(contractSummaryProgramDrodown))
+            if (contractDetailsProgramDrodown.Equals(contractSummaryProgramDrodown))
             {
-                ReportingManager.LogPass("Program value of Contract Summary Page : "+ contractSummaryProgramDrodown + " and Contract Details Pages is Matched : "+ contractDetailsProgramDrodown);
+                ReportingManager.LogPass("Program value of Contract Summary Page : " + contractSummaryProgramDrodown + " and Contract Details Pages is Matched : " + contractDetailsProgramDrodown);
             }
             else
             {
@@ -315,8 +318,28 @@ namespace Navistar.Navistar.Pages.NfcPages
                 ReportingManager.LogFail("Cusotmer not Added ");
                 ReportingManager.AddScreenshotToReport("Cusotmer not Added.");
             }
-            
+
+        }
+
+        public void VerifyVINAssetErrorMessage()
+        {
+            notificationButton.Click();
+            Thread.Sleep(1000);
+            bool isErrorMessageDisplay = vinErrorMessage.Displayed;
+            if (isErrorMessageDisplay)
+            {
+                ReportingManager.LogPass("Validation Message is Present for VIN Asset Number");
+                ReportingManager.AddScreenshotToReport("Validation Message is Present for VIN Asset Number");
+
+            }
+            else
+            {
+                ReportingManager.LogFail("Validation Message is not Present for VIN Asset Number");
+                ReportingManager.AddScreenshotToReport("Validation Message is not Present for VIN Asset Number");
+            }
+
         }
 
     }
 }
+

@@ -45,3 +45,31 @@ Scenario Outline: Contract Details Page Validation
     | sandeep.bedekar | Testing@2211 | IdeaLease Program               | Finance Included Loan      |
     | sandeep.bedekar | Testing@2211 | IdeaLease Program               | Idealease                  |
 
+
+
+	@Sanity
+Scenario Outline: VIN Number Asset Validation
+	#Given the user is on the login page
+	#When the user enters "<Username>" and "<Password>" and clicks on the Login button
+	Then the user should be successfully redirected to the dashboard page
+	When the user clicks on Create Quick Quote
+	Then the user should be redirected to the Create Quick Quote page
+	When the user selects the data in the programe "<Program>" field from the dropdown
+	And the user selects the data in the product "<Product>" field from the dropdown
+	Then the user selects the "Asset" value from the dropdown
+	And the user enters the "Purchase Price"
+	And the user enters the "Residual Value"
+	Then the user selects the Frequency from the dropdown
+	And the user selects the Term from the dropdown
+	And the user clicks on Create Quote
+	Then the user should be redirected to the Contract Details page and Add Asset Details Without VIN Number
+	When the user enters Days to First Payment and clicks on the Next button
+	And the user clicks on Add Contract Parties and then clicks on Add New Customer button
+	Then the user clicks on the Next button
+	And the user lands on the contract summary page
+	Then Verify VIN Asset Error Message
+
+Examples:
+	| Username        | Password     | Program                          | Product               | Status |
+	| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown       | Finance Lease         | Status : Credit Line Takedown Submitted  |
+	| sandeep.bedekar | Testing@2211 | Credit Line Lease Takedown       | TRAC Lease            | Status : Credit Line Takedown Submitted     |

@@ -367,6 +367,7 @@ namespace Navistar.StepDefinitions
             _pageObjects.ContractSummaryPage.ValidateApplicationSubmittedStatus(status);
         }
 
+
         [Then("the user enters all the required fields in party details page for Customer Role Sublease")]
         public void ThenTheUserEntersAllTheRequiredFieldsInPartyDetailsPageForCustomerRoleSublease()
         {
@@ -574,6 +575,28 @@ namespace Navistar.StepDefinitions
             _pageObjects.CustomerDetailsPage.ValidateContractIdIsGenerated();
             _pageObjects.CustomerDetailsPage.ClickOnAddContractPartiesButton();
             _pageObjects.SearchCustomerPage.ClickOnAddNewCustomerButton();
+        }
+
+        [Then("Verify VIN Asset Error Message")]
+        public void ThenVerifyVINAssetErrorMessage()
+        {
+            _pageObjects.ContractSummaryPage.VerifyVINAssetErrorMessage();
+        }
+
+
+        [Then("the user should be redirected to the Contract Details page and Add Asset Details Without VIN Number")]
+        public void ThenTheUserShouldBeRedirectedToTheContractDetailsPageAndAddAssetDetailsWithoutVINNumber()
+        {
+            _pageObjects.ContractDetailsPage.ClickOnAssetSummery();
+            string product = ScenarioContext.Current["Product"].ToString();
+            Thread.Sleep(3000);
+            _pageObjects.AssetSummeryPage.ClickOnAssetEditButton();
+            _pageObjects.AssetSummeryPage.SelectyearField(_pageObjects.AssetSummaryTestData.Year);
+            _pageObjects.AssetSummeryPage.SelectNewOrUsed(_pageObjects.AssetSummaryTestData.NU);
+            _pageObjects.AssetSummeryPage.SelectCategory(_pageObjects.AssetSummaryTestData.Category);
+            _pageObjects.AssetSummeryPage.EnterOdometer(_pageObjects.AssetSummaryTestData.Odometer);
+            _pageObjects.AssetSummeryPage.SaveTheAsset();
+            _pageObjects.AssetSummeryPage.ClickOnSaveButton();
         }
 
 

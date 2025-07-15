@@ -216,6 +216,94 @@ this.ScenarioInitialize(scenarioInfo);
             }
             await this.ScenarioCleanupAsync();
         }
+        
+        [NUnit.Framework.TestAttribute()]
+        [NUnit.Framework.DescriptionAttribute("VIN Number Asset Validation")]
+        [NUnit.Framework.CategoryAttribute("Sanity")]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "Finance Lease", "Status : Credit Line Takedown Submitted", null)]
+        [NUnit.Framework.TestCaseAttribute("sandeep.bedekar", "Testing@2211", "Credit Line Lease Takedown", "TRAC Lease", "Status : Credit Line Takedown Submitted", null)]
+        public async global::System.Threading.Tasks.Task VINNumberAssetValidation(string username, string password, string program, string product, string status, string[] exampleTags)
+        {
+            string[] @__tags = new string[] {
+                    "Sanity"};
+            if ((exampleTags != null))
+            {
+                @__tags = System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Concat(@__tags, exampleTags));
+            }
+            string[] tagsOfScenario = @__tags;
+            global::System.Collections.Specialized.OrderedDictionary argumentsOfScenario = new global::System.Collections.Specialized.OrderedDictionary();
+            argumentsOfScenario.Add("Username", username);
+            argumentsOfScenario.Add("Password", password);
+            argumentsOfScenario.Add("Program", program);
+            argumentsOfScenario.Add("Product", product);
+            argumentsOfScenario.Add("Status", status);
+            global::Reqnroll.ScenarioInfo scenarioInfo = new global::Reqnroll.ScenarioInfo("VIN Number Asset Validation", null, tagsOfScenario, argumentsOfScenario, featureTags);
+#line 51
+this.ScenarioInitialize(scenarioInfo);
+#line hidden
+            if ((global::Reqnroll.TagHelper.ContainsIgnoreTag(scenarioInfo.CombinedTags) || global::Reqnroll.TagHelper.ContainsIgnoreTag(featureTags)))
+            {
+                testRunner.SkipScenario();
+            }
+            else
+            {
+                await this.ScenarioStartAsync();
+#line 54
+ await testRunner.ThenAsync("the user should be successfully redirected to the dashboard page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 55
+ await testRunner.WhenAsync("the user clicks on Create Quick Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 56
+ await testRunner.ThenAsync("the user should be redirected to the Create Quick Quote page", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 57
+ await testRunner.WhenAsync(string.Format("the user selects the data in the programe \"{0}\" field from the dropdown", program), ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 58
+ await testRunner.AndAsync(string.Format("the user selects the data in the product \"{0}\" field from the dropdown", product), ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 59
+ await testRunner.ThenAsync("the user selects the \"Asset\" value from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 60
+ await testRunner.AndAsync("the user enters the \"Purchase Price\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 61
+ await testRunner.AndAsync("the user enters the \"Residual Value\"", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 62
+ await testRunner.ThenAsync("the user selects the Frequency from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 63
+ await testRunner.AndAsync("the user selects the Term from the dropdown", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 64
+ await testRunner.AndAsync("the user clicks on Create Quote", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 65
+ await testRunner.ThenAsync("the user should be redirected to the Contract Details page and Add Asset Details " +
+                        "Without VIN Number", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 66
+ await testRunner.WhenAsync("the user enters Days to First Payment and clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "When ");
+#line hidden
+#line 67
+ await testRunner.AndAsync("the user clicks on Add Contract Parties and then clicks on Add New Customer butto" +
+                        "n", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 68
+ await testRunner.ThenAsync("the user clicks on the Next button", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+#line 69
+ await testRunner.AndAsync("the user lands on the contract summary page", ((string)(null)), ((global::Reqnroll.Table)(null)), "And ");
+#line hidden
+#line 70
+ await testRunner.ThenAsync("Verify VIN Asset Error Message", ((string)(null)), ((global::Reqnroll.Table)(null)), "Then ");
+#line hidden
+            }
+            await this.ScenarioCleanupAsync();
+        }
     }
 }
 #pragma warning restore
