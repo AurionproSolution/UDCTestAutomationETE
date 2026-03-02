@@ -1,0 +1,26 @@
+{
+  "application": {
+    "name": "UDC Application",
+    "version": "1.0.0"
+  },
+  "timeouts": {
+    "default": 30000,
+    "short": 5000,
+    "long": 60000,
+    "pageLoad": 45000
+  },
+  "retries": {
+    "maxRetries": 3,
+    "retryDelay": 1000
+  },
+  "screenshots": {
+    "enabled": true,
+    "onFailure": true,
+    "fullPage": true
+  },
+  "video": {
+    "enabled": false,
+    "onFailure": true
+  }
+}
+

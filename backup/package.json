@@ -1,0 +1,32 @@
+{
+  "name": "udc-automation-tests",
+  "version": "1.0.0",
+  "description": "UDC Automation Tests - Playwright TypeScript Framework",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:ui": "npx playwright test --ui",
+    "test:debug": "npx playwright test --debug",
+    "test:chromium": "npx playwright test --project=chromium",
+    "test:firefox": "npx playwright test --project=firefox",
+    "test:webkit": "npx playwright test --project=webkit",
+    "report": "npx playwright show-report my-report",
+    "report:ortoni": "npx playwright show-report ortoni-report"
+  },
+  "keywords": [
+    "playwright",
+    "typescript",
+    "automation",
+    "testing",
+    "e2e"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.41.0",
+    "@types/node": "^20.11.0",
+    "ortoni-report": "^4.0.7",
+    "typescript": "^5.3.3"
+  }
+}

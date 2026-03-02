@@ -1,0 +1,28 @@
+{
+  "timeouts": {
+    "short": 5000,
+    "default": 30000,
+    "long": 60000,
+    "pageLoad": 45000
+  },
+  "pagination": {
+    "defaultPageSize": 10,
+    "availableSizes": [10, 25, 50, 100]
+  },
+  "dateFormats": {
+    "display": "MM/DD/YYYY",
+    "api": "YYYY-MM-DD",
+    "timestamp": "YYYY-MM-DD HH:mm:ss"
+  },
+  "validationMessages": {
+    "required": "This field is required",
+    "invalidEmail": "Please enter a valid email address",
+    "invalidPhone": "Please enter a valid phone number",
+    "minLength": "Minimum {min} characters required",
+    "maxLength": "Maximum {max} characters allowed"
+  }
+}
+
+
+
+

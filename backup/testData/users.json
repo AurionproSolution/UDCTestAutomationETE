@@ -1,0 +1,45 @@
+{
+  "testData": {
+    "validUsers": [
+      {
+        "username": "testuser1",
+        "password": "Password123!",
+        "role": "admin",
+        "email": "testuser1@example.com"
+      },
+      {
+        "username": "testuser2",
+        "password": "Password456!",
+        "role": "user",
+        "email": "testuser2@example.com"
+      }
+    ],
+    "invalidUsers": [
+      {
+        "username": "invaliduser",
+        "password": "wrongpassword",
+        "expectedError": "Invalid credentials"
+      },
+      {
+        "username": "",
+        "password": "",
+        "expectedError": "Username and password are required"
+      }
+    ]
+  },
+  "environments": {
+    "dev": {
+      "baseUrl": "https://dev.example.com",
+      "apiUrl": "https://api.dev.example.com"
+    },
+    "staging": {
+      "baseUrl": "https://staging.example.com",
+      "apiUrl": "https://api.staging.example.com"
+    },
+    "production": {
+      "baseUrl": "https://example.com",
+      "apiUrl": "https://api.example.com"
+    }
+  }
+}
+
