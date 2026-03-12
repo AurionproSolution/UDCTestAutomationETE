@@ -20,7 +20,13 @@
   "playwright.reuseBrowser": true,
   "playwright.showTrace": true,
   "playwright.env": {},
-  "playwright.configs": ["playwright.config.ts"]
+  "playwright.configs": [
+    "playwright.config.ts"
+  ],
+  "[jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  }
 }
-
-

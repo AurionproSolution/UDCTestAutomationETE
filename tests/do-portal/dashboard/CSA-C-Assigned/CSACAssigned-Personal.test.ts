@@ -1,46 +1,71 @@
-import { test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 test('test', async ({ page }) => {
-    // login page
-  await page.goto('https://aurpr-ia.assetfinance.myfis.cloud/IAUDCPortal/authentication/login');
+  // login page
+  await page.goto('https://testportaludc.aurionpro.com/');
   await page.getByRole('button', { name: 'Login with FIS' }).click();
   await page.getByRole('searchbox', { name: 'Username' }).click();
-  await page.getByRole('searchbox', { name: 'Username' }).fill('pramod.more');
+  await page.getByRole('searchbox', { name: 'Username' }).fill('shalini.mishra');
   await page.getByRole('searchbox', { name: 'Username' }).press('Enter');
   await page.getByRole('button', { name: 'Proceed' }).click();
   await page.getByRole('textbox', { name: 'Password' }).click();
-  await page.getByRole('textbox', { name: 'Password' }).fill('Sanvi@123456');
+  await page.getByRole('textbox', { name: 'Password' }).fill('Aurionpro@0512');
   await page.getByRole('radio', { name: 'Yes, this is my computer or' }).check();
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.waitForTimeout(15000);
+  await page.waitForTimeout(5000);
   // start page
- // await page.getByRole('link', { name: 'Quotes & Applications Quotes' }).click();
-  // Dashboard Page
-  await page.getByRole('button', { name: ' + Create Standard Quote' }).click();
-  await page.getByRole('dialog').locator('div').filter({ hasText: 'Credit Sale Agreement Assured' }).click();
-  // 
- // await page.getByText('Credit Sale Agreement').click();
-  //wait page.locator('#pn_id_387').getByRole('button', { name: 'dropdown trigger' }).click();
-  await page.getByRole('link').nth(1).click();
-  await page.getByRole('button', { name: ' + Create Standard Quote' }).click();
-  await page.waitForTimeout(10000);
-  await page.getByRole('link', { name: 'Credit Sale Agreement' }).click();
-  await page.reload();
-  await page.reload();
- await page.locator(`//span//label[contains(text(), 'Product')]/following-sibling::div//span`).click(); 
- await page.getByRole('option', { name: 'CSA-C-Assigned' }).click();
+  await page.getByRole('link', { name: /Quotes & Applications/i }).click();
+
+  const createBtn = page.getByRole('button', { name: /Create Standard Quote/i });
+  await createBtn.click();
+  await page.waitForTimeout(5000);
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+
+  const option = dialog.locator('text= Credit Sale Agreement ');
+  await option.waitFor({ state: 'attached' });
+  await option.click({ force: false });
+  //   await page.getByRole('button', { name: ' + Create Standard Quote' }).click();
+  //     await page.getByRole('button', { name: ' + Create Standard Quote' }).click();
+  //   await page.getByRole('dialog').locator('div').filter({ hasText: 'Credit Sale Agreement Assured' }).click();
+  //   // 
+  //  // await page.getByText('Credit Sale Agreement').click();
+  //   //wait page.locator('#pn_id_387').getByRole('button', { name: 'dropdown trigger' }).click();
+  //   await page.getByRole('link').nth(1).click();
+  //   await page.getByRole('button', { name: ' + Create Standard Quote' }).click();
+  //   await page.waitForTimeout(10000);
+  //   await page.getByRole('link', { name: 'Credit Sale Agreement' }).waitFor({ state: 'visible' });
+  //   await page.getByRole('link', { name: 'Credit Sale Agreement' }).click();
+
+  await page.locator(`//span//label[contains(text(), 'Product')]/following-sibling::div//span`).click();
+  await page.getByRole('option', { name: 'CSA-C-Assigned' }).click();
   await page.locator(`//span//label[contains(text(), 'Program')]/following-sibling::div//span`).click();
   await page.getByText('CSA Personal - MV Dealer').click();
+  await page.locator('text').filter({ hasText: 'Originator Reference' }).locator('#text').waitFor({ state: 'visible' });
   await page.locator('text').filter({ hasText: 'Originator Reference' }).locator('#text').click();
   await page.locator('text').filter({ hasText: 'Originator Reference' }).locator('#text').fill('test');
   await page.locator('input[name="assetTypeDD"]').click();
   await page.getByRole('searchbox').click();
   await page.getByRole('searchbox').fill('car');
   await page.getByText('Car and Light Commercial /').click();
-  await page.locator(`//div//span[contains(text(), 'Used')]`).click();
+  await page.locator(`(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[6]`).click();
   await page.getByRole('option', { name: 'Used' }).click();
+  //await page.waitForTimeout(10000);
+  await page.getByRole('button', { name: 'Asset, Insurance & Trade-in' }).scrollIntoViewIfNeeded();
   await page.getByRole('button', { name: 'Asset, Insurance & Trade-in' }).click();
-  await page.locator('.cursor-pointer.fa-pen-to-square').click();
+  const editButton = page.locator('.cursor-pointer.fa-pen-to-square');
+
+  if (await editButton.count() > 0) {
+    await editButton.first().click();
+  } else {
+    const cancelButton = page.locator("//timesicon//*[name()='svg']");
+    await cancelButton.click();
+
+    await page.getByRole('button', { name: 'Asset, Insurance & Trade-in' }).click();
+    await editButton.first().click();
+  }
+  await page.getByRole('textbox', { name: 'Asset Value* Sum Insured Net' }).scrollIntoViewIfNeeded();
   await page.getByRole('textbox', { name: 'Asset Value* Sum Insured Net' }).click();
   await page.getByRole('textbox', { name: 'Asset Value* Sum Insured Net' }).click();
   //await page.getByRole('textbox', { name: 'Asset Value* Sum Insured Net' }).press('ArrowRight');
@@ -49,8 +74,8 @@ test('test', async ({ page }) => {
   await asset.click();
   await asset.press('Control+A');
   await asset.press('Delete');
-  // Type digits only
-  await page.keyboard.insertText('100000');
+  // Type digits only\
+  await page.keyboard.type('100000');
   //  await page.getByRole('textbox', { name: 'Asset Value* Sum Insured Net' }).asset.press('Control+A');
 
   await page.locator('text').filter({ hasText: 'Make' }).locator('#text').click();
@@ -65,15 +90,16 @@ test('test', async ({ page }) => {
   await page.getByRole('button', { name: 'Close' }).click();
   await page.locator('percentage').filter({ hasText: 'Interest Rate' }).locator('#percent').click();
   await page.locator('percentage').filter({ hasText: 'Interest Rate' }).locator('#percent').press('ArrowRight');
-    await page.locator('percentage').filter({ hasText: 'Interest Rate' }).locator('#percent').fill('5');
+  await page.locator('percentage').filter({ hasText: 'Interest Rate' }).locator('#percent').fill('5');
 
   await page.locator('date').filter({ hasText: 'First Payment' }).getByLabel('Choose Date').click();
   await page.getByText('30', { exact: true }).click();
   await page.getByRole('button', { name: 'Calculate' }).click();
+  await page.getByRole('button', { name: 'Next' }).scrollIntoViewIfNeeded();
   await page.getByRole('button', { name: 'Next' }).click();
- // await page.goto('https://testportaludc.aurionpro.com/dealer/standard-quote/create/5161');
-// await page.locator('.table-row').waitFor({ state: 'visible', timeout: 30000 });
-await page.waitForTimeout(20000);
+  // await page.goto('https://testportaludc.aurionpro.com/dealer/standard-quote/create/5161');
+  // await page.locator('.table-row').waitFor({ state: 'visible', timeout: 30000 });
+  await page.waitForTimeout(20000);
   await page.getByRole('button', { name: ' Add Borrowers / Guarantors' }).click();
   await page.locator('text').filter({ hasText: 'First Name' }).locator('#text').click();
   await page.locator('text').filter({ hasText: 'First Name' }).locator('#text').fill('REA');

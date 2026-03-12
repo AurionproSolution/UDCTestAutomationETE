@@ -22,12 +22,12 @@ test.describe('Authentication Suite - Valid Login', () => {
     // Expectation: Username field contains 'tomsmith'
     await expect(usernameInput).toHaveValue('tomsmith');
 
-    // Step 3: Enter valid password 'SuperSecretPassword!'
-    await passwordInput.click();
+    // Step 3: Enter valid password 'SuperSecretPassword!'/*  */
+        await passwordInput.click();
     await passwordInput.fill('SuperSecretPassword!');
     
     // Expectation: Password field is filled but masked
-    await expect(passwordInput).toHaveValue('SuperSecretPassword!');
+       await expect(passwordInput).toHaveValue('SuperSecretPassword!');
     // Verify the input type is password (for masking)
     await expect(passwordInput).toHaveAttribute('type', 'password');
 
