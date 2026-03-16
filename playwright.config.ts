@@ -101,7 +101,7 @@ export default defineConfig({
     actionTimeout: 60000,
 
     // Default navigation timeout
-    navigationTimeout: 120000,
+    navigationTimeout: 30000,
   },
 
   // Timeout for each test
