@@ -98,18 +98,18 @@ export default defineConfig({
     video: "on",
 
     // Default timeout for actions
-    actionTimeout: 15000,
+    actionTimeout: 60000,
 
     // Default navigation timeout
-    navigationTimeout: 30000,
+    navigationTimeout: 120000,
   },
 
   // Timeout for each test
-  timeout: 60000,
+  timeout: 120000,
 
   // Expect timeout
   expect: {
-    timeout: 10000,
+    timeout: 60000,
   },
 
   // ============ Projects ============

@@ -1,8 +1,8 @@
 {
   "validUsers": [
     {
-      "username": "do_admin",
-      "password": "Admin@123",
+      "username": "DEEPAK.PARAMANICK",
+      "password": "SandBoxAPIfin@2211",
       "role": "admin",
       "email": "do_admin@udc.com"
     },
@@ -37,7 +37,3 @@
     }
   ]
 }
-
-
-
-

@@ -40,6 +40,13 @@ export class BasePage {
   }
 
   /**
+   * Scrolls the element into view if needed
+   */
+  async scrollIfNeeded(locator: Locator): Promise<void> {
+    await locator.scrollIntoViewIfNeeded();
+  }
+
+  /**
    * Wait for page to be fully loaded
    */
   async waitForPageLoad(): Promise<void> {

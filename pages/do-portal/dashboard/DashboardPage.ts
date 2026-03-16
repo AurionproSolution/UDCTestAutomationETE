@@ -3,11 +3,13 @@
  * Page Object Model for DO Portal main dashboard
  */
 
-import { Page, Locator } from '@playwright/test';
-import { BasePage } from '../../common/BasePage';
+import { Locator, Page, expect } from "@playwright/test";
+import { BasePage } from "../../common/BasePage";
 
 export class DODashboardPage extends BasePage {
   // Locators
+  readonly createStandardQuoteButton: Locator;
+  readonly dialogBox: Locator;
   readonly pageHeader: Locator;
   readonly welcomeMessage: Locator;
   readonly sideMenu: Locator;
@@ -20,13 +22,49 @@ export class DODashboardPage extends BasePage {
     super(page);
 
     // DO Portal dashboard specific selectors
-    this.pageHeader = page.locator('h1, h2, .page-header');
-    this.welcomeMessage = page.locator('.welcome-message, [data-testid="welcome"]');
+    this.createStandardQuoteButton = page.getByRole("button", {
+      name: "Create Standard Quote",
+    });
+    this.dialogBox = page.getByRole("dialog");
+    this.pageHeader = page.locator("h1, h2, .page-header");
+    this.welcomeMessage = page.locator(
+      '.welcome-message, [data-testid="welcome"]',
+    );
     this.sideMenu = page.locator('.side-menu, nav, [data-testid="side-nav"]');
-    this.userProfile = page.locator('.user-profile, [data-testid="user-profile"]');
-    this.logoutButton = page.locator('button:has-text("Logout"), [data-testid="logout"]');
-    this.notificationBell = page.locator('.notification-bell, [data-testid="notifications"]');
-    this.quickActions = page.locator('.quick-actions, [data-testid="quick-actions"]');
+    this.userProfile = page.locator(
+      '.user-profile, [data-testid="user-profile"]',
+    );
+    this.logoutButton = page.locator(
+      'button:has-text("Logout"), [data-testid="logout"]',
+    );
+    this.notificationBell = page.locator(
+      '.notification-bell, [data-testid="notifications"]',
+    );
+    this.quickActions = page.locator(
+      '.quick-actions, [data-testid="quick-actions"]',
+    );
+  }
+
+  /**
+   * Click on Create Standard Quote button
+   */
+  async clickCreateStandardQuote(): Promise<void> {
+    await this.click(this.createStandardQuoteButton);
+    await this.waitForLoadingComplete();
+  }
+
+  /**
+   * Select the Credit Sale Agreement (CSA) product from dialog box
+   */
+  async selectCSAproduct(): Promise<void> {
+    // wait for the dialog to be visible
+    const dialog = this.page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // locate and click the CSA option
+    const option = dialog.locator("text= Credit Sale Agreement ");
+    await option.waitFor({ state: "attached" });
+    await option.click({ force: false });
   }
 
   /**
@@ -57,7 +95,7 @@ export class DODashboardPage extends BasePage {
    * Logout from portal
    */
   async logout(): Promise<void> {
-    this.log('Logging out from DO Portal');
+    this.log("Logging out from DO Portal");
     await this.click(this.userProfile);
     await this.click(this.logoutButton);
   }
@@ -66,7 +104,7 @@ export class DODashboardPage extends BasePage {
    * Get notification count
    */
   async getNotificationCount(): Promise<number> {
-    const badge = this.notificationBell.locator('.badge, .count');
+    const badge = this.notificationBell.locator(".badge, .count");
     const text = await this.getText(badge);
     return parseInt(text) || 0;
   }
@@ -79,7 +117,3 @@ export class DODashboardPage extends BasePage {
     await this.click(action);
   }
 }
-
-
-
-

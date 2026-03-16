@@ -3,9 +3,6 @@
  * Export all DO Portal page objects
  */
 
-export { DOLoginPage } from './login/LoginPage';
-export { DODashboardPage } from './dashboard/DashboardPage';
-
-
-
-
+export { DODashboardPage } from "./dashboard/DashboardPage";
+export { DOLoginPage } from "./login/LoginPage";
+export { DOAssetDetailsPage } from "./StandardQuote/AssetDetails/AssetDetailsPage";
