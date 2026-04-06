@@ -3,8 +3,8 @@
  * Contains common methods shared across DO, RSS, and CSS portals
  */
 
-import { Page, Locator, expect } from '@playwright/test';
-import { CommonUtils } from '../../utils/commonUtils';
+import { Locator, Page, expect } from "@playwright/test";
+import { CommonUtils } from "../../utils/commonUtils";
 
 export class BasePage {
   readonly page: Page;
@@ -22,10 +22,16 @@ export class BasePage {
     this.utils = new CommonUtils(page);
 
     // Common locators - override in child classes if needed
-    this.itemsPerPageDropdown = page.locator('#maxPerPage, [data-testid="items-per-page"]');
-    this.itemsPerPageOptions = page.locator('#maxPerPage option');
-    this.tableRows = page.locator('table tbody tr, div.table-container table tbody tr');
-    this.loadingSpinner = page.locator('.loading, .spinner, [data-testid="loading"]');
+    this.itemsPerPageDropdown = page.locator(
+      '#maxPerPage, [data-testid="items-per-page"]',
+    );
+    this.itemsPerPageOptions = page.locator("#maxPerPage option");
+    this.tableRows = page.locator(
+      "table tbody tr, div.table-container table tbody tr",
+    );
+    this.loadingSpinner = page.locator(
+      '.loading, .spinner, [data-testid="loading"]',
+    );
     this.toastMessage = page.locator('.toast, [role="alert"], .notification');
   }
 
@@ -36,7 +42,7 @@ export class BasePage {
    */
   async navigateTo(url: string): Promise<void> {
     console.log(`📍 Navigating to: ${url}`);
-    await this.page.goto(url, { waitUntil: 'domcontentloaded' });
+    await this.page.goto(url, { waitUntil: "domcontentloaded" });
   }
 
   /**
@@ -50,7 +56,7 @@ export class BasePage {
    * Wait for page to be fully loaded
    */
   async waitForPageLoad(): Promise<void> {
-    await this.page.waitForLoadState('networkidle');
+    await this.page.waitForLoadState("networkidle");
   }
 
   /**
@@ -72,14 +78,22 @@ export class BasePage {
   /**
    * Click element with visual highlight
    */
-  async click(locator: Locator): Promise<void> {
+  async clickElement(locator: Locator): Promise<void> {
     await this.utils.click(locator);
   }
 
   /**
    * Fill input with visual highlight
    */
-  async fill(locator: Locator, text: string): Promise<void> {
+  async fillElement(locator: Locator, text: string): Promise<void> {
+    await this.utils.fill(locator, text);
+  }
+
+  /**
+   * Click and fill element with visual highlight
+   */
+  async clickAndFillElement(locator: Locator, text: string): Promise<void> {
+    await this.utils.click(locator);
     await this.utils.fill(locator, text);
   }
 
@@ -124,9 +138,13 @@ export class BasePage {
   /**
    * Validate items per page options
    */
-  async validateItemsPerPageOptions(expected: string[] = ['10', '25', '50']): Promise<void> {
+  async validateItemsPerPageOptions(
+    expected: string[] = ["10", "25", "50"],
+  ): Promise<void> {
     await this.itemsPerPageDropdown.click();
-    const actual = (await this.itemsPerPageOptions.allTextContents()).map((t) => t.trim());
+    const actual = (await this.itemsPerPageOptions.allTextContents()).map((t) =>
+      t.trim(),
+    );
     expect(actual).toEqual(expected);
   }
 
@@ -137,7 +155,7 @@ export class BasePage {
    */
   async waitForLoadingComplete(timeout: number = 30000): Promise<void> {
     try {
-      await this.loadingSpinner.waitFor({ state: 'hidden', timeout });
+      await this.loadingSpinner.waitFor({ state: "hidden", timeout });
     } catch {
       // Spinner may not exist, continue
     }
@@ -147,7 +165,7 @@ export class BasePage {
    * Wait for toast/notification message
    */
   async waitForToast(timeout: number = 10000): Promise<string> {
-    await this.toastMessage.waitFor({ state: 'visible', timeout });
+    await this.toastMessage.waitFor({ state: "visible", timeout });
     return await this.getText(this.toastMessage);
   }
 
@@ -167,7 +185,3 @@ export class BasePage {
     console.log(`[${new Date().toISOString()}] ${message}`);
   }
 }
-
-
-
-

@@ -49,7 +49,7 @@ export class DODashboardPage extends BasePage {
    * Click on Create Standard Quote button
    */
   async clickCreateStandardQuote(): Promise<void> {
-    await this.click(this.createStandardQuoteButton);
+    await this.clickElement(this.createStandardQuoteButton);
     await this.waitForLoadingComplete();
   }
 
@@ -87,7 +87,7 @@ export class DODashboardPage extends BasePage {
    */
   async navigateToMenuItem(menuText: string): Promise<void> {
     const menuItem = this.sideMenu.locator(`text=${menuText}`);
-    await this.click(menuItem);
+    await this.clickElement(menuItem);
     await this.waitForLoadingComplete();
   }
 
@@ -96,8 +96,8 @@ export class DODashboardPage extends BasePage {
    */
   async logout(): Promise<void> {
     this.log("Logging out from DO Portal");
-    await this.click(this.userProfile);
-    await this.click(this.logoutButton);
+    await this.clickElement(this.userProfile);
+    await this.clickElement(this.logoutButton);
   }
 
   /**
@@ -114,6 +114,6 @@ export class DODashboardPage extends BasePage {
    */
   async clickQuickAction(actionName: string): Promise<void> {
     const action = this.quickActions.locator(`text=${actionName}`);
-    await this.click(action);
+    await this.clickElement(action);
   }
 }

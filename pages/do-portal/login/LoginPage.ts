@@ -64,14 +64,14 @@ export class DOLoginPage extends BasePage {
    */
   async login(username: string, password: string): Promise<void> {
     this.log(`Logging in as: ${username}`);
-    await this.click(this.loginWithFisButton);
-    await this.fill(this.usernameInput, username);
-    await this.click(this.proceedButton);
-    await this.fill(this.passwordInput, password);
-    await this.click(this.yesThisIsMyComputerRadio);
-    await this.click(this.signinButton);
+    await this.clickElement(this.loginWithFisButton);
+    await this.fillElement(this.usernameInput, username);
+    await this.clickElement(this.proceedButton);
+    await this.fillElement(this.passwordInput, password);
+    await this.clickElement(this.yesThisIsMyComputerRadio);
+    await this.clickElement(this.signinButton);
     await this.waitForLoadingComplete();
-    await this.click(this.quoteAndAppButton);
+    await this.clickElement(this.quoteAndAppButton);
     await this.waitForLoadingComplete();
   }
 
@@ -90,7 +90,7 @@ export class DOLoginPage extends BasePage {
    */
   async navigateToForgotPassword(): Promise<void> {
     await this.navigate();
-    await this.click(this.forgotPasswordLink);
+    await this.clickElement(this.forgotPasswordLink);
   }
 
   /**
@@ -112,6 +112,6 @@ export class DOLoginPage extends BasePage {
    * Toggle remember me checkbox
    */
   async toggleRememberMe(): Promise<void> {
-    await this.click(this.rememberMeCheckbox);
+    await this.clickElement(this.rememberMeCheckbox);
   }
 }

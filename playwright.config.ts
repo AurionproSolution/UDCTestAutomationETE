@@ -88,6 +88,7 @@ export default defineConfig({
 
   // Global settings for all projects
   use: {
+    headless: false,
     // Trace - captures actions, DOM snapshots, network logs
     trace: "on",
 
