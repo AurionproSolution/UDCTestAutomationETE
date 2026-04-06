@@ -1,0 +1,185 @@
+name: UDC Automation Tests
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      portal:
+        description: 'Portal to test (do, rss, css, all)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - do
+          - rss
+          - css
+      environment:
+        description: 'Test environment'
+        required: true
+        default: 'qat'
+        type: choice
+        options:
+          - dev
+          - qat
+          - uat
+      test_type:
+        description: 'Test type to run'
+        required: true
+        default: 'smoke'
+        type: choice
+        options:
+          - smoke
+          - regression
+          - all
+
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        portal: [do-portal, rss-portal, css-portal]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests for ${{ matrix.portal }}
+        run: npx playwright test --project=${{ matrix.portal }}-chromium
+        env:
+          TEST_ENV: ${{ github.event.inputs.environment || 'qat' }}
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.portal }}
+          path: test-results/
+          retention-days: 30
+
+      - name: Upload HTML Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.portal }}
+          path: my-report/
+          retention-days: 30
+
+      - name: Upload Ortoni Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ortoni-report-${{ matrix.portal }}
+          path: ortoni-report/
+          retention-days: 30
+
+  # Smoke Tests - Quick validation
+  smoke-tests:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Smoke Tests
+        run: npm run test:smoke
+        env:
+          TEST_ENV: qat
+
+      - name: Upload Smoke Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-results
+          path: |
+            test-results/
+            my-report/
+          retention-days: 7
+
+  # Manual Portal Test
+  manual-test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      - name: Determine test command
+        id: test-cmd
+        run: |
+          PORTAL="${{ github.event.inputs.portal }}"
+          TEST_TYPE="${{ github.event.inputs.test_type }}"
+          
+          if [ "$PORTAL" = "all" ]; then
+            if [ "$TEST_TYPE" = "smoke" ]; then
+              echo "cmd=npm run test:smoke" >> $GITHUB_OUTPUT
+            elif [ "$TEST_TYPE" = "regression" ]; then
+              echo "cmd=npm run test:regression" >> $GITHUB_OUTPUT
+            else
+              echo "cmd=npm run test:all-portals" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "cmd=npx playwright test --project=${PORTAL}-portal-chromium" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Tests
+        run: ${{ steps.test-cmd.outputs.cmd }}
+        env:
+          TEST_ENV: ${{ github.event.inputs.environment }}
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: manual-test-results
+          path: |
+            test-results/
+            my-report/
+            ortoni-report/
+          retention-days: 30

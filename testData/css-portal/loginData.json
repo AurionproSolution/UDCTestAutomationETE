@@ -1,0 +1,38 @@
+{
+  "validUsers": [
+    {
+      "username": "css_admin",
+      "password": "CssAdmin@123",
+      "role": "admin",
+      "email": "css_admin@udc.com"
+    },
+    {
+      "username": "css_support",
+      "password": "Support@123",
+      "role": "support",
+      "email": "css_support@udc.com"
+    },
+    {
+      "username": "css_agent",
+      "password": "Agent@123",
+      "role": "agent",
+      "email": "css_agent@udc.com"
+    }
+  ],
+  "invalidUsers": [
+    {
+      "username": "bad_user",
+      "password": "badpass",
+      "expectedError": "Login failed. Check your credentials."
+    },
+    {
+      "username": "expired_user",
+      "password": "expired123",
+      "expectedError": "Account has expired. Contact support."
+    }
+  ]
+}
+
+
+
+
