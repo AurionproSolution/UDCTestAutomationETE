@@ -1,0 +1,38 @@
+{
+  "validUsers": [
+    {
+      "username": "rss_admin",
+      "password": "RssAdmin@123",
+      "role": "admin",
+      "email": "rss_admin@udc.com"
+    },
+    {
+      "username": "rss_analyst",
+      "password": "Analyst@123",
+      "role": "analyst",
+      "email": "rss_analyst@udc.com"
+    },
+    {
+      "username": "rss_reporter",
+      "password": "Reporter@123",
+      "role": "reporter",
+      "email": "rss_reporter@udc.com"
+    }
+  ],
+  "invalidUsers": [
+    {
+      "username": "invalid_rss",
+      "password": "wrongpass",
+      "expectedError": "Authentication failed."
+    },
+    {
+      "username": "",
+      "password": "somepassword",
+      "expectedError": "Username is required."
+    }
+  ]
+}
+
+
+
+

@@ -1,0 +1,39 @@
+{
+  "validUsers": [
+    {
+      "username": "DEEPAK.PARAMANICK",
+      "password": "SandBoxAPIfin@2211",
+      "role": "admin",
+      "email": "do_admin@udc.com"
+    },
+    {
+      "username": "do_user",
+      "password": "User@123",
+      "role": "user",
+      "email": "do_user@udc.com"
+    },
+    {
+      "username": "do_viewer",
+      "password": "Viewer@123",
+      "role": "viewer",
+      "email": "do_viewer@udc.com"
+    }
+  ],
+  "invalidUsers": [
+    {
+      "username": "invalid_user",
+      "password": "wrongpassword",
+      "expectedError": "Invalid credentials. Please try again."
+    },
+    {
+      "username": "",
+      "password": "",
+      "expectedError": "Username and password are required."
+    },
+    {
+      "username": "locked_user",
+      "password": "password",
+      "expectedError": "Account is locked. Contact administrator."
+    }
+  ]
+}
