@@ -10,8 +10,8 @@ import {
   DOLoginPage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
-import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/StandardQuote/addressDetails";
-import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/StandardQuote/personalDetails";
+import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
+import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import doLoginData from "../../../testData/do-portal/loginData.json";
 
 let loginPage: DOLoginPage;
