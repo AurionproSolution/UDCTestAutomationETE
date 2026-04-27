@@ -66,6 +66,10 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** Angular host for SelectorHub / QAT paths (narrower than div+physicalSearch). */
   readonly physicalAddressRoot: Locator;
+  /** CSA-B / business entity — Physical Address lives under `app-business-physical-address`, not `app-physical-address`. */
+  readonly businessPhysicalAddressRoot: Locator;
+  /** Reuse for Register Address (`toggle-checkbox` + `p-inputswitch`). */
+  readonly reuseRegisterAddressToggle: Locator;
   readonly previousAddressRoot: Locator;
 
   constructor(page: Page) {
@@ -75,6 +79,21 @@ export class DOAddressDetailsPage extends BasePage {
       .filter({ has: page.locator('input[name="physicalSearchValue"]') })
       .first();
     this.physicalAddressRoot = page.locator("app-physical-address").first();
+    this.businessPhysicalAddressRoot = page
+      .locator("app-business-physical-address")
+      .first();
+    /** CSA-B: row with “Reuse for Register Address” → PrimeNG switch slider. */
+    this.reuseRegisterAddressToggle = this.businessPhysicalAddressRoot
+      .locator("toggle-checkbox")
+      .filter({ hasText: /Reuse for Register Address/i })
+      .locator(".p-inputswitch-slider")
+      .first()
+      .or(
+        this.businessPhysicalAddressRoot.locator(
+          "form > div:nth-child(1) > div:nth-child(8) toggle-checkbox p-inputswitch span:nth-child(2)",
+        ),
+      )
+      .first();
     this.previousAddressRoot = page.locator("app-previous-address").first();
     // Residence Type only — never `.first()` on all triggers in a wide div (that hits Dealer / other chrome).
     this.residentialTypeDropdown = this.physicalAddressRoot
@@ -421,6 +440,15 @@ export class DOAddressDetailsPage extends BasePage {
         );
       })
       .catch(() => false);
+    const isBusinessPhysicalHost = await block
+      .evaluate((el: HTMLElement) => {
+        const t = el.tagName?.toUpperCase?.() ?? "";
+        return (
+          t === "APP-BUSINESS-PHYSICAL-ADDRESS" ||
+          !!el.closest?.("app-business-physical-address")
+        );
+      })
+      .catch(() => false);
     const hasPrevSearchInput =
       (await block.locator('input[name="previousSearchValue"]').count()) > 0;
     const isPreviousCard = isPreviousHost || hasPrevSearchInput;
@@ -443,8 +471,8 @@ export class DOAddressDetailsPage extends BasePage {
       return true;
     };
 
-    // PrimeNG time row: was previous-address-only, but physical `app-physical-address` uses the same widgets.
-    if (isPreviousCard || isPhysicalHost) {
+    // PrimeNG time row: physical + CSA-B `app-business-physical-address` use the same widgets.
+    if (isPreviousCard || isPhysicalHost || isBusinessPhysicalHost) {
       const timeRow = block
         .locator("div, section, form")
         .filter({ has: block.getByText(/Time at Address/i) })
@@ -705,6 +733,27 @@ export class DOAddressDetailsPage extends BasePage {
    * months = `form > div > div:nth-child(6) > text > … > input` (gen-card physical form).
    */
   async timeAtAddress(year: string, month: string) {
+    const bizRoot = this.businessPhysicalAddressRoot;
+    if (await bizRoot.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await bizRoot.scrollIntoViewIfNeeded().catch(() => {});
+      const yBiz = this.businessPhysicalTimeYearsInput();
+      const mBiz = this.businessPhysicalTimeMonthsInput();
+      const yBizOk = await yBiz.isVisible({ timeout: 6000 }).catch(() => false);
+      const mBizOk = await mBiz.isVisible({ timeout: 6000 }).catch(() => false);
+      if (yBizOk && mBizOk) {
+        await yBiz.click();
+        await yBiz.fill("");
+        await yBiz.fill(year);
+        await mBiz.click();
+        await mBiz.fill("");
+        await mBiz.fill(month);
+        await mBiz.press("Tab").catch(() => {});
+        return;
+      }
+      await this.fillYearsMonthsInBlock(bizRoot, year, month);
+      return;
+    }
+
     const root = this.physicalAddressRoot;
     await root.scrollIntoViewIfNeeded().catch(() => {});
 
@@ -791,6 +840,34 @@ export class DOAddressDetailsPage extends BasePage {
       `form > div > div:nth-child(${rowDivChild}) > text > div > div:nth-child(2) > input`,
     );
     return exact.or(fallback).first();
+  }
+
+  /**
+   * CSA-B `app-business-physical-address` — Selector Hub years input (`form … div:nth-child(3) > text … > input`).
+   */
+  private businessPhysicalTimeYearsInput(): Locator {
+    const root = this.businessPhysicalAddressRoot;
+    const exact = root.locator(
+      "> div:nth-child(2) > base-form > gen-card > p-card > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > div:nth-child(2) > form:nth-child(1) > div:nth-child(1) > div:nth-child(3) > text:nth-child(1) > div:nth-child(1) > div:nth-child(2) > input:nth-child(1)",
+    );
+    const short = root.locator(
+      "form > div:nth-child(1) > div:nth-child(3) > text > div > div:nth-child(2) > input",
+    );
+    return exact.or(short).first();
+  }
+
+  /**
+   * CSA-B months — `//div[@class='mt-3 ng-star-inserted']//input[@id='text']` scoped to business physical.
+   */
+  private businessPhysicalTimeMonthsInput(): Locator {
+    const root = this.businessPhysicalAddressRoot;
+    const byMt3 = root.locator(
+      'xpath=.//div[contains(@class,"mt-3")][contains(@class,"ng-star-inserted")]//input[@id="text"]',
+    );
+    const byExactClass = root.locator(
+      'xpath=.//div[@class="mt-3 ng-star-inserted"]//input[@id="text"]',
+    );
+    return byMt3.or(byExactClass).first();
   }
 
   /**
@@ -1091,6 +1168,33 @@ export class DOAddressDetailsPage extends BasePage {
 
   async clickReuseForPostalAddressToggle() {
     await this.reusePostalAddressToggle.click();
+  }
+
+  /** CSA-B business physical card — “Reuse for Register Address”. */
+  async clickReuseForRegisterAddressToggle(): Promise<void> {
+    await this.businessPhysicalAddressRoot.waitFor({
+      state: "visible",
+      timeout: 15000,
+    });
+    await this.reuseRegisterAddressToggle.waitFor({
+      state: "visible",
+      timeout: 15000,
+    });
+    await this.reuseRegisterAddressToggle.scrollIntoViewIfNeeded();
+    await this.reuseRegisterAddressToggle.click();
+  }
+
+  async clickReuseForRegisterAddressToggleIfPresent(): Promise<void> {
+    if (
+      await this.businessPhysicalAddressRoot.isVisible({ timeout: 3000 }).catch(() => false)
+    ) {
+      if (
+        await this.reuseRegisterAddressToggle.isVisible({ timeout: 3000 }).catch(() => false)
+      ) {
+        await this.reuseRegisterAddressToggle.scrollIntoViewIfNeeded();
+        await this.reuseRegisterAddressToggle.click();
+      }
+    }
   }
 
   /** Clicks reuse toggle only when shown (some products omit postal reuse). */
