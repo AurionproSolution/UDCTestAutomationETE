@@ -46,11 +46,59 @@ export class DODashboardPage extends BasePage {
   }
 
   /**
-   * Click on Create Standard Quote button
+   * After login, Prime may show a full-page blocking overlay (app-loader + progress spinner) that
+   * intercepts pointer events. Wait until it is gone before clicking dashboard CTAs.
+   */
+  private async waitForAppLoaderOverlayGone(timeoutMs: number = 120_000): Promise<void> {
+    const overlay = this.page.locator(".app-loader-overlay, [class*='app-loader']");
+    const n = await overlay.count();
+    if (n > 0) {
+      const first = overlay.first();
+      if (await first.isVisible().catch(() => false)) {
+        await first.waitFor({ state: "hidden", timeout: timeoutMs });
+      } else {
+        await first
+          .waitFor({ state: "hidden", timeout: 5_000 })
+          .catch(() => {});
+      }
+    }
+    await this.page
+      .locator(".app-loader-overlay p-progressspinner, .app-loader p-progressspinner")
+      .first()
+      .waitFor({ state: "hidden", timeout: 15_000 })
+      .catch(() => {});
+  }
+
+  /**
+   * Click "Create Standard Quote" — wait out the blocking loader, then click (with force retry).
    */
   async clickCreateStandardQuote(): Promise<void> {
-    await this.clickElement(this.createStandardQuoteButton);
-    await this.waitForLoadingComplete();
+    await this.page
+      .waitForLoadState("domcontentloaded", { timeout: 30_000 })
+      .catch(() => {});
+    await this.waitForAppLoaderOverlayGone(120_000);
+
+    const btn = this.createStandardQuoteButton;
+    await btn.waitFor({ state: "visible", timeout: 60_000 });
+    await expect(btn).toBeEnabled({ timeout: 30_000 });
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await this.waitForAppLoaderOverlayGone(30_000);
+      }
+      try {
+        await btn.click({ timeout: 30_000, force: attempt > 0 });
+        break;
+      } catch {
+        if (attempt === 2) {
+          throw new Error(
+            "Create Standard Quote: click failed after waiting for .app-loader-overlay; overlay may still be blocking.",
+          );
+        }
+        await this.page.waitForTimeout(500);
+      }
+    }
+    await this.waitForLoadingComplete(30_000);
   }
 
   /**
@@ -66,6 +114,18 @@ export class DODashboardPage extends BasePage {
     await option.waitFor({ state: "attached" });
     await option.click({ force: false });
   }
+//finance lease
+
+async selectFinanceLeaseProduct(): Promise<void> {
+  // wait for the dialog to be visible
+  const dialog = this.page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+
+  // locate and click the CSA option
+  const option = dialog.locator("text= Finance Lease ");
+  await option.waitFor({ state: "attached" });
+  await option.click({ force: false });
+}
 
   /**
    * Verify dashboard is loaded
