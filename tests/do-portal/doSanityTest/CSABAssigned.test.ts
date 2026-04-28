@@ -113,18 +113,20 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
     await businessDetailsPage.enterBusinessEmail("liza.doe@example.com");
     await businessDetailsPage.clickNextButton();
     await addressDetailsPage.waitForPhysicalAddressStep();
-    // Physical Address
+    // Physical Address — then reuse toggles (CSA-B: register reuse = Yes skips Registered + Previous Physical blocks).
     await addressDetailsPage.timeAtAddress("1", "1");
     await addressDetailsPage.enterStreetNumber("123");
     await addressDetailsPage.enterStreetName("Main Street");
     await addressDetailsPage.enterCity("Wellington");
     await addressDetailsPage.chooseCountry("New Zealand");
-    // Reuse for Postal Address → Yes (click once if toggle starts on No)
+    // Reuse for Postal Address → Yes (scoped to business physical card when present).
     await addressDetailsPage.clickReuseForPostalAddressToggle();
-    // CSA-B: “Reuse for Register Address” — call when the flow should share the same address (optional).
-    // await addressDetailsPage.clickReuseForRegisterAddressToggle();
+    await page.waitForTimeout(400);
+    // Reuse for Register Address → Yes: reuses physical for registered address; Previous Physical / Registered Address are usually hidden.
+    await addressDetailsPage.ensureReuseForRegisterAddressYes();
 
-    // Previous Physical Address — skipped automatically when `app-previous-address` is not shown for this product.
+    // Previous Physical Address — `app-previous-address` or CSA-B `p-card`/`gen-card` under `app-business-address-details`.
+    await addressDetailsPage.ensureOverseasAddressNoIfPreviousPhysicalVisible();
     await addressDetailsPage.fillPreviousPhysicalRequiredIfPresent({
       years: "1",
       months: "1",
@@ -133,29 +135,30 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
       city: "Wellington",
       country: "New Zealand",
     });
-    // Postal Address — Postal type, freeform textarea, Country (reuse is toggled off inside the helper if needed)
-    await addressDetailsPage.fillPostalAddressPostalTypeTextareaAndCountry({
-      addressLine: "Navimumbai",
-      country: "Afghanistan",
-    });
-
-
-    // Postal Address — only when Reuse is No: clickPostalStreetType, fillPostalSearch, enterPostal*, choosePostalCountry
+    // Postal Address — only when a separate postal block is required (e.g. postal reuse No).
+    // await addressDetailsPage.fillPostalAddressPostalTypeTextareaAndCountry({
+    //   addressLine: "Navimumbai",
+    //   country: "Afghanistan",
+    // });
 
     await addressDetailsPage.clickNextButton();
 
     // Financial Position — Liabilities, Income, Expenditure, income-decrease radios, Essential Outgoings
     await financialPositionPage.waitForFinancialPositionStep();
-    await financialPositionPage.fillFirstLiabilityBalanceAndAmount("$500000.00", "$2500.00");
-    await financialPositionPage.setFirstLiabilityRowFrequencyMonthly();
-    await financialPositionPage.fillFirstIncomeAmount("$5000.00");
-    await financialPositionPage.setIncomeFrequencyMonthly();
-    await financialPositionPage.selectIncomeLikelyToDecreaseNo();
-    await financialPositionPage.fillFirstExpenditureAmount("$200.00");
-    await financialPositionPage.setExpenditureFrequencyMonthly();
-    await financialPositionPage.selectEssentialOutgoingTypeLifestyle();
-    await financialPositionPage.fillEssentialOutgoingAmount("$150.00");
-    await financialPositionPage.setEssentialOutgoingFrequencyMonthly();
+    await financialPositionPage.selectBusinessNetProfitLastYearYes();
+    await financialPositionPage.fillBusinessNetProfitLastYear("$50000.00");
+    await financialPositionPage.fillBusinessTurnoverLatestYear(
+      "$500000.00",
+      "31/03/2025",
+    );
+    // await financialPositionPage.fillBusinessTurnoverPreviousYear(
+    //   "$450000.00",
+    //   "31/03/2024",
+    // );
+    await financialPositionPage.fillBusinessCashBalance("$10000.00", "31/03/2025");
+    // await financialPositionPage.fillBusinessDebtorBalance("$5000.00", "31/03/2025");
+    // await financialPositionPage.fillBusinessCreditorBalance("$3000.00", "31/03/2025");
+    // await financialPositionPage.fillBusinessOverdraftBalance("$0.00", "31/03/2025");
     await financialPositionPage.clickNextButton();
 
     // Reference Details — add contact, confirm, submit

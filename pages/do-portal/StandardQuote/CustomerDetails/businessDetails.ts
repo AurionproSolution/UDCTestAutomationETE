@@ -49,7 +49,8 @@ export class DOBusinessDetailsPage extends BasePage {
 
     const tryOpen = async (trigger: Locator, timeout: number): Promise<boolean> => {
       try {
-        await trigger.waitFor({ state: "visible", timeout });
+        if (!(await trigger.isVisible({ timeout: Math.min(timeout, 1200) }).catch(() => false)))
+          return false;
         await trigger.scrollIntoViewIfNeeded();
         if (!(await trigger.isEnabled().catch(() => true))) return false;
         await trigger.click({ timeout: 5000 });
