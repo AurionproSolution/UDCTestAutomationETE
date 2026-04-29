@@ -243,7 +243,6 @@ export class DOAddressDetailsPage extends BasePage {
       .locator("#text")
       .nth(2);
   }
-
   async selectResidenceType(residenceType: string) {
     const rx = new RegExp(residenceType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
 

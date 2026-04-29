@@ -791,6 +791,67 @@ export class DOAssetDetailsPage extends BasePage {
       "Finance Lease: could not set Initial Lease Amount (tried getByLabel, p-field row, label ancestor input, w-full p-inputtext).",
     );
   }
+
+  /**
+   * Finance Lease — **Residual Value** `%` only: visible `#percent` inside `app-quote-details`
+   * (no label click — avoids focus churn next to **Origination Reference**).
+   * Call **once after first Calculate** when pricing has finished (loaders handled by {@link clickCalculateButton}).
+   */
+  private async patchResidualPercentNative(inp: Locator, digits: string): Promise<void> {
+    await inp.evaluate((el: HTMLInputElement, v: string) => {
+      el.removeAttribute("readonly");
+      el.removeAttribute("disabled");
+      el.focus();
+      const proto = Object.getPrototypeOf(el) as HTMLInputElement;
+      const desc = Object.getOwnPropertyDescriptor(proto, "value");
+      const setter = desc?.set;
+      if (setter) setter.call(el, v);
+      else el.value = v;
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+    }, digits);
+  }
+
+  /** Visible `#percent` scoped to quote shell (not page-wide — avoids wrong `#percent`). */
+  private residualPercentInput(): Locator {
+    const root = this.page.locator("app-quote-details, app-standard-quote").first();
+    return root.locator("#percent").filter({ visible: true }).first();
+  }
+
+  async enterResidualValuePercentFinanceLease(percent: string): Promise<void> {
+    const page = this.page;
+    const root = page.locator("app-quote-details, app-standard-quote").first();
+    await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    await page.waitForTimeout(400);
+
+    const digits = percent.replace(/%/g, "").trim();
+    const pct = this.residualPercentInput();
+
+    await pct.waitFor({ state: "visible", timeout: 15_000 });
+    await pct.scrollIntoViewIfNeeded();
+    await pct.click({ force: true });
+    await pct.press("ControlOrMeta+a");
+    await pct.fill(digits);
+
+    let v = (await pct.inputValue().catch(() => "")).trim();
+    const num = parseFloat(v.replace(/%/g, ""));
+    const target = parseFloat(digits);
+    const ok =
+      v.includes(digits) ||
+      (!Number.isNaN(num) && !Number.isNaN(target) && Math.abs(num - target) < 0.05);
+    if (!ok) {
+      await this.patchResidualPercentNative(pct, digits);
+    }
+
+    /** Blur only `#percent` — do not Tab into Origination / other fields. */
+    await pct.evaluate((el: HTMLElement) => {
+      el.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+    });
+    await page.waitForTimeout(300);
+  }
+
   async loanDAte(): Promise<void> {
     await this.loanDate.click();
   }
