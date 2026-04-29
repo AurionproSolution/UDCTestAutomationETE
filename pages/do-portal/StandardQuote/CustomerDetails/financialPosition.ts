@@ -2,12 +2,18 @@ import { Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
 /**
- * Step 4 — Financial Position (`app-financial-position`): Liabilities, Income, Expenditure,
- * income-decrease radios, and Regular Recurring Essential Outgoings.
+ * Step — Financial Position:
+ * - **Individual:** `app-financial-position` (Liabilities, Income, Expenditure, Essential Outgoings).
+ * - **CSA-B business:** `app-business-financial` (Profit declaration, Turnover, Balance information).
  * PrimeNG ids (`#pn_id_*`) are fallbacks — they can change between builds.
  */
 export class DOFinancialPositionPage extends BasePage {
   readonly financialRoot: Locator;
+  /** CSA-B business entity — Financial Accounts step. */
+  readonly businessFinancialRoot: Locator;
+  readonly turnoverInformationRoot: Locator;
+  /** `app-balance-information` or a card titled “Balance Information” under `app-business-financial`. */
+  readonly balanceInformationHost: Locator;
   readonly liabilitiesCard: Locator;
   readonly incomeDetailsCard: Locator;
   readonly expenditureCard: Locator;
@@ -16,6 +22,20 @@ export class DOFinancialPositionPage extends BasePage {
   constructor(page: Page) {
     super(page);
     this.financialRoot = page.locator("app-financial-position").first();
+    this.businessFinancialRoot = page.locator("app-business-financial").first();
+    this.turnoverInformationRoot = page
+      .locator("app-business-financial app-turnover-information")
+      .first()
+      .or(page.locator("app-turnover-information").first());
+    this.balanceInformationHost = page
+      .locator("app-balance-information")
+      .first()
+      .or(
+        this.businessFinancialRoot
+          .locator("gen-card, p-card")
+          .filter({ hasText: /Balance Information/i })
+          .first(),
+      );
     this.liabilitiesCard = page.locator("app-individual-liabilities").first();
     this.incomeDetailsCard = page.locator("app-income-details").first();
     this.expenditureCard = page.locator("app-individual-expenditure").first();
@@ -23,7 +43,10 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async waitForFinancialPositionStep(): Promise<void> {
-    await this.financialRoot.waitFor({ state: "visible", timeout: 120000 });
+    await this.financialRoot
+      .or(this.businessFinancialRoot)
+      .first()
+      .waitFor({ state: "visible", timeout: 120000 });
   }
 
   private escapeRx(s: string): string {
@@ -48,6 +71,48 @@ export class DOFinancialPositionPage extends BasePage {
     await input.pressSequentially(digits, { delay: 35 });
     await input.press("Tab");
     await this.page.waitForTimeout(400);
+  }
+
+  /**
+   * PrimeNG `p-calendar` text inputs are often **readonly**; `fill()` does not bind the model.
+   * Prefer keyboard entry, then fall back to clearing readonly and dispatching input/change/blur.
+   */
+  private async fillYearEndingField(input: Locator, value: string): Promise<void> {
+    await input.waitFor({ state: "visible", timeout: 20000 });
+    await input.scrollIntoViewIfNeeded();
+    await input.click({ timeout: 15000, force: true });
+    await input.press("Control+A");
+    await input.pressSequentially(value, { delay: 40 });
+    await input.press("Tab");
+    await this.page.waitForTimeout(350);
+
+    const v = (await input.inputValue().catch(() => "")).trim();
+    if (v.length > 0) {
+      return;
+    }
+
+    await input.evaluate((el: HTMLInputElement, dateStr: string) => {
+      el.removeAttribute("readonly");
+      el.removeAttribute("disabled");
+      el.focus();
+      el.value = dateStr;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+    }, value);
+    await this.page.waitForTimeout(350);
+  }
+
+  /** Year-ending `p-calendar` input on the same logical row as this `<amount>` host (avoids wrong `nth()`). */
+  private yearEndingInputForAmountHost(amountHost: Locator): Locator {
+    return amountHost
+      .locator("xpath=following::p-calendar[1]//input")
+      .first()
+      .or(
+        amountHost
+          .locator("xpath=ancestor::*[.//p-calendar][1]//p-calendar//input")
+          .first(),
+      );
   }
 
   /**
@@ -368,6 +433,170 @@ export class DOFinancialPositionPage extends BasePage {
       timeout: 10000,
     });
     await this.pickDropdownOption("Monthly");
+  }
+
+  private profitDeclarationCard(): Locator {
+    return this.businessFinancialRoot
+      .locator("gen-card, p-card")
+      .filter({ hasText: /Did you make a Net Profit|Profit Declaration/i })
+      .first();
+  }
+
+  /** CSA-B **Financial Accounts** — “Did you make a Net Profit last year?” → **Yes**. */
+  async selectBusinessNetProfitLastYearYes(): Promise<void> {
+    await this.businessFinancialRoot.waitFor({
+      state: "visible",
+      timeout: 120000,
+    });
+    const card = this.profitDeclarationCard();
+    await card.waitFor({ state: "visible", timeout: 15000 });
+
+    const yesAlready = card.locator("p-radiobutton.p-radiobutton-checked").filter({
+      hasText: "Yes",
+    });
+    if (await yesAlready.isVisible({ timeout: 800 }).catch(() => false)) {
+      return;
+    }
+
+    const yesLabel = card.getByText("Yes", { exact: true }).first();
+    if (await yesLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await yesLabel.scrollIntoViewIfNeeded();
+      await yesLabel.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const byRole = card.getByRole("radio", { name: /^yes$/i });
+    if (await byRole.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await byRole.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const yesBoxes = card.locator("p-radiobutton").filter({ hasText: "Yes" });
+    const yesBox = yesBoxes.locator(".p-radiobutton-box").first();
+    if (await yesBox.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await yesBox.scrollIntoViewIfNeeded();
+      await yesBox.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const radios = card.locator("p-radiobutton");
+    const count = await radios.count();
+    if (count >= 2) {
+      await radios.nth(1).locator(".p-radiobutton-box").click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const yesRb = card.locator("p-radiobutton").filter({ hasText: "Yes" }).first();
+    if (await yesRb.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await yesRb.scrollIntoViewIfNeeded();
+      await yesRb.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const nativeRadios = card.locator("input[type='radio']");
+    if ((await nativeRadios.count()) >= 2) {
+      await nativeRadios.nth(1).click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    throw new Error(
+      "Profit declaration: could not select Yes for “Did you make a Net Profit last year?”",
+    );
+  }
+
+  /** “Net Profit last year *” (`<amount>` / `input.valueClass`). */
+  async fillBusinessNetProfitLastYear(value: string): Promise<void> {
+    await this.businessFinancialRoot.waitFor({ state: "visible", timeout: 60000 });
+    const card = this.profitDeclarationCard();
+    await card.waitFor({ state: "visible", timeout: 15000 });
+    const byAmountHost = card.locator("amount").locator("#amount").first();
+    if (await byAmountHost.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await this.setCommittedAmount(byAmountHost, value);
+      return;
+    }
+    const valueClassInput = card
+      .locator("input.p-inputtext.p-component.p-element.w-full.valueClass")
+      .first();
+    await this.setCommittedAmount(valueClassInput, value);
+  }
+
+  /** Turnover (Latest Year) — amount + year ending. */
+  async fillBusinessTurnoverLatestYear(
+    amount: string,
+    yearEnding: string,
+  ): Promise<void> {
+    await this.fillBusinessTurnoverRow(0, amount, yearEnding);
+  }
+
+  /** Turnover (Previous Year) — amount + year ending. */
+  async fillBusinessTurnoverPreviousYear(
+    amount: string,
+    yearEnding: string,
+  ): Promise<void> {
+    await this.fillBusinessTurnoverRow(1, amount, yearEnding);
+  }
+
+  private async fillBusinessTurnoverRow(
+    rowIndex: number,
+    amount: string,
+    yearEnding: string,
+  ): Promise<void> {
+    await this.turnoverInformationRoot.waitFor({
+      state: "visible",
+      timeout: 20000,
+    });
+    const amountHost = this.turnoverInformationRoot.locator("amount").nth(rowIndex);
+    const amountInput = amountHost
+      .locator("#amount")
+      .or(amountHost.locator("input.p-inputtext.p-component"))
+      .first();
+    await this.setCommittedAmount(amountInput, amount);
+    const calendarInput = this.yearEndingInputForAmountHost(amountHost);
+    await this.fillYearEndingField(calendarInput, yearEnding);
+  }
+
+  /**
+   * Balance Information — row order in DOM: **0** Cash, **1** Debtor, **2** Creditor, **3** Overdraft.
+   */
+  async fillBusinessCashBalance(amount: string, yearEnding: string): Promise<void> {
+    await this.fillBusinessBalanceRow(0, amount, yearEnding);
+  }
+
+  async fillBusinessDebtorBalance(amount: string, yearEnding: string): Promise<void> {
+    await this.fillBusinessBalanceRow(1, amount, yearEnding);
+  }
+
+  async fillBusinessCreditorBalance(amount: string, yearEnding: string): Promise<void> {
+    await this.fillBusinessBalanceRow(2, amount, yearEnding);
+  }
+
+  async fillBusinessOverdraftBalance(amount: string, yearEnding: string): Promise<void> {
+    await this.fillBusinessBalanceRow(3, amount, yearEnding);
+  }
+
+  private async fillBusinessBalanceRow(
+    rowIndex: number,
+    amount: string,
+    yearEnding: string,
+  ): Promise<void> {
+    await this.balanceInformationHost.waitFor({
+      state: "visible",
+      timeout: 20000,
+    });
+    const amountHost = this.balanceInformationHost.locator("amount").nth(rowIndex);
+    const amountInput = amountHost
+      .locator("#amount")
+      .or(amountHost.locator("input.p-inputtext.p-component"))
+      .first();
+    await this.setCommittedAmount(amountInput, amount);
+    const calendarInput = this.yearEndingInputForAmountHost(amountHost);
+    await this.fillYearEndingField(calendarInput, yearEnding);
   }
 
   async clickNextButton(): Promise<void> {

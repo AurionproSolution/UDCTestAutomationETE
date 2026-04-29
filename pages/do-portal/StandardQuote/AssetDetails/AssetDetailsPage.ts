@@ -578,8 +578,55 @@ export class DOAssetDetailsPage extends BasePage {
     this.udcEstablishmentFee(udcEstablishmentFee);
     this.dealerOriginationFee(dealerOriginationFee);
   }
+  /**
+   * Term: numeric **spinbutton** inside `<number>` (some builds), or **dropdown** (QAT / other products).
+   */
   async termsOfFinance(term: string): Promise<void> {
-    await this.termsOfFinanceInputField.fill(term);
+    const spin = this.termsOfFinanceInputField;
+    if (await spin.isVisible({ timeout: 10000 }).catch(() => false)) {
+      await spin.scrollIntoViewIfNeeded();
+      await spin.click();
+      await spin.fill(term);
+      await spin.press("Tab");
+      return;
+    }
+
+    const numberInput = this.page
+      .locator("number")
+      .filter({ hasText: /Term/i })
+      .locator("input[type='number'], input.p-inputtext, input");
+    if (await numberInput.first().isVisible({ timeout: 5000 }).catch(() => false)) {
+      await numberInput.first().scrollIntoViewIfNeeded();
+      await numberInput.first().click();
+      await numberInput.first().fill(term);
+      await numberInput.first().press("Tab");
+      return;
+    }
+
+    const triggerSpan = this.page
+      .locator("//span//label[contains(., 'Term')]/following-sibling::div//span")
+      .first();
+    const triggerPrime = this.page
+      .locator("label")
+      .filter({ hasText: /^Term\s*\*?$/i })
+      .first()
+      .locator(
+        "xpath=following-sibling::div//*[contains(@class,'p-dropdown-trigger') or @aria-label='dropdown trigger'][1]",
+      );
+
+    const trigger = (await triggerSpan.isVisible({ timeout: 3000 }).catch(() => false))
+      ? triggerSpan
+      : triggerPrime;
+
+    await trigger.waitFor({ state: "visible", timeout: 45000 });
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click();
+
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const opt = this.page.getByRole("option", { name: new RegExp(`^${escaped}$`, "i") });
+    await opt.first().waitFor({ state: "visible", timeout: 15000 });
+    await opt.first().click();
+    await this.page.keyboard.press("Escape").catch(() => {});
   }
 
   private parseInterestPercent(raw: string): number {

@@ -1,4 +1,4 @@
-import { Locator, Page } from "@playwright/test";
+import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
 /**
@@ -6,16 +6,25 @@ import { BasePage } from "../../../common";
  */
 export class DOReferenceDetailsPage extends BasePage {
   readonly addContactDetailsButton: Locator;
-  readonly addContactDialog: Locator;
-  readonly addContactButton: Locator;
   readonly submitButton: Locator;
 
   constructor(page: Page) {
     super(page);
-    this.addContactDetailsButton = page.locator(':text-is("Add Contact Details")');
-    this.addContactDialog = page.getByRole("dialog");
-    this.addContactButton = page.locator(':text-is("Add Contact")');
+    this.addContactDetailsButton = page.getByText("Add Contact Details", {
+      exact: true,
+    });
     this.submitButton = page.getByRole("button", { name: "Submit" }).last();
+  }
+
+  /**
+   * “Add contact” modal — scoped by **Contact Type** so we never click inside the wrong
+   * `role=dialog` (toast, confirm, etc.). Prefer **last** match when several exist in the DOM.
+   */
+  private contactAddModal(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ has: this.page.getByText(/Contact Type/i) })
+      .last();
   }
 
   async waitForReferenceDetailsStep(): Promise<void> {
@@ -28,7 +37,7 @@ export class DOReferenceDetailsPage extends BasePage {
   async clickAddContactDetails(): Promise<void> {
     await this.addContactDetailsButton.scrollIntoViewIfNeeded();
     await this.addContactDetailsButton.click({ timeout: 30000 });
-    await this.addContactDialog.waitFor({ state: "visible", timeout: 20000 });
+    await this.contactAddModal().waitFor({ state: "visible", timeout: 20000 });
   }
 
   private async selectDropdownInRoot(
@@ -71,7 +80,11 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async selectContactType(optionName: string): Promise<void> {
-    await this.selectDropdownInRoot(this.addContactDialog, "Contact Type", optionName);
+    await this.selectDropdownInRoot(
+      this.contactAddModal(),
+      "Contact Type",
+      optionName,
+    );
   }
 
   /**
@@ -94,14 +107,14 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async enterContactFirstName(value: string): Promise<void> {
-    const input = this.contactNameInput(this.addContactDialog, "first");
+    const input = this.contactNameInput(this.contactAddModal(), "first");
     await input.waitFor({ state: "visible", timeout: 15000 });
     await input.click();
     await input.fill(value);
   }
 
   async enterContactLastName(value: string): Promise<void> {
-    const dialog = this.addContactDialog;
+    const dialog = this.contactAddModal();
     const byLabelRow = this.contactNameInput(dialog, "last");
     if (await byLabelRow.isVisible({ timeout: 5000 }).catch(() => false)) {
       await byLabelRow.click();
@@ -125,13 +138,32 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async clickAddContactInModal(): Promise<void> {
-    const inDialog = this.addContactDialog.locator(':text-is("Add Contact")');
-    const target = (await inDialog.isVisible({ timeout: 2000 }).catch(() => false))
-      ? inDialog
-      : this.addContactButton;
-    await target.scrollIntoViewIfNeeded();
-    await target.click({ timeout: 20000 });
-    await this.addContactDialog.waitFor({ state: "hidden", timeout: 25000 }).catch(() => {});
+    const dialog = this.contactAddModal();
+    await dialog.waitFor({ state: "visible", timeout: 20000 });
+
+    // Blur name fields so PrimeNG / Angular validation enables the footer button.
+    await this.contactNameInput(dialog, "last").press("Tab");
+    await this.page.waitForTimeout(300);
+
+    const byRole = dialog
+      .getByRole("button", { name: /Add Contact/i })
+      .filter({ hasNotText: /Add Contact Details/i })
+      .first();
+    const footerBtn = dialog
+      .locator(".p-dialog-footer button, footer button")
+      .filter({ hasText: /^Add Contact$/i })
+      .filter({ hasNotText: /Details/i })
+      .first();
+
+    const btn = (await byRole.isVisible({ timeout: 4000 }).catch(() => false))
+      ? byRole
+      : footerBtn;
+
+    await btn.waitFor({ state: "visible", timeout: 20000 });
+    await expect(btn).toBeEnabled({ timeout: 30000 });
+    await btn.scrollIntoViewIfNeeded();
+    await btn.click({ timeout: 20000 });
+    await dialog.waitFor({ state: "hidden", timeout: 25000 }).catch(() => {});
   }
 
   async confirmCustomerDetailsCorrect(): Promise<void> {
