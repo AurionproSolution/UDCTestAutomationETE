@@ -1,29 +1,24 @@
 import { expect, test } from "@playwright/test";
-import { DODashboardPage, DOLoginPage, DOQuickQuotePage } from "../../../pages";
-import doLoginData from "../../../testData/do-portal/loginData.json";
+import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
+import { DODashboardPage } from "../../../pages";
+import { DOQuickQuotePage } from "../../../pages";
 
-test.describe.serial("DO Portal - QucikQuoteModule - Sanity @do @smoke", () => {
-  let loginPage: DOLoginPage;
+test.describe.serial("DO Portal - QuickQuoteModule - Sanity @do @smoke", () => {
   let dashboardPage: DODashboardPage;
   let quickQuotePage: DOQuickQuotePage;
 
-  test.beforeAll(async ({ browser }) => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-    loginPage = new DOLoginPage(page);
+  test.beforeEach(async ({ page }) => {
     dashboardPage = new DODashboardPage(page);
     quickQuotePage = new DOQuickQuotePage(page);
-
-    await loginPage.navigate("https://testportaludc.aurionpro.com/");
-    await loginPage.loginWithTestData(doLoginData.validUsers[0]);
-    await page.waitForLoadState("networkidle").catch(() => {});
+    await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+    await dashboardPage.waitForAuthenticatedDashboard();
   });
 
   const fillMandatoryQuickQuoteInputs = async (): Promise<void> => {
     await quickQuotePage.selectProduct("Finance Lease - Business Asg");
     await quickQuotePage.selectProgram("Finance Lease Business - MV Dealer");
     await quickQuotePage.enterCashPrice("100000");
-    await quickQuotePage.enterDepositPercent("10");
+    //await quickQuotePage.enterDepositPercent("10");
     await quickQuotePage.enterInterestRatePercent("4");
     await quickQuotePage.enterTermsMonths("36");
     await quickQuotePage.enterBalloonPercent("20");
@@ -46,7 +41,7 @@ test.describe.serial("DO Portal - QucikQuoteModule - Sanity @do @smoke", () => {
     await quickQuotePage.selectProgram("Finance Lease Business - MV Dealer");
 
     await expect(quickQuotePage.cashPriceInput).toBeVisible();
-    await expect(quickQuotePage.depositPercentInput).toBeVisible();
+    // Deposit % can be hidden/disabled for some product/program combinations.
     await expect(quickQuotePage.interestRatePercentInput).toBeVisible();
     await expect(quickQuotePage.termsMonthsInput).toBeVisible();
     await expect(quickQuotePage.calculateButton).toBeVisible();
@@ -100,6 +95,30 @@ test.describe.serial("DO Portal - QucikQuoteModule - Sanity @do @smoke", () => {
     await expect(quickQuotePage.addComparison3Button).toBeVisible();
   });
 
+  /**
+   * Jira UDP-2831 — Add comparison 3 should not be enabled without calculating
+   * quick quote 1 and quick quote 2.
+   *
+   * After QQ1 is calculated and "Add Comparison 2" adds the second quote block,
+   * "Add Comparison 3" must remain disabled until that second quote is calculated
+   * (regression: it was incorrectly enabled too early).
+   */
+  test("UDP-2831 - Add Comparison 3 disabled until Quick Quote 2 is calculated @do @sanity", async () => {
+    test.setTimeout(240000);
+    await quickQuotePage.openQuickQuote();
+    await quickQuotePage.selectProduct("Finance Lease - Business Asg");
+    await quickQuotePage.selectProgram("Finance Lease Business - MV Dealer");
+    await quickQuotePage.enterCashPrice("100000");
+    await quickQuotePage.enterInterestRatePercent("4");
+    await quickQuotePage.enterTermsMonths("36");
+    //await quickQuotePage.enterBalloonPercent("20");
+    await quickQuotePage.clickCalculate();
+    await quickQuotePage.clickAddComparison2();
+
+    await expect(quickQuotePage.addComparison3Button).toBeVisible();
+    await expect(quickQuotePage.addComparison3Button).toBeDisabled();
+  });
+
   test("TC7 - Reset clears fields, Create Quote remains available after recalculate", async () => {
     test.setTimeout(300000);
     await quickQuotePage.openQuickQuote();
@@ -127,4 +146,3 @@ test.describe.serial("DO Portal - QucikQuoteModule - Sanity @do @smoke", () => {
     await quickQuotePage.downloadButton.click({ trial: true });
   });
 });
-

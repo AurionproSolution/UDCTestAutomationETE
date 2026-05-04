@@ -5,6 +5,7 @@
 
 export { DODashboardPage } from "./dashboard/DashboardPage";
 export { DOLoginPage } from "./login/LoginPage";
+export { DOQuickQuotePage } from "./QuickQuote/QuickQuotePage";
 export { DOAssetDetailsPage } from "./StandardQuote/AssetDetails/AssetDetailsPage";
 export { DOReferenceDetailsPage } from "./StandardQuote/CustomerDetails/referenceDetails";
 export { DOBusinessDetailsPage } from "./StandardQuote/CustomerDetails/businessDetails";

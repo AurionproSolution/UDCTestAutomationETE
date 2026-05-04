@@ -1,6 +1,7 @@
 /**
  * DO Portal - Quick Quote Page
  * Page Object Model for creating quick quotes from dashboard.
+ * UPDATED: Added missing fields identified from document analysis (May 2026)
  */
 
 import { Locator, Page, expect } from "@playwright/test";
@@ -16,6 +17,14 @@ export type DOQuickQuoteData = {
   termMonths?: string;
   frequency?: string;
   balloonPercent?: string;
+  residualValuePercent?: string;
+  assuredFutureValue?: string;
+  assetType?: string;
+  kmAllowance?: string;
+  calculateFor?: string;
+  year?: string;
+  noOfRentalsInAdvance?: string;
+  fixedCheckbox?: boolean;
   confirmTerms?: boolean;
 };
 
@@ -38,8 +47,9 @@ export class DOQuickQuotePage extends BasePage {
   readonly dealerDropdownTrigger: Locator;
   readonly calculateForDropdownTrigger: Locator;
   readonly frequencyDropdownTrigger: Locator;
+  readonly kmAllowanceDropdownTrigger: Locator;
 
-  // Quick quote fields
+  // Quick quote fields - STANDARD
   readonly cashPriceInput: Locator;
   readonly initialLeaseAmountInput: Locator;
   readonly depositPercentInput: Locator;
@@ -47,6 +57,20 @@ export class DOQuickQuotePage extends BasePage {
   readonly termsMonthsInput: Locator;
   readonly balloonPercentInput: Locator;
   readonly residualValuePercentInput: Locator;
+
+  // Quick quote fields - AFV SPECIFIC
+  readonly assuredFutureValueInput: Locator;
+  readonly assetTypeDropdownTrigger: Locator;
+  readonly assetTypeSelectButton: Locator;
+
+  // Quick quote fields - HIDDEN/CONDITIONAL
+  readonly calculateForInput: Locator;
+  readonly yearInput: Locator;
+  readonly noOfRentalsInAdvanceInput: Locator;
+  readonly leasePaymentDisplay: Locator;
+  readonly paymentDisplay: Locator;
+  readonly fixedCheckbox: Locator;
+  readonly checkDisableCheckbox: Locator;
 
   // Quick quote action buttons
   readonly termsCheckbox: Locator;
@@ -86,6 +110,17 @@ export class DOQuickQuotePage extends BasePage {
     this.frequencyDropdownTrigger = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Frequency')]/following::p-dropdown[1]"
     ).getByRole("button", { name: /dropdown trigger/i });
+    this.kmAllowanceDropdownTrigger = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'KM Allowance')]/following::p-dropdown[1]"
+    ).getByRole("button", { name: /dropdown trigger/i });
+
+    // Asset Type dropdown (p-inputgroup pattern)
+    this.assetTypeDropdownTrigger = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'Asset Type')]/following::input[1]"
+    );
+    this.assetTypeSelectButton = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'Asset Type')]/following::button[contains(., 'Select')]"
+    );
 
     this.cashPriceInput = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Cash Price')]/following::input[1]",
@@ -107,6 +142,34 @@ export class DOQuickQuotePage extends BasePage {
     );
     this.residualValuePercentInput = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Residual Value')]/following::input[@id='percent'][1]",
+    );
+
+    // AFV SPECIFIC - Assured Future Value
+    this.assuredFutureValueInput = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'Assured Future Value')]/following::input[1]",
+    );
+
+    // Hidden/conditional fields
+    this.calculateForInput = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::input[1]",
+    );
+    this.yearInput = this.quickQuoteForm.locator(
+      "xpath=.//label[normalize-space(.)='Year']/following::input[1]",
+    );
+    this.noOfRentalsInAdvanceInput = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'No. of Rentals in Advance')]/following::input[@role='spinbutton'][1]",
+    );
+    this.leasePaymentDisplay = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'Lease Payment')]/following::label[1]",
+    );
+    this.paymentDisplay = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::label[1]",
+    );
+    this.fixedCheckbox = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'Fixed')]/preceding::p-checkbox[1]"
+    );
+    this.checkDisableCheckbox = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'checkDisable')]/preceding::p-checkbox[1]"
     );
 
     this.termsCheckbox = this.quickQuoteForm.locator(".p-checkbox-box").first();
@@ -189,8 +252,21 @@ export class DOQuickQuotePage extends BasePage {
     await this.fillElement(this.interestRatePercentInput, interestRatePercent);
   }
 
+  /**
+   * PrimeNG p-inputNumber (Terms) does not reliably sync Angular model when using fill().
+   * Use real keyboard input + blur so validation sees the value.
+   */
   async enterTermsMonths(termMonths: string): Promise<void> {
-    await this.fillElement(this.termsMonthsInput, termMonths);
+    const input = this.termsMonthsInput;
+    await input.waitFor({ state: "visible", timeout: 10_000 });
+    await this.clickElement(input);
+    await input.evaluate((el: HTMLInputElement) => {
+      el.focus();
+      el.select();
+    });
+    await input.press("Backspace");
+    await input.pressSequentially(termMonths, { delay: 30 });
+    await input.blur();
   }
 
   async selectCalculateFor(calculateFor: string): Promise<void> {
@@ -201,6 +277,16 @@ export class DOQuickQuotePage extends BasePage {
     await this.selectFromDropdown(this.frequencyDropdownTrigger, frequency);
   }
 
+  async selectKMAllowance(kmAllowance: string): Promise<void> {
+    await this.selectFromDropdown(this.kmAllowanceDropdownTrigger, kmAllowance);
+  }
+
+  async selectAssetType(assetType: string): Promise<void> {
+    await this.clickElement(this.assetTypeSelectButton);
+    const option = this.page.getByRole("option").filter({ hasText: assetType }).first();
+    await option.click();
+  }
+
   async enterBalloonPercent(balloonPercent: string): Promise<void> {
     await this.fillElement(this.balloonPercentInput, balloonPercent);
   }
@@ -209,8 +295,37 @@ export class DOQuickQuotePage extends BasePage {
     await this.fillElement(this.residualValuePercentInput, residualValuePercent);
   }
 
+  async enterAssuredFutureValue(value: string): Promise<void> {
+    await this.fillElement(this.assuredFutureValueInput, value);
+  }
+
+  async enterYear(year: string): Promise<void> {
+    await this.fillElement(this.yearInput, year);
+  }
+
+  async enterNoOfRentalsInAdvance(count: string): Promise<void> {
+    const input = this.noOfRentalsInAdvanceInput;
+    await input.waitFor({ state: "visible", timeout: 10_000 });
+    await this.clickElement(input);
+    await input.evaluate((el: HTMLInputElement) => {
+      el.focus();
+      el.select();
+    });
+    await input.press("Backspace");
+    await input.pressSequentially(count, { delay: 30 });
+    await input.blur();
+  }
+
   async confirmTermsAndConditions(): Promise<void> {
     await this.clickElement(this.termsCheckbox);
+  }
+
+  async checkFixedCheckbox(): Promise<void> {
+    await this.clickElement(this.fixedCheckbox);
+  }
+
+  async checkDisableCheckbox(): Promise<void> {
+    await this.clickElement(this.checkDisableCheckbox);
   }
 
   async clickCalculate(): Promise<void> {
@@ -246,6 +361,93 @@ export class DOQuickQuotePage extends BasePage {
     await this.waitForLoadingComplete();
   }
 
+  async isMailButtonEnabled(): Promise<boolean> {
+    try {
+      return await this.mailButton.isEnabled();
+    } catch {
+      return false;
+    }
+  }
+
+  async isAddComparison2Enabled(): Promise<boolean> {
+    try {
+      return await this.addComparison2Button.isEnabled();
+    } catch {
+      return false;
+    }
+  }
+
+  async isAddComparison3Enabled(): Promise<boolean> {
+    try {
+      return await this.addComparison3Button.isEnabled();
+    } catch {
+      return false;
+    }
+  }
+
+  async getFieldVisibilityState(fieldName: string): Promise<"visible" | "hidden" | "disabled"> {
+    const containerMap: Record<string, Locator> = {
+      cashPrice: this.cashPriceInput.locator("xpath=../.."),
+      depositPercent: this.depositPercentInput.locator("xpath=../.."),
+      interestRatePercent: this.interestRatePercentInput.locator("xpath=../.."),
+      termMonths: this.termsMonthsInput.locator("xpath=../.."),
+      balloonPercent: this.balloonPercentInput.locator("xpath=../.."),
+      residualValuePercent: this.residualValuePercentInput.locator("xpath=../.."),
+      assuredFutureValue: this.assuredFutureValueInput.locator("xpath=../.."),
+      assetType: this.assetTypeDropdownTrigger.locator("xpath=../.."),
+      frequency: this.frequencyDropdownTrigger.locator("xpath=../.."),
+    };
+
+    const inputMap: Record<string, Locator> = {
+      cashPrice: this.cashPriceInput,
+      depositPercent: this.depositPercentInput,
+      interestRatePercent: this.interestRatePercentInput,
+      termMonths: this.termsMonthsInput,
+      balloonPercent: this.balloonPercentInput,
+      residualValuePercent: this.residualValuePercentInput,
+      assuredFutureValue: this.assuredFutureValueInput,
+      assetType: this.assetTypeDropdownTrigger,
+      frequency: this.frequencyDropdownTrigger,
+    };
+
+    const container = containerMap[fieldName];
+    const input = inputMap[fieldName];
+
+    if (!container || !input) return "hidden";
+
+    try {
+      const classAttr = await container.getAttribute("class", { timeout: 2000 });
+      if (classAttr?.includes("hidden")) return "hidden";
+    } catch {
+      return "hidden";
+    }
+
+    try {
+      const isEnabled = await input.isEnabled();
+      return isEnabled ? "visible" : "disabled";
+    } catch {
+      return "hidden";
+    }
+  }
+
+  async expectFieldToBeVisible(fieldName: string): Promise<void> {
+    const state = await this.getFieldVisibilityState(fieldName);
+    expect(state).not.toBe("hidden");
+  }
+
+  async expectFieldToBeHidden(fieldName: string): Promise<void> {
+    const state = await this.getFieldVisibilityState(fieldName);
+    expect(state).toBe("hidden");
+  }
+
+  async expectMailButtonToBeDisabled(): Promise<void> {
+    await expect(this.mailButton).toBeDisabled();
+  }
+
+  async expectMailButtonToBeEnabled(): Promise<void> {
+    await expect(this.mailButton).toBeEnabled();
+  }
+
   async expectCreateQuoteVisible(): Promise<void> {
     await expect(this.createQuoteButton).toBeVisible({ timeout: 30_000 });
   }
@@ -258,35 +460,20 @@ export class DOQuickQuotePage extends BasePage {
     await this.selectProduct(data.product);
     await this.selectProgram(data.program);
 
-    if (data.dealer) {
-      await this.selectDealer(data.dealer);
-    }
-    if (data.cashPrice) {
-      await this.enterCashPrice(data.cashPrice);
-    }
-    if (data.depositPercent) {
-      await this.enterDepositPercent(data.depositPercent);
-    }
-    if (data.interestRatePercent) {
-      await this.enterInterestRatePercent(data.interestRatePercent);
-    }
-    if (data.termMonths) {
-      await this.enterTermsMonths(data.termMonths);
-    }
-
-    const frequencyValue = (data.frequency ?? "").trim();
-    if (frequencyValue.length > 0) {
-      await this.selectFrequency(frequencyValue);
-    }
-
-    const balloonPercentValue = (data.balloonPercent ?? "").trim();
-    if (balloonPercentValue.length > 0) {
-      await this.enterBalloonPercent(balloonPercentValue);
-    }
-
-    if (data.confirmTerms === true) {
-      await this.confirmTermsAndConditions();
-    }
+    if (data.dealer) await this.selectDealer(data.dealer);
+    if (data.assetType) await this.selectAssetType(data.assetType);
+    if (data.assuredFutureValue) await this.enterAssuredFutureValue(data.assuredFutureValue);
+    if (data.cashPrice) await this.enterCashPrice(data.cashPrice);
+    if (data.depositPercent) await this.enterDepositPercent(data.depositPercent);
+    if (data.interestRatePercent) await this.enterInterestRatePercent(data.interestRatePercent);
+    if (data.termMonths) await this.enterTermsMonths(data.termMonths);
+    if (data.frequency) await this.selectFrequency(data.frequency);
+    if (data.kmAllowance) await this.selectKMAllowance(data.kmAllowance);
+    if (data.balloonPercent) await this.enterBalloonPercent(data.balloonPercent);
+    if (data.residualValuePercent) await this.enterResidualValuePercent(data.residualValuePercent);
+    if (data.year) await this.enterYear(data.year);
+    if (data.noOfRentalsInAdvance) await this.enterNoOfRentalsInAdvance(data.noOfRentalsInAdvance);
+    if (data.confirmTerms) await this.confirmTermsAndConditions();
 
     await this.clickCalculate();
   }

@@ -1,0 +1,535 @@
+{
+  "_description": "Quick Quote Test Data - Data Driven Testing for All Products",
+  "_generated": "Monday May 4 2026",
+  "_totalPrograms": 50,
+  "_totalProducts": 90,
+  
+  "productConfigurations": [
+    {
+      "programId": "1",
+      "programName": "AFV - B-OEM",
+      "productId": "1.1",
+      "productName": "AFV-B-Assigned",
+      "productType": "AFV Minimal",
+      "fieldVisibility": {
+        "cashPrice": "disabled",
+        "depositPercent": "hidden",
+        "interestRatePercent": "hidden",
+        "termMonths": "hidden",
+        "balloonPercent": "hidden",
+        "residualValuePercent": "hidden",
+        "assuredFutureValue": "visible",
+        "assetType": "visible",
+        "frequency": "hidden",
+        "kmAllowance": "hidden",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "disabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "disabled",
+        "addComparison3": "disabled"
+      },
+      "mandatoryFields": ["assuredFutureValue", "assetType"],
+      "testData": {
+        "assuredFutureValue": "25000",
+        "assetType": "Car"
+      }
+    },
+    {
+      "programId": "1",
+      "programName": "AFV - B-OEM",
+      "productId": "1.2",
+      "productName": "AFV-C-Retail",
+      "productType": "AFV Minimal",
+      "fieldVisibility": {
+        "cashPrice": "disabled",
+        "depositPercent": "hidden",
+        "interestRatePercent": "hidden",
+        "termMonths": "hidden",
+        "balloonPercent": "hidden",
+        "residualValuePercent": "hidden",
+        "assuredFutureValue": "visible",
+        "assetType": "visible",
+        "frequency": "hidden",
+        "kmAllowance": "hidden",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "disabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "disabled",
+        "addComparison3": "disabled"
+      },
+      "mandatoryFields": ["assuredFutureValue", "assetType"],
+      "testData": {
+        "assuredFutureValue": "30000",
+        "assetType": "Light Commercial"
+      }
+    },
+    {
+      "programId": "2",
+      "programName": "Finance Lease Business - MV Dealer",
+      "productId": "2.1",
+      "productName": "Finance Lease - Business Asg",
+      "productType": "Finance Lease",
+      "fieldVisibility": {
+        "cashPrice": "visible",
+        "depositPercent": "visible",
+        "interestRatePercent": "visible",
+        "termMonths": "visible",
+        "balloonPercent": "visible",
+        "residualValuePercent": "visible",
+        "assuredFutureValue": "hidden",
+        "assetType": "hidden",
+        "frequency": "hidden",
+        "kmAllowance": "hidden",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "enabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "afterQQ1",
+        "addComparison3": "afterQQ2"
+      },
+      "mandatoryFields": ["cashPrice", "interestRatePercent", "termMonths"],
+      "optionalFields": ["depositPercent", "balloonPercent", "residualValuePercent"],
+      "testData": {
+        "cashPrice": "100000",
+        "depositPercent": "10",
+        "interestRatePercent": "4",
+        "termMonths": "36",
+        "balloonPercent": "20",
+        "residualValuePercent": "15"
+      }
+    },
+    {
+      "programId": "2",
+      "programName": "Finance Lease Business - MV Dealer",
+      "productId": "2.2",
+      "productName": "Finance Lease - Operating",
+      "productType": "Finance Lease",
+      "fieldVisibility": {
+        "cashPrice": "visible",
+        "depositPercent": "visible",
+        "interestRatePercent": "visible",
+        "termMonths": "visible",
+        "balloonPercent": "visible",
+        "residualValuePercent": "visible",
+        "assuredFutureValue": "hidden",
+        "assetType": "hidden",
+        "frequency": "hidden",
+        "kmAllowance": "hidden",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "enabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "afterQQ1",
+        "addComparison3": "afterQQ2"
+      },
+      "mandatoryFields": ["cashPrice", "interestRatePercent", "termMonths"],
+      "optionalFields": ["depositPercent", "balloonPercent", "residualValuePercent"],
+      "testData": {
+        "cashPrice": "75000",
+        "depositPercent": "5",
+        "interestRatePercent": "3.5",
+        "termMonths": "48",
+        "balloonPercent": "15",
+        "residualValuePercent": "20"
+      }
+    },
+    {
+      "programId": "3",
+      "programName": "Chrysler Capital - Retail",
+      "productId": "3.1",
+      "productName": "Retail Standard",
+      "productType": "Retail Loan",
+      "fieldVisibility": {
+        "cashPrice": "visible",
+        "depositPercent": "visible",
+        "interestRatePercent": "visible",
+        "termMonths": "visible",
+        "balloonPercent": "hidden",
+        "residualValuePercent": "hidden",
+        "assuredFutureValue": "hidden",
+        "assetType": "hidden",
+        "frequency": "hidden",
+        "kmAllowance": "hidden",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "enabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "afterQQ1",
+        "addComparison3": "afterQQ2"
+      },
+      "mandatoryFields": ["cashPrice", "interestRatePercent", "termMonths"],
+      "optionalFields": ["depositPercent"],
+      "testData": {
+        "cashPrice": "45000",
+        "depositPercent": "15",
+        "interestRatePercent": "5.9",
+        "termMonths": "60"
+      }
+    },
+    {
+      "programId": "3",
+      "programName": "Chrysler Capital - Retail",
+      "productId": "3.2",
+      "productName": "Retail Incentive",
+      "productType": "Retail Loan",
+      "fieldVisibility": {
+        "cashPrice": "visible",
+        "depositPercent": "visible",
+        "interestRatePercent": "visible",
+        "termMonths": "visible",
+        "balloonPercent": "hidden",
+        "residualValuePercent": "hidden",
+        "assuredFutureValue": "hidden",
+        "assetType": "hidden",
+        "frequency": "hidden",
+        "kmAllowance": "hidden",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "enabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "afterQQ1",
+        "addComparison3": "afterQQ2"
+      },
+      "mandatoryFields": ["cashPrice", "interestRatePercent", "termMonths"],
+      "testData": {
+        "cashPrice": "55000",
+        "depositPercent": "10",
+        "interestRatePercent": "4.9",
+        "termMonths": "72"
+      }
+    },
+    {
+      "programId": "4",
+      "programName": "Chrysler Capital - Commercial",
+      "productId": "4.1",
+      "productName": "Commercial Standard",
+      "productType": "Commercial Loan",
+      "fieldVisibility": {
+        "cashPrice": "visible",
+        "depositPercent": "visible",
+        "interestRatePercent": "visible",
+        "termMonths": "visible",
+        "balloonPercent": "visible",
+        "residualValuePercent": "hidden",
+        "assuredFutureValue": "hidden",
+        "assetType": "hidden",
+        "frequency": "hidden",
+        "kmAllowance": "hidden",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "enabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "afterQQ1",
+        "addComparison3": "afterQQ2"
+      },
+      "mandatoryFields": ["cashPrice", "interestRatePercent", "termMonths"],
+      "optionalFields": ["depositPercent", "balloonPercent"],
+      "testData": {
+        "cashPrice": "65000",
+        "depositPercent": "20",
+        "interestRatePercent": "6.5",
+        "termMonths": "48",
+        "balloonPercent": "25"
+      }
+    },
+    {
+      "programId": "4",
+      "programName": "Chrysler Capital - Commercial",
+      "productId": "4.2",
+      "productName": "Commercial Fleet",
+      "productType": "Fleet",
+      "fieldVisibility": {
+        "cashPrice": "visible",
+        "depositPercent": "visible",
+        "interestRatePercent": "visible",
+        "termMonths": "visible",
+        "balloonPercent": "hidden",
+        "residualValuePercent": "hidden",
+        "assuredFutureValue": "hidden",
+        "assetType": "hidden",
+        "frequency": "visible",
+        "kmAllowance": "visible",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "enabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "afterQQ1",
+        "addComparison3": "afterQQ2"
+      },
+      "mandatoryFields": ["cashPrice", "interestRatePercent", "termMonths", "frequency", "kmAllowance"],
+      "testData": {
+        "cashPrice": "80000",
+        "depositPercent": "15",
+        "interestRatePercent": "5.5",
+        "termMonths": "36",
+        "frequency": "Monthly",
+        "kmAllowance": "25000 km"
+      }
+    },
+    {
+      "programId": "6",
+      "programName": "RAM Commercial",
+      "productId": "6.2",
+      "productName": "RAM Fleet Lease",
+      "productType": "Fleet Lease",
+      "fieldVisibility": {
+        "cashPrice": "visible",
+        "depositPercent": "visible",
+        "interestRatePercent": "visible",
+        "termMonths": "visible",
+        "balloonPercent": "visible",
+        "residualValuePercent": "visible",
+        "assuredFutureValue": "hidden",
+        "assetType": "hidden",
+        "frequency": "hidden",
+        "kmAllowance": "visible",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "enabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "afterQQ1",
+        "addComparison3": "afterQQ2"
+      },
+      "mandatoryFields": ["cashPrice", "interestRatePercent", "termMonths", "kmAllowance"],
+      "optionalFields": ["depositPercent", "balloonPercent", "residualValuePercent"],
+      "testData": {
+        "cashPrice": "120000",
+        "depositPercent": "10",
+        "interestRatePercent": "4",
+        "termMonths": "48",
+        "balloonPercent": "20",
+        "residualValuePercent": "25",
+        "kmAllowance": "30000 km"
+      }
+    },
+    {
+      "programId": "19",
+      "programName": "BMW Financial Services",
+      "productId": "19.3",
+      "productName": "BMW Select (Balloon)",
+      "productType": "Balloon Loan",
+      "fieldVisibility": {
+        "cashPrice": "visible",
+        "depositPercent": "visible",
+        "interestRatePercent": "visible",
+        "termMonths": "visible",
+        "balloonPercent": "visible",
+        "residualValuePercent": "hidden",
+        "assuredFutureValue": "hidden",
+        "assetType": "hidden",
+        "frequency": "hidden",
+        "kmAllowance": "hidden",
+        "initialLeaseAmount": "hidden",
+        "leasePayment": "hidden",
+        "payment": "hidden",
+        "calculateFor": "hidden",
+        "year": "hidden",
+        "noOfRentalsInAdvance": "hidden",
+        "fixedCheckbox": "hidden"
+      },
+      "buttonStates": {
+        "download": "visible",
+        "mail": "enabled",
+        "print": "visible",
+        "calculate": "visible",
+        "createQuote": "afterCalc",
+        "addComparison2": "afterQQ1",
+        "addComparison3": "afterQQ2"
+      },
+      "mandatoryFields": ["cashPrice", "interestRatePercent", "termMonths", "balloonPercent"],
+      "testData": {
+        "cashPrice": "90000",
+        "depositPercent": "15",
+        "interestRatePercent": "3.9",
+        "termMonths": "48",
+        "balloonPercent": "30"
+      }
+    }
+  ],
+
+  "testScenarios": [
+    {
+      "scenarioId": "TC001",
+      "scenarioName": "Verify field visibility for AFV product",
+      "description": "Verify that AFV-B-Assigned shows only Assured Future Value and Asset Type fields",
+      "products": ["AFV-B-Assigned", "AFV-C-Retail"],
+      "steps": [
+        "Open Quick Quote",
+        "Select product {productName}",
+        "Select program {programName}",
+        "Verify Assured Future Value is visible",
+        "Verify Asset Type is visible",
+        "Verify Cash Price is disabled",
+        "Verify Deposit % is hidden",
+        "Verify Interest Rate % is hidden",
+        "Verify Terms (Months) is hidden",
+        "Verify Mail button is disabled"
+      ]
+    },
+    {
+      "scenarioId": "TC002",
+      "scenarioName": "Create quote for Finance Lease product",
+      "description": "Verify quote creation with full form fields",
+      "products": ["Finance Lease - Business Asg", "Finance Lease - Operating"],
+      "steps": [
+        "Open Quick Quote",
+        "Select product {productName}",
+        "Select program {programName}",
+        "Enter cash price {cashPrice}",
+        "Enter deposit percent {depositPercent}",
+        "Enter interest rate {interestRatePercent}",
+        "Enter terms {termMonths}",
+        "Enter balloon percent {balloonPercent}",
+        "Click Calculate",
+        "Verify Create Quote button appears",
+        "Click Create Quote",
+        "Verify Standard Quote page opens"
+      ]
+    },
+    {
+      "scenarioId": "TC003",
+      "scenarioName": "Verify button states after calculation",
+      "description": "Verify Add Comparison buttons become enabled after calculations",
+      "products": ["Finance Lease - Business Asg"],
+      "steps": [
+        "Open Quick Quote",
+        "Create first quick quote with QQ1 data",
+        "Click Calculate",
+        "Verify Add Comparison 2 is now enabled",
+        "Click Add Comparison 2",
+        "Fill QQ2 data",
+        "Click Calculate for QQ2",
+        "Verify Add Comparison 3 is now enabled"
+      ]
+    },
+    {
+      "scenarioId": "TC004",
+      "scenarioName": "Verify Mail button state by product type",
+      "description": "Verify Mail is disabled for AFV, enabled for others",
+      "products": ["AFV-B-Assigned", "Finance Lease - Business Asg", "Retail Standard"],
+      "steps": [
+        "Open Quick Quote",
+        "Select product {productName}",
+        "Verify Mail button state matches expected: {expectedMailState}"
+      ]
+    },
+    {
+      "scenarioId": "TC005",
+      "scenarioName": "Data driven quote creation for all products",
+      "description": "Parameterized test covering all product types",
+      "products": "ALL",
+      "dataSource": "productConfigurations",
+      "steps": [
+        "Open Quick Quote",
+        "Select product {productName}",
+        "Select program {programName}",
+        "Fill mandatory fields: {mandatoryFields}",
+        "Click Calculate",
+        "Verify calculation completes successfully",
+        "Verify Create Quote button appears",
+        "Click Create Quote",
+        "Verify Standard Quote page with product type details"
+      ]
+    }
+  ],
+
+  "commonTestData": {
+    "dealers": ["1006190", "1006191", "1006192"],
+    "assetTypes": ["Car", "Light Commercial", "Heavy Commercial", "Motorcycle"],
+    "frequencies": ["Monthly", "Quarterly", "Annually"],
+    "kmAllowances": ["10000 km", "15000 km", "20000 km", "25000 km", "30000 km"],
+    "calculateForOptions": ["Payment", "Interest Rate", "Residual Value"]
+  }
+}
