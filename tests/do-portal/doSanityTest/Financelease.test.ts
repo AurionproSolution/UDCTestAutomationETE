@@ -3,12 +3,12 @@
  */
 
 import { test } from "@playwright/test";
+import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
   DOBusinessDetailsPage,
   DOCustomerQuotePostSubmitPage,
   DODashboardPage,
-  DOLoginPage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
@@ -16,9 +16,6 @@ import { DOEmploymentDetailsPage } from "../../../pages/do-portal/StandardQuote/
 import { DOFinancialPositionPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/financialPosition";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import { DOReferenceDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
-import doLoginData from "../../../testData/do-portal/loginData.json";
-
-let loginPage: DOLoginPage;
 let dashboardPage: DODashboardPage;
 let addAssetPage: DOAddAssetPage;
 let assetDetailsPage: DOAssetDetailsPage;
@@ -32,7 +29,6 @@ let personalDetailsPage: DOPersonalDetailsPage;
 
 test.describe("DO Portal - Finance Lease - Sanity @do @smoke", () => {
   test.beforeEach(async ({ page }) => {
-    loginPage = new DOLoginPage(page);
     dashboardPage = new DODashboardPage(page);
     addAssetPage = new DOAddAssetPage(page);
     assetDetailsPage = new DOAssetDetailsPage(page);
@@ -48,8 +44,8 @@ test.describe("DO Portal - Finance Lease - Sanity @do @smoke", () => {
 
   test("Finance Lease - Create Standard Quote", async ({ page }) => {
     test.setTimeout(360000);
-    await loginPage.navigate("https://testportaludc.aurionpro.com/");
-    await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+    await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+    await dashboardPage.waitForAuthenticatedDashboard();
     await dashboardPage.clickCreateStandardQuote();
     await dashboardPage.selectFinanceLeaseProduct();
     await assetDetailsPage.chooseProduct("Finance Lease - Business Asg");

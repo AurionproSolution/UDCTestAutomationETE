@@ -9,6 +9,7 @@
     "test:ui": "npx playwright test --ui",
     "test:debug": "npx playwright test --debug",
     "test:do": "npx playwright test --project=do-portal-chromium",
+    "test:do:sanity": "npx playwright test tests/do-portal/doSanityTest --project=do-sanity-chromium",
     "test:do:firefox": "npx playwright test --project=do-portal-firefox",
     "test:do:webkit": "npx playwright test --project=do-portal-webkit",
     "test:rss": "npx playwright test --project=rss-portal-chromium",

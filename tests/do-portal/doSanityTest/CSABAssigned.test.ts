@@ -4,12 +4,12 @@
  */
 
 import { test } from "@playwright/test";
+import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
   DOBusinessDetailsPage,
   DOCustomerQuotePostSubmitPage,
   DODashboardPage,
-  DOLoginPage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
@@ -17,9 +17,6 @@ import { DOEmploymentDetailsPage } from "../../../pages/do-portal/StandardQuote/
 import { DOFinancialPositionPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/financialPosition";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import { DOReferenceDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
-import doLoginData from "../../../testData/do-portal/loginData.json";
-
-let loginPage: DOLoginPage;
 let dashboardPage: DODashboardPage;
 let addAssetPage: DOAddAssetPage;
 let assetDetailsPage: DOAssetDetailsPage;
@@ -31,10 +28,8 @@ let referenceDetailsPage: DOReferenceDetailsPage;
 let customerQuotePostSubmitPage: DOCustomerQuotePostSubmitPage;
 let personalDetailsPage: DOPersonalDetailsPage;
 
-
 test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
   test.beforeEach(async ({ page }) => {
-    loginPage = new DOLoginPage(page);
     dashboardPage = new DODashboardPage(page);
     addAssetPage = new DOAddAssetPage(page);
     assetDetailsPage = new DOAssetDetailsPage(page);
@@ -45,12 +40,11 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
     referenceDetailsPage = new DOReferenceDetailsPage(page);
     customerQuotePostSubmitPage = new DOCustomerQuotePostSubmitPage(page);
     personalDetailsPage = new DOPersonalDetailsPage(page);
-
   });
-  test("CSAC Assigned - Create Standard Quote", async ({ page }) => {
+  test("CSAB Assigned - Create Standard Quote", async ({ page }) => {
     test.setTimeout(360000);
-    await loginPage.navigate("https://testportaludc.aurionpro.com/");
-    await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+    await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+    await dashboardPage.waitForAuthenticatedDashboard();
     await dashboardPage.clickCreateStandardQuote();
     await dashboardPage.selectCSAproduct();
     await assetDetailsPage.chooseProduct("CSA-B-Assigned");
@@ -155,7 +149,10 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
     //   "$450000.00",
     //   "31/03/2024",
     // );
-    await financialPositionPage.fillBusinessCashBalance("$10000.00", "31/03/2025");
+    await financialPositionPage.fillBusinessCashBalance(
+      "$10000.00",
+      "31/03/2025",
+    );
     // await financialPositionPage.fillBusinessDebtorBalance("$5000.00", "31/03/2025");
     // await financialPositionPage.fillBusinessCreditorBalance("$3000.00", "31/03/2025");
     // await financialPositionPage.fillBusinessOverdraftBalance("$0.00", "31/03/2025");

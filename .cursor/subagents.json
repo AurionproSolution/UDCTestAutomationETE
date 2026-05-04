@@ -1,0 +1,32 @@
+{
+  "subagents": [
+    {
+      "id": "test-case-writer",
+      "name": "Test Case Writer",
+      "description": "Use this agent when you need to create Playwright test scripts from JIRA requirements. Fetches requirements from JIRA, analyzes existing project patterns, and generates complete Playwright test files following the UDC Test Automation ETE project conventions.",
+      "model": "inherit",
+      "file": ".cursor/agents/test-case-writer.md"
+    },
+    {
+      "id": "playwright-test-generator",
+      "name": "Playwright Test Generator",
+      "description": "Use this agent when you need to create automated browser tests using Playwright. Generates robust, reliable Playwright tests that simulate user interactions and validate application behavior.",
+      "model": "inherit",
+      "file": ".cursor/agents/playwright-test-generator.md"
+    },
+    {
+      "id": "playwright-test-healer",
+      "name": "Playwright Test Healer",
+      "description": "Use this agent to fix and heal broken Playwright tests. Analyzes test failures, identifies root causes, and applies fixes to make tests stable and reliable.",
+      "model": "inherit",
+      "file": ".cursor/agents/playwright-test-healer.md"
+    },
+    {
+      "id": "playwright-test-planner",
+      "name": "Playwright Test Planner",
+      "description": "Use this agent to plan and organize Playwright test suites. Helps structure test plans, identify test coverage gaps, and organize tests effectively.",
+      "model": "inherit",
+      "file": ".cursor/agents/playwright-test-planner.md"
+    }
+  ]
+}

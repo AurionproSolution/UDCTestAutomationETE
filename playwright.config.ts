@@ -5,9 +5,20 @@
  * @see https://playwright.dev/docs/test-configuration
  */
 
+import path from "path";
 import { defineConfig, devices } from "@playwright/test";
 import type { OrtoniReportConfig } from "ortoni-report";
 import * as os from "os";
+
+const doSanityAuthStorage = path.join(
+  process.cwd(),
+  "playwright",
+  ".auth",
+  "do-sanity.json",
+);
+
+/** Run only via `do-sanity-chromium` (depends on setup + storageState). */
+const ignoreDoSanityFolder = "**/doSanityTest/**";
 
 // Environment variable for selecting test environment
 const TEST_ENV = process.env.TEST_ENV || "qat";
@@ -119,6 +130,7 @@ export default defineConfig({
     {
       name: "all-tests",
       testDir: "./tests",
+      testIgnore: ignoreDoSanityFolder,
       use: maximizedChrome,
     },
 
@@ -126,17 +138,38 @@ export default defineConfig({
     {
       name: "do-portal-chromium",
       testDir: "./tests/do-portal",
+      testIgnore: ignoreDoSanityFolder,
       use: maximizedChrome,
     },
     {
       name: "do-portal-firefox",
       testDir: "./tests/do-portal",
+      testIgnore: ignoreDoSanityFolder,
       use: maximizedFirefox,
     },
     {
       name: "do-portal-webkit",
       testDir: "./tests/do-portal",
+      testIgnore: ignoreDoSanityFolder,
       use: maximizedWebkit,
+    },
+
+    // -------- DO Portal sanity (single login via storageState) --------
+    {
+      name: "do-sanity-setup",
+      testDir: "./tests/do-portal/doSanityTest",
+      testMatch: "**/*.auth.setup.ts",
+      use: maximizedChrome,
+    },
+    {
+      name: "do-sanity-chromium",
+      testDir: "./tests/do-portal/doSanityTest",
+      testIgnore: "**/*.auth.setup.ts",
+      dependencies: ["do-sanity-setup"],
+      use: {
+        ...maximizedChrome,
+        storageState: doSanityAuthStorage,
+      },
     },
 
     // -------- RSS Portal Projects --------
@@ -174,6 +207,7 @@ export default defineConfig({
     {
       name: "all-portals-smoke",
       testDir: "./tests",
+      testIgnore: ignoreDoSanityFolder,
       grep: /@smoke/,
       use: maximizedChrome,
     },

@@ -10,6 +10,7 @@ dist/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+/playwright/.auth/do-sanity.json
 
 # Custom report folders
 my-report/

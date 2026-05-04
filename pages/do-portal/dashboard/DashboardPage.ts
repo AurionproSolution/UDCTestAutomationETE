@@ -21,10 +21,11 @@ export class DODashboardPage extends BasePage {
   constructor(page: Page) {
     super(page);
 
-    // DO Portal dashboard specific selectors
-    this.createStandardQuoteButton = page.getByRole("button", {
-      name: "Create Standard Quote",
-    });
+    // Dealer shell uses a breadcrumb link (/dealer/standard-quote); two links share the same visible text.
+    this.createStandardQuoteButton = page
+      .locator('a[href="/dealer/standard-quote"]')
+      .filter({ hasText: /Create Standard Quote/i })
+      .or(page.getByRole("button", { name: "Create Standard Quote" }));
     this.dialogBox = page.getByRole("dialog");
     this.pageHeader = page.locator("h1, h2, .page-header");
     this.welcomeMessage = page.locator(
@@ -67,6 +68,18 @@ export class DODashboardPage extends BasePage {
       .first()
       .waitFor({ state: "hidden", timeout: 15_000 })
       .catch(() => {});
+  }
+
+  /**
+   * After `storageState` restore: ensure dashboard is ready (same readiness as before Create Standard Quote).
+   */
+  async waitForAuthenticatedDashboard(): Promise<void> {
+    await this.page
+      .waitForLoadState("domcontentloaded", { timeout: 30_000 })
+      .catch(() => {});
+    await this.waitForAppLoaderOverlayGone(120_000);
+    await this.createStandardQuoteButton.waitFor({ state: "visible", timeout: 60_000 });
+    await expect(this.createStandardQuoteButton).toBeEnabled({ timeout: 30_000 });
   }
 
   /**

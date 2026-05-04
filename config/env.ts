@@ -38,7 +38,7 @@ const environments: Record<Environment, EnvironmentConfig> = {
   },
   qat: {
     do: {
-      baseUrl: "https://do-qat.udc.com",
+      baseUrl: "https://testportaludc.aurionpro.com/",
       apiUrl: "https://api-do-qat.udc.com",
       name: "DO Portal - QAT",
     },
@@ -105,6 +105,16 @@ export const CSS_CONFIG = () => getPortalConfig("css");
 
 // Export current environment URLs for each portal
 export const DO_BASE_URL = () => DO_CONFIG().baseUrl;
+
+/**
+ * Authenticated dealer quotes area. The bare {@link DO_BASE_URL} is often the public marketing
+ * shell; use this after `storageState` (or post-login) to open the app where dashboard CTAs live.
+ */
+export const DO_DEALER_STANDARD_QUOTE_URL = (): string => {
+  const base = DO_CONFIG().baseUrl.replace(/\/$/, "");
+  return `${base}/dealer/`;
+};
+
 export const RSS_BASE_URL = () => RSS_CONFIG().baseUrl;
 export const CSS_BASE_URL = () => CSS_CONFIG().baseUrl;
 
