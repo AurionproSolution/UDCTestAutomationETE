@@ -16,11 +16,11 @@ export type DOQuickQuoteData = {
   termMonths?: string;
   frequency?: string;
   balloonPercent?: string;
-  residualValuePercent?: string;
   confirmTerms?: boolean;
 };
 
 export class DOQuickQuotePage extends BasePage {
+  private readonly debugRunId = "qq-module-debug";
   // Root containers
   readonly quickQuoteRoot: Locator;
   readonly quickQuoteCard: Locator;
@@ -72,20 +72,20 @@ export class DOQuickQuotePage extends BasePage {
     this.printButton = this.quickQuoteRoot.getByRole("button", { name: /^Print$/i });
 
     this.productDropdownTrigger = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Product')]/following::div[@aria-label='dropdown trigger'][1]",
-    );
+      "xpath=.//label[contains(normalize-space(.), 'Product')]/following::p-dropdown[1]"
+    ).getByRole("button", { name: /dropdown trigger/i });
     this.programDropdownTrigger = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Program')]/following::div[@aria-label='dropdown trigger'][1]",
-    );
+      "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]"
+    ).getByRole("button", { name: /dropdown trigger/i });
     this.dealerDropdownTrigger = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Dealer')]/following::div[@aria-label='dropdown trigger'][1]",
-    );
+      "xpath=.//label[contains(normalize-space(.), 'Dealer')]/following::p-dropdown[1]"
+    ).getByRole("button", { name: /dropdown trigger/i });
     this.calculateForDropdownTrigger = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::div[@aria-label='dropdown trigger'][1]",
-    );
+      "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]"
+    ).getByRole("button", { name: /dropdown trigger/i });
     this.frequencyDropdownTrigger = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Frequency')]/following::div[@aria-label='dropdown trigger'][1]",
-    );
+      "xpath=.//label[contains(normalize-space(.), 'Frequency')]/following::p-dropdown[1]"
+    ).getByRole("button", { name: /dropdown trigger/i });
 
     this.cashPriceInput = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Cash Price')]/following::input[1]",
@@ -131,17 +131,34 @@ export class DOQuickQuotePage extends BasePage {
    * Opens the quick quote panel from dashboard.
    */
   async openQuickQuote(): Promise<void> {
+    // #region agent log
+    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H1",location:"QuickQuotePage.ts:openQuickQuote:entry",message:"Open quick quote start",data:{buttonVisible:await this.createQuickQuoteButton.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     await this.clickElement(this.createQuickQuoteButton);
     await this.waitForLoadingComplete();
+    // #region agent log
+    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H1",location:"QuickQuotePage.ts:openQuickQuote:exit",message:"Open quick quote done",data:{rootVisible:await this.quickQuoteRoot.isVisible().catch(()=>false),formVisible:await this.quickQuoteForm.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   }
 
   private async selectFromDropdown(
     trigger: Locator,
     optionText: string,
   ): Promise<void> {
+    // #region agent log
+    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H2",location:"QuickQuotePage.ts:selectFromDropdown:before",message:"Select dropdown option start",data:{optionText,triggerVisible:await trigger.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     await trigger.waitFor({ state: "visible", timeout: 60_000 });
     await this.clickElement(trigger);
-    await this.page.getByRole("option", { name: optionText }).click();
+    const option = this.page.getByRole("option").filter({ hasText: optionText }).first();
+    const optionsCount = await this.page.getByRole("option").count().catch(() => -1);
+    // #region agent log
+    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H2",location:"QuickQuotePage.ts:selectFromDropdown:afterOpen",message:"Dropdown opened",data:{optionText,optionsCount,targetOptionVisible:await option.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    await option.click();
+    // #region agent log
+    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H2",location:"QuickQuotePage.ts:selectFromDropdown:afterSelect",message:"Dropdown option selected",data:{optionText},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   }
 
   async selectProduct(product: string): Promise<void> {
@@ -197,13 +214,26 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async clickCalculate(): Promise<void> {
+    const isEnabled = await this.calculateButton.isEnabled().catch(() => false);
+    // #region agent log
+    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H3",location:"QuickQuotePage.ts:clickCalculate:before",message:"Calculate click start",data:{calculateEnabled:isEnabled},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     await this.clickElement(this.calculateButton);
     await this.waitForLoadingComplete();
+    // #region agent log
+    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H5",location:"QuickQuotePage.ts:clickCalculate:after",message:"Calculate click done",data:{createQuoteVisible:await this.createQuoteButton.isVisible().catch(()=>false),downloadVisible:await this.downloadButton.isVisible().catch(()=>false),printVisible:await this.printButton.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   }
 
   async clickCreateQuote(): Promise<void> {
+    // #region agent log
+    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H4",location:"QuickQuotePage.ts:clickCreateQuote:before",message:"Create quote click start",data:{currentUrl:this.page.url()},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     await this.clickElement(this.createQuoteButton);
     await this.waitForLoadingComplete();
+    // #region agent log
+    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H4",location:"QuickQuotePage.ts:clickCreateQuote:after",message:"Create quote click done",data:{currentUrl:this.page.url(),standardQuoteVisible:await this.page.locator("app-quote-details, app-standard-quote").first().isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   }
 
   async clickReset(): Promise<void> {
@@ -254,14 +284,10 @@ export class DOQuickQuotePage extends BasePage {
       await this.enterBalloonPercent(balloonPercentValue);
     }
 
-    const residualValuePercentValue = (data.residualValuePercent ?? "").trim();
-    if (residualValuePercentValue.length > 0) {
-      await this.enterResidualValuePercent(residualValuePercentValue);
-    }
-
     if (data.confirmTerms === true) {
       await this.confirmTermsAndConditions();
     }
+
     await this.clickCalculate();
   }
 }
