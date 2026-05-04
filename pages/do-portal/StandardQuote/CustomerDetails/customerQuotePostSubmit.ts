@@ -360,76 +360,107 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   /**
-   * **Status :** quote dropdown (Selector Hub: `.col-2.status.w-10rem.ng-star-inserted`) → **Submit**.
-   * Submit uses `:text("Submit")` scoped to the open `.p-dropdown-panel` so other Submit buttons are not hit.
+   * **Status** → **Submit** (Quote header). Some products use **Open Quote** + `div.action-item` menu
+   * (not `li[role=option]` / `.p-dropdown-panel` only). Handle both.
    */
   async submitQuoteFromStatusMenu(): Promise<void> {
-    const statusQuoteCell = this.page.locator(".col-2.status.w-10rem.ng-star-inserted").or(
-      this.page.locator(".col-2.status.w-10rem"),
-    );
+    const p = this.page;
 
-    await statusQuoteCell.first().waitFor({ state: "visible", timeout: 60000 });
+    const openMenu = async (): Promise<void> => {
+      const openQuote = p.getByRole("button", { name: /Open Quote/i });
+      if (await openQuote.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await openQuote.scrollIntoViewIfNeeded();
+        await openQuote.click({ timeout: 20_000 });
+        return;
+      }
+      const statusQuoteCell = p
+        .locator(".col-2.status.w-10rem.ng-star-inserted, .col-2.status.w-10rem, .col-2.status")
+        .or(p.locator("[class*='status']").filter({ has: p.locator("p-dropdown, p-select, .p-dropdown, .p-select") }))
+        .first();
+      await statusQuoteCell.waitFor({ state: "visible", timeout: 60_000 });
+      const trigger = statusQuoteCell
+        .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
+        .first();
+      if (await trigger.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.click({ timeout: 15_000 });
+      } else {
+        await statusQuoteCell.click({ timeout: 15_000 });
+      }
+    };
 
-    const trigger = statusQuoteCell
-      .first()
-      .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
+    await openMenu();
+
+    /** Custom menus: `div.action-item` with text Submit (not listbox `option`). */
+    const submitAction = p
+      .locator("div.action-item, .action-item")
+      .filter({ hasText: /^\s*Submit\s*$/i })
       .first();
 
-    if (await trigger.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await trigger.scrollIntoViewIfNeeded();
-      await trigger.click({ timeout: 15000 });
-    } else {
-      await statusQuoteCell.first().click({ timeout: 15000 });
+    const flexSubmit = p
+      .locator("div.flex.justify-content-center.action-item")
+      .filter({ hasText: /^\s*Submit\s*$/i })
+      .first();
+
+    const clickSubmitMenuItem = async (): Promise<boolean> => {
+      for (const candidate of [submitAction, flexSubmit]) {
+        try {
+          await candidate.waitFor({ state: "visible", timeout: 12_000 });
+          await candidate.scrollIntoViewIfNeeded();
+          await candidate.click({ timeout: 15_000 });
+          await p.keyboard.press("Escape").catch(() => {});
+          return true;
+        } catch {
+          /* try next */
+        }
+      }
+      return false;
+    };
+
+    if (await clickSubmitMenuItem()) {
+      return;
     }
 
-    let panel = this.page
-      .locator(".p-dropdown-panel")
+    const panel = p
+      .locator(".p-dropdown-panel, .p-select-overlay")
       .filter({ visible: true })
-      .filter({ hasText: /Withdraw/i })
+      .filter({ hasText: /Submit/i })
       .last();
 
-    try {
-      await panel.waitFor({ state: "visible", timeout: 8000 });
-    } catch {
-      panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
-      await panel.waitFor({ state: "visible", timeout: 20000 });
-    }
+    if (await panel.isVisible({ timeout: 12_000 }).catch(() => false)) {
+      const submitChoices: Locator[] = [
+        panel.getByRole("option", { name: /^Submit$/i }),
+        panel.locator("li.p-dropdown-item").filter({ hasText: /^Submit$/i }),
+        panel.locator("div.action-item, .action-item").filter({ hasText: /^\s*Submit\s*$/i }),
+        panel.getByText("Submit", { exact: true }),
+        panel.locator(':text-is("Submit")'),
+      ];
 
-    await new Promise((r) => setTimeout(r, 300));
-
-    const submitChoices: Locator[] = [
-      panel.getByRole("option", { name: /^Submit$/i }),
-      panel.locator("li.p-dropdown-item").filter({ hasText: /^Submit$/i }),
-      panel.locator("li.p-dropdown-item span").filter({ hasText: /^Submit$/i }),
-      panel.locator("li").filter({ hasText: /^Submit$/i }),
-      panel.getByText("Submit", { exact: true }),
-      panel.locator(':text-is("Submit")'),
-      panel.locator(':text("Submit")'),
-      this.page.locator(".cdk-overlay-pane").filter({ visible: true }).locator(':text-is("Submit")'),
-    ];
-
-    let clicked = false;
-    for (const choice of submitChoices) {
-      const target = choice.first();
-      try {
-        await target.waitFor({ state: "visible", timeout: 4000 });
-        await target.scrollIntoViewIfNeeded();
-        await target.click({ timeout: 10000 });
-        clicked = true;
-        break;
-      } catch {
-        /* next */
+      let clicked = false;
+      for (const choice of submitChoices) {
+        const target = choice.first();
+        try {
+          await target.waitFor({ state: "visible", timeout: 6000 });
+          await target.scrollIntoViewIfNeeded();
+          await target.click({ timeout: 12_000 });
+          clicked = true;
+          break;
+        } catch {
+          /* next */
+        }
       }
+      if (!clicked) {
+        await flexSubmit.or(submitAction).first().click({ timeout: 12_000, force: true });
+      }
+    } else {
+      await flexSubmit.or(submitAction).first().click({ timeout: 15_000, force: true });
     }
 
-    if (!clicked) {
-      await panel.locator("li.p-dropdown-item").first().click({ timeout: 10000, force: true });
-    }
-
-    await this.page.locator(".p-dropdown-panel").waitFor({
-      state: "hidden",
-      timeout: 15000,
-    }).catch(() => {});
+    await p
+      .locator(".p-dropdown-panel, .p-select-overlay")
+      .filter({ visible: true })
+      .waitFor({ state: "hidden", timeout: 15_000 })
+      .catch(() => {});
   }
 
   /**
