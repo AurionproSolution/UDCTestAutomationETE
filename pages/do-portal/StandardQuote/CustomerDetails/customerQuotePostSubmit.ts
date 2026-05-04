@@ -35,6 +35,78 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   /**
+   * **Search Customer** modal (same host as {@link DOAssetDetailsPage} borrower search).
+   */
+  private searchCustomerDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ has: this.page.getByRole("button", { name: /^Search$/i }) })
+      .last();
+  }
+
+  /**
+   * **Customer Details** — `+ Add Borrowers / Guarantors` (Selector Hub `:text-is("Add Borrowers / Guarantors")`).
+   * Prefer `getByRole("button")` when the control is a real button; fall back to exact text (may be a link).
+   */
+  async clickAddBorrowersOrGuarantorsButton(): Promise<void> {
+    const byRole = this.page.getByRole("button", {
+      name: /Add Borrowers\s*\/\s*Guarantors/i,
+    });
+    const byTextIs = this.page.locator(':text-is("Add Borrowers / Guarantors")');
+    const byTextLoose = this.page.getByText(/^\+\s*Add Borrowers\s*\/\s*Guarantors$/i);
+
+    let target: Locator | null = null;
+    if (await byRole.isVisible({ timeout: 3000 }).catch(() => false)) {
+      target = byRole;
+    } else if (await byTextIs.isVisible({ timeout: 3000 }).catch(() => false)) {
+      target = byTextIs;
+    } else if (await byTextLoose.isVisible({ timeout: 2000 }).catch(() => false)) {
+      target = byTextLoose;
+    } else {
+      target = this.page
+        .getByText("Add Borrowers / Guarantors", { exact: false })
+        .first();
+    }
+
+    await target.waitFor({ state: "visible", timeout: 120000 });
+    await target.scrollIntoViewIfNeeded();
+    await target.click({ timeout: 30000 });
+    await this.searchCustomerDialog().waitFor({ state: "visible", timeout: 60000 });
+  }
+
+  /**
+   * In **Search Customer**, set search type to **Individual** (first radio: Individual | Business | Trust).
+   * Prefers accessible name; falls back to PrimeNG box or Selector Hub xpath on first `p-radiobutton`.
+   */
+  async selectSearchCustomerIndividualType(): Promise<void> {
+    const dialog = this.searchCustomerDialog();
+    await dialog.waitFor({ state: "visible", timeout: 60000 });
+
+    const byRole = dialog.getByRole("radio", { name: /^Individual$/i });
+    if (await byRole.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await byRole.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(300);
+      return;
+    }
+
+    const box = dialog
+      .locator("p-radiobutton")
+      .filter({ hasText: /^Individual$/i })
+      .locator(".p-radiobutton-box")
+      .first();
+    if (await box.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await box.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(300);
+      return;
+    }
+
+    await dialog
+      .locator("xpath=.//p-radiobutton[1]//div[1]//div[1]")
+      .click({ timeout: 15000, force: true });
+    await this.page.waitForTimeout(300);
+  }
+
+  /**
    * The Upload / Documents / Signing strip lives inside one PrimeNG `p-tabview`.
    * Resolving tabs from the whole page hits the wrong tab or misses role/name quirks.
    */
