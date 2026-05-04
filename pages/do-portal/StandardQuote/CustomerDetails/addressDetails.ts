@@ -76,9 +76,12 @@ export class DOAddressDetailsPage extends BasePage {
    * not `app-previous-address`. {@link fillPreviousPhysicalRequiredIfPresent} resolves this card when filling.
    */
   readonly businessPreviousPhysicalCard: Locator;
+  /** Sole Trader — `app-physical-address` nested under `app-sole-trade` (global `.first()` misses this host). */
+  readonly soleTradePhysicalRoot: Locator;
 
   constructor(page: Page) {
     super(page);
+    this.soleTradePhysicalRoot = page.locator("app-sole-trade app-physical-address").first();
     this.physicalAddressBlock = page
       .locator("div")
       .filter({ has: page.locator('input[name="physicalSearchValue"]') })
@@ -243,6 +246,79 @@ export class DOAddressDetailsPage extends BasePage {
       .locator("#text")
       .nth(2);
   }
+
+  /**
+   * Active **Current Physical Address** host:
+   * - **Sole Trader:** `app-sole-trade` often hosts `input[name="physicalSearchValue"]` without a nested
+   *   `app-physical-address`, or the nested host is not matched by `app-sole-trade app-physical-address`.
+   * - **CSA-B:** `app-business-physical-address`
+   * - **Else:** `app-physical-address` that actually contains the physical search field (avoid a hidden `.first()`).
+   */
+  private async activePhysicalHost(): Promise<Locator> {
+    const soleShell = this.page.locator("app-sole-trade").first();
+    if (await soleShell.isVisible({ timeout: 4000 }).catch(() => false)) {
+      const searchInSole = soleShell.locator('input[name="physicalSearchValue"]');
+      if (await searchInSole.isVisible({ timeout: 4000 }).catch(() => false)) {
+        const nested = soleShell.locator("app-physical-address").first();
+        if ((await nested.count()) > 0) {
+          const nestedOk = await nested.isVisible({ timeout: 2500 }).catch(() => false);
+          if (nestedOk) {
+            return nested;
+          }
+        }
+        return soleShell;
+      }
+    }
+
+    if (await this.soleTradePhysicalRoot.isVisible({ timeout: 1500 }).catch(() => false)) {
+      return this.soleTradePhysicalRoot;
+    }
+
+    if (await this.businessPhysicalAddressRoot.isVisible({ timeout: 3000 }).catch(() => false)) {
+      return this.businessPhysicalAddressRoot;
+    }
+
+    const physicalWithSearch = this.page
+      .locator("app-physical-address")
+      .filter({ has: this.page.locator('input[name="physicalSearchValue"]') })
+      .first();
+    if ((await physicalWithSearch.count()) > 0) {
+      const ok = await physicalWithSearch.isVisible({ timeout: 5000 }).catch(() => false);
+      if (ok) {
+        return physicalWithSearch;
+      }
+    }
+
+    return this.physicalAddressRoot;
+  }
+
+  /** PrimeNG trigger for Residence Type scoped to a physical-address host (same axes as constructor). */
+  private residenceTypeTrigger(host: Locator): Locator {
+    const labelRx =
+      /Residence\s*Type|Type\s+of\s+Residence|Residential\s*(type|status)?/i;
+    return host
+      .locator("label")
+      .filter({ hasText: labelRx })
+      .first()
+      .locator(
+        "xpath=following::button[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+      )
+      .or(
+        host
+          .locator("label")
+          .filter({ hasText: labelRx })
+          .first()
+          .locator(
+            "xpath=preceding::button[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+          ),
+      )
+      .or(
+        host.locator(
+          "xpath=.//span[contains(@class,'p-float-label')][.//label[contains(.,'Residence')]]//*[contains(@class,'p-dropdown-trigger')][1]",
+        ),
+      );
+  }
+
   async selectResidenceType(residenceType: string) {
     const rx = new RegExp(residenceType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
 
@@ -317,16 +393,17 @@ export class DOAddressDetailsPage extends BasePage {
     const residenceLabelRx =
       /Residence\s*Type|Type\s+of\s+Residence|Residential\s*(type|status)?/i;
 
-    const root = this.physicalAddressRoot;
+    const root = await this.activePhysicalHost();
     await root.waitFor({ state: "visible", timeout: 60000 });
+    await root.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
 
     const residenceLabels = root.locator("label").filter({ hasText: residenceLabelRx });
 
-    // 1) PrimeNG: dropdown whose subtree contains the Residence label (`has` is scoped per row).
+    // 1) PrimeNG: dropdown whose subtree contains the Residence label (`has` must be under `root`).
     const pDropdownByLabel = root
       .locator("p-dropdown, .p-element.p-dropdown, .p-dropdown")
       .filter({
-        has: this.page.locator("label").filter({ hasText: residenceLabelRx }),
+        has: root.locator("label").filter({ hasText: residenceLabelRx }),
       })
       .first();
     const pDropdownTrigger = pDropdownByLabel
@@ -384,10 +461,10 @@ export class DOAddressDetailsPage extends BasePage {
       if (await tryTrigger(combobox)) return;
     }
 
-    await this.residentialTypeDropdown
-      .waitFor({ state: "visible", timeout: 8000 })
-      .catch(() => {});
-    if (await tryTrigger(this.residentialTypeDropdown)) return;
+    const residenceTrigger = this.residenceTypeTrigger(root);
+    // Do not `waitFor` here — when no label/trigger chain matches, the locator has 0 elements and
+    // `waitFor({ attached })` still burns the full timeout (see trace). `tryTrigger` no-ops safely.
+    if (await tryTrigger(residenceTrigger)) return;
 
     const panelWithOption = this.page
       .locator(".p-dropdown-panel")
@@ -412,7 +489,7 @@ export class DOAddressDetailsPage extends BasePage {
       return;
 
     throw new Error(
-      `selectResidenceType: could not open Residence Type or pick "${residenceType}" (check app-physical-address DOM).`,
+      `selectResidenceType: could not open Residence Type or pick "${residenceType}" (check app-physical-address / app-sole-trade app-physical-address DOM).`,
     );
   }
 
@@ -780,7 +857,7 @@ export class DOAddressDetailsPage extends BasePage {
   async timeAtAddress(year: string, month: string) {
     const bizRoot = this.businessPhysicalAddressRoot;
     if (await bizRoot.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await bizRoot.scrollIntoViewIfNeeded().catch(() => {});
+      await bizRoot.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
       const yBiz = this.businessPhysicalTimeYearsInput();
       const mBiz = this.businessPhysicalTimeMonthsInput();
       const yBizOk = await yBiz.isVisible({ timeout: 6000 }).catch(() => false);
@@ -799,12 +876,12 @@ export class DOAddressDetailsPage extends BasePage {
       return;
     }
 
-    const root = this.physicalAddressRoot;
-    await root.scrollIntoViewIfNeeded().catch(() => {});
+    const root = await this.activePhysicalHost();
+    await root.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
 
     // Primary: gen-card Time at Address rows (child(4)=years, child(6)=months — matches recorded SelectorHub path).
-    const yearHubInput = this.physicalTimeAtHubInput(4);
-    const monthHubInput = this.physicalTimeAtHubInput(6);
+    const yearHubInput = this.physicalTimeAtHubInput(4, root);
+    const monthHubInput = this.physicalTimeAtHubInput(6, root);
     const yearHubOk = await yearHubInput
       .isVisible({ timeout: 4000 })
       .catch(() => false);
@@ -876,8 +953,8 @@ export class DOAddressDetailsPage extends BasePage {
    * Time at Address only — `app-physical-address` gen-card / base-form row inputs (years + months).
    * Exact path mirrors SelectorHub: `form > div:nth-child(1) > div:nth-child(N) > text(1) > … > input(1)`.
    */
-  private physicalTimeAtHubInput(rowDivChild: number): Locator {
-    const root = this.physicalRootOrBlock();
+  private physicalTimeAtHubInput(rowDivChild: number, host?: Locator): Locator {
+    const root = host ?? this.physicalRootOrBlock();
     const exact = root.locator(
       `form > div:nth-child(1) > div:nth-child(${rowDivChild}) > text:nth-child(1) > div:nth-child(1) > div:nth-child(2) > input:nth-child(1)`,
     );
@@ -1210,8 +1287,251 @@ export class DOAddressDetailsPage extends BasePage {
     await this.physicalSearchInput.fill(query);
   }
 
-  async clickReuseForPostalAddressToggle() {
-    await this.reusePostalAddressToggle.click();
+  /** PrimeNG `toggle-checkbox` row that contains `labelRx` under `scope`. */
+  private toggleCheckboxRowByLabel(scope: Locator, labelRx: RegExp): Locator {
+    return scope
+      .locator("toggle-checkbox")
+      .filter({ has: scope.getByText(labelRx) })
+      .first();
+  }
+
+  /** First visible PrimeNG switch thumb inside `container` (used for layout `div.col-4.mt-2.text-sm` rows). */
+  private async clickFirstVisibleInputSliderIn(container: Locator): Promise<boolean> {
+    const pc = container
+      .locator('span.p-inputswitch-slider[data-pc-section="slider"]')
+      .filter({ visible: true })
+      .first();
+    if ((await pc.count()) > 0 && (await pc.isVisible({ timeout: 2500 }).catch(() => false))) {
+      await pc.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      await pc.click({ force: true });
+      return true;
+    }
+    const hub = container.locator("span.p-inputswitch-slider:visible").first();
+    if ((await hub.count()) > 0 && (await hub.isVisible({ timeout: 2500 }).catch(() => false))) {
+      await hub.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      await hub.click({ force: true });
+      return true;
+    }
+    const any = container.locator("span.p-inputswitch-slider").filter({ visible: true }).first();
+    if ((await any.count()) > 0 && (await any.isVisible({ timeout: 2500 }).catch(() => false))) {
+      await any.click({ force: true });
+      return true;
+    }
+    const pSwitch = container.locator("p-inputswitch").first();
+    if ((await pSwitch.count()) > 0 && (await pSwitch.isVisible({ timeout: 2000 }).catch(() => false))) {
+      await pSwitch.click({ force: true });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * **Create new and copy to previous Address** — UI uses `div.col-4.mt-2.text-sm` for the switch column
+   * (label may be in the same column or a sibling in the same `div.row`).
+   */
+  private async clickCreateNewCopyViaCol4Layout(): Promise<boolean> {
+    const labelPattern = /Create new and copy to previous\s*Address/i;
+
+    const colWithLabel = this.page
+      .locator("div.col-4.mt-2.text-sm")
+      .filter({ has: this.page.getByText(labelPattern) })
+      .first();
+    if ((await colWithLabel.count()) > 0 && (await colWithLabel.isVisible({ timeout: 5000 }).catch(() => false))) {
+      await colWithLabel.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      if (await this.clickFirstVisibleInputSliderIn(colWithLabel)) return true;
+    }
+
+    const row = this.page.locator("div.row").filter({ has: this.page.getByText(labelPattern) }).first();
+    if ((await row.count()) > 0 && (await row.isVisible({ timeout: 5000 }).catch(() => false))) {
+      await row.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      const cols = row.locator("div.col-4.mt-2.text-sm");
+      const n = await cols.count();
+      for (let i = 0; i < n; i++) {
+        const col = cols.nth(i);
+        if (await this.clickFirstVisibleInputSliderIn(col)) return true;
+      }
+    }
+
+    const grid = this.page.locator("div.grid").filter({ has: this.page.getByText(labelPattern) }).first();
+    if ((await grid.count()) > 0 && (await grid.isVisible({ timeout: 4000 }).catch(() => false))) {
+      await grid.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      const gcols = grid.locator("div.col-4.mt-2.text-sm");
+      const gn = await gcols.count();
+      for (let i = 0; i < gn; i++) {
+        if (await this.clickFirstVisibleInputSliderIn(gcols.nth(i))) return true;
+      }
+    }
+
+    for (const host of [
+      this.page.locator("app-business-address-details").first(),
+      this.page.locator("app-address-details").first(),
+      this.page.locator("app-sole-trade").first(),
+    ]) {
+      if (!(await host.isVisible({ timeout: 1500 }).catch(() => false))) continue;
+      const scoped = host
+        .locator("div.col-4.mt-2.text-sm")
+        .filter({ has: host.getByText(labelPattern) })
+        .first();
+      if ((await scoped.count()) > 0 && (await scoped.isVisible({ timeout: 3000 }).catch(() => false))) {
+        await scoped.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+        if (await this.clickFirstVisibleInputSliderIn(scoped)) return true;
+      }
+      const scopedRow = host.locator("div.row").filter({ has: host.getByText(labelPattern) }).first();
+      if ((await scopedRow.count()) > 0 && (await scopedRow.isVisible({ timeout: 3000 }).catch(() => false))) {
+        const sn = await scopedRow.locator("div.col-4.mt-2.text-sm").count();
+        for (let i = 0; i < sn; i++) {
+          if (await this.clickFirstVisibleInputSliderIn(scopedRow.locator("div.col-4.mt-2.text-sm").nth(i)))
+            return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Clicks the p-inputswitch beside label text (label may sit outside `toggle-checkbox`).
+   * Tries: `toggle-checkbox` ancestor → nearest ancestor with `p-inputswitch` → following slider.
+   */
+  private async clickPrimeSwitchNearLabel(scope: Page | Locator, pattern: RegExp): Promise<boolean> {
+    const label = scope.getByText(pattern).first();
+    if ((await label.count()) === 0) return false;
+    if (!(await label.isVisible({ timeout: 5000 }).catch(() => false))) return false;
+    await label.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+
+    const toggleRow = label.locator("xpath=ancestor::toggle-checkbox[1]");
+    if ((await toggleRow.count()) > 0 && (await toggleRow.isVisible({ timeout: 2000 }).catch(() => false))) {
+      await this.clickToggleCheckboxRow(toggleRow);
+      return true;
+    }
+
+    const shell = label.locator("xpath=ancestor::*[.//p-inputswitch][1]").first();
+    const inShell = shell
+      .locator('span.p-inputswitch-slider[data-pc-section="slider"]')
+      .filter({ visible: true })
+      .first();
+    if ((await inShell.count()) > 0 && (await inShell.isVisible({ timeout: 2000 }).catch(() => false))) {
+      await inShell.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      await inShell.click({ force: true });
+      return true;
+    }
+
+    const following = label.locator(
+      "xpath=following::span[contains(@class,'p-inputswitch-slider')][1]",
+    );
+    if ((await following.count()) > 0 && (await following.isVisible({ timeout: 2000 }).catch(() => false))) {
+      await following.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      await following.click({ force: true });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Sole Trader Address step: visible sliders under `app-sole-trade` are ordered
+   * **[0] Create new and copy to previous Address**, **[1] Reuse for Postal Address** (Selector Hub css 1 / 2).
+   */
+  private async clickSoleTradeVisibleInputSwitchByIndex(index: 0 | 1): Promise<boolean> {
+    const sole = this.page.locator("app-sole-trade").first();
+    if (!(await sole.isVisible({ timeout: 2500 }).catch(() => false))) return false;
+    await sole.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+    const sliders = sole
+      .locator('span.p-inputswitch-slider[data-pc-section="slider"]')
+      .filter({ visible: true });
+    if ((await sliders.count()) <= index) return false;
+    const target = sliders.nth(index);
+    await target.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+    await target.click({ force: true });
+    return true;
+  }
+
+  private async clickToggleCheckboxRow(row: Locator): Promise<void> {
+    await row.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+    // Selector Hub: `span.p-inputswitch-slider:visible`; DOM: `data-pc-section="slider"`.
+    const pcSliders = row
+      .locator('span.p-inputswitch-slider[data-pc-section="slider"]')
+      .filter({ visible: true });
+    if ((await pcSliders.count()) > 0) {
+      await pcSliders.first().click({ force: true });
+      return;
+    }
+    const hubStyle = row.locator("span.p-inputswitch-slider:visible");
+    if ((await hubStyle.count()) > 0) {
+      await hubStyle.first().click({ force: true });
+      return;
+    }
+    const anyVis = row.locator("span.p-inputswitch-slider").filter({ visible: true });
+    if ((await anyVis.count()) > 0) {
+      await anyVis.first().click({ force: true });
+      return;
+    }
+    const chk = row.locator('input[type="checkbox"]').first();
+    if ((await chk.count()) > 0) await chk.click({ force: true }).catch(() => {});
+  }
+
+  /**
+   * **Reuse for Postal Address** — under `app-business-physical-address` (CSA-B) or `app-sole-trade` (Sole Trader).
+   * Constructor `reusePostalAddressToggle` is business-only; this resolves the visible row.
+   */
+  private async resolveReuseForPostalAddressToggleRow(): Promise<Locator | null> {
+    const scopes = [
+      this.businessPhysicalAddressRoot,
+      this.page.locator("app-sole-trade").first(),
+    ];
+    for (const scope of scopes) {
+      if (!(await scope.isVisible({ timeout: 2000 }).catch(() => false))) continue;
+      const row = this.toggleCheckboxRowByLabel(scope, /Reuse for Postal Address/i);
+      if ((await row.count()) === 0) continue;
+      if (await row.isVisible({ timeout: 2500 }).catch(() => false)) return row;
+    }
+    return null;
+  }
+
+  private async clickReuseForPostalAddressToggleOnce(): Promise<boolean> {
+    const row = await this.resolveReuseForPostalAddressToggleRow();
+    if (row) {
+      await this.clickToggleCheckboxRow(row);
+      return true;
+    }
+    if (await this.clickSoleTradeVisibleInputSwitchByIndex(1)) return true;
+    if (await this.reusePostalAddressToggle.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await this.reusePostalAddressToggle.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      await this.reusePostalAddressToggle.click({ force: true });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Top-of-step toggle: **Create new and copy to previous Address** (often beside the label, under
+   * `app-business-address-details` rather than inside `app-sole-trade`).
+   */
+  async clickCreateNewAndCopyToPreviousAddressToggle(): Promise<void> {
+    const labelRx = /Create new and copy to previous\s*Address/i;
+    if (await this.clickCreateNewCopyViaCol4Layout()) return;
+    const hosts = [
+      this.page.locator("app-business-address-details").first(),
+      this.page.locator("app-address-details").first(),
+      this.page.locator("app-sole-trade").first(),
+    ];
+    for (const host of hosts) {
+      if (!(await host.isVisible({ timeout: 2000 }).catch(() => false))) continue;
+      if (await this.clickPrimeSwitchNearLabel(host, labelRx)) return;
+    }
+    if (await this.clickPrimeSwitchNearLabel(this.page, labelRx)) return;
+    if (await this.clickSoleTradeVisibleInputSwitchByIndex(0)) return;
+    throw new Error(
+      'Address Details: "Create new and copy to previous Address" toggle not found (label or p-inputswitch beside it).',
+    );
+  }
+
+  async clickReuseForPostalAddressToggle(): Promise<void> {
+    const ok = await this.clickReuseForPostalAddressToggleOnce();
+    if (!ok) {
+      throw new Error(
+        'Address Details: "Reuse for Postal Address" toggle not found (check Sole Trader / business physical card).',
+      );
+    }
   }
 
   /** Row host for the Physical card “Reuse for Register Address” switch. */
@@ -1376,11 +1696,14 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** Clicks reuse toggle only when shown (some products omit postal reuse). */
   async clickReuseForPostalAddressToggleIfPresent(): Promise<void> {
-    if (
-      await this.reusePostalAddressToggle.isVisible({ timeout: 2500 }).catch(() => false)
-    ) {
-      await this.reusePostalAddressToggle.scrollIntoViewIfNeeded();
-      await this.reusePostalAddressToggle.click();
+    const row = await this.resolveReuseForPostalAddressToggleRow();
+    if (row) {
+      await this.clickToggleCheckboxRow(row);
+      return;
+    }
+    if (await this.reusePostalAddressToggle.isVisible({ timeout: 2500 }).catch(() => false)) {
+      await this.reusePostalAddressToggle.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      await this.reusePostalAddressToggle.click({ force: true });
     }
   }
 
@@ -1438,12 +1761,11 @@ export class DOAddressDetailsPage extends BasePage {
     if (await this.isManualPostalBlockReady()) return;
 
     for (let i = 0; i < 6; i++) {
-      if (
-        !(await this.reusePostalAddressToggle.isVisible({ timeout: 2000 }).catch(() => false))
-      )
-        break;
-      await this.reusePostalAddressToggle.scrollIntoViewIfNeeded();
-      await this.reusePostalAddressToggle.click();
+      const row = await this.resolveReuseForPostalAddressToggleRow();
+      const legacy = await this.reusePostalAddressToggle.isVisible({ timeout: 500 }).catch(() => false);
+      if (!row && !legacy) break;
+      const clicked = await this.clickReuseForPostalAddressToggleOnce();
+      if (!clicked) break;
       await this.page.waitForTimeout(500);
       if (await this.isManualPostalBlockReady()) return;
     }
@@ -1992,6 +2314,14 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async waitForPhysicalAddressStep() {
+    const soleSearch = this.page
+      .locator("app-sole-trade")
+      .locator('input[name="physicalSearchValue"]')
+      .first();
+    if (await soleSearch.isVisible({ timeout: 8000 }).catch(() => false)) {
+      await soleSearch.waitFor({ state: "visible", timeout: 120000 });
+      return;
+    }
     await this.physicalSearchInput.waitFor({
       state: "visible",
       timeout: 120000,
