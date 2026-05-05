@@ -5,12 +5,16 @@ import { BasePage } from "../../../common";
  * Step — Financial Position:
  * - **Individual:** `app-financial-position` (Liabilities, Income, Expenditure, Essential Outgoings).
  * - **CSA-B business:** `app-business-financial` (Profit declaration, Turnover, Balance information).
+ * - **Sole Trader:** `app-sole-trade-financial` + `app-sole-trade-profit-declaration`, `app-sole-trade-turnover-info`,
+ *   `app-sole-trade-assets`, `app-sole-trade-liabilities` (same business-style fields, different hosts).
  * PrimeNG ids (`#pn_id_*`) are fallbacks — they can change between builds.
  */
 export class DOFinancialPositionPage extends BasePage {
   readonly financialRoot: Locator;
   /** CSA-B business entity — Financial Accounts step. */
   readonly businessFinancialRoot: Locator;
+  /** Sole Trader — Financial Position step (parallel to `app-business-financial`). */
+  readonly soleTradeFinancialRoot: Locator;
   readonly turnoverInformationRoot: Locator;
   /** `app-balance-information` or a card titled “Balance Information” under `app-business-financial`. */
   readonly balanceInformationHost: Locator;
@@ -23,13 +27,20 @@ export class DOFinancialPositionPage extends BasePage {
     super(page);
     this.financialRoot = page.locator("app-financial-position").first();
     this.businessFinancialRoot = page.locator("app-business-financial").first();
+    this.soleTradeFinancialRoot = page.locator("app-sole-trade-financial").first();
     this.turnoverInformationRoot = page
-      .locator("app-business-financial app-turnover-information")
+      .locator("app-sole-trade-financial app-sole-trade-turnover-info")
+      .filter({ visible: true })
       .first()
+      .or(page.locator("app-business-financial app-turnover-information").first())
       .or(page.locator("app-turnover-information").first());
     this.balanceInformationHost = page
-      .locator("app-balance-information")
+      .locator("app-sole-trade-financial")
+      .filter({ visible: true })
+      .locator("gen-card, p-card")
+      .filter({ hasText: /Balance Information/i })
       .first()
+      .or(page.locator("app-balance-information").first())
       .or(
         this.businessFinancialRoot
           .locator("gen-card, p-card")
@@ -45,6 +56,7 @@ export class DOFinancialPositionPage extends BasePage {
   async waitForFinancialPositionStep(): Promise<void> {
     await this.financialRoot
       .or(this.businessFinancialRoot)
+      .or(this.soleTradeFinancialRoot)
       .first()
       .waitFor({ state: "visible", timeout: 120000 });
   }
@@ -435,21 +447,47 @@ export class DOFinancialPositionPage extends BasePage {
     await this.pickDropdownOption("Monthly");
   }
 
-  private profitDeclarationCard(): Locator {
+  private profitDeclarationCardForBusiness(): Locator {
     return this.businessFinancialRoot
       .locator("gen-card, p-card")
       .filter({ hasText: /Did you make a Net Profit|Profit Declaration/i })
       .first();
   }
 
-  /** CSA-B **Financial Accounts** — “Did you make a Net Profit last year?” → **Yes**. */
+  /** Profit declaration card/host — Sole Trader (`app-sole-trade-profit-declaration`) or CSA-B business card. */
+  private async resolveProfitDeclarationScope(): Promise<Locator> {
+    const solePd = this.page
+      .locator("app-sole-trade-financial app-sole-trade-profit-declaration")
+      .first();
+    if (await solePd.isVisible({ timeout: 20000 }).catch(() => false)) {
+      const card = solePd
+        .locator("gen-card, p-card")
+        .filter({
+          hasText: /Did you make a Net Profit|Profit Declaration|Net Profit last year/i,
+        })
+        .first();
+      if ((await card.count()) > 0 && (await card.isVisible({ timeout: 4000 }).catch(() => false)))
+        return card;
+      return solePd;
+    }
+    await this.businessFinancialRoot.waitFor({ state: "visible", timeout: 120000 });
+    return this.profitDeclarationCardForBusiness();
+  }
+
+  /** CSA-B **Financial Accounts** or **Sole Trader** — “Did you make a Net Profit last year?” → **Yes**. */
   async selectBusinessNetProfitLastYearYes(): Promise<void> {
-    await this.businessFinancialRoot.waitFor({
-      state: "visible",
-      timeout: 120000,
-    });
-    const card = this.profitDeclarationCard();
-    await card.waitFor({ state: "visible", timeout: 15000 });
+    try {
+      await Promise.any([
+        this.businessFinancialRoot.waitFor({ state: "visible", timeout: 120000 }),
+        this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 120000 }),
+      ]);
+    } catch {
+      throw new Error(
+        "Financial Position: neither app-business-financial nor app-sole-trade-financial became visible.",
+      );
+    }
+    const card = await this.resolveProfitDeclarationScope();
+    await card.waitFor({ state: "visible", timeout: 20000 });
 
     const yesAlready = card.locator("p-radiobutton.p-radiobutton-checked").filter({
       hasText: "Yes",
@@ -512,9 +550,16 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** “Net Profit last year *” (`<amount>` / `input.valueClass`). */
   async fillBusinessNetProfitLastYear(value: string): Promise<void> {
-    await this.businessFinancialRoot.waitFor({ state: "visible", timeout: 60000 });
-    const card = this.profitDeclarationCard();
-    await card.waitFor({ state: "visible", timeout: 15000 });
+    await Promise.any([
+      this.businessFinancialRoot.waitFor({ state: "visible", timeout: 60000 }),
+      this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 60000 }),
+    ]).catch(() => {
+      throw new Error(
+        "Financial Position: app-business-financial / app-sole-trade-financial not visible for net profit.",
+      );
+    });
+    const card = await this.resolveProfitDeclarationScope();
+    await card.waitFor({ state: "visible", timeout: 20000 });
     const byAmountHost = card.locator("amount").locator("#amount").first();
     if (await byAmountHost.isVisible({ timeout: 4000 }).catch(() => false)) {
       await this.setCommittedAmount(byAmountHost, value);
@@ -547,6 +592,10 @@ export class DOFinancialPositionPage extends BasePage {
     amount: string,
     yearEnding: string,
   ): Promise<void> {
+    await Promise.any([
+      this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 15000 }),
+      this.businessFinancialRoot.waitFor({ state: "visible", timeout: 15000 }),
+    ]).catch(() => {});
     await this.turnoverInformationRoot.waitFor({
       state: "visible",
       timeout: 20000,
@@ -585,6 +634,10 @@ export class DOFinancialPositionPage extends BasePage {
     amount: string,
     yearEnding: string,
   ): Promise<void> {
+    await Promise.any([
+      this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 15000 }),
+      this.businessFinancialRoot.waitFor({ state: "visible", timeout: 15000 }),
+    ]).catch(() => {});
     await this.balanceInformationHost.waitFor({
       state: "visible",
       timeout: 20000,
@@ -597,6 +650,159 @@ export class DOFinancialPositionPage extends BasePage {
     await this.setCommittedAmount(amountInput, amount);
     const calendarInput = this.yearEndingInputForAmountHost(amountHost);
     await this.fillYearEndingField(calendarInput, yearEnding);
+  }
+
+  /** Sole: **Personal Statement of Position** → **Home Ownership Type** (e.g. **Joint**). No-op if not Sole layout. */
+  async selectSoleTradeHomeOwnershipType(optionLabel: string): Promise<void> {
+    const host = this.page.locator("app-sole-trade-financial app-sole-trade-assets").first();
+    if (!(await host.isVisible({ timeout: 5000 }).catch(() => false))) return;
+    await host.scrollIntoViewIfNeeded();
+    const anchor = host.getByText(/Home Ownership Type/i).first();
+    await anchor.waitFor({ state: "visible", timeout: 20000 });
+    const trigger = anchor
+      .locator(
+        "xpath=ancestor::*[.//p-dropdown or .//*[contains(@class,'p-dropdown-trigger')]][1]//*[contains(@class,'p-dropdown-trigger') or @aria-label='dropdown trigger'][1]",
+      )
+      .first();
+    await trigger.waitFor({ state: "visible", timeout: 15000 });
+    await trigger.click({ timeout: 15000 });
+    await this.pickDropdownOption(optionLabel);
+  }
+
+  /**
+   * Sole: amount beside **Home Ownership Type** (`<amount>` → `p-floatlabel` / `#amount` / `valueClass` input).
+   * SelectorHub path: `... amount > div > p-floatlabel > span > input` (first assets form row).
+   * No-op if not Sole layout.
+   */
+  async fillSoleTradeHomeOwnershipAmount(value: string): Promise<void> {
+    const host = this.page.locator("app-sole-trade-financial app-sole-trade-assets").first();
+    if (!(await host.isVisible({ timeout: 5000 }).catch(() => false))) return;
+    await host.scrollIntoViewIfNeeded();
+
+    const tryFill = async (loc: Locator): Promise<boolean> => {
+      if ((await loc.count()) === 0) return false;
+      const target = loc.first();
+      if (!(await target.isVisible({ timeout: 3000 }).catch(() => false))) return false;
+      await this.setCommittedAmount(target, value);
+      return true;
+    };
+
+    const form = host.locator("form").first();
+    const firstAmountHost = form.locator("amount").first();
+    // Row 1 = Home Ownership (per app layout).
+    if (await tryFill(firstAmountHost.locator("#amount"))) return;
+    if (await tryFill(firstAmountHost.locator("p-floatlabel input.p-inputtext"))) return;
+    if (
+      await tryFill(
+        firstAmountHost.locator("input.p-inputtext.p-component.p-element.w-full.valueClass"),
+      )
+    )
+      return;
+    if (await tryFill(firstAmountHost.locator("div input.p-inputtext.p-component"))) return;
+    if (await tryFill(firstAmountHost.locator("input.p-inputtext"))) return;
+
+    const label = host.getByText(/Home Ownership Type/i).first();
+    await label.scrollIntoViewIfNeeded().catch(() => {});
+    const rowWithAmount = label.locator("xpath=ancestor::*[.//amount][1]");
+    const amountInRow = rowWithAmount.locator("amount").first();
+    if (await tryFill(amountInRow.locator("#amount"))) return;
+    if (await tryFill(amountInRow.locator("p-floatlabel input.p-inputtext"))) return;
+    if (
+      await tryFill(
+        amountInRow.locator("input.p-inputtext.p-component.p-element.w-full.valueClass"),
+      )
+    )
+      return;
+    if (await tryFill(amountInRow.locator("input.p-inputtext"))) return;
+
+    const card = host
+      .locator("gen-card, p-card")
+      .filter({ hasText: /Personal Statement of Position|Assets/i })
+      .first();
+    if ((await card.count()) > 0) {
+      const am = card.locator("amount").first();
+      if (await tryFill(am.locator("#amount"))) return;
+      if (await tryFill(am.locator("p-floatlabel input.p-inputtext"))) return;
+      if (
+        await tryFill(
+          am.locator("input.p-inputtext.p-component.p-element.w-full.valueClass"),
+        )
+      )
+        return;
+      if (await tryFill(am.locator("input.p-inputtext"))) return;
+    }
+
+    throw new Error(
+      "Sole assets: could not find Home Ownership amount input (expected <amount> / p-floatlabel input in first form row).",
+    );
+  }
+
+  /**
+   * Sole: **Liabilities** → **Mortgage / Rent** monthly amount (`app-sole-trade-liabilities` + `<amount>`).
+   * Row scoping uses label → ancestor with `amount` (same pattern as home ownership); avoids
+   * `filter({ has: host.getByText })` on `div,form`, which often misses the real amount cell.
+   * No-op if not Sole layout.
+   */
+  async fillSoleTradeMortgageRentMonthlyAmount(value: string): Promise<void> {
+    const host = this.page.locator("app-sole-trade-financial app-sole-trade-liabilities").first();
+    if (!(await host.isVisible({ timeout: 5000 }).catch(() => false))) return;
+    await host.scrollIntoViewIfNeeded();
+
+    const tryFill = async (loc: Locator): Promise<boolean> => {
+      if ((await loc.count()) === 0) return false;
+      const target = loc.first();
+      if (!(await target.isVisible({ timeout: 3000 }).catch(() => false))) return false;
+      await this.setCommittedAmount(target, value);
+      return true;
+    };
+
+    const mortgageLabel = host.getByText(/Mortgage\s*\/\s*Rent/i).first();
+    await mortgageLabel.waitFor({ state: "visible", timeout: 20000 });
+    await mortgageLabel.scrollIntoViewIfNeeded();
+
+    const rowWithAmount = mortgageLabel.locator("xpath=ancestor::*[.//amount][1]");
+    const amountHost = rowWithAmount.locator("amount").first();
+
+    if (await tryFill(amountHost.locator("#amount"))) return;
+    if (await tryFill(amountHost.locator("p-floatlabel input.p-inputtext"))) return;
+    if (
+      await tryFill(
+        amountHost.locator("input.p-inputtext.p-component.p-element.w-full.valueClass"),
+      )
+    )
+      return;
+    if (await tryFill(amountHost.locator("div input.p-inputtext.p-component"))) return;
+    if (await tryFill(amountHost.locator("input.p-inputtext"))) return;
+
+    if (
+      await tryFill(
+        rowWithAmount.locator("input.p-inputtext.p-component.p-element.w-full.valueClass").first(),
+      )
+    )
+      return;
+    if (await tryFill(rowWithAmount.locator("p-floatlabel input.p-inputtext").first())) return;
+    if (await tryFill(rowWithAmount.locator("input.p-inputtext").first())) return;
+
+    const card = host
+      .locator("gen-card, p-card")
+      .filter({ hasText: /Liabilities/i })
+      .first();
+    if ((await card.count()) > 0 && (await card.isVisible({ timeout: 2000 }).catch(() => false))) {
+      const firstRowAmount = card.locator("amount").first();
+      if (await tryFill(firstRowAmount.locator("#amount"))) return;
+      if (await tryFill(firstRowAmount.locator("p-floatlabel input.p-inputtext"))) return;
+      if (
+        await tryFill(
+          firstRowAmount.locator("input.p-inputtext.p-component.p-element.w-full.valueClass"),
+        )
+      )
+        return;
+      if (await tryFill(firstRowAmount.locator("input.p-inputtext"))) return;
+    }
+
+    throw new Error(
+      "Sole liabilities: could not find Mortgage / Rent monthly amount input (expected <amount> / p-floatlabel / valueClass in row).",
+    );
   }
 
   async clickNextButton(): Promise<void> {
