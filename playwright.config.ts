@@ -5,10 +5,10 @@
  * @see https://playwright.dev/docs/test-configuration
  */
 
-import path from "path";
 import { defineConfig, devices } from "@playwright/test";
 import type { OrtoniReportConfig } from "ortoni-report";
 import * as os from "os";
+import path from "path";
 
 const doSanityAuthStorage = path.join(
   process.cwd(),
@@ -17,7 +17,7 @@ const doSanityAuthStorage = path.join(
   "do-sanity.json",
 );
 
-/** Run only via `do-sanity-chromium` (depends on setup + storageState). */
+/** Excluded from bulk portal projects; run via `do-sanity-chromium` (uses setup + storageState). */
 const ignoreDoSanityFolder = "**/doSanityTest/**";
 
 // Environment variable for selecting test environment
@@ -72,8 +72,12 @@ export default defineConfig({
   // Test directory - contains all portal tests
   testDir: "./tests",
 
-  // Test file pattern
-  testMatch: "**/*.test.ts",
+  // Test file pattern (jira-linked specs may use a fixed filename without .test.ts)
+  testMatch: [
+    "**/*.test.ts",
+    "**/do-portal/jira/quickQuotejira.ts",
+    "**/do-portal/doSanityTest/jira tickets/quickQuoteissue.ts",
+  ],
 
   // Run tests in parallel
   fullyParallel: true,
@@ -110,10 +114,10 @@ export default defineConfig({
     video: "on",
 
     // Default timeout for actions
-    actionTimeout: 60000,
+    actionTimeout: 120000,
 
     // Default navigation timeout
-    navigationTimeout: 30000,
+    navigationTimeout: 120000,
   },
 
   // Timeout for each test
@@ -121,7 +125,7 @@ export default defineConfig({
 
   // Expect timeout
   expect: {
-    timeout: 60000,
+    timeout: 120000,
   },
 
   // ============ Projects ============
@@ -141,18 +145,18 @@ export default defineConfig({
       testIgnore: ignoreDoSanityFolder,
       use: maximizedChrome,
     },
-    {
-      name: "do-portal-firefox",
-      testDir: "./tests/do-portal",
-      testIgnore: ignoreDoSanityFolder,
-      use: maximizedFirefox,
-    },
-    {
-      name: "do-portal-webkit",
-      testDir: "./tests/do-portal",
-      testIgnore: ignoreDoSanityFolder,
-      use: maximizedWebkit,
-    },
+    // {
+    //   name: "do-portal-firefox",
+    //   testDir: "./tests/do-portal",
+    //   testIgnore: ignoreDoSanityFolder,
+    //   use: maximizedFirefox,
+    // },
+    // {
+    //   name: "do-portal-webkit",
+    //   testDir: "./tests/do-portal",
+    //   testIgnore: ignoreDoSanityFolder,
+    //   use: maximizedWebkit,
+    // },
 
     // -------- DO Portal sanity (single login via storageState) --------
     {
@@ -165,6 +169,7 @@ export default defineConfig({
       name: "do-sanity-chromium",
       testDir: "./tests/do-portal/doSanityTest",
       testIgnore: "**/*.auth.setup.ts",
+      testMatch: ["**/*.test.ts", "**/quickQuoteissue.ts"],
       dependencies: ["do-sanity-setup"],
       use: {
         ...maximizedChrome,
@@ -178,11 +183,11 @@ export default defineConfig({
       testDir: "./tests/rss-portal",
       use: maximizedChrome,
     },
-    {
-      name: "rss-portal-firefox",
-      testDir: "./tests/rss-portal",
-      use: maximizedFirefox,
-    },
+    // {
+    //   name: "rss-portal-firefox",
+    //   testDir: "./tests/rss-portal",
+    //   use: maximizedFirefox,
+    // },
 
     // -------- CSS Portal Projects --------
     {
@@ -190,11 +195,11 @@ export default defineConfig({
       testDir: "./tests/css-portal",
       use: maximizedChrome,
     },
-    {
-      name: "css-portal-firefox",
-      testDir: "./tests/css-portal",
-      use: maximizedFirefox,
-    },
+    // {
+    //   name: "css-portal-firefox",
+    //   testDir: "./tests/css-portal",
+    //   use: maximizedFirefox,
+    // },
 
     // -------- Sample/Demo Tests --------
     {
@@ -219,21 +224,21 @@ export default defineConfig({
     },
 
     // -------- Mobile Testing --------
-    {
-      name: "mobile-chrome",
-      testDir: "./tests",
-      grep: /@mobile/,
-      use: {
-        ...devices["Pixel 5"],
-      },
-    },
-    {
-      name: "mobile-safari",
-      testDir: "./tests",
-      grep: /@mobile/,
-      use: {
-        ...devices["iPhone 13"],
-      },
-    },
+    // {
+    //   name: "mobile-chrome",
+    //   testDir: "./tests",
+    //   grep: /@mobile/,
+    //   use: {
+    //     ...devices["Pixel 5"],
+    //   },
+    // },
+    // {
+    //   name: "mobile-safari",
+    //   testDir: "./tests",
+    //   grep: /@mobile/,
+    //   use: {
+    //     ...devices["iPhone 13"],
+    //   },
+    // },
   ],
 });

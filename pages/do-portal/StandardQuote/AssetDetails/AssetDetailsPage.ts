@@ -11,6 +11,8 @@ export class DOAssetDetailsPage extends BasePage {
   readonly assetyEditButton: Locator;
   readonly assetSummaryCancelButton: Locator;
   readonly cashPriceOfAssetInputField: Locator;
+  /** Recommended Retail Price (`input#amount` under label; UDP-2640). Shown for Condition New, hidden for Used on some builds. */
+  readonly recommendedRetailPriceInput: Locator;
   readonly PPSRCount: Locator;
   readonly udcEstablishmentFeeInputField: Locator;
   readonly dealerOriginationFeeInputField: Locator;
@@ -50,6 +52,19 @@ export class DOAssetDetailsPage extends BasePage {
     this.cashPriceOfAssetInputField = page.getByRole("textbox", {
       name: "Cash Price of Asset*",
     });
+    const rrpLabel = /Recommended\s+Retail\s+Price/i;
+    // Float labels may sit outside the `col-6` wrapper; prefer ARIA name, then label text + `#amount`.
+    this.recommendedRetailPriceInput = page
+      .getByRole("textbox", { name: rrpLabel })
+      .or(
+        page
+          .getByText(rrpLabel)
+          .locator(
+            "xpath=ancestor::div[contains(@class,'col-')][1]//input[@id='amount']",
+          ),
+      )
+      .or(page.locator("amount").filter({ hasText: rrpLabel }).locator("#amount"))
+      .first();
     this.PPSRCount = page.locator("app-quote-details").getByRole("spinbutton");
     this.udcEstablishmentFeeInputField = page
       .locator("amount")
@@ -475,6 +490,16 @@ export class DOAssetDetailsPage extends BasePage {
   async selectCondition(condition: string): Promise<void> {
     await this.conditionDropdown.click();
     await this.page.getByRole("option", { name: condition }).click();
+  }
+
+  async scrollRecommendedRetailPriceIntoView(): Promise<void> {
+    await this.scrollIfNeeded(this.recommendedRetailPriceInput);
+  }
+
+  async fillRecommendedRetailPrice(value: string): Promise<void> {
+    await this.scrollRecommendedRetailPriceIntoView();
+    await this.recommendedRetailPriceInput.click();
+    await this.recommendedRetailPriceInput.fill(value);
   }
 
   /**

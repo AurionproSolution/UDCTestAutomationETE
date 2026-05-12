@@ -1,6 +1,13 @@
 {
   "subagents": [
     {
+      "id": "test-automation-architect",
+      "name": "Test Automation Architect",
+      "description": "Use this agent for UDC Test Automation ETE workflow orchestration, framework architecture, and step-by-step guidance on which specialist subagent to run next (JIRA vs plan-driven vs healing).",
+      "model": "inherit",
+      "file": ".cursor/agents/test-automation-architect.md"
+    },
+    {
       "id": "test-case-writer",
       "name": "Test Case Writer",
       "description": "Use this agent when you need to create Playwright test scripts from JIRA requirements. Fetches requirements from JIRA, analyzes existing project patterns, and generates complete Playwright test files following the UDC Test Automation ETE project conventions.",
