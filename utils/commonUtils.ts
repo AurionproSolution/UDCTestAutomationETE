@@ -43,11 +43,12 @@ export class CommonUtils {
 
   /**
    * Click with visual highlighting
+   * @param clickTimeoutMs Playwright click timeout (default 15000); raise for overlays / slow QAT hosts.
    */
-  async click(locator: Locator): Promise<void> {
+  async click(locator: Locator, clickTimeoutMs = 15_000): Promise<void> {
     await locator.waitFor({ state: "visible", timeout: 10000 }).catch(() => {});
     await this.highlight(locator);
-    await locator.click({ timeout: 15000 });
+    await locator.click({ timeout: clickTimeoutMs });
   }
 
   /**

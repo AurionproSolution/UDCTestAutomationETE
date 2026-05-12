@@ -1,6 +1,12 @@
 {
   "validUsers": [
     {
+      "username": "Prasad.Kashid",
+      "password": "Happy/06/25kaam",
+      "role": "analyst",
+      "email": "prasad.kashid@udc.com"
+    },
+    {
       "username": "rss_admin",
       "password": "RssAdmin@123",
       "role": "admin",
@@ -32,7 +38,3 @@
     }
   ]
 }
-
-
-
-
