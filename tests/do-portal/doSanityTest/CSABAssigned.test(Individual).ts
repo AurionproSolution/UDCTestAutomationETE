@@ -32,7 +32,7 @@ let customerQuotePostSubmitPage: DOCustomerQuotePostSubmitPage;
 let personalDetailsPage: DOPersonalDetailsPage;
 
 
-test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
+test.describe("DO Portal - CSAB Assigned(Individual-SOLE trade customer) - Sanity @do @smoke", () => {
   test.beforeEach(async ({ page }) => {
     loginPage = new DOLoginPage(page);
     dashboardPage = new DODashboardPage(page);
@@ -141,15 +141,15 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
     // await addressDetailsPage.ensureReuseForRegisterAddressYes();
 
     // Previous Physical Address — `app-previous-address` or CSA-B `p-card`/`gen-card` under `app-business-address-details`.
-    await addressDetailsPage.ensureOverseasAddressNoIfPreviousPhysicalVisible();
-    await addressDetailsPage.fillPreviousPhysicalRequiredIfPresent({
-      years: "1",
-      months: "1",
-      streetNumber: "45",
-      streetName: "Queen Street",
-      city: "Wellington",
-      country: "New Zealand",
-    });
+    // await addressDetailsPage.ensureOverseasAddressNoIfPreviousPhysicalVisible();
+    // await addressDetailsPage.fillPreviousPhysicalRequiredIfPresent({
+    //   years: "1",
+    //   months: "1",
+    //   streetNumber: "45",
+    //   streetName: "Queen Street",
+    //   city: "Wellington",
+    //   country: "New Zealand",
+    // });
     // Postal Address — only when a separate postal block is required (e.g. postal reuse No).
     // await addressDetailsPage.fillPostalAddressPostalTypeTextareaAndCountry({
     //   addressLine: "Navimumbai",
@@ -186,6 +186,10 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
     // await financialPositionPage.fillBusinessDebtorBalance("$5000.00", "31/03/2025");
     // await financialPositionPage.fillBusinessCreditorBalance("$3000.00", "31/03/2025");
     // await financialPositionPage.fillBusinessOverdraftBalance("$0.00", "31/03/2025");
+    // Sole Trader — Personal Statement of Position (assets / liabilities); no-op on non-Sole layouts.
+    await financialPositionPage.selectSoleTradeHomeOwnershipType("Joint");
+    await financialPositionPage.fillSoleTradeHomeOwnershipAmount("$1000.00");
+    await financialPositionPage.fillSoleTradeMortgageRentMonthlyAmount("$500.00");
     await financialPositionPage.clickNextButton();
 
     // Reference Details — add contact, confirm, submit
@@ -200,15 +204,6 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
 
     await referenceDetailsPage.confirmCustomerDetailsCorrect();
     await referenceDetailsPage.clickSubmitButton();
-    // Second borrower / guarantor — Individual (Search Customer; same UDC search flow as first borrower).
-    await customerQuotePostSubmitPage.clickAddBorrowersOrGuarantorsButton();
-    await customerQuotePostSubmitPage.selectSearchCustomerIndividualType();
-    await assetDetailsPage.searchByDropdownClick();
-    await assetDetailsPage.selectUDCSelectOption();
-    await assetDetailsPage.enterUDCCustomerNumber("420");
-    await assetDetailsPage.clickSearchButton();
-    await assetDetailsPage.clickAddNewCustomerButton();
-
     await customerQuotePostSubmitPage.waitForUploadStep();
     await customerQuotePostSubmitPage.uploadDocument();
     await customerQuotePostSubmitPage.expectDocumentUploaded();

@@ -77,9 +77,10 @@ export class BasePage {
 
   /**
    * Click element with visual highlight
+   * @param clickTimeoutMs optional Playwright click timeout (slow CI / QAT / blocking spinners)
    */
-  async clickElement(locator: Locator): Promise<void> {
-    await this.utils.click(locator);
+  async clickElement(locator: Locator, clickTimeoutMs?: number): Promise<void> {
+    await this.utils.click(locator, clickTimeoutMs);
   }
 
   /**
