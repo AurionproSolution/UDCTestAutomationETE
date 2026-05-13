@@ -197,6 +197,19 @@ export class DOQuickQuotePage extends BasePage {
     // #region agent log
     fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H1",location:"QuickQuotePage.ts:openQuickQuote:entry",message:"Open quick quote start",data:{buttonVisible:await this.createQuickQuoteButton.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
+    const blockingOverlay = this.page.locator(".app-loader-overlay, [class*='app-loader']");
+    const overlayCount = await blockingOverlay.count();
+    if (overlayCount > 0) {
+      const first = blockingOverlay.first();
+      if (await first.isVisible().catch(() => false)) {
+        await first.waitFor({ state: "hidden", timeout: 120_000 });
+      }
+    }
+    await this.page
+      .locator(".app-loader-overlay p-progressspinner, .app-loader p-progressspinner")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
     await this.clickElement(this.createQuickQuoteButton);
     await this.waitForLoadingComplete();
     // #region agent log

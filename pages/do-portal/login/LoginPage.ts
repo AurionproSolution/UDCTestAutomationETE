@@ -3,7 +3,7 @@
  * Page Object Model for DO Portal authentication
  */
 
-import { Locator, Page } from "@playwright/test";
+import { expect, Locator, Page } from "@playwright/test";
 import { DO_BASE_URL } from "../../../config/env";
 import { BasePage } from "../../common/BasePage";
 
@@ -68,9 +68,14 @@ export class DOLoginPage extends BasePage {
     await this.fillElement(this.usernameInput, username);
     await this.clickElement(this.proceedButton);
     await this.fillElement(this.passwordInput, password);
+    // Blur so Angular/async validators can run and enable Sign in
+    await this.passwordInput.press("Tab");
     await this.clickElement(this.yesThisIsMyComputerRadio);
+    await expect(this.yesThisIsMyComputerRadio).toBeChecked({ timeout: 15_000 });
+    await expect(this.signinButton).toBeEnabled({ timeout: 90_000 });
     await this.clickElement(this.signinButton);
     await this.waitForLoadingComplete();
+    await expect(this.quoteAndAppButton).toBeVisible({ timeout: 90_000 });
     await this.clickElement(this.quoteAndAppButton);
     await this.waitForLoadingComplete();
   }
