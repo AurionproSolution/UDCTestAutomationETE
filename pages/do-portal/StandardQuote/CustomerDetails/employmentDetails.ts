@@ -36,9 +36,16 @@ export class DOEmploymentDetailsPage extends BasePage {
       .or(sole);
 
     this.previousEmploymentRoot = sole
-      .locator("app-previous-employment")
+      .locator("app-sole-trade-previous-employee")
       .filter({ visible: true })
       .first()
+      .or(sole.locator("app-previous-employment").filter({ visible: true }).first())
+      .or(
+        page
+          .locator("app-sole-trade-previous-employee")
+          .filter({ visible: true })
+          .first(),
+      )
       .or(page.locator("app-previous-employment").filter({ visible: true }).first());
 
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
@@ -263,15 +270,7 @@ export class DOEmploymentDetailsPage extends BasePage {
   }
 
   private previousEmployerNameInput(): Locator {
-    const r = this.previousEmploymentRoot;
-    return r
-      .getByRole("textbox", { name: /Employer Name/i })
-      .first()
-      .or(
-        r.locator(
-          "form > div > div:nth-child(1) > text > div > div:nth-child(2) > input",
-        ).first(),
-      );
+    return this.employerNameInputFor(this.previousEmploymentRoot);
   }
 
   async enterCurrentEmployerName(name: string): Promise<void> {
@@ -310,6 +309,34 @@ export class DOEmploymentDetailsPage extends BasePage {
       }
     }
 
+    // Sole Trade Employment (`app-sole-trade-current-employment` / `app-sole-trade-previous-employee`):
+    // gen-card rows often expose Years / Months as form rows 4 & 6 (Selector Hub), sometimes 5 & 7 or 6 & 8 (see `DOSoleTraderDetailsPage.enterTimeInBusiness`).
+    const soleTradeRowPairs: Array<[number, number]> = [
+      [4, 6],
+      [5, 7],
+      [6, 8],
+      [3, 5],
+    ];
+    for (const [yIdx, mIdx] of soleTradeRowPairs) {
+      const yIn = root
+        .locator(
+          `form > div:nth-child(1) > div:nth-child(${yIdx}) text div div:nth-child(2) input`,
+        )
+        .first();
+      const mIn = root
+        .locator(
+          `form > div:nth-child(1) > div:nth-child(${mIdx}) text div div:nth-child(2) input`,
+        )
+        .first();
+      const yOk = await yIn.isVisible({ timeout: 2000 }).catch(() => false);
+      const mOk = await mIn.isVisible({ timeout: 2000 }).catch(() => false);
+      if (yOk && mOk) {
+        await yIn.fill(years);
+        await mIn.fill(months);
+        return;
+      }
+    }
+
     // Sole Trader / PrimeFlex: "Years" / "Months" near "Time with … Employer" (same idea as `DOSoleTraderDetailsPage.enterTimeInBusiness`).
     const yearsAnchor = root.getByText(/^Years$/i).first();
     if (await yearsAnchor.isVisible({ timeout: 2500 }).catch(() => false)) {
@@ -342,7 +369,7 @@ export class DOEmploymentDetailsPage extends BasePage {
     const timeStrip = root
       .locator("div, section")
       .filter({
-        has: root.getByText(/Time with (Current )?Employer/i),
+        has: root.getByText(/Time with (Current Employer|Previous Employer|Employer)/i),
       })
       .first();
     if ((await timeStrip.count()) > 0 && (await timeStrip.isVisible().catch(() => false))) {
@@ -356,22 +383,32 @@ export class DOEmploymentDetailsPage extends BasePage {
       }
     }
 
-    const yIn = root
+    const legacyY = root
       .locator(
         "form > div > div:nth-child(5) > text > div > div:nth-child(2) > input",
       )
       .first();
-    const mIn = root
+    const legacyM = root
       .locator(
         "form > div > div:nth-child(6) > text > div > div:nth-child(2) > input",
       )
       .first();
-    if (await yIn.isVisible().catch(() => false)) {
-      await yIn.fill(years);
+    const legacyYOk = await legacyY.isVisible().catch(() => false);
+    const legacyMOk = await legacyM.isVisible().catch(() => false);
+    if (legacyYOk && legacyMOk) {
+      await legacyY.fill(years);
+      await legacyM.fill(months);
+      return;
     }
-    if (await mIn.isVisible().catch(() => false)) {
-      await mIn.fill(months);
+    if (legacyYOk || legacyMOk) {
+      throw new Error(
+        "Time with Employer: only one of Years/Months inputs resolved — refusing partial fill (fix locators).",
+      );
     }
+
+    throw new Error(
+      "Time with Employer: could not resolve visible Years and Months inputs for this layout.",
+    );
   }
 
   async enterCurrentTimeWithEmployer(
