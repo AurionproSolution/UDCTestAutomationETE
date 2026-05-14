@@ -10,7 +10,7 @@
     {
       "id": "test-case-writer",
       "name": "Test Case Writer",
-      "description": "Use this agent when you need to create Playwright test scripts from JIRA requirements. Fetches requirements from JIRA, analyzes existing project patterns, and generates complete Playwright test files following the UDC Test Automation ETE project conventions.",
+      "description": "Use this agent when you need to create Playwright test scripts from JIRA requirements. Fetches JIRA, runs the six-block requirements gate (posts a comment to the reporter via MCP if anything is missing—no test Write until the gate passes unless you explicitly override), then analyzes project patterns and generates Playwright tests per UDC conventions.",
       "model": "inherit",
       "file": ".cursor/agents/test-case-writer.md"
     },
