@@ -97,11 +97,10 @@ export class DOQuickQuotePage extends BasePage {
     this.createQuickQuoteButton = page.getByRole("button", {
       name: /\+\s*Create Quick Quote/i,
     });
-    this.downloadButton = this.quickQuoteRoot.getByRole("button", {
-      name: /^Download$/i,
-    });
-    this.mailButton = this.quickQuoteRoot.getByRole("button", { name: /^Mail$/i });
-    this.printButton = this.quickQuoteRoot.getByRole("button", { name: /^Print$/i });
+    // Print / Mail / Download sit in the Quick Quote chrome (often outside the first quote card DOM).
+    this.printButton = page.getByRole("button", { name: "Print" });
+    this.downloadButton = page.locator(':text-is("Download")');
+    this.mailButton = page.getByRole("button", { name: "Mail" });
 
     this.productDropdownTrigger = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Product')]/following::p-dropdown[1]"
@@ -168,6 +167,33 @@ export class DOQuickQuotePage extends BasePage {
           "xpath=.//label[starts-with(normalize-space(.), 'Balloon')]/following::input[@id='amount'][1]",
         ),
       );
+
+    // Balloon row "Fixed" — anchor from balloon $ input so we never hit an unrelated preceding p-checkbox (e.g. Terms).
+    this.fixedCheckbox = this.balloonDollarInput
+      .locator("xpath=following::label[contains(normalize-space(.),'Fixed')][1]/preceding::p-checkbox[1]")
+      .or(
+        this.balloonDollarInput.locator(
+          "xpath=following::label[contains(normalize-space(.),'Fixed')][1]/following-sibling::p-checkbox[1]",
+        ),
+      )
+      .or(
+        this.quickQuoteForm.getByText("Fixed", { exact: true }).locator("xpath=preceding-sibling::p-checkbox[1]"),
+      )
+      .or(
+        this.quickQuoteForm.getByText("Fixed", { exact: true }).locator("xpath=following-sibling::p-checkbox[1]"),
+      )
+      .or(
+        this.quickQuoteForm.locator("p-checkbox").filter({
+          has: this.quickQuoteForm.locator("label").filter({ hasText: /^Fixed$/i }),
+        }),
+      )
+      .or(
+        this.quickQuoteForm.locator(
+          "xpath=.//label[contains(normalize-space(.), 'Fixed')]/preceding::p-checkbox[1]",
+        ),
+      )
+      .first();
+
     this.depositDollarInput = this.quickQuoteForm
       .locator(
         `xpath=.//label[starts-with(normalize-space(.), 'Deposit')]/following::${orSep}[1]/following::input[@id='amount'][1]`,
@@ -209,9 +235,6 @@ export class DOQuickQuotePage extends BasePage {
     );
     this.paymentAmountInput = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::input[1]",
-    );
-    this.fixedCheckbox = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Fixed')]/preceding::p-checkbox[1]"
     );
     this.checkDisableCheckbox = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'checkDisable')]/preceding::p-checkbox[1]"
@@ -334,19 +357,7 @@ export class DOQuickQuotePage extends BasePage {
   private async replaceInputValueByKeyboard(input: Locator, text: string): Promise<void> {
     await input.waitFor({ state: "visible", timeout: 10_000 });
     await this.clickElement(input);
-    await input.focus();
-    if (process.platform === "darwin") {
-      await input.press("Meta+A");
-    } else {
-      await input.press("Control+A");
-    }
-    await input.press("Backspace");
-    if (process.platform === "darwin") {
-      await input.press("Meta+A");
-    } else {
-      await input.press("Control+A");
-    }
-    await input.press("Delete");
+    await this.clearPrimeNgInput(input);
     if (text.length > 0) {
       await input.pressSequentially(text, { delay: 25 });
     }
@@ -368,7 +379,26 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   /**
-   * Deposit / Balloon %: click to place caret (like manual entry), then type or paste — no select-all / clear.
+   * PrimeNG % fields: same as Terms — must clear before typing or new digits append to synced/masked text.
+   */
+  private async clearPrimeNgInput(loc: Locator): Promise<void> {
+    await loc.focus();
+    if (process.platform === "darwin") {
+      await loc.press("Meta+A");
+    } else {
+      await loc.press("Control+A");
+    }
+    await loc.press("Backspace");
+    if (process.platform === "darwin") {
+      await loc.press("Meta+A");
+    } else {
+      await loc.press("Control+A");
+    }
+    await loc.press("Delete");
+  }
+
+  /**
+   * Deposit / Balloon %: focus, clear masked value, then type or paste (caret-only entry corrupts when field is non-empty).
    */
   private async replaceDepositBalloonPercentInput(
     primary: Locator,
@@ -397,6 +427,7 @@ export class DOQuickQuotePage extends BasePage {
 
       await loc.scrollIntoViewIfNeeded();
       await this.clickElement(loc);
+      await this.clearPrimeNgInput(loc);
 
       if (trimmed.length > 0) {
         await loc.pressSequentially(trimmed, { delay: 45 });
@@ -412,6 +443,7 @@ export class DOQuickQuotePage extends BasePage {
         return;
       } catch {
         await this.clickElement(loc);
+        await this.clearPrimeNgInput(loc);
         await this.pasteTextNoSelectAll(loc, trimmed);
         await loc.blur();
         try {
@@ -587,6 +619,26 @@ export class DOQuickQuotePage extends BasePage {
     await this.replaceCashPriceInInput(this.cashPriceInput, cashPrice);
   }
 
+  /** PrimeNG cash / paired $ fields: clear before a new value so digits do not append to the prior mask. */
+  private async clearMaskedCurrencyInput(input: Locator): Promise<void> {
+    await input.waitFor({ state: "visible", timeout: 10_000 });
+    await this.clickElement(input);
+    await this.clearPrimeNgInput(input);
+    await input.blur();
+  }
+
+  async clearCashPriceField(): Promise<void> {
+    await this.clearMaskedCurrencyInput(this.cashPriceInput);
+  }
+
+  async clearDepositDollarField(): Promise<void> {
+    await this.clearMaskedCurrencyInput(this.depositDollarInput);
+  }
+
+  async clearBalloonDollarField(): Promise<void> {
+    await this.clearMaskedCurrencyInput(this.balloonDollarInput);
+  }
+
   async enterInitialLeaseAmount(initialLeaseAmount: string): Promise<void> {
     await this.fillElement(this.initialLeaseAmountInput, initialLeaseAmount);
   }
@@ -664,19 +716,46 @@ export class DOQuickQuotePage extends BasePage {
 
   /**
    * Sets the Fixed balloon checkbox without toggling blindly.
-   * PrimeNG: checked state is on the `p-checkbox` host (`p-checkbox-checked`).
+   * Resolves `fixedCheckbox` to the visible PrimeNG host, then clicks the box or [role=checkbox] surface.
    */
   async setFixedCheckbox(checked: boolean): Promise<void> {
-    const host = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Fixed')]/ancestor::p-checkbox[1]",
-    );
-    const box = host.locator(".p-checkbox-box").first();
-    await box.waitFor({ state: "visible", timeout: 15_000 });
-    const cls = (await host.getAttribute("class")) ?? "";
-    const isChecked = cls.includes("p-checkbox-checked");
-    if (isChecked !== checked) {
+    const host = this.fixedCheckbox;
+    await expect(host).toBeVisible({ timeout: 20_000 });
+    await host.scrollIntoViewIfNeeded().catch(() => {});
+
+    const box = host
+      .locator(".p-checkbox-box, [class*='p-checkbox-box']")
+      .or(host.getByRole("checkbox"))
+      .first();
+    await expect(box).toBeVisible({ timeout: 20_000 });
+
+    const isChecked = async (): Promise<boolean> => {
+      const hostCls = (await host.getAttribute("class")) ?? "";
+      if (hostCls.includes("p-checkbox-checked")) {
+        return true;
+      }
+      const aria = await box.getAttribute("aria-checked");
+      if (aria === "true") {
+        return true;
+      }
+      if (aria === "false") {
+        return false;
+      }
+      const hidden = host.locator('input[type="checkbox"]').first();
+      if ((await hidden.count()) > 0) {
+        return hidden.isChecked();
+      }
+      return false;
+    };
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if ((await isChecked()) === checked) {
+        return;
+      }
       await this.clickElement(box);
     }
+
+    await expect.poll(async () => (await isChecked()) === checked, { timeout: 10_000 }).toBeTruthy();
   }
 
   async clickCheckDisableCheckbox(): Promise<void> {
