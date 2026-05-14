@@ -20,6 +20,9 @@ const doSanityAuthStorage = path.join(
 /** Excluded from bulk portal projects; run via `do-sanity-chromium` (uses setup + storageState). */
 const ignoreDoSanityFolder = "**/doSanityTest/**";
 
+/** DO Portal regression specs that use dealer storageState; run via `do-regression-chromium`. */
+const ignoreDoRegressionFolder = "**/do-portal/Regression/**";
+
 // Environment variable for selecting test environment
 const TEST_ENV = process.env.TEST_ENV || "qat";
 
@@ -134,7 +137,7 @@ export default defineConfig({
     {
       name: "all-tests",
       testDir: "./tests",
-      testIgnore: ignoreDoSanityFolder,
+      testIgnore: [ignoreDoSanityFolder, ignoreDoRegressionFolder],
       use: maximizedChrome,
     },
 
@@ -142,7 +145,7 @@ export default defineConfig({
     {
       name: "do-portal-chromium",
       testDir: "./tests/do-portal",
-      testIgnore: ignoreDoSanityFolder,
+      testIgnore: [ignoreDoSanityFolder, ignoreDoRegressionFolder],
       use: maximizedChrome,
     },
     // {
@@ -170,6 +173,17 @@ export default defineConfig({
       testDir: "./tests/do-portal/doSanityTest",
       testIgnore: "**/*.auth.setup.ts",
       testMatch: ["**/*.test.ts", "**/quickQuoteissue.ts"],
+      dependencies: ["do-sanity-setup"],
+      use: {
+        ...maximizedChrome,
+        storageState: doSanityAuthStorage,
+      },
+    },
+
+    {
+      name: "do-regression-chromium",
+      testDir: "./tests/do-portal/Regression",
+      testMatch: ["**/*.test.ts"],
       dependencies: ["do-sanity-setup"],
       use: {
         ...maximizedChrome,
@@ -212,13 +226,14 @@ export default defineConfig({
     {
       name: "all-portals-smoke",
       testDir: "./tests",
-      testIgnore: ignoreDoSanityFolder,
+      testIgnore: [ignoreDoSanityFolder, ignoreDoRegressionFolder],
       grep: /@smoke/,
       use: maximizedChrome,
     },
     {
       name: "all-portals-regression",
       testDir: "./tests",
+      testIgnore: [ignoreDoSanityFolder, ignoreDoRegressionFolder],
       grep: /@regression/,
       use: maximizedChrome,
     },
