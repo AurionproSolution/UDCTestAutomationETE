@@ -63,11 +63,15 @@ export class DODashboardPage extends BasePage {
           .catch(() => {});
       }
     }
-    await this.page
-      .locator(".app-loader-overlay p-progressspinner, .app-loader p-progressspinner")
-      .first()
-      .waitFor({ state: "hidden", timeout: 15_000 })
-      .catch(() => {});
+    const spinner = this.page.locator(
+      ".app-loader-overlay p-progressspinner, .app-loader p-progressspinner",
+    ).first();
+    const spinnerBudget = Math.min(Math.max(timeoutMs, 30_000), 120_000);
+    try {
+      await spinner.waitFor({ state: "hidden", timeout: spinnerBudget });
+    } catch {
+      /* Slow QAT: spinner can linger after overlay; Create Standard Quote wait still gates readiness. */
+    }
   }
 
   /**

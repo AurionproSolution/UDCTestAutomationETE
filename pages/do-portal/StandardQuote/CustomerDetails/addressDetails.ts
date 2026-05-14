@@ -1287,42 +1287,71 @@ export class DOAddressDetailsPage extends BasePage {
     await this.physicalSearchInput.fill(query);
   }
 
+  /** First **visible** `app-sole-trade` (step content); `.first()` alone can hit a hidden shell. */
+  private visibleSoleTrade(): Locator {
+    return this.page.locator("app-sole-trade").filter({ visible: true }).first();
+  }
+
   /** PrimeNG `toggle-checkbox` row that contains `labelRx` under `scope`. */
   private toggleCheckboxRowByLabel(scope: Locator, labelRx: RegExp): Locator {
     return scope
       .locator("toggle-checkbox")
-      .filter({ has: scope.getByText(labelRx) })
+      .filter({ hasText: labelRx })
+      .filter({ visible: true })
       .first();
   }
 
-  /** First visible PrimeNG switch thumb inside `container` (used for layout `div.col-4.mt-2.text-sm` rows). */
-  private async clickFirstVisibleInputSliderIn(container: Locator): Promise<boolean> {
+  /** Resolves first visible PrimeNG switch thumb inside `container` (Selector Hub: `span.p-inputswitch-slider:visible`). */
+  private async resolveFirstVisibleInputSliderIn(container: Locator): Promise<Locator | null> {
     const pc = container
       .locator('span.p-inputswitch-slider[data-pc-section="slider"]')
       .filter({ visible: true })
       .first();
-    if ((await pc.count()) > 0 && (await pc.isVisible({ timeout: 2500 }).catch(() => false))) {
-      await pc.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-      await pc.click({ force: true });
-      return true;
-    }
+    if ((await pc.count()) > 0 && (await pc.isVisible({ timeout: 2500 }).catch(() => false))) return pc;
     const hub = container.locator("span.p-inputswitch-slider:visible").first();
-    if ((await hub.count()) > 0 && (await hub.isVisible({ timeout: 2500 }).catch(() => false))) {
-      await hub.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-      await hub.click({ force: true });
-      return true;
-    }
+    if ((await hub.count()) > 0 && (await hub.isVisible({ timeout: 2500 }).catch(() => false))) return hub;
     const any = container.locator("span.p-inputswitch-slider").filter({ visible: true }).first();
-    if ((await any.count()) > 0 && (await any.isVisible({ timeout: 2500 }).catch(() => false))) {
-      await any.click({ force: true });
-      return true;
+    if ((await any.count()) > 0 && (await any.isVisible({ timeout: 2500 }).catch(() => false))) return any;
+    const pSwitch = container.locator("p-inputswitch").filter({ visible: true }).first();
+    if ((await pSwitch.count()) > 0 && (await pSwitch.isVisible({ timeout: 2000 }).catch(() => false))) return pSwitch;
+    return null;
+  }
+
+  /** True when PrimeNG `p-inputswitch` hosting this slider is on (Yes). */
+  private async isPrimeSwitchOnFromSliderOrHost(target: Locator): Promise<boolean> {
+    const isSlider = await target
+      .evaluate((el) => (el as HTMLElement).classList?.contains("p-inputswitch-slider") ?? false)
+      .catch(() => false);
+    const slider = isSlider
+      ? target
+      : target.locator("span.p-inputswitch-slider").filter({ visible: true }).first();
+    const sw = slider.locator("xpath=ancestor::p-inputswitch[1]");
+    if ((await sw.count()) > 0) {
+      const cls = (await sw.first().getAttribute("class")) ?? "";
+      if (cls.includes("p-inputswitch-checked")) return true;
+      const cb = sw.locator('input[type="checkbox"]').first();
+      if ((await cb.count()) > 0) return await cb.isChecked().catch(() => false);
+      if (cls.includes("p-inputswitch") && !cls.includes("p-inputswitch-checked")) return false;
     }
-    const pSwitch = container.locator("p-inputswitch").first();
-    if ((await pSwitch.count()) > 0 && (await pSwitch.isVisible({ timeout: 2000 }).catch(() => false))) {
-      await pSwitch.click({ force: true });
-      return true;
+    const role = target.locator("[role='switch']").first();
+    if ((await role.count()) > 0) {
+      return (await role.getAttribute("aria-checked")) === "true";
     }
     return false;
+  }
+
+  /**
+   * Turns a PrimeNG switch **on** (Yes) if it is off; no-op if already on.
+   * Used for **Create new and copy to previous Address** so a second run does not flip to No.
+   */
+  private async ensurePrimeSwitchOnInContainer(container: Locator): Promise<boolean> {
+    const target = await this.resolveFirstVisibleInputSliderIn(container);
+    if (!target) return false;
+    await target.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+    const on = await this.isPrimeSwitchOnFromSliderOrHost(target);
+    if (on) return true;
+    await target.click({ force: true });
+    return true;
   }
 
   /**
@@ -1331,58 +1360,115 @@ export class DOAddressDetailsPage extends BasePage {
    */
   private async clickCreateNewCopyViaCol4Layout(): Promise<boolean> {
     const labelPattern = /Create new and copy to previous\s*Address/i;
+    const colVisible = this.page.locator("div.col-4.mt-2.text-sm").filter({ visible: true });
 
-    const colWithLabel = this.page
-      .locator("div.col-4.mt-2.text-sm")
-      .filter({ has: this.page.getByText(labelPattern) })
-      .first();
+    const colWithLabel = colVisible.filter({ has: this.page.getByText(labelPattern) }).first();
     if ((await colWithLabel.count()) > 0 && (await colWithLabel.isVisible({ timeout: 5000 }).catch(() => false))) {
       await colWithLabel.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-      if (await this.clickFirstVisibleInputSliderIn(colWithLabel)) return true;
+      if (await this.ensurePrimeSwitchOnInContainer(colWithLabel)) return true;
     }
 
-    const row = this.page.locator("div.row").filter({ has: this.page.getByText(labelPattern) }).first();
+    const row = this.page
+      .locator("div.row")
+      .filter({ has: this.page.getByText(labelPattern) })
+      .filter({ visible: true })
+      .first();
     if ((await row.count()) > 0 && (await row.isVisible({ timeout: 5000 }).catch(() => false))) {
       await row.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-      const cols = row.locator("div.col-4.mt-2.text-sm");
+      const cols = row.locator("div.col-4.mt-2.text-sm").filter({ visible: true });
       const n = await cols.count();
       for (let i = 0; i < n; i++) {
         const col = cols.nth(i);
-        if (await this.clickFirstVisibleInputSliderIn(col)) return true;
+        if (await this.ensurePrimeSwitchOnInContainer(col)) return true;
       }
     }
 
-    const grid = this.page.locator("div.grid").filter({ has: this.page.getByText(labelPattern) }).first();
+    const grid = this.page
+      .locator("div.grid")
+      .filter({ has: this.page.getByText(labelPattern) })
+      .filter({ visible: true })
+      .first();
     if ((await grid.count()) > 0 && (await grid.isVisible({ timeout: 4000 }).catch(() => false))) {
       await grid.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-      const gcols = grid.locator("div.col-4.mt-2.text-sm");
+      const gcols = grid.locator("div.col-4.mt-2.text-sm").filter({ visible: true });
       const gn = await gcols.count();
       for (let i = 0; i < gn; i++) {
-        if (await this.clickFirstVisibleInputSliderIn(gcols.nth(i))) return true;
+        if (await this.ensurePrimeSwitchOnInContainer(gcols.nth(i))) return true;
       }
     }
 
     for (const host of [
-      this.page.locator("app-business-address-details").first(),
-      this.page.locator("app-address-details").first(),
-      this.page.locator("app-sole-trade").first(),
+      this.page.locator("app-business-address-details").filter({ visible: true }).first(),
+      this.page.locator("app-address-details").filter({ visible: true }).first(),
+      this.page.locator("app-sole-trade").filter({ visible: true }).first(),
     ]) {
       if (!(await host.isVisible({ timeout: 1500 }).catch(() => false))) continue;
       const scoped = host
         .locator("div.col-4.mt-2.text-sm")
+        .filter({ visible: true })
         .filter({ has: host.getByText(labelPattern) })
         .first();
       if ((await scoped.count()) > 0 && (await scoped.isVisible({ timeout: 3000 }).catch(() => false))) {
         await scoped.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-        if (await this.clickFirstVisibleInputSliderIn(scoped)) return true;
+        if (await this.ensurePrimeSwitchOnInContainer(scoped)) return true;
       }
-      const scopedRow = host.locator("div.row").filter({ has: host.getByText(labelPattern) }).first();
+      const scopedRow = host
+        .locator("div.row")
+        .filter({ has: host.getByText(labelPattern) })
+        .filter({ visible: true })
+        .first();
       if ((await scopedRow.count()) > 0 && (await scopedRow.isVisible({ timeout: 3000 }).catch(() => false))) {
-        const sn = await scopedRow.locator("div.col-4.mt-2.text-sm").count();
+        const scopedCols = scopedRow.locator("div.col-4.mt-2.text-sm").filter({ visible: true });
+        const sn = await scopedCols.count();
         for (let i = 0; i < sn; i++) {
-          if (await this.clickFirstVisibleInputSliderIn(scopedRow.locator("div.col-4.mt-2.text-sm").nth(i)))
-            return true;
+          if (await this.ensurePrimeSwitchOnInContainer(scopedCols.nth(i))) return true;
         }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Sole Trader / QAT: many `div`s match "Create new and copy to…"; use the row that also contains
+   * the **Yes** label beside the switch, or `div.filter(…).nth(5)` + `.p-inputswitch-slider` (Selector Hub).
+   */
+  private async clickCreateNewCopyViaDivNthAndYesLabel(): Promise<boolean> {
+    const snippet = /Create new and copy to/i;
+
+    const combinedRow = this.page
+      .locator("div")
+      .filter({ hasText: snippet })
+      .filter({ has: this.page.locator("label").filter({ hasText: /^Yes$/i }) })
+      .filter({ visible: true })
+      .first();
+    if ((await combinedRow.count()) > 0 && (await combinedRow.isVisible({ timeout: 4000 }).catch(() => false))) {
+      await combinedRow.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      const slider = combinedRow.locator(".p-inputswitch-slider").filter({ visible: true }).first();
+      if ((await slider.count()) > 0 && (await slider.isVisible({ timeout: 2500 }).catch(() => false))) {
+        await slider.click({ force: true });
+        return true;
+      }
+      const yesLabel = combinedRow.locator("label").filter({ hasText: /^Yes$/i }).first();
+      if ((await yesLabel.count()) > 0 && (await yesLabel.isVisible({ timeout: 2000 }).catch(() => false))) {
+        await yesLabel.click({ force: true });
+        return true;
+      }
+    }
+
+    for (const n of [5, 4, 3, 2, 1, 0]) {
+      const div = this.page.locator("div").filter({ hasText: snippet }).nth(n);
+      if (!(await div.isVisible({ timeout: 1200 }).catch(() => false))) continue;
+      await div.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      const slider = div.locator(".p-inputswitch-slider").filter({ visible: true }).first();
+      if ((await slider.count()) > 0 && (await slider.isVisible({ timeout: 2000 }).catch(() => false))) {
+        await slider.click({ force: true });
+        return true;
+      }
+      const yesInDiv = div.locator("label").filter({ hasText: /^Yes$/i }).first();
+      if ((await yesInDiv.count()) > 0 && (await yesInDiv.isVisible({ timeout: 1500 }).catch(() => false))) {
+        await yesInDiv.click({ force: true });
+        return true;
       }
     }
 
@@ -1394,7 +1480,7 @@ export class DOAddressDetailsPage extends BasePage {
    * Tries: `toggle-checkbox` ancestor → nearest ancestor with `p-inputswitch` → following slider.
    */
   private async clickPrimeSwitchNearLabel(scope: Page | Locator, pattern: RegExp): Promise<boolean> {
-    const label = scope.getByText(pattern).first();
+    const label = scope.getByText(pattern).filter({ visible: true }).first();
     if ((await label.count()) === 0) return false;
     if (!(await label.isVisible({ timeout: 5000 }).catch(() => false))) return false;
     await label.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
@@ -1432,13 +1518,19 @@ export class DOAddressDetailsPage extends BasePage {
    * **[0] Create new and copy to previous Address**, **[1] Reuse for Postal Address** (Selector Hub css 1 / 2).
    */
   private async clickSoleTradeVisibleInputSwitchByIndex(index: 0 | 1): Promise<boolean> {
-    const sole = this.page.locator("app-sole-trade").first();
+    const sole = this.visibleSoleTrade();
     if (!(await sole.isVisible({ timeout: 2500 }).catch(() => false))) return false;
     await sole.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-    const sliders = sole
+    const withPc = sole
       .locator('span.p-inputswitch-slider[data-pc-section="slider"]')
       .filter({ visible: true });
-    if ((await sliders.count()) <= index) return false;
+    let n = await withPc.count();
+    let sliders = withPc;
+    if (n <= index) {
+      sliders = sole.locator("span.p-inputswitch-slider").filter({ visible: true });
+      n = await sliders.count();
+    }
+    if (n <= index) return false;
     const target = sliders.nth(index);
     await target.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
     await target.click({ force: true });
@@ -1503,16 +1595,69 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   /**
+   * Same pattern as {@link resolveReuseForPostalAddressToggleRow} — `toggle-checkbox` + label,
+   * then {@link clickSoleTradeVisibleInputSwitchByIndex}(0) under `app-sole-trade` (postal uses index 1).
+   */
+  private async resolveCreateNewAndCopyToPreviousAddressToggleRow(): Promise<Locator | null> {
+    const labelRx = /Create new and copy to previous\s*Address/i;
+    const scopes = [
+      this.page.locator("app-business-address-details").filter({ visible: true }).first(),
+      this.businessPhysicalAddressRoot,
+      this.page.locator("app-sole-trade").first(),
+    ];
+    for (const scope of scopes) {
+      if (!(await scope.isVisible({ timeout: 2000 }).catch(() => false))) continue;
+      const row = this.toggleCheckboxRowByLabel(scope, labelRx);
+      if ((await row.count()) === 0) continue;
+      if (await row.isVisible({ timeout: 2500 }).catch(() => false)) return row;
+    }
+    return null;
+  }
+
+  /** Mirrors {@link clickReuseForPostalAddressToggleOnce}: labeled row first, then Sole Trader slider [0]. */
+  private async clickCreateNewAndCopyToggleOnce(): Promise<boolean> {
+    const row = await this.resolveCreateNewAndCopyToPreviousAddressToggleRow();
+    if (row) {
+      await this.clickToggleCheckboxRow(row);
+      return true;
+    }
+    if (await this.clickSoleTradeVisibleInputSwitchByIndex(0)) return true;
+    return false;
+  }
+
+  /**
    * Top-of-step toggle: **Create new and copy to previous Address** (often beside the label, under
    * `app-business-address-details` rather than inside `app-sole-trade`).
    */
   async clickCreateNewAndCopyToPreviousAddressToggle(): Promise<void> {
     const labelRx = /Create new and copy to previous\s*Address/i;
+    // Same order as Reuse for Postal: `toggle-checkbox` row → `app-sole-trade` slider index (0 here, 1 for postal).
+    if (await this.clickCreateNewAndCopyToggleOnce()) return;
     if (await this.clickCreateNewCopyViaCol4Layout()) return;
+    if (await this.clickCreateNewCopyViaDivNthAndYesLabel()) return;
+
+    const physical = await this.activePhysicalHost();
+    const scopedAncestors: Locator[] = [
+      physical,
+      this.visibleSoleTrade(),
+      this.page.locator("app-address-details").filter({ visible: true }).first(),
+      this.page.locator("lib-stepper").filter({ visible: true }).first(),
+    ];
+    for (const scope of scopedAncestors) {
+      if ((await scope.count()) === 0) continue;
+      if (!(await scope.isVisible({ timeout: 1500 }).catch(() => false))) continue;
+      if (await this.clickPrimeSwitchNearLabel(scope, labelRx)) return;
+      const row = this.toggleCheckboxRowByLabel(scope, labelRx);
+      if ((await row.count()) > 0 && (await row.isVisible({ timeout: 2500 }).catch(() => false))) {
+        await this.clickToggleCheckboxRow(row);
+        return;
+      }
+    }
+
     const hosts = [
-      this.page.locator("app-business-address-details").first(),
-      this.page.locator("app-address-details").first(),
-      this.page.locator("app-sole-trade").first(),
+      this.page.locator("app-business-address-details").filter({ visible: true }).first(),
+      this.page.locator("app-address-details").filter({ visible: true }).first(),
+      this.visibleSoleTrade(),
     ];
     for (const host of hosts) {
       if (!(await host.isVisible({ timeout: 2000 }).catch(() => false))) continue;
