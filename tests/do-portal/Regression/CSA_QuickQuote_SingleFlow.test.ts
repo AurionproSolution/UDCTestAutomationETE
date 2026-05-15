@@ -8,6 +8,8 @@ import { expect, test } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DODashboardPage, DOQuickQuotePage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
+import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 
 const CSA_QQ_PRODUCT = "CSA-C-Assigned";
 const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
@@ -308,7 +310,6 @@ test(
 
     const assetDetailsPage = new DOAssetDetailsPage(page);
     const addAssetPage = new DOAddAssetPage(page);
-
     // -------------------------------------------------------------------------
     // Spreadsheet / PDF: Product & Program, finance carry-over, UDC Establishment Fee,
     // Loan / First Payment, Calculate with blank origin (allowed on CSA), Originator ref + Loan Purpose blank
@@ -395,6 +396,110 @@ test(
 
     await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
     await assetDetailsPage.clickNextButton();
-    
+    await assetDetailsPage.waitForAddBorrowerButton();
+    await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+    await assetDetailsPage.searchByDropdownClick();
+    await assetDetailsPage.selectUDCSelectOption();
+    await assetDetailsPage.enterUDCCustomerNumber("420");
+    await assetDetailsPage.clickSearchButton();
+    await assetDetailsPage.clickAddNewCustomerButton();
+    const personalDetailsPage = new DOPersonalDetailsPage(page);
+    const addressDetailsPage = new DOAddressDetailsPage(page);
+    // Leave required fields unset / empty, then **Save** — expect inline validation (see screenshot).
+    await personalDetailsPage.chooseTitle("");
+    await personalDetailsPage.enterFirstName("");
+    // await personalDetailsPage.enterMiddleName("Marie");
+    await personalDetailsPage.enterLastName("");
+    await personalDetailsPage.chooseGender("");
+    await personalDetailsPage.enterDateOfBirth("");
+    await personalDetailsPage.chooseMarritalStatus("");
+    await personalDetailsPage.chooseNoOfDependents("");
+    // await personalDetailsPage.fillDependantsAgesInYears(["8", "12"]);
+    await personalDetailsPage.enterMobileNumber("");
+    await personalDetailsPage.enterEmail("");
+    await personalDetailsPage.chooseLicenceType("");
+    // await personalDetailsPage.chooseCountryOfIssue("New Zealand");
+    // await personalDetailsPage.enterLicenceNumber("DL000123");
+    // await personalDetailsPage.enterVersionNumber("244");
+    await personalDetailsPage.chooseNewZealandResident("");
+    await personalDetailsPage.chooseCountryOfBirth("");
+    await personalDetailsPage.chooseCountryOfCitizenship("");
+
+    await personalDetailsPage.clickSavePersonalDetails();
+    await personalDetailsPage.expectPersonalDetailsRequiredValidationMessages();
+    await personalDetailsPage.enterFirstName("jhbhuyvyu90");
+    await personalDetailsPage.enterLastName("jhbhuyvyu90");
+    await personalDetailsPage.enterMobileNumber("ioi900");
+    await personalDetailsPage.enterEmail("jkbhbu");
+    await personalDetailsPage.enterLicenceNumber("jkui");
+    await personalDetailsPage.enterVersionNumber("hkbiubh");
+
+    await personalDetailsPage.clickSavePersonalDetails();
+    await personalDetailsPage.expectPersonalDetailsInvalidFormatValidationMessages();
+    await personalDetailsPage.chooseTitle("Dame");
+    await personalDetailsPage.enterFirstName("Liza");
+    await personalDetailsPage.enterMiddleName("Marie");
+    await personalDetailsPage.enterLastName("Doe");
+    await personalDetailsPage.chooseGender("Female");
+    await personalDetailsPage.enterDateOfBirth("01/01/1980");
+    await personalDetailsPage.chooseMarritalStatus("Married");
+    await personalDetailsPage.chooseNoOfDependents("2");
+    await personalDetailsPage.fillDependantsAgesInYears(["8", "12"]);
+    await personalDetailsPage.enterMobileNumber("0211234567");
+    await personalDetailsPage.enterEmail("liza.doe@example.com");
+    await personalDetailsPage.chooseLicenceType("Full Licence");
+    await personalDetailsPage.chooseCountryOfIssue("New Zealand");
+    await personalDetailsPage.enterLicenceNumber("DL000123");
+    await personalDetailsPage.enterVersionNumber("244");
+    await personalDetailsPage.chooseNewZealandResident("Yes");
+    await personalDetailsPage.chooseCountryOfBirth("New Zealand");
+    await personalDetailsPage.chooseCountryOfCitizenship("New Zealand");
+    await personalDetailsPage.clickNextButton();
+    await addressDetailsPage.waitForPhysicalAddressStep();
+
+    // Physical Address — explicit empty required fields, then **Save** / assert.
+    await addressDetailsPage.timeAtAddress("", "");
+    await addressDetailsPage.enterStreetNumber("");
+    await addressDetailsPage.enterStreetName("");
+    await addressDetailsPage.enterCity("");
+    await addressDetailsPage.touchPhysicalResidenceTypeWithoutSelection();
+    await addressDetailsPage.clickSaveAddressDetails();
+    await addressDetailsPage.expectPhysicalAddressRequiredValidationMessages();
+
+    await addressDetailsPage.timeAtAddress("1", "1");
+    await addressDetailsPage.enterStreetNumber("123");
+    await addressDetailsPage.enterStreetName("Main Street");
+    await addressDetailsPage.enterCity("Wellington");
+    await addressDetailsPage.chooseCountry("New Zealand");
+    await addressDetailsPage.selectResidenceType("Boarding");
+
+
+
+    // Reuse for Postal Addresss → Yes (click once if toggle starts on No)
+    await addressDetailsPage.clickReuseForPostalAddressToggle();
+
+    // Previous Physical Address — explicit empty required fields when section exists, then **Save** / assert.
+    if (await addressDetailsPage.isPreviousPhysicalAddressVisible(5_000)) {
+      await addressDetailsPage.previousTimeAtAddress("", "");
+      await addressDetailsPage.enterPreviousStreetNumber("");
+      await addressDetailsPage.enterPreviousStreetName("");
+      await addressDetailsPage.enterPreviousCity("");
+      await addressDetailsPage.touchPreviousPhysicalResidenceTypeWithoutSelection();
+      await addressDetailsPage.clickSaveAddressDetails();
+      await addressDetailsPage.expectPreviousPhysicalAddressRequiredValidationMessages();
+    }
+
+    // Previous Physical Address — skipped automatically when `app-previous-address` is not shown for this product.
+    await addressDetailsPage.fillPreviousPhysicalRequiredIfPresent({
+      years: "1",
+      months: "1",
+      streetNumber: "45",
+      streetName: "Queen Street",
+      city: "Wellington",
+      country: "New Zealand",
+    });
+
+    await addressDetailsPage.clickNextButton();
   },
 );
+
