@@ -6,7 +6,8 @@
 
 import { expect, test } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
-import { DODashboardPage, DOQuickQuotePage } from "../../../pages";
+import { DOAssetDetailsPage, DODashboardPage, DOQuickQuotePage } from "../../../pages";
+import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 
 const CSA_QQ_PRODUCT = "CSA-C-Assigned";
 const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
@@ -20,14 +21,19 @@ test(
     const dashboardPage = new DODashboardPage(page);
     const quickQuotePage = new DOQuickQuotePage(page);
 
-    // --- PDF: user logged in, dashboard, open QQ ---
+    // -------------------------------------------------------------------------
+    // PDF: user logged in, dashboard, open Quick Quote
+    // -------------------------------------------------------------------------
     await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
     await dashboardPage.waitForAuthenticatedDashboard();
     await quickQuotePage.openQuickQuote();
     await expect(quickQuotePage.quickQuoteRoot).toBeVisible();
     await expect(quickQuotePage.quickQuoteForm).toBeVisible();
 
-    // --- PDF: product and program empty ---
+    // -------------------------------------------------------------------------
+    // PDF: product and program empty (initial state) — optional strict empty cash
+    // -------------------------------------------------------------------------
+    const qq = 0;
     await expect(quickQuotePage.productDropdownTrigger).toBeVisible();
     await expect(quickQuotePage.programDropdownTrigger).toBeVisible();
     // const cashHidden = await quickQuotePage.cashPriceInput.isHidden().catch(() => false);
@@ -39,10 +45,14 @@ test(
     //   await expect(quickQuotePage.interestRatePercentInput).toHaveValue("");
     // }
 
-    // --- PDF: calculate hidden or disabled ---
-    await quickQuotePage.expectCalculateButtonHiddenOrDisabled(0);
+    // -------------------------------------------------------------------------
+    // PDF: Calculate hidden or disabled until product/program chosen
+    // -------------------------------------------------------------------------
+    await quickQuotePage.expectCalculateButtonHiddenOrDisabled(qq);
 
-    // --- PDF: select CSA-C-Assigned; related programs in list ---
+    // -------------------------------------------------------------------------
+    // PDF: select CSA-C-Assigned; related programs appear in list
+    // -------------------------------------------------------------------------
     await quickQuotePage.selectProduct(CSA_QQ_PRODUCT);
     await quickQuotePage.dismissQuickQuoteDropdownOverlays();
     await quickQuotePage.programDropdownTrigger.click();
@@ -53,7 +63,9 @@ test(
     expect(programs.length).toBeGreaterThan(0);
     expect(programs.some((t) => /CSA|Personal|Dealer|Webform|MV|Retail|Assigned/i.test(t))).toBeTruthy();
 
-    // --- PDF: select program; fields appear ---
+    // -------------------------------------------------------------------------
+    // PDF: select program; pricing fields appear
+    // -------------------------------------------------------------------------
     if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
       await quickQuotePage.selectProgram(CSA_QQ_PROGRAM);
     }
@@ -65,7 +77,10 @@ test(
     await expect(quickQuotePage.termsMonthsInput).toBeVisible();
     await expect(quickQuotePage.frequencyDropdownTrigger).toBeVisible();
 
-    // --- PDF: Calculate For defaults to Payment; often locked until first calc via p-dropdown host ---
+    // -------------------------------------------------------------------------
+    // PDF: Calculate For defaults to Payment; often locked until first calc (p-dropdown host)
+    // When the host is not p-disabled, inner trigger can still report enabled — do not fail.
+    // -------------------------------------------------------------------------
     const calculateForHost = quickQuotePage.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]",
     );
@@ -73,21 +88,26 @@ test(
     if (hostCls.includes("p-disabled")) {
       await expect(quickQuotePage.calculateForDropdownTrigger).toBeDisabled();
     }
-    // When the host is not p-disabled, the inner trigger can still report enabled in Playwright — do not fail the run.
 
-    // --- PDF: Interest / Term / Frequency (visible; may pre-populate) ---
+    // -------------------------------------------------------------------------
+    // PDF: Interest / Term / Frequency (visible; may pre-populate)
+    // -------------------------------------------------------------------------
     await expect(quickQuotePage.interestRatePercentInput).toBeVisible();
     await expect(quickQuotePage.termsMonthsInput).toBeVisible();
     await expect(quickQuotePage.frequencyDropdownTrigger).toBeVisible();
 
-    // --- PDF: Payment read-only before first calculation (input locked and/or amount shown as label) ---
+    // -------------------------------------------------------------------------
+    // PDF: Payment read-only before first calculation (locked input and/or label display)
+    // -------------------------------------------------------------------------
     if (await quickQuotePage.paymentAmountInput.isVisible().catch(() => false)) {
       const locked = await quickQuotePage.paymentAmountInputIsReadOnly();
       const displayOnly = await quickQuotePage.paymentDisplay.isVisible().catch(() => false);
       expect(locked || displayOnly).toBeTruthy();
     }
 
-    // --- PDF: mandatory incomplete (cash blank / $0.00) — some builds disable Calculate; others keep it enabled and validate on click ---
+    // -------------------------------------------------------------------------
+    // PDF: mandatory incomplete path — some builds disable Calculate; others validate on click
+    // -------------------------------------------------------------------------
     await quickQuotePage.selectFrequency("Monthly");
     await quickQuotePage.enterInterestRatePercent("9");
     await quickQuotePage.enterTermsMonths("36");
@@ -97,31 +117,39 @@ test(
     //   await expect(quickQuotePage.calculateButton).toBeDisabled();
     // }
 
-    // --- PDF: negative Cash Price validation ---
+    // -------------------------------------------------------------------------
+    // PDF: negative Cash Price validation (uncomment when re-enabled in PDF run)
+    // -------------------------------------------------------------------------
     // await quickQuotePage.enterCashPrice("-$100");
     // await quickQuotePage.expectCashPriceNonNegativeMessage(0);
     // await quickQuotePage.enterCashPrice("$20,000");
 
-    // --- PDF: Term blank → Please complete (or inline "cannot be blank" when Calculate stays disabled) ---
-    await quickQuotePage.clearTermsMonths(0);
+    // -------------------------------------------------------------------------
+    // PDF: Term blank → Please complete (or inline error when Calculate stays disabled)
+    // -------------------------------------------------------------------------
+    await quickQuotePage.clearTermsMonths(qq);
     // if (await quickQuotePage.calculateButton.isEnabled().catch(() => false)) {
     //   await quickQuotePage.clickCalculate();
     // }
     await expect(quickQuotePage.calculateButton).toBeDisabled();
-    await quickQuotePage.expectBlankTermsValidation(0);
+    await quickQuotePage.expectBlankTermsValidation(qq);
     await quickQuotePage.enterTermsMonths("36");
 
-    // --- PDF: Term > max (inline error + disabled Calculate, or click then message) ---
+    // -------------------------------------------------------------------------
+    // PDF: Term > max (inline error + disabled Calculate, or click then message)
+    // -------------------------------------------------------------------------
     await quickQuotePage.enterTermsMonths("9999");
     if (await quickQuotePage.calculateButton.isEnabled().catch(() => false)) {
       await quickQuotePage.clickCalculate();
     }
-    await quickQuotePage.expectTermExceedsMaxMessage(0);
+    await quickQuotePage.expectTermExceedsMaxMessage(qq);
     await quickQuotePage.enterTermsMonths("36");
 
-    // PDF: Frequency blank — skipped when program enforces a default and UI has no empty option.
+    // PDF: Frequency blank — skipped when program enforces default and UI has no empty option.
 
-    // --- PDF: first successful calculate; summary read-only ---
+    // -------------------------------------------------------------------------
+    // PDF: first successful Calculate; summary; optional ~$18k financed check (fees vary)
+    // -------------------------------------------------------------------------
     await quickQuotePage.enterCashPrice("$20,000");
     await quickQuotePage.enterDepositPercent("10%");
     await quickQuotePage.enterBalloonPercent("0");
@@ -143,28 +171,33 @@ test(
     await expect(summary).toBeVisible({ timeout: 30_000 });
     await expect(summary).toContainText(/Loan Amount/i);
     await expect(summary).toContainText(/Total (Amount )?Payable|Total Payable|Amount Payable/i);
-    // Optional: 10% on $20k → ~$18k financed — copy/fees vary; must not fail the run (expect in try/catch still surfaces in some reporters).
     await summary
       .getByText(/\$18[, ]?000|18[, ]?000(?:\.00)?|\$180\.00/i)
       .first()
       .isVisible({ timeout: 5_000 })
       .catch(() => false);
 
-    // --- PDF: Calculate For enabled after first calculation ---
+    // -------------------------------------------------------------------------
+    // PDF: Calculate For enabled after first calculation
+    // -------------------------------------------------------------------------
     await expect(quickQuotePage.calculateForDropdownTrigger).toBeEnabled();
 
-    // First Calculate can re-format p-inputNumber cash (e.g. $20.00 instead of $20,000) — reset before deposit $ sync.
-    await quickQuotePage.clearCashPriceField();
-    await quickQuotePage.enterCashPrice("$20,000");
+    // First Calculate can re-format cash (e.g. $20.00) — reset before deposit $ sync.
+    // await quickQuotePage.clearCashPriceField();
+    // await quickQuotePage.enterCashPrice("$20,000");
 
-    // --- PDF: Deposit % / $ sync — % of cash price → deposit $; deposit $ vs cash → % ---
+    // -------------------------------------------------------------------------
+    // PDF: Deposit % / $ sync — % of cash → deposit $; deposit $ vs cash → %
+    // -------------------------------------------------------------------------
     await quickQuotePage.enterDepositPercent("10%");
     await expect(quickQuotePage.depositDollarInput).toHaveValue(/2[, ]?000|2000/, { timeout: 25_000 });
     await quickQuotePage.clearDepositDollarField();
     await quickQuotePage.enterDepositDollars("$4,000.00");
     await expect(quickQuotePage.depositPercentInput).toHaveValue(/20/);
 
-    // --- PDF: Balloon % / $ sync — same as deposit: % of cash → $; $ vs cash → % ---
+    // -------------------------------------------------------------------------
+    // PDF: Balloon % / $ sync (uncomment when included in PDF run)
+    // -------------------------------------------------------------------------
     // await quickQuotePage.enterBalloonPercent("20%");
     // await expect(quickQuotePage.balloonDollarInput).toHaveValue(/4[, ]?000|4000/, { timeout: 25_000 });
     // await quickQuotePage.clearBalloonDollarField();
@@ -172,16 +205,18 @@ test(
     // await expect(quickQuotePage.balloonPercentInput).toHaveValue(/25/);
     // await quickQuotePage.clickCalculate();
     // await quickQuotePage.expectCreateQuoteVisible();
-    // // --- PDF: Fixed balloon on / off ---
     // await quickQuotePage.enterBalloonDollars("$5,000");
-    // await quickQuotePage.setFixedCheckbox(true);//give selctorhub for this test
+    // await quickQuotePage.setFixedCheckbox(true);
     // await quickQuotePage.clickCalculate();
     // await quickQuotePage.expectCreateQuoteVisible();
     // await quickQuotePage.setFixedCheckbox(false);
+
     await quickQuotePage.clickCalculate();
     await quickQuotePage.expectCreateQuoteVisible();
 
-    // // --- PDF: Calculate For = Cash Price / Deposit / Balloon ---
+    // -------------------------------------------------------------------------
+    // PDF: Calculate For = Cash Price / Deposit / Balloon (alternate PDF branch)
+    // -------------------------------------------------------------------------
     // await quickQuotePage.selectCalculateFor("Cash Price");
     // await quickQuotePage.enterPaymentAmount("450");
     // await quickQuotePage.enterInterestRatePercent("9");
@@ -189,7 +224,7 @@ test(
     // await quickQuotePage.selectFrequency("Monthly");
     // await quickQuotePage.clickCalculate();
     // await expect(quickQuotePage.cashPriceInput).not.toHaveValue("");
-
+    //
     // await quickQuotePage.selectCalculateFor("Deposit");
     // await quickQuotePage.enterPaymentAmount("500");
     // await quickQuotePage.enterCashPrice("20000");
@@ -198,7 +233,7 @@ test(
     // await quickQuotePage.selectFrequency("Monthly");
     // await quickQuotePage.clickCalculate();
     // await expect(quickQuotePage.depositPercentInput).not.toHaveValue("");
-
+    //
     // await quickQuotePage.selectCalculateFor("Balloon");
     // await quickQuotePage.enterPaymentAmount("480");
     // await quickQuotePage.enterCashPrice("20000");
@@ -208,47 +243,35 @@ test(
     // await quickQuotePage.clickCalculate();
     // await expect(quickQuotePage.balloonPercentInput).not.toHaveValue("");
 
-    // --- PDF: Reset → default / cleared ---
+    // -------------------------------------------------------------------------
+    // PDF: Reset → default / cleared (uncomment when PDF requires)
+    // -------------------------------------------------------------------------
     // await quickQuotePage.clickReset();
     // await expect(quickQuotePage.cashPriceInput).toHaveValue("");
 
-    // --- PDF: QQ1 calculate → Add Comparison → QQ2 copy; Add 3 disabled until QQ2 calc ---
+    // -------------------------------------------------------------------------
+    // PDF: QQ1 calculate → Add Comparison → QQ2 copy; Add 3 disabled until QQ2 calc
+    // (duplicate first-panel flow — keep commented; active path below uses current panel state)
+    // -------------------------------------------------------------------------
     // await quickQuotePage.selectProduct(CSA_QQ_PRODUCT);
     // await quickQuotePage.selectProgram(CSA_QQ_PROGRAM);
     // await quickQuotePage.enterCashPrice("$20,000");
     // await quickQuotePage.enterDepositPercent("10%");
     // await quickQuotePage.enterBalloonPercent("0");
-    // if (await quickQuotePage.termsCheckbox.isVisible().catch(() => false)) {
-    //   const boxClass =
-    //     (await quickQuotePage.termsCheckbox
-    //       .locator("xpath=ancestor::p-checkbox[1]")
-    //       .getAttribute("class")
-    //       .catch(() => "")) ?? "";
-    //   // if (!boxClass.includes("p-checkbox-checked")) {
-    //   //   await quickQuotePage.confirmTermsAndConditions();
-    //   // }
-    // }
     // await quickQuotePage.clickCalculate();
     // await quickQuotePage.expectCreateQuoteVisible();
     // await expect(quickQuotePage.addComparison2Button).toBeEnabled();
-
     // const qq1Summary = quickQuotePage.calculationSummaryRegion.first();
     // await expect(qq1Summary).toBeVisible({ timeout: 30_000 });
     // await expect(qq1Summary).toContainText(/Loan Amount/i);
     // await expect(qq1Summary).toContainText(/Total (Amount )?Payable|Total Payable|Amount Payable/i);
-    // // Optional: 10% on $20k → ~$18k financed — copy/fees vary; must not fail the run (expect in try/catch still surfaces in some reporters).
-    // await qq1Summary
-    //   .getByText(/\$18[, ]?000|18[, ]?000(?:\.00)?|\$180\.00/i)
-    //   .first()
-    //   .isVisible({ timeout: 5_000 })
-    //   .catch(() => false);
+
     await expect(quickQuotePage.addComparison2Button).toBeEnabled();
     await quickQuotePage.clickAddComparisonPrimary();
     expect(await quickQuotePage.quickQuotePanelCount()).toBe(2);
     await expect(quickQuotePage.cashPriceInputOnQuote(1)).not.toHaveValue("");
     // await expect(quickQuotePage.calculateForTriggerOnQuote(1)).toBeDisabled();
 
-    // await expect(quickQuotePage.addComparison3Button).toBeVisible();
     await expect(quickQuotePage.addComparison3Button).toBeDisabled();
 
     await quickQuotePage.enterTermsMonthsOnQuote(1, "36");
@@ -256,7 +279,9 @@ test(
     await quickQuotePage.clickCalculateOnQuote(1);
     await quickQuotePage.expectCreateQuoteVisible();
 
-    // --- PDF: max 3 Quick Quotes; no QQ4 ---
+    // -------------------------------------------------------------------------
+    // PDF: max 3 Quick Quotes; no QQ4
+    // -------------------------------------------------------------------------
     await expect(quickQuotePage.addComparison3Button).toBeEnabled();
     await quickQuotePage.clickElement(quickQuotePage.addComparison3Button);
     expect(await quickQuotePage.quickQuotePanelCount()).toBe(3);
@@ -265,16 +290,111 @@ test(
     await quickQuotePage.clickCalculateOnQuote(2);
     await expect(page.getByRole("button", { name: /Add Comparison 4/i })).toHaveCount(0);
 
-    // --- PDF: Print / Download (trial; MAF-6689) ---
+    // -------------------------------------------------------------------------
+    // PDF: Print / Download (trial; MAF-6689)
+    // -------------------------------------------------------------------------
     await expect(quickQuotePage.printButton).toBeVisible();
     await expect(quickQuotePage.downloadButton).toBeVisible();
     await quickQuotePage.printButton.click({ trial: true });
     await quickQuotePage.downloadButton.click({ trial: true });
 
-    // --- PDF: Create Quote → Standard Quote carry-over ---
+    // -------------------------------------------------------------------------
+    // PDF: Create Quote → Standard Quote (Asset Details step)
+    // -------------------------------------------------------------------------
     await quickQuotePage.clickCreateQuote();
     const standardRoot = page.locator("app-quote-details, app-standard-quote").first();
     await expect(standardRoot).toBeVisible({ timeout: 120_000 });
     await expect(page.getByText(/CSA|Credit Sale/i).first()).toBeVisible();
+
+    const assetDetailsPage = new DOAssetDetailsPage(page);
+    const addAssetPage = new DOAddAssetPage(page);
+
+    // -------------------------------------------------------------------------
+    // Spreadsheet / PDF: Product & Program, finance carry-over, UDC Establishment Fee,
+    // Loan / First Payment, Calculate with blank origin (allowed on CSA), Originator ref + Loan Purpose blank
+    // -------------------------------------------------------------------------
+    await assetDetailsPage.waitForAssetDetailsStepReady();
+    await assetDetailsPage.expectProductProgramCarriedFromQuickQuote(CSA_QQ_PRODUCT, CSA_QQ_PROGRAM);
+    await assetDetailsPage.expectFinanceCarriedFromQuickQuote({
+      cashPrice: /20[, ]?000|20000/i,
+      term: /36/,
+      frequencyText: /Monthly/i,
+      interestRate: /9/,
+    });
+    await assetDetailsPage.expectUdcEstablishmentFeePrePopulatedFromProgram();
+    await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
+    await assetDetailsPage.calculateWithOriginationBlank();
+    await assetDetailsPage.enterOriginationReference("QQ-CSA-Asset-Orig-01");
+
+    // -------------------------------------------------------------------------
+    // Spreadsheet: Dealer Origination Fee, PPSR fee, LMF; change interest + brand hint;
+    // interest editability; term > program max on Calculate then restore
+    // -------------------------------------------------------------------------
+    await assetDetailsPage.expectDealerOriginationFeePopulatedFromProgram();
+    await assetDetailsPage.expectPpsrCountAndFeeLineVisible();
+    await assetDetailsPage.expectLoanMaintenanceFeeOrLmfAreaVisible();
+    await assetDetailsPage.expectInterestRateEditable();
+    await assetDetailsPage.enterInterestRatePercentSimple("8.5");
+    await assetDetailsPage.expectBrandHierarchyOrRateHintIfShown();
+    await assetDetailsPage.expectInterestRateEditable();
+    await assetDetailsPage.expectTermExceedsProgramMaxOnCalculateThenRestore({
+      overMaxTerm: "9999",
+      restoreTerm: "36",
+    });
+    // Product / Program already match QQ carry-over and are often p-disabled — do not call chooseProduct/chooseProgram here.
+    await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
+    await assetDetailsPage.enterAsset("Car and Light Commercial /");
+    await assetDetailsPage.selectCondition("Used");
+    await assetDetailsPage.openAssetInsuranceTradeInSummary();
+    await assetDetailsPage.clickAssetSummaryEditButton();
+    await addAssetPage.enterAssetValue("$10,0000");
+    await addAssetPage.selectCondition("Used");
+    await addAssetPage.selectYear("2025");
+    await addAssetPage.enterMake("Toyota");
+    await addAssetPage.enterModel("Hilux");
+    await addAssetPage.enterVariant("Top");
+    await addAssetPage.enterRegoNO("TG08BP5123");
+    await addAssetPage.enterVIN("1HGCM82633A004352");
+    await addAssetPage.enterOdometer("50000");
+    await addAssetPage.enterColour("Black");
+    await addAssetPage.enterSerialNO("0999944477");
+    await addAssetPage.enterEngineNO("1133445588");
+    await addAssetPage.enterCCRating("5");
+    await addAssetPage.chooseMotivePower("Petrol");
+    await addAssetPage.chooseCountryRegistered("New Zealand");
+    await addAssetPage.chooseAssetLocation("North Island");
+    await addAssetPage.clickSummitButton();
+    await addAssetPage.clickCrossButton();
+    await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
+    
+    await assetDetailsPage.termsOfFinance("36");
+    await assetDetailsPage.interestRate("4");
+    await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
+
+    await assetDetailsPage.clickCalculateButton();
+    await assetDetailsPage.interestRate("4");
+    await assetDetailsPage.clickCalculateButton();
+
+
+    // -------------------------------------------------------------------------
+    // Payment Schedule: table populated ($, frequency); top-right view toggles keep data visible
+    // -------------------------------------------------------------------------
+    // await assetDetailsPage.expectPaymentScheduleViewTogglesWorkAndTablePopulated();
+
+    // -------------------------------------------------------------------------
+    // Asset & Insurance Summary → Trade Summary → "Search & Add Trade in" opens chooser / search UI
+    // -------------------------------------------------------------------------
+    await assetDetailsPage.openAssetInsuranceTradeInSummary();
+    await assetDetailsPage.clickSearchAddTradeInAndExpectChooserOpened();
+    await assetDetailsPage.closeSearchTradeInAssetDialog();
+    await assetDetailsPage.clickFrontPrimeDialogHeaderMaximizeIfVisible();
+    await assetDetailsPage.closeAssetInsuranceSummaryDialog();
+
+    await assetDetailsPage.openKeyInformationDisclosureDialog();
+    await assetDetailsPage.closeKeyInformationDisclosureDialog();
+
+    await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
+    await assetDetailsPage.clickNextButton();
+    
   },
 );
