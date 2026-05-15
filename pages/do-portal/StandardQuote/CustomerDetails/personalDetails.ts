@@ -1,8 +1,10 @@
-import { Locator, Page } from "@playwright/test";
+import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../..";
 
 export class DOPersonalDetailsPage extends BasePage {
   readonly personalDetailsRoot: Locator;
+  /** Outlined **Save** on Personal Details (SelectorHub class chain + label). */
+  readonly savePersonalDetailsButton: Locator;
   readonly titleDropdown: Locator;
   readonly firstNameInput: Locator;
   readonly middleNameInput: Locator;
@@ -84,7 +86,28 @@ export class DOPersonalDetailsPage extends BasePage {
     this.countryOfCitizenshipDropdown = page.locator(
       `//label[text()='Country of Citizenship']/following-sibling::div//div[@aria-label='dropdown trigger']`,
     );
+    this.savePersonalDetailsButton = page
+      .locator(
+        "button.p-ripple.p-element.p-button.p-component.p-button-outlined",
+      )
+      .filter({ hasText: /^Save$/i });
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
+  }
+
+  /**
+   * Open a PrimeNG dropdown trigger, then dismiss the panel **without** choosing an option.
+   * Required so Angular marks the control touched and **Save** surfaces `… is required` messages.
+   */
+  private async touchRequiredDropdownWithoutSelection(
+    trigger: Locator,
+  ): Promise<void> {
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click({ timeout: 15_000 });
+    const listbox = this.page.getByRole("listbox");
+    await listbox.waitFor({ state: "visible", timeout: 8_000 }).catch(() => {});
+    await this.page.keyboard.press("Escape");
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await listbox.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
   }
 
   async selectTitle(): Promise<void> {
@@ -94,8 +117,13 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.page.getByRole("option", { name: title, exact: true }).click();
   }
   async chooseTitle(title: string): Promise<void> {
+    const t = title.trim();
+    if (!t) {
+      await this.touchRequiredDropdownWithoutSelection(this.titleDropdown);
+      return;
+    }
     await this.selectTitle();
-    await this.selectTitleOption(title);
+    await this.selectTitleOption(t);
   }
   async enterFirstName(firstName: string): Promise<void> {
     await this.fillElement(this.firstNameInput, firstName);
@@ -116,10 +144,22 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.page.getByRole("option", { name: gender, exact: true }).click();
   }
   async chooseGender(gender: string): Promise<void> {
-    await this.selectGender(gender);
-    await this.selectGenderOption(gender);
+    const g = gender.trim();
+    if (!g) {
+      await this.touchRequiredDropdownWithoutSelection(this.genderDropdown);
+      return;
+    }
+    await this.selectGender(g);
+    await this.selectGenderOption(g);
   }
   async enterDateOfBirth(dob: string): Promise<void> {
+    if (!dob.trim()) {
+      await this.dateOfBirthInput.waitFor({ state: "visible", timeout: 20000 });
+      await this.dateOfBirthInput.click();
+      await this.page.keyboard.press("Escape").catch(() => {});
+      await this.page.keyboard.press("Tab").catch(() => {});
+      return;
+    }
     await this.dateOfBirthInput.waitFor({ state: "visible", timeout: 20000 });
     try {
       await this.clickAndFillElement(this.dateOfBirthInput, dob);
@@ -138,8 +178,15 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseMarritalStatus(maritalStatus: string): Promise<void> {
-    await this.selectMarritalStatus(maritalStatus);
-    await this.selectMarritalStatusOption(maritalStatus);
+    const m = maritalStatus.trim();
+    if (!m) {
+      await this.touchRequiredDropdownWithoutSelection(
+        this.maritalStatusDropdown,
+      );
+      return;
+    }
+    await this.selectMarritalStatus(m);
+    await this.selectMarritalStatusOption(m);
   }
   async selectNoOfDependents(noOfDependents: string): Promise<void> {
     await this.noOfDependentsDropdown.click();
@@ -150,8 +197,15 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseNoOfDependents(noOfDependents: string): Promise<void> {
-    await this.selectNoOfDependents(noOfDependents);
-    await this.selectNoOfDependentsOption(noOfDependents);
+    const n = noOfDependents.trim();
+    if (!n) {
+      await this.touchRequiredDropdownWithoutSelection(
+        this.noOfDependentsDropdown,
+      );
+      return;
+    }
+    await this.selectNoOfDependents(n);
+    await this.selectNoOfDependentsOption(n);
     await this.page
       .getByRole("listbox")
       .waitFor({ state: "hidden", timeout: 10000 })
@@ -242,8 +296,15 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseLicenceType(licenceType: string): Promise<void> {
+    const l = licenceType.trim();
+    if (!l) {
+      await this.touchRequiredDropdownWithoutSelection(
+        this.licenceTypeDropdown,
+      );
+      return;
+    }
     await this.selectLicenceTypeDropdown();
-    await this.selectLicenceTypeOption(licenceType);
+    await this.selectLicenceTypeOption(l);
   }
   async selectCountryOfIssue(): Promise<void> {
     await this.CountryOfIssueDropDown.click();
@@ -254,8 +315,15 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseCountryOfIssue(countryOfIssue: string): Promise<void> {
+    const c = countryOfIssue.trim();
+    if (!c) {
+      await this.touchRequiredDropdownWithoutSelection(
+        this.CountryOfIssueDropDown,
+      );
+      return;
+    }
     await this.selectCountryOfIssue();
-    await this.selectCountryOfIssueOption(countryOfIssue);
+    await this.selectCountryOfIssueOption(c);
   }
   async enterLicenceNumber(licenceNumber: string): Promise<void> {
     await this.fillElement(this.licenceNumber, licenceNumber);
@@ -273,8 +341,15 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseNewZealandResident(residentStatus: string): Promise<void> {
+    const r = residentStatus.trim();
+    if (!r) {
+      await this.touchRequiredDropdownWithoutSelection(
+        this.newZealandResidentDropdown,
+      );
+      return;
+    }
     await this.selectNewZealandResident();
-    await this.selectNewZealandResidentOption(residentStatus);
+    await this.selectNewZealandResidentOption(r);
   }
   async selectCountryOfBirth(): Promise<void> {
     await this.countryOfBirthDropdown.click();
@@ -285,8 +360,15 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseCountryOfBirth(countryOfBirth: string): Promise<void> {
+    const c = countryOfBirth.trim();
+    if (!c) {
+      await this.touchRequiredDropdownWithoutSelection(
+        this.countryOfBirthDropdown,
+      );
+      return;
+    }
     await this.selectCountryOfBirth();
-    await this.selectCountryOfBirthOption(countryOfBirth);
+    await this.selectCountryOfBirthOption(c);
   }
   async selectCountryOfCitizenship(): Promise<void> {
     await this.countryOfCitizenshipDropdown.click();
@@ -301,9 +383,76 @@ export class DOPersonalDetailsPage extends BasePage {
   async chooseCountryOfCitizenship(
     countryOfCitizenship: string,
   ): Promise<void> {
+    const c = countryOfCitizenship.trim();
+    if (!c) {
+      await this.touchRequiredDropdownWithoutSelection(
+        this.countryOfCitizenshipDropdown,
+      );
+      return;
+    }
     await this.selectCountryOfCitizenship();
-    await this.selectCountryOfCitizenshipOption(countryOfCitizenship);
+    await this.selectCountryOfCitizenshipOption(c);
   }
+
+  /** Clicks outlined **Save**; Angular then shows `p-error` / inline messages for empty required fields. */
+  async clickSavePersonalDetails(): Promise<void> {
+    await this.savePersonalDetailsButton.waitFor({
+      state: "visible",
+      timeout: 30_000,
+    });
+    await this.savePersonalDetailsButton.scrollIntoViewIfNeeded();
+    await this.savePersonalDetailsButton.click({ timeout: 15_000 });
+  }
+
+  /**
+   * After **Save** with required Personal Details left unset/empty, expect the standard validation copy
+   * (matches on-screen `* is required` messages).
+   */
+  async expectPersonalDetailsRequiredValidationMessages(): Promise<void> {
+    const root = this.personalDetailsRoot;
+    const messages = [
+      "Title is required",
+      "First Name is required",
+      "Last Name is required",
+      "Gender is required",
+      "Date of Birth is required",
+      "Marital Status is required",
+      "Number of Dependants is required",
+      "Mobile Number is required",
+      "Email is required",
+      "Licence Type is required",
+      "New Zealand Resident is required",
+      "Country of Birth is required",
+      "Country of Citizenship is required",
+    ] as const;
+    for (const msg of messages) {
+      await expect(root.getByText(msg, { exact: true })).toBeVisible({
+        timeout: 20_000,
+      });
+    }
+  }
+
+  /**
+   * After **Save** with invalid First/Last name, phone, email, licence / version values, expect only
+   * the format / pattern messages for those fields (other sections should be valid from prior steps).
+   */
+  async expectPersonalDetailsInvalidFormatValidationMessages(): Promise<void> {
+    const root = this.personalDetailsRoot;
+    const messages = [
+      "First Name is in an incorrect format",
+      "Last Name is in an incorrect format",
+      "Phone Number is in an incorrect format",
+      "Email is in an incorrect format",
+      "Licence Number should start with 2 letters followed by 6 digits",
+      "Version Number is in an incorrect format",
+    ] as const;
+    for (const msg of messages) {
+      await expect(root.getByText(msg, { exact: true })).toBeVisible({
+        timeout: 20_000,
+      });
+    }
+  }
+
   async clickNextButton(): Promise<void> {
     await this.nextButton.waitFor({ state: "visible", timeout: 120000 });
     for (let i = 0; i < 120; i++) {
