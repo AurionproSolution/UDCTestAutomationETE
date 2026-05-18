@@ -1,4 +1,4 @@
-import { Locator, Page } from "@playwright/test";
+import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
 /**
@@ -21,6 +21,10 @@ export class DOFinancialPositionPage extends BasePage {
   readonly liabilitiesCard: Locator;
   readonly incomeDetailsCard: Locator;
   readonly expenditureCard: Locator;
+  /** Individual — `app-individual-asset-details` (Home Ownership, Vehicle, Furniture, Other asset row). */
+  readonly individualAssetDetailsCard: Locator;
+  /** Individual — `app-regular-recurring-frequency` (Essential Outgoings). */
+  readonly essentialOutgoingsCard: Locator;
   readonly nextButton: Locator;
 
   constructor(page: Page) {
@@ -50,6 +54,11 @@ export class DOFinancialPositionPage extends BasePage {
     this.liabilitiesCard = page.locator("app-individual-liabilities").first();
     this.incomeDetailsCard = page.locator("app-income-details").first();
     this.expenditureCard = page.locator("app-individual-expenditure").first();
+    this.individualAssetDetailsCard = page.locator("app-individual-asset-details").first();
+    this.essentialOutgoingsCard = page
+      .locator("app-regular-recurring-frequency")
+      .filter({ visible: true })
+      .first();
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
   }
 
@@ -326,22 +335,226 @@ export class DOFinancialPositionPage extends BasePage {
     );
   }
 
-  /** Region containing “Regular Recurring Essential Outgoings” and its `p-dropdown` rows. */
+  /** Individual Financial Position — expect host cards from your layout (`app-individual-*`, income, expenditure, recurring). */
+  async expectIndividualFinancialPositionSectionsVisible(): Promise<void> {
+    await this.financialRoot.waitFor({ state: "visible", timeout: 60_000 });
+    await expect(this.individualAssetDetailsCard).toBeVisible({ timeout: 30_000 });
+    await expect(
+      this.individualAssetDetailsCard.getByText(/^Assets$/i).or(
+        this.individualAssetDetailsCard.getByRole("heading", { name: /^Assets$/i }),
+      ),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(this.liabilitiesCard).toBeVisible({ timeout: 15_000 });
+    await expect(this.liabilitiesCard.getByText(/^Liabilities$/i)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(this.incomeDetailsCard).toBeVisible({ timeout: 15_000 });
+    await expect(this.incomeDetailsCard.getByText(/Income Details/i)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(this.expenditureCard).toBeVisible({ timeout: 15_000 });
+    await expect(this.expenditureCard.getByText(/^Expenditure$/i)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(this.essentialOutgoingsCard).toBeVisible({ timeout: 15_000 });
+    await expect(
+      this.essentialOutgoingsCard.getByText(/Regular Recurring Essential Outgoings/i),
+    ).toBeVisible({ timeout: 15_000 });
+  }
+
+  /** `app-individual-asset-details` — row that contains `labelRx` and an `<amount>` control. */
+  private amountInputInIndividualCardRow(card: Locator, labelRx: RegExp): Locator {
+    return card
+      .getByText(labelRx)
+      .first()
+      .locator("xpath=ancestor::div[.//amount][1]")
+      .locator("amount")
+      .locator("#amount")
+      .first();
+  }
+
+  /** Individual Assets — **Home Ownership Type** (`assestHomeOwnerType` in template). */
+  async selectIndividualHomeOwnershipType(optionLabel: string): Promise<void> {
+    const card = this.individualAssetDetailsCard;
+    await card.waitFor({ state: "visible", timeout: 30_000 });
+    await card.scrollIntoViewIfNeeded();
+    const byFc = card.locator(`p-dropdown[formcontrolname="assestHomeOwnerType"]`).first();
+    const dd = (await byFc.isVisible({ timeout: 4_000 }).catch(() => false))
+      ? byFc
+      : card.getByText(/Home Ownership Type/i).first().locator("xpath=ancestor::div[.//p-dropdown][1]").locator("p-dropdown").first();
+    const trigger = dd.locator(".p-dropdown-trigger, [aria-label='dropdown trigger']").first();
+    await trigger.waitFor({ state: "visible", timeout: 20_000 });
+    await trigger.click({ timeout: 15_000 });
+    await this.pickDropdownOption(optionLabel);
+  }
+
+  async fillIndividualVehicleValueAmount(value: string): Promise<void> {
+    const input = this.amountInputInIndividualCardRow(
+      this.individualAssetDetailsCard,
+      /Vehicle Value/i,
+    );
+    await this.setCommittedAmount(input, value);
+  }
+
+  async fillIndividualFurnitureEffectsValueAmount(value: string): Promise<void> {
+    const input = this.amountInputInIndividualCardRow(
+      this.individualAssetDetailsCard,
+      /Furniture\s*&\s*Effects Value/i,
+    );
+    await this.setCommittedAmount(input, value);
+  }
+
+  /** Other asset row — `financialAssetType` must be a real option (clears “Select a valid value”). */
+  async selectIndividualOtherFinancialAssetType(optionLabel: string): Promise<void> {
+    const card = this.individualAssetDetailsCard;
+    await card.waitFor({ state: "visible", timeout: 30_000 });
+    const dd = card.locator(`p-dropdown[formcontrolname="financialAssetType"]`).first();
+    const trigger = dd.locator(".p-dropdown-trigger, [aria-label='dropdown trigger']").first();
+    await trigger.waitFor({ state: "visible", timeout: 20_000 });
+    await trigger.click({ timeout: 15_000 });
+    await this.pickDropdownOption(optionLabel);
+  }
+
+  async fillIndividualOtherFinancialAssetAmount(value: string): Promise<void> {
+    const card = this.individualAssetDetailsCard;
+    const host = card.locator(`amount[formcontrolname="financialAssetTypeAmount"]`).first();
+    const input = host.locator("#amount").first();
+    await this.setCommittedAmount(input, value);
+  }
+
+  /** Income — second row (e.g. **Spouse / Partner Pay**) amount. */
+  async fillSecondIncomeRowAmount(value: string): Promise<void> {
+    const input = this.amountInputsInCard(this.incomeDetailsCard).nth(1);
+    await this.setCommittedAmount(input, value);
+  }
+
+  /** Frequency `p-dropdown` in the same grid row as `labelRx` → **Monthly**. */
+  private async setRowFrequencyMonthlyInCard(card: Locator, labelRx: RegExp): Promise<void> {
+    const row = card
+      .getByText(labelRx)
+      .first()
+      .locator("xpath=ancestor::div[.//p-dropdown][1]");
+    const trigger = row.locator(".p-dropdown-trigger, [aria-label='dropdown trigger']").first();
+    await trigger.waitFor({ state: "visible", timeout: 20_000 });
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click({ timeout: 15_000 });
+    await this.pickDropdownOption("Monthly");
+  }
+
+  async setTakeHomePayFrequencyMonthly(): Promise<void> {
+    await this.incomeDetailsCard.waitFor({ state: "visible", timeout: 30_000 });
+    await this.setRowFrequencyMonthlyInCard(this.incomeDetailsCard, /Take Home Pay/i);
+  }
+
+  async setSpousePartnerPayFrequencyMonthly(): Promise<void> {
+    await this.incomeDetailsCard.waitFor({ state: "visible", timeout: 30_000 });
+    await this.setRowFrequencyMonthlyInCard(this.incomeDetailsCard, /Spouse\s*\/\s*Partner Pay/i);
+  }
+
+  /** “Is your income likely to decrease…” → **Yes** (shows **Details** textarea). */
+  async selectIncomeLikelyToDecreaseYes(): Promise<void> {
+    const root = this.incomeDetailsCard;
+    await root.waitFor({ state: "visible", timeout: 30_000 });
+    const question = root.getByText(/Is your income likely to decrease/i).first();
+    await question.waitFor({ state: "visible", timeout: 20_000 });
+    await question.scrollIntoViewIfNeeded();
+    const yesLabel = root.locator("label[for='yesOption']").first();
+    if (await yesLabel.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await yesLabel.click();
+      return;
+    }
+    const yesRadio = root.getByRole("radio", { name: /^yes$/i }).first();
+    if (await yesRadio.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await yesRadio.click({ force: true });
+      return;
+    }
+    await root.locator("#yesOption").click({ force: true });
+  }
+
+  incomeDecreaseDetailsTextarea(): Locator {
+    return this.incomeDetailsCard.locator(`textarea[formcontrolname="myTextarea"]`).first();
+  }
+
+  async expectIncomeDecreaseDetailsTextareaVisibleAndEnabled(): Promise<void> {
+    const ta = this.incomeDecreaseDetailsTextarea();
+    await expect(ta).toBeVisible({ timeout: 15_000 });
+    await expect(ta).toBeEnabled({ timeout: 10_000 });
+  }
+
+  async expectIncomeDecreaseDetailsTextareaHiddenOrDisabled(): Promise<void> {
+    const ta = this.incomeDecreaseDetailsTextarea();
+    const visible = await ta.isVisible().catch(() => false);
+    if (!visible) {
+      await expect(ta).toBeHidden({ timeout: 10_000 });
+      return;
+    }
+    await expect(ta).toBeDisabled({ timeout: 10_000 });
+  }
+
+  async fillIncomeDecreaseDetails(text: string): Promise<void> {
+    const ta = this.incomeDecreaseDetailsTextarea();
+    await ta.waitFor({ state: "visible", timeout: 15_000 });
+    await ta.fill(text);
+    await ta.press("Tab").catch(() => {});
+    await this.page.waitForTimeout(200);
+  }
+
+  async fillExpenditureAmountByLabel(labelRx: RegExp, value: string): Promise<void> {
+    const input = this.amountInputInIndividualCardRow(this.expenditureCard, labelRx);
+    await this.setCommittedAmount(input, value);
+  }
+
+  async setExpenditureRowFrequencyMonthlyByLabel(labelRx: RegExp): Promise<void> {
+    await this.expenditureCard.waitFor({ state: "visible", timeout: 30_000 });
+    await this.setRowFrequencyMonthlyInCard(this.expenditureCard, labelRx);
+  }
+
+  /** Essential Outgoings — outgoing type combobox should show **Other** by default (`recurringDescription`). */
+  async expectEssentialOutgoingTypeDefaultOther(): Promise<void> {
+    const card = this.essentialOutgoingsCard;
+    await card.waitFor({ state: "visible", timeout: 30_000 });
+    const combo = card
+      .locator(`p-dropdown[formcontrolname="recurringDescription"]`)
+      .getByRole("combobox")
+      .first();
+    await expect(combo).toHaveAttribute("aria-label", /Other/i, { timeout: 10_000 });
+  }
+
+  /**
+   * **Regular Recurring Essential Outgoings** host (`app-regular-recurring-frequency`).
+   * Avoid `.or()` unions for scroll targets — Playwright can fail `scrollIntoViewIfNeeded` on combined locators.
+   */
   private essentialOutgoingsSection(): Locator {
-    const heading = this.financialRoot
-      .getByText(/Regular Recurring Essential Outgoings/i)
+    return this.page.locator("app-regular-recurring-frequency").filter({ visible: true }).first();
+  }
+
+  /** Scroll the Essential Outgoings card into view (footer-safe). */
+  private async scrollEssentialOutgoingsCardIntoView(): Promise<void> {
+    await this.page.keyboard.press("Escape").catch(() => {});
+    const card = this.page
+      .locator("app-regular-recurring-frequency")
+      .filter({ visible: true })
       .first();
-    return heading
-      .locator(
-        "xpath=ancestor::div[.//div[contains(@class,'p-dropdown-trigger')] or .//p-dropdown][1]",
-      )
-      .first();
+    await card.waitFor({ state: "visible", timeout: 30_000 });
+    const title = card.getByText(/Regular Recurring Essential Outgoings/i).first();
+    if (await title.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await title
+        .evaluate((el: Element) => {
+          (el as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });
+        })
+        .catch(() => {});
+    }
+    await card
+      .evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });
+      })
+      .catch(() => {});
   }
 
   /** Outgoing type → **Lifestyle** (`#pn_id_93_2` or first row’s first PrimeNG dropdown). */
   async selectEssentialOutgoingTypeLifestyle(): Promise<void> {
+    await this.scrollEssentialOutgoingsCardIntoView();
     const section = this.essentialOutgoingsSection();
-    await section.scrollIntoViewIfNeeded();
 
     const byId = this.financialRoot.locator("#pn_id_93_2");
     const scopedId = section.locator("#pn_id_93_2");
@@ -375,8 +588,12 @@ export class DOFinancialPositionPage extends BasePage {
       );
     }
 
-    await trigger.scrollIntoViewIfNeeded();
-    await trigger.click({ timeout: 15000 });
+    await trigger
+      .evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });
+      })
+      .catch(() => {});
+    await trigger.click({ timeout: 15_000 });
     await this.page.locator(".p-dropdown-panel").waitFor({
       state: "visible",
       timeout: 10000,
@@ -386,6 +603,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Amount in Regular Recurring Essential Outgoings row. */
   async fillEssentialOutgoingAmount(value: string): Promise<void> {
+    await this.scrollEssentialOutgoingsCardIntoView();
     const section = this.essentialOutgoingsSection();
     const byAmountHost = section.locator("amount").first().locator("#amount");
     if (await byAmountHost.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -404,10 +622,15 @@ export class DOFinancialPositionPage extends BasePage {
     await this.setCommittedAmount(section.locator("input.p-inputtext").first(), value);
   }
 
-  /** Essential Outgoings row frequency → **Monthly** (`#pn_id_95_2` or second row dropdown). */
+  /** Essential Outgoings row frequency → **Monthly** (`recurringFrequency` or second `p-dropdown` in card). */
   async setEssentialOutgoingFrequencyMonthly(): Promise<void> {
+    await this.scrollEssentialOutgoingsCardIntoView();
     const section = this.essentialOutgoingsSection();
-    await section.scrollIntoViewIfNeeded();
+
+    const byFc = section.locator(`p-dropdown[formcontrolname="recurringFrequency"]`).first();
+    const triggerFromFc = byFc
+      .locator(".p-dropdown-trigger, [aria-label='dropdown trigger']")
+      .first();
 
     const byId = this.financialRoot.locator("#pn_id_95_2");
     const scopedId = section.locator("#pn_id_95_2");
@@ -424,7 +647,9 @@ export class DOFinancialPositionPage extends BasePage {
       count >= 2 ? rowTriggers.nth(1) : rowTriggers.last();
 
     let trigger: Locator | null = null;
-    if (await triggerFromId.isVisible({ timeout: 2000 }).catch(() => false)) {
+    if (await triggerFromFc.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      trigger = triggerFromFc;
+    } else if (await triggerFromId.isVisible({ timeout: 2000 }).catch(() => false)) {
       trigger = triggerFromId;
     } else if (await idEl.isVisible({ timeout: 1500 }).catch(() => false)) {
       trigger = idEl;
@@ -438,8 +663,12 @@ export class DOFinancialPositionPage extends BasePage {
       );
     }
 
-    await trigger.scrollIntoViewIfNeeded();
-    await trigger.click({ timeout: 15000 });
+    await trigger
+      .evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });
+      })
+      .catch(() => {});
+    await trigger.click({ timeout: 15_000 });
     await this.page.locator(".p-dropdown-panel").waitFor({
       state: "visible",
       timeout: 10000,

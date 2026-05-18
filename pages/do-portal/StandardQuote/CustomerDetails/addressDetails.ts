@@ -2529,8 +2529,18 @@ export class DOAddressDetailsPage extends BasePage {
     });
     try {
       await expect(timeMsgs).toHaveCount(2, { timeout: 8_000 });
-      await timeMsgs.nth(0).scrollIntoViewIfNeeded({ timeout: 10_000 }).catch(() => {});
-      await timeMsgs.nth(1).scrollIntoViewIfNeeded({ timeout: 10_000 }).catch(() => {});
+      const scrollTimeMsg = async (loc: Locator): Promise<void> => {
+        await loc
+          .evaluate((el: Element) => {
+            (el as HTMLElement).scrollIntoView({
+              block: "center",
+              behavior: "instant",
+            });
+          })
+          .catch(() => {});
+      };
+      await scrollTimeMsg(timeMsgs.nth(0));
+      await scrollTimeMsg(timeMsgs.nth(1));
       await expect(timeMsgs.nth(0)).toBeVisible({ timeout: 15_000 });
       await expect(timeMsgs.nth(1)).toBeVisible({ timeout: 15_000 });
     } catch {

@@ -6,9 +6,11 @@
 
 import { expect, test } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
-import { DOAssetDetailsPage, DODashboardPage, DOQuickQuotePage } from "../../../pages";
+import { DOAssetDetailsPage, DODashboardPage, DOQuickQuotePage, DOReferenceDetailsPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
+import { DOEmploymentDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/employmentDetails";
+import { DOFinancialPositionPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/financialPosition";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 
 const CSA_QQ_PRODUCT = "CSA-C-Assigned";
@@ -16,7 +18,7 @@ const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
 
 test(
   "DO Portal - CSA Quick Quote — PDF regression (single run)",
-  { tag: ["@do", "@sanity"] },
+  { tag: ["@regression"] },
   async ({ page }) => {
     test.setTimeout(480_000);
 
@@ -500,6 +502,104 @@ test(
     });
 
     await addressDetailsPage.clickNextButton();
+    const employmentDetailsPage = new DOEmploymentDetailsPage(page);
+    const financialPositionPage = new DOFinancialPositionPage(page);
+    await employmentDetailsPage.waitForEmploymentDetailsStep();
+    // Toggle on first so Previous Employment is in the DOM before filling dropdowns that depend on layout.
+    // await employmentDetailsPage.turnOnEmploymentDetailsChanged();
+
+    // Current Employment — explicit empty / touched fields, **Save**, assert required messages.
+    await employmentDetailsPage.enterCurrentEmployerName("");
+    await employmentDetailsPage.touchCurrentOccupationDropdownWithoutSelection();
+    await employmentDetailsPage.touchCurrentEmploymentTypeDropdownWithoutSelection();
+    await employmentDetailsPage.enterCurrentTimeWithEmployer("", "");
+    await employmentDetailsPage.clickSaveEmploymentDetails();
+    await employmentDetailsPage.expectCurrentEmploymentRequiredValidationMessages();
+
+    // Current Employment — valid data with time &lt; 3 years → **Previous Employment** section appears after Save.
+    await employmentDetailsPage.enterCurrentEmployerName("Acme Finance Ltd");
+    await employmentDetailsPage.selectCurrentOccupation("Accountant");
+    await employmentDetailsPage.selectCurrentEmploymentType("Full Time Employed");
+    await employmentDetailsPage.enterCurrentTimeWithEmployer("1", "2");
+    await employmentDetailsPage.clickSaveEmploymentDetails();
+    await employmentDetailsPage.expectPreviousEmploymentSectionVisible();
+
+    // Previous Employment — leave required fields empty / touched, Save, assert (matches empty-state validation UI).
+    await employmentDetailsPage.enterPreviousEmployerName("");
+    await employmentDetailsPage.touchPreviousOccupationDropdownWithoutSelection();
+    await employmentDetailsPage.touchPreviousEmploymentTypeDropdownWithoutSelection();
+    await employmentDetailsPage.enterPreviousTimeWithEmployer("", "");
+    await employmentDetailsPage.clickSaveEmploymentDetails();
+    await employmentDetailsPage.expectPreviousEmploymentRequiredValidationMessages();
+
+    await employmentDetailsPage.enterPreviousEmployerName("Prior Employer Ltd");
+    await employmentDetailsPage.selectPreviousOccupation("Accountant");
+    await employmentDetailsPage.selectPreviousEmploymentType("Full Time Employed");
+    await employmentDetailsPage.enterPreviousTimeWithEmployer("1", "0");
+    await employmentDetailsPage.clickSaveEmploymentDetails();
+    await employmentDetailsPage.clickNextButton();
+
+    // Financial Position — Individual: section visibility, Assets, Income (incl. decrease radios + Details),
+    // Expenditure, Essential Outgoings (default Other), Liabilities, then Next (aligned with CSAcAssigned sanity).
+    await financialPositionPage.waitForFinancialPositionStep();
+    await financialPositionPage.expectIndividualFinancialPositionSectionsVisible();
+
+    // Assets — Home Ownership Type, Vehicle & Furniture amounts, Other asset type + amount (clears “Select a valid value”).
+    // Option labels are product-driven; adjust if the dropdown list changes.
+    await financialPositionPage.selectIndividualHomeOwnershipType("Mortgage");
+    await financialPositionPage.fillIndividualVehicleValueAmount("$18,000.00");
+    await financialPositionPage.fillIndividualFurnitureEffectsValueAmount("$12,500.00");
+    await financialPositionPage.selectIndividualOtherFinancialAssetType("Savings");
+    await financialPositionPage.fillIndividualOtherFinancialAssetAmount("$5,000.00");
+
+    // Liabilities — first row (Mortgage / Rent): balance/limit + repayment amount > 0, frequency Monthly.
+    await financialPositionPage.fillFirstLiabilityBalanceAndAmount("$500000.00", "$2500.00");
+    await financialPositionPage.setFirstLiabilityRowFrequencyMonthly();
+
+    // Income — Take Home Pay + Spouse/Partner Pay, Monthly; “income decrease” Yes → Details mandatory, then No → Details not required.
+    await financialPositionPage.fillFirstIncomeAmount("$5000.00");
+    await financialPositionPage.fillSecondIncomeRowAmount("$1,200.00");
+    await financialPositionPage.setTakeHomePayFrequencyMonthly();
+    await financialPositionPage.setSpousePartnerPayFrequencyMonthly();
+    await financialPositionPage.selectIncomeLikelyToDecreaseYes();
+    await financialPositionPage.expectIncomeDecreaseDetailsTextareaVisibleAndEnabled();
+    await financialPositionPage.fillIncomeDecreaseDetails(
+      "Automation: conditional Details when Yes is selected.",
+    );
+    await financialPositionPage.selectIncomeLikelyToDecreaseNo();
+    await financialPositionPage.expectIncomeDecreaseDetailsTextareaHiddenOrDisabled();
+
+    // Expenditure — each recurring line: amount + Monthly (labels match `app-individual-expenditure` copy).
+    await financialPositionPage.fillExpenditureAmountByLabel(/Council Rates/i, "$220.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Council Rates/i);
+    await financialPositionPage.fillExpenditureAmountByLabel(/Insurance/i, "$180.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Insurance/i);
+    await financialPositionPage.fillExpenditureAmountByLabel(/Utilities/i, "$140.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Utilities/i);
+    await financialPositionPage.fillExpenditureAmountByLabel(/Living Expenses/i, "$900.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Living Expenses/i);
+    await financialPositionPage.fillExpenditureAmountByLabel(/Motor Vehicles/i, "$350.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Motor Vehicles/i);
+
+    // Regular Recurring Essential Outgoings — type defaults to Other; amount + frequency still required.
+    await financialPositionPage.expectEssentialOutgoingTypeDefaultOther();
+    await financialPositionPage.fillEssentialOutgoingAmount("$150.00");
+    await financialPositionPage.setEssentialOutgoingFrequencyMonthly();
+
+    await financialPositionPage.clickNextButton();
+    // Reference Details — add contact, confirm, submit
+    const referenceDetailsPage = new DOReferenceDetailsPage(page);
+    await referenceDetailsPage.waitForReferenceDetailsStep();
+    await referenceDetailsPage.clickAddContactDetails();
+    await referenceDetailsPage.selectContactType("Accountant");
+    await referenceDetailsPage.enterContactFirstName("Alex");
+    await referenceDetailsPage.enterContactLastName("Referee");
+    await referenceDetailsPage.clickAddContactInModal();
+    await referenceDetailsPage.confirmCustomerDetailsCorrect();
+    await referenceDetailsPage.clickSubmitButton();
+
+
+    
   },
 );
 
