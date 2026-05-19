@@ -454,15 +454,34 @@ export class DOPersonalDetailsPage extends BasePage {
   }
 
   async clickNextButton(): Promise<void> {
-    await this.nextButton.waitFor({ state: "visible", timeout: 120000 });
-    for (let i = 0; i < 120; i++) {
-      if (await this.nextButton.isEnabled().catch(() => false)) break;
-      await this.page.waitForTimeout(500);
+    const startTime = Date.now();
+    try {
+      await this.nextButton.waitFor({ state: "visible", timeout: 120000 });
+      console.log(`⏱️ clickNextButton: button visible after ${Date.now() - startTime}ms`);
+      
+      for (let i = 0; i < 120; i++) {
+        if (await this.nextButton.isEnabled().catch(() => false)) break;
+        await this.page.waitForTimeout(500);
+      }
+      console.log(`⏱️ clickNextButton: button enabled after ${Date.now() - startTime}ms`);
+      
+      await this.nextButton.scrollIntoViewIfNeeded();
+      await this.clickElement(this.nextButton);
+      console.log(`⏱️ clickNextButton: click done after ${Date.now() - startTime}ms`);
+      
+      // Guard against page closure and reduce blocking waits
+      if (!this.page.isClosed()) {
+        await this.page.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
+        console.log(`⏱️ clickNextButton: domcontentloaded done after ${Date.now() - startTime}ms`);
+      }
+      if (!this.page.isClosed()) {
+        await this.page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+        console.log(`⏱️ clickNextButton: networkidle done after ${Date.now() - startTime}ms`);
+      }
+    } catch (err) {
+      console.error(`❌ clickNextButton failed after ${Date.now() - startTime}ms:`, err);
+      throw err;
     }
-    await this.nextButton.scrollIntoViewIfNeeded();
-    await this.clickElement(this.nextButton);
-    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
-    await this.page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
   }
 }
  

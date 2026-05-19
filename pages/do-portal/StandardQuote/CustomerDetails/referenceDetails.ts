@@ -167,21 +167,37 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async confirmCustomerDetailsCorrect(): Promise<void> {
-    const byRole = this.page.getByRole("checkbox", {
-      name: /I confirm that all customer details are correct/i,
-    });
-    if (await byRole.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await byRole.check();
-      return;
-    }
-    const confirmRow = this.page
-      .locator("div")
-      .filter({ hasText: /I confirm that all customer details are correct/i })
-      .first();
-    await confirmRow.waitFor({ state: "visible", timeout: 15000 });
-    const box = confirmRow.locator("div.p-checkbox-box").first();
-    await box.scrollIntoViewIfNeeded();
-    await box.click();
+    const labelRx = /I confirm that all customer details are correct/i;
+
+    // PrimeNG: native `input` is often `hiddenInput` / off-viewport — `locator.check()` still
+    // targets it and fails "outside of the viewport". Click the visible box (SelectorHub-style).
+    const host = this.page.locator("p-checkbox").filter({ hasText: labelRx }).first();
+    await host.waitFor({ state: "visible", timeout: 15000 });
+
+    const visibleBox = host.locator("div.p-checkbox-box:visible").first();
+    await visibleBox.waitFor({ state: "visible", timeout: 15000 });
+    await visibleBox.scrollIntoViewIfNeeded();
+    await visibleBox.evaluate((el) =>
+      (el as HTMLElement).scrollIntoView({ block: "center", inline: "nearest" }),
+    );
+
+    const isChecked = async (): Promise<boolean> => {
+      const visual = await host
+        .locator(".p-checkbox-box.p-checkbox-checked, .p-checkbox-box.p-highlight")
+        .first()
+        .isVisible({ timeout: 1500 })
+        .catch(() => false);
+      if (visual) return true;
+      const input = host.locator('input[type="checkbox"]').first();
+      return input.isChecked().catch(() => false);
+    };
+
+    if (await isChecked()) return;
+
+    await visibleBox.click({ timeout: 15000 });
+    if (await isChecked()) return;
+
+    await visibleBox.click({ force: true, timeout: 15000 });
   }
 
   async clickSubmitButton(): Promise<void> {
