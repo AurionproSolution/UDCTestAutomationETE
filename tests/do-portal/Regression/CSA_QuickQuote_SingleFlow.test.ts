@@ -6,7 +6,7 @@
 
 import { expect, test } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
-import { DOAssetDetailsPage, DODashboardPage, DOQuickQuotePage, DOReferenceDetailsPage } from "../../../pages";
+import { DOAssetDetailsPage, DOCustomerQuotePostSubmitPage, DODashboardPage, DOQuickQuotePage, DOReferenceDetailsPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
 import { DOEmploymentDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/employmentDetails";
@@ -20,7 +20,7 @@ test(
   "DO Portal - CSA Quick Quote — PDF regression (single run)",
   { tag: ["@regression"] },
   async ({ page }) => {
-    test.setTimeout(480_000);
+    test.setTimeout(1_200_000);
 
     const dashboardPage = new DODashboardPage(page);
     const quickQuotePage = new DOQuickQuotePage(page);
@@ -597,7 +597,36 @@ test(
     await referenceDetailsPage.clickAddContactInModal();
     await referenceDetailsPage.confirmCustomerDetailsCorrect();
     await referenceDetailsPage.clickSubmitButton();
+    const customerQuotePostSubmitPage = new DOCustomerQuotePostSubmitPage(page);
 
+    await customerQuotePostSubmitPage.waitForUploadStep();
+
+    // Notes: existing cards show author + date | time; >1000 chars rejected; exactly 1000 saves; list truncates with **More**.
+    await customerQuotePostSubmitPage.expectExistingNoteCardsShowAuthorAndTimestamp();
+    await customerQuotePostSubmitPage.expectOversizedNoteRejectedOnSubmit();
+    await customerQuotePostSubmitPage.submitNoteOfExactLengthFromDialog(1000);
+    await customerQuotePostSubmitPage.expectNoteListShowsMoreForLongSavedNote();
+
+    // Upload tab: .jpg + .pdf succeed; >20 MB rejected; Preview (new tab); Download; Delete removes tile.
+    await customerQuotePostSubmitPage.uploadJpgThenPdfExpectBothVisible();
+    await customerQuotePostSubmitPage.expectOversizeBinaryUploadRejected();
+    await customerQuotePostSubmitPage.expectUploadTabPreviewOpensNewTab();
+    await customerQuotePostSubmitPage.expectUploadTabDownloadStarts();
+    await customerQuotePostSubmitPage.deleteUploadedDocumentTileByBasenameAndExpectRemoved(
+      "minimal-upload.jpg",
+    );
+
+    await customerQuotePostSubmitPage.openDocumentsTab();
+    // await customerQuotePostSubmitPage.selectAllDocumentsAndCreditAdviceRowsForBulkPreview();
+    // await customerQuotePostSubmitPage.clickDocumentsTabPreviewOpensNewTab(); //now This is the correct way to preview the documents But we are not using it because we are not able to download the documents
+    await customerQuotePostSubmitPage.selectCustomerQuoteBasicRow();
+    await customerQuotePostSubmitPage.clickDownload();
+    await customerQuotePostSubmitPage.confirmDocumentParameters();
+    await customerQuotePostSubmitPage.addNoteAndSubmit(
+      "Automated sanity note — CSAC Assigned quote.",
+    );
+    await customerQuotePostSubmitPage.submitQuoteFromStatusMenu();
+    await customerQuotePostSubmitPage.completeOriginatorDeclaration();
 
     
   },

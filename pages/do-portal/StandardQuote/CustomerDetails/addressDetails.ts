@@ -907,7 +907,18 @@ export class DOAddressDetailsPage extends BasePage {
     }
 
     const labelled = root.getByLabel(/Time at Address/i);
-    const n = await labelled.count();
+    let n = 0;
+    try {
+      n = await labelled.count();
+    } catch (err) {
+      if (this.page && typeof this.page.isClosed === "function" && this.page.isClosed()) {
+        throw new Error(
+          "Time at Address: page or context was closed before counting labelled inputs",
+        );
+      }
+      // If counting failed for another reason, treat as none found and continue with fallbacks
+      n = 0;
+    }
     if (n >= 2) {
       await labelled.nth(0).fill(year);
       await labelled.nth(1).fill(month);
