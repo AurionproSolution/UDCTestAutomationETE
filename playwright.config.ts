@@ -21,7 +21,7 @@ const doSanityAuthStorage = path.join(
 const ignoreDoSanityFolder = "**/doSanityTest/**";
 
 /** DO Portal regression specs that use dealer storageState; run via `do-regression-chromium`. */
-const ignoreDoRegressionFolder = "**/do-portal/Regression/**";
+const ignoreDoRegressionFolder = "**/do-portal/regression/**";
 
 // Environment variable for selecting test environment
 const TEST_ENV = process.env.TEST_ENV || "qat";
@@ -182,7 +182,7 @@ export default defineConfig({
 
     {
       name: "do-regression-chromium",
-      testDir: "./tests/do-portal/Regression",
+      testDir: "./tests/do-portal/regression",
       testMatch: ["**/*.test.ts"],
       dependencies: ["do-sanity-setup"],
       use: {

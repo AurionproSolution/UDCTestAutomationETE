@@ -18,7 +18,7 @@ const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
 
 test(
   "DO Portal - CSA Quick Quote — PDF regression (single run)",
-  { tag: ["@regression"] },
+  { tag: ["@do", "@sanity", "@regression"] },
   async ({ page }) => {
     test.setTimeout(1_200_000);
 
