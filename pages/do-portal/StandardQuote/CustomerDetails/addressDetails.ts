@@ -81,9 +81,32 @@ export class DOAddressDetailsPage extends BasePage {
   /** Sole Trader — `app-physical-address` nested under `app-sole-trade` (global `.first()` misses this host). */
   readonly soleTradePhysicalRoot: Locator;
 
+  /** Trust Address Details — scoped hosts (do not use `app-physical-address` / business hosts). */
+  readonly trustPhysicalAddressRoot: Locator;
+  readonly trustPostalAddressRoot: Locator;
+  readonly trustRegisteredAddressRoot: Locator;
+  readonly trustPreviousPhysicalRoot: Locator;
+  readonly trustAddressTopToggleGrid: Locator;
+
   constructor(page: Page) {
     super(page);
     this.soleTradePhysicalRoot = page.locator("app-sole-trade app-physical-address").first();
+    this.trustPhysicalAddressRoot = page.locator("app-trust-physical-address").first();
+    this.trustPostalAddressRoot = page.locator("app-trust-postal-address").first();
+    this.trustRegisteredAddressRoot = page.locator("app-trust-registered-address").first();
+    this.trustPreviousPhysicalRoot = page
+      .locator("app-trust-previous-address, app-trust-previous-physical-address")
+      .first()
+      .or(
+        page
+          .locator("gen-card, p-card")
+          .filter({ hasText: /Previous Physical Address/i })
+          .first(),
+      );
+    this.trustAddressTopToggleGrid = page
+      .locator("div.grid")
+      .filter({ has: page.getByText(/Copy primary borrower/i) })
+      .first();
     this.physicalAddressBlock = page
       .locator("div")
       .filter({ has: page.locator('input[name="physicalSearchValue"]') })
@@ -578,6 +601,24 @@ export class DOAddressDetailsPage extends BasePage {
         );
       })
       .catch(() => false);
+    /** Trust quote address steps use the same PrimeNG time widgets as physical, but different Angular hosts. */
+    const isTrustAddressHost = await block
+      .evaluate((el: HTMLElement) => {
+        const t = el.tagName?.toUpperCase?.() ?? "";
+        if (
+          t === "APP-TRUST-PHYSICAL-ADDRESS" ||
+          t === "APP-TRUST-POSTAL-ADDRESS" ||
+          t === "APP-TRUST-REGISTERED-ADDRESS" ||
+          t === "APP-TRUST-PREVIOUS-ADDRESS" ||
+          t === "APP-TRUST-PREVIOUS-PHYSICAL-ADDRESS"
+        ) {
+          return true;
+        }
+        return !!el.closest?.(
+          "app-trust-physical-address, app-trust-postal-address, app-trust-registered-address, app-trust-previous-address, app-trust-previous-physical-address",
+        );
+      })
+      .catch(() => false);
     const hasPrevSearchInput =
       (await block.locator('input[name="previousSearchValue"]').count()) > 0;
     const isPreviousCard = isPreviousHost || hasPrevSearchInput;
@@ -600,8 +641,8 @@ export class DOAddressDetailsPage extends BasePage {
       return true;
     };
 
-    // PrimeNG time row: physical + CSA-B `app-business-physical-address` use the same widgets.
-    if (isPreviousCard || isPhysicalHost || isBusinessPhysicalHost) {
+    // PrimeNG time row: physical + CSA-B + trust address hosts use the same widgets.
+    if (isPreviousCard || isPhysicalHost || isBusinessPhysicalHost || isTrustAddressHost) {
       const timeRow = block
         .locator("div, section, form")
         .filter({ has: block.getByText(/Time at Address/i) })
@@ -2714,5 +2755,203 @@ export class DOAddressDetailsPage extends BasePage {
       state: "visible",
       timeout: 120000,
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Trust Address Details (`app-trust-physical-address`, postal, registered)
+  // -------------------------------------------------------------------------
+
+  async waitForTrustAddressStep(): Promise<void> {
+    await this.trustPhysicalAddressRoot.waitFor({ state: "visible", timeout: 120_000 });
+    await expect(this.trustPhysicalAddressRoot.getByText(/^Physical Address$/i).first()).toBeVisible({
+      timeout: 60_000,
+    });
+  }
+
+  private async isTrustToggleLabelVisible(labelRx: RegExp): Promise<boolean> {
+    const scopes: (Page | Locator)[] = [
+      this.trustAddressTopToggleGrid,
+      this.trustPhysicalAddressRoot,
+      this.page.locator("app-trust-address-details, lib-stepper").first(),
+      this.page,
+    ];
+    for (const scope of scopes) {
+      if (scope !== this.page) {
+        if ((await (scope as Locator).count()) === 0) continue;
+        if (!(await (scope as Locator).isVisible({ timeout: 800 }).catch(() => false))) continue;
+      }
+      const label = scope.getByText(labelRx).first();
+      if (await label.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** After “Copy primary borrower”, trust address may load async (spinner) before optional toggles render. */
+  private async waitForTrustAddressUiSettled(): Promise<void> {
+    const spinner = this.page
+      .locator(".p-progress-spinner, .p-progress-spinner-circle, [class*='loading']")
+      .filter({ visible: true })
+      .first();
+    if (await spinner.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await spinner.waitFor({ state: "hidden", timeout: 90_000 }).catch(() => {});
+    }
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+  }
+
+  private async ensureTrustSwitchOnNearLabel(scope: Page | Locator, labelRx: RegExp): Promise<void> {
+    const clicked = await this.clickPrimeSwitchNearLabel(scope, labelRx);
+    if (!clicked) {
+      throw new Error(`Trust Address: toggle not found for ${String(labelRx)}`);
+    }
+    const label = scope.getByText(labelRx).first();
+    const shell = label.locator("xpath=ancestor::*[.//p-inputswitch][1]").first();
+    const slider = shell.locator(".p-inputswitch-slider").first();
+    await expect.poll(async () => this.isPrimeSwitchOnFromSliderOrHost(slider), {
+      timeout: 12_000,
+    }).toBe(true);
+  }
+
+  /** Turns on a trust toggle within `scope`; returns `false` when the label/switch is not in that scope. */
+  private async ensureTrustSwitchOnNearLabelIfPresent(
+    scope: Page | Locator,
+    labelRx: RegExp,
+  ): Promise<boolean> {
+    const clicked = await this.clickPrimeSwitchNearLabel(scope, labelRx);
+    if (!clicked) {
+      return false;
+    }
+    const label = scope.getByText(labelRx).first();
+    const shell = label.locator("xpath=ancestor::*[.//p-inputswitch][1]").first();
+    const slider = shell.locator(".p-inputswitch-slider").first();
+    await expect.poll(async () => this.isPrimeSwitchOnFromSliderOrHost(slider), {
+      timeout: 12_000,
+    }).toBe(true);
+    return true;
+  }
+
+  async setTrustCopyPrimaryBorrowerAddressOn(): Promise<void> {
+    const grid = this.trustAddressTopToggleGrid;
+    const scope =
+      (await grid.isVisible({ timeout: 2_000 }).catch(() => false)) ? grid : this.page;
+    await this.ensureTrustSwitchOnNearLabel(scope, /Copy primary borrower/i);
+  }
+
+  /**
+   * “Create new and copy to previous Address” — only on some trust products; skip when not shown.
+   * @returns `true` if the toggle was found and turned on.
+   */
+  async setTrustCreateNewAndCopyToPreviousAddressOnIfPresent(): Promise<boolean> {
+    const labelRx = /Create new and copy to previous\s*Address/i;
+    await this.waitForTrustAddressUiSettled();
+    if (!(await this.isTrustToggleLabelVisible(labelRx))) {
+      return false;
+    }
+    const scopes: (Page | Locator)[] = [
+      this.trustAddressTopToggleGrid,
+      this.trustPhysicalAddressRoot,
+      this.page,
+    ];
+    for (const scope of scopes) {
+      if (scope !== this.page) {
+        if ((await (scope as Locator).count()) === 0) continue;
+        if (!(await (scope as Locator).isVisible({ timeout: 800 }).catch(() => false))) continue;
+      }
+      if (await this.ensureTrustSwitchOnNearLabelIfPresent(scope, labelRx)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async setTrustReuseForPostalAddressOn(): Promise<void> {
+    await this.ensureTrustSwitchOnNearLabel(
+      this.trustPhysicalAddressRoot,
+      /Reuse for Postal Address/i,
+    );
+  }
+
+  async setTrustReuseForRegisteredAddressOn(): Promise<void> {
+    await this.ensureTrustSwitchOnNearLabel(
+      this.trustPhysicalAddressRoot,
+      /Reuse for Registered Address/i,
+    );
+  }
+
+  /**
+   * Trust address toggles: copy borrower (required), optional copy-to-previous, reuse postal + registered.
+   * Skips “Create new and copy to previous Address” when that label is not on the step (TLC trust).
+   */
+  async enableAllTrustAddressCopyAndReuseToggles(): Promise<void> {
+    await this.setTrustCopyPrimaryBorrowerAddressOn();
+    await this.waitForTrustAddressUiSettled();
+    await this.setTrustCreateNewAndCopyToPreviousAddressOnIfPresent();
+    await this.setTrustReuseForPostalAddressOn();
+    await this.setTrustReuseForRegisteredAddressOn();
+  }
+
+  private trustInputAfterLabel(host: Locator, labelText: string): Locator {
+    return host.locator(
+      `xpath=.//label[contains(normalize-space(.),'${labelText}')]/following::input[contains(@class,'p-inputtext')][1]`,
+    );
+  }
+
+  private trustCityInputIn(host: Locator): Locator {
+    return host
+      .locator('input[name="physicalCity"], input[name="postalCity"], input[name="registerCity"]')
+      .first()
+      .or(host.getByRole("combobox", { name: /City/i }).first())
+      .or(this.trustInputAfterLabel(host, "City"));
+  }
+
+  private async expectTrustAddressSectionPopulated(host: Locator): Promise<void> {
+    await expect(this.trustInputAfterLabel(host, "Street Number")).toHaveValue(/123/, {
+      timeout: 20_000,
+    });
+    await expect(this.trustInputAfterLabel(host, "Street Name")).toHaveValue(/Main Street/i);
+    await expect(this.trustCityInputIn(host)).toHaveValue(/Wellington/i);
+    const country = host
+      .locator("p-dropdown")
+      .filter({ has: host.getByText(/^Country/i) })
+      .locator('[role="combobox"]')
+      .first();
+    if (await country.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect(country).toContainText(/New Zealand/i);
+    }
+  }
+
+  async expectTrustAddressDataPopulatedAfterToggles(): Promise<void> {
+    await this.expectTrustAddressSectionPopulated(this.trustPhysicalAddressRoot);
+    if (await this.trustPreviousPhysicalRoot.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await this.expectTrustAddressSectionPopulated(this.trustPreviousPhysicalRoot);
+    }
+    await this.expectTrustAddressSectionPopulated(this.trustPostalAddressRoot);
+    await this.expectTrustAddressSectionPopulated(this.trustRegisteredAddressRoot);
+  }
+
+  private async fillTrustTimeAtAddressInSection(
+    host: Locator,
+    years: string,
+    months: string,
+  ): Promise<void> {
+    await host.waitFor({ state: "visible", timeout: 30_000 });
+    await host.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+    await this.fillYearsMonthsInBlock(host, years, months);
+  }
+
+  async enterTrustPhysicalTimeAtAddress(years: string, months: string): Promise<void> {
+    await this.fillTrustTimeAtAddressInSection(this.trustPhysicalAddressRoot, years, months);
+  }
+
+  async enterTrustPreviousPhysicalTimeAtAddress(years: string, months: string): Promise<void> {
+    if (!(await this.trustPreviousPhysicalRoot.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    await this.fillTrustTimeAtAddressInSection(this.trustPreviousPhysicalRoot, years, months);
+  }
+
+  async enterTrustRegisteredTimeAtAddress(years: string, months: string): Promise<void> {
+    await this.fillTrustTimeAtAddressInSection(this.trustRegisteredAddressRoot, years, months);
   }
 }
