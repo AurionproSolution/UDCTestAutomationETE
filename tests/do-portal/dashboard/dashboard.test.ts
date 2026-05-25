@@ -4,20 +4,16 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { DOLoginPage, DODashboardPage } from '../../../pages';
-import doLoginData from '../../../testData/do-portal/loginData.json';
+import { DO_DEALER_STANDARD_QUOTE_URL } from '../../../config/env';
+import { DODashboardPage } from '../../../pages';
 
 test.describe('DO Portal - Dashboard Module', () => {
-  let loginPage: DOLoginPage;
   let dashboardPage: DODashboardPage;
 
   test.beforeEach(async ({ page }) => {
-    loginPage = new DOLoginPage(page);
     dashboardPage = new DODashboardPage(page);
-
-    // Login before each test
-    await loginPage.navigate();
-    await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+    await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+    await dashboardPage.waitForAuthenticatedDashboard();
   });
 
   test('should display dashboard after login @smoke @do', async () => {

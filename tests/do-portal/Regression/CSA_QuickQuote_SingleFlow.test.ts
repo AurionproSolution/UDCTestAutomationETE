@@ -1,7 +1,7 @@
 /**
  * DO Portal — CSA Quick Quote regression (single Playwright test, single run).
  * Scenario source: CSA_Quote_Regression_Split.pdf (steps / validation table).
- * Auth: `do-regression-chromium` + `doSanity.auth.setup.ts` (storageState).
+ * Auth: shared DO `storageState` from `playwright/do-portal-auth.setup.ts` when running under `do-portal-chromium`.
  */
 
 import { expect, test } from "@playwright/test";

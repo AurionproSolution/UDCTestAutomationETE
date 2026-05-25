@@ -2,26 +2,24 @@
  * UDC Automation Tests - Playwright Configuration
  * Supports DO, RSS, and CSS portals with environment-based configuration
  *
+ * DO portal: shared session via playwright/do-portal-auth.setup.ts → playwright/.auth/do-portal.json
+ * Chromium only; headed mode everywhere (CI uses Xvfb — see .github/workflows/playwright.yml).
+ *
  * @see https://playwright.dev/docs/test-configuration
  */
 
 import { defineConfig, devices } from "@playwright/test";
 import type { OrtoniReportConfig } from "ortoni-report";
+import * as fs from "fs";
 import * as os from "os";
 import path from "path";
+import { doPortalAuthFile } from "./playwright/do-portal-auth.helper";
 
-const doSanityAuthStorage = path.join(
-  process.cwd(),
-  "playwright",
-  ".auth",
-  "do-sanity.json",
-);
+/** VS Code / Cursor Test Explorer: one project is always enabled (see docs/test-explorer.md). */
+const ideMode = process.env.PLAYWRIGHT_IDE === "1";
 
-/** Excluded from bulk portal projects; run via `do-sanity-chromium` (uses setup + storageState). */
-const ignoreDoSanityFolder = "**/doSanityTest/**";
-
-/** DO Portal regression specs that use dealer storageState; run via `do-regression-chromium`. */
-const ignoreDoRegressionFolder = "**/do-portal/regression/**";
+/** Admin perf script against a different host; uses empty storageState in spec file. */
+const ignoreDoPerfInPortalOnly = "**/udc-perf-test-data.test.ts";
 
 // Environment variable for selecting test environment
 const TEST_ENV = process.env.TEST_ENV || "qat";
@@ -46,7 +44,7 @@ const ortoniConfig: OrtoniReportConfig = {
   },
 } as OrtoniReportConfig;
 
-// Shared config for maximized browser window
+// Shared config for maximized browser window (Chromium only)
 const maximizedChrome = {
   ...devices["Desktop Chrome"],
   viewport: null,
@@ -56,204 +54,164 @@ const maximizedChrome = {
   },
 };
 
-const maximizedFirefox = {
-  ...devices["Desktop Firefox"],
-  viewport: null,
-  deviceScaleFactor: undefined,
-  launchOptions: {
-    args: ["-width", "1920", "-height", "1080"],
-  },
+/**
+ * OTP during do-portal-auth.setup cannot run unattended on GitHub-hosted runners.
+ * - Local / non-CI: always use global DO storage (single login per run).
+ * - CI: set PLAYWRIGHT_USE_DO_GLOBAL_AUTH=1 when you have unattended storage or a self-hosted runner.
+ */
+const useGlobalDoAuth =
+  !process.env.CI || process.env.PLAYWRIGHT_USE_DO_GLOBAL_AUTH === "1";
+
+/**
+ * Only attach storageState after do-portal-auth.setup has created the file.
+ * A path to a missing file can break project registration (e.g. VS Code Test Explorer lists no DO tests).
+ */
+function doPortalResolvedUse(): typeof maximizedChrome & {
+  storageState?: string;
+} {
+  if (!useGlobalDoAuth) return maximizedChrome;
+  if (fs.existsSync(doPortalAuthFile)) {
+    return { ...maximizedChrome, storageState: doPortalAuthFile };
+  }
+  return maximizedChrome;
+}
+
+const doPortalAuthSetupProject = {
+  name: "do-portal-auth-setup",
+  testDir: "./playwright",
+  testMatch: "**/do-portal-auth.setup.ts",
+  use: maximizedChrome,
 };
 
-const maximizedWebkit = {
-  ...devices["Desktop Safari"],
-  viewport: null,
-  deviceScaleFactor: undefined,
+const doPortalChromiumProject = {
+  name: "do-portal-chromium",
+  testDir: "./tests/do-portal",
+  testIgnore: [ignoreDoPerfInPortalOnly],
+  ...(useGlobalDoAuth
+    ? { dependencies: ["do-portal-auth-setup"] as const, use: doPortalResolvedUse() }
+    : { use: maximizedChrome }),
 };
+
+const tagPortalTestIgnore = [
+  "**/udc-perf-test-data.test.ts",
+  ...(useGlobalDoAuth ? [] : ["**/do-portal/**"]),
+];
+
+/** Flat tree for IDE: all portals under tests/, DO auth via globalSetup (no setup project in explorer). */
+const ideChromiumProject = {
+  name: "udc-chromium",
+  testDir: "./tests",
+  testIgnore: [
+    "**/udc-perf-test-data.test.ts",
+    ...(!useGlobalDoAuth ? ["**/do-portal/**"] : []),
+  ],
+  use: useGlobalDoAuth ? doPortalResolvedUse() : maximizedChrome,
+};
+
+const ciProjects = [
+  ...(useGlobalDoAuth ? [doPortalAuthSetupProject] : []),
+
+  doPortalChromiumProject,
+
+  /** Perf / bulk admin script: not DO-dealer; no shared DO storageState. */
+  {
+    name: "do-portal-perf-data",
+    testDir: "./tests/do-portal",
+    testMatch: "**/udc-perf-test-data.test.ts",
+    use: maximizedChrome,
+  },
+
+  {
+    name: "all-tests",
+    testDir: "./tests",
+    testIgnore: ["**/do-portal/**"],
+    use: maximizedChrome,
+  },
+
+  {
+    name: "rss-portal-chromium",
+    testDir: "./tests/rss-portal",
+    use: maximizedChrome,
+  },
+
+  {
+    name: "css-portal-chromium",
+    testDir: "./tests/css-portal",
+    use: maximizedChrome,
+  },
+
+  {
+    name: "samples",
+    testDir: "./tests/samples",
+    use: maximizedChrome,
+  },
+
+  {
+    name: "all-portals-smoke",
+    testDir: "./tests",
+    grep: /@smoke/,
+    testIgnore: tagPortalTestIgnore,
+    ...(useGlobalDoAuth
+      ? { dependencies: ["do-portal-auth-setup"] as const, use: doPortalResolvedUse() }
+      : { use: maximizedChrome }),
+  },
+  {
+    name: "all-portals-regression",
+    testDir: "./tests",
+    grep: /@regression/,
+    testIgnore: tagPortalTestIgnore,
+    ...(useGlobalDoAuth
+      ? { dependencies: ["do-portal-auth-setup"] as const, use: doPortalResolvedUse() }
+      : { use: maximizedChrome }),
+  },
+];
 
 export default defineConfig({
-  // Test directory - contains all portal tests
   testDir: "./tests",
 
-  // Test file pattern (jira-linked specs may use a fixed filename without .test.ts)
   testMatch: [
     "**/*.test.ts",
     "**/do-portal/jira/quickQuotejira.ts",
     "**/do-portal/doSanityTest/jira tickets/quickQuoteissue.ts",
   ],
 
-  // Run tests in parallel
   fullyParallel: true,
 
-  // Fail build on CI if test.only is left in code
   forbidOnly: !!process.env.CI,
 
-  // Retry failed tests
   retries: process.env.CI ? 2 : 0,
 
-  // Worker configuration
   workers: process.env.CI ? 1 : undefined,
 
-  // Output directory for test artifacts
   outputDir: "test-results",
 
-  // Reporter configuration
   reporter: [
     ["list"],
     ["html", { outputFolder: "my-report", open: "never" }],
-    ["ortoni-report", ortoniConfig],
+    ...(process.env.PLAYWRIGHT_SKIP_ORTONI === "1"
+      ? []
+      : ([["ortoni-report", ortoniConfig]] as const)),
   ],
 
-  // Global settings for all projects
   use: {
     headless: false,
-    // Trace - captures actions, DOM snapshots, network logs
-    trace: "on",
-
-    // Screenshot after every test (pass or fail)
-    screenshot: "on",
-
-    // Video of every test (pass or fail)
-    video: "on",
-
-    // Default timeout for actions
+    trace: process.env.CI ? "on-first-retry" : "on",
+    screenshot: process.env.CI ? "only-on-failure" : "on",
+    video: process.env.CI ? "retain-on-failure" : "on",
     actionTimeout: 120000,
-
-    // Default navigation timeout
     navigationTimeout: 120000,
   },
 
-  // Timeout for each test
   timeout: 120000,
 
-  // Expect timeout
   expect: {
     timeout: 120000,
   },
 
-  // ============ Projects ============
-  projects: [
-    // ======== DEFAULT: All Tests (shows everything in UI) ========
-    {
-      name: "all-tests",
-      testDir: "./tests",
-      testIgnore: [ignoreDoSanityFolder, ignoreDoRegressionFolder],
-      use: maximizedChrome,
-    },
+  globalSetup:
+    ideMode && useGlobalDoAuth
+      ? path.join(__dirname, "playwright", "do-portal-global-setup.ts")
+      : undefined,
 
-    // -------- DO Portal Projects --------
-    {
-      name: "do-portal-chromium",
-      testDir: "./tests/do-portal",
-      testIgnore: [ignoreDoSanityFolder, ignoreDoRegressionFolder],
-      use: maximizedChrome,
-    },
-    // {
-    //   name: "do-portal-firefox",
-    //   testDir: "./tests/do-portal",
-    //   testIgnore: ignoreDoSanityFolder,
-    //   use: maximizedFirefox,
-    // },
-    // {
-    //   name: "do-portal-webkit",
-    //   testDir: "./tests/do-portal",
-    //   testIgnore: ignoreDoSanityFolder,
-    //   use: maximizedWebkit,
-    // },
-
-    // -------- DO Portal sanity (single login via storageState) --------
-    {
-      name: "do-sanity-setup",
-      testDir: "./tests/do-portal/doSanityTest",
-      testMatch: "**/*.auth.setup.ts",
-      use: maximizedChrome,
-    },
-    {
-      name: "do-sanity-chromium",
-      testDir: "./tests/do-portal/doSanityTest",
-      testIgnore: "**/*.auth.setup.ts",
-      testMatch: ["**/*.test.ts", "**/quickQuoteissue.ts"],
-      dependencies: ["do-sanity-setup"],
-      use: {
-        ...maximizedChrome,
-        storageState: doSanityAuthStorage,
-      },
-    },
-
-    {
-      name: "do-regression-chromium",
-      testDir: "./tests/do-portal/regression",
-      testMatch: ["**/*.test.ts"],
-      dependencies: ["do-sanity-setup"],
-      use: {
-        ...maximizedChrome,
-        storageState: doSanityAuthStorage,
-      },
-    },
-
-    // -------- RSS Portal Projects --------
-    {
-      name: "rss-portal-chromium",
-      testDir: "./tests/rss-portal",
-      use: maximizedChrome,
-    },
-    // {
-    //   name: "rss-portal-firefox",
-    //   testDir: "./tests/rss-portal",
-    //   use: maximizedFirefox,
-    // },
-
-    // -------- CSS Portal Projects --------
-    {
-      name: "css-portal-chromium",
-      testDir: "./tests/css-portal",
-      use: maximizedChrome,
-    },
-    // {
-    //   name: "css-portal-firefox",
-    //   testDir: "./tests/css-portal",
-    //   use: maximizedFirefox,
-    // },
-
-    // -------- Sample/Demo Tests --------
-    {
-      name: "samples",
-      testDir: "./tests/samples",
-      use: maximizedChrome,
-    },
-
-    // -------- Filtered by Tags --------
-    {
-      name: "all-portals-smoke",
-      testDir: "./tests",
-      testIgnore: [ignoreDoSanityFolder, ignoreDoRegressionFolder],
-      grep: /@smoke/,
-      use: maximizedChrome,
-    },
-    {
-      name: "all-portals-regression",
-      testDir: "./tests",
-      testIgnore: [ignoreDoSanityFolder, ignoreDoRegressionFolder],
-      grep: /@regression/,
-      use: maximizedChrome,
-    },
-
-    // -------- Mobile Testing --------
-    // {
-    //   name: "mobile-chrome",
-    //   testDir: "./tests",
-    //   grep: /@mobile/,
-    //   use: {
-    //     ...devices["Pixel 5"],
-    //   },
-    // },
-    // {
-    //   name: "mobile-safari",
-    //   testDir: "./tests",
-    //   grep: /@mobile/,
-    //   use: {
-    //     ...devices["iPhone 13"],
-    //   },
-    // },
-  ],
+  projects: ideMode ? [ideChromiumProject] : ciProjects,
 });

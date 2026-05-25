@@ -4,11 +4,11 @@
  */
 
 import { test } from "@playwright/test";
+import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
   DOCustomerQuotePostSubmitPage,
   DODashboardPage,
-  DOLoginPage,
   DOSoleTraderDetailsPage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
@@ -17,24 +17,20 @@ import { DOEmploymentDetailsPage } from "../../../pages/do-portal/StandardQuote/
 import { DOFinancialPositionPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/financialPosition";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import { DOReferenceDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
-import doLoginData from "../../../testData/do-portal/loginData.json";
-
-let loginPage: DOLoginPage;
-let dashboardPage: DODashboardPage;
-let addAssetPage: DOAddAssetPage;
-let assetDetailsPage: DOAssetDetailsPage;
-let soleTraderDetailsPage: DOSoleTraderDetailsPage;
-let addressDetailsPage: DOAddressDetailsPage;
-let employmentDetailsPage: DOEmploymentDetailsPage;
-let financialPositionPage: DOFinancialPositionPage;
-let referenceDetailsPage: DOReferenceDetailsPage;
-let customerQuotePostSubmitPage: DOCustomerQuotePostSubmitPage;
-let personalDetailsPage: DOPersonalDetailsPage;
-
 
 test.describe("DO Portal - CSAB Assigned(Individual-SOLE trade customer) - Sanity @do @smoke", () => {
+  let dashboardPage: DODashboardPage;
+  let addAssetPage: DOAddAssetPage;
+  let assetDetailsPage: DOAssetDetailsPage;
+  let soleTraderDetailsPage: DOSoleTraderDetailsPage;
+  let addressDetailsPage: DOAddressDetailsPage;
+  let employmentDetailsPage: DOEmploymentDetailsPage;
+  let financialPositionPage: DOFinancialPositionPage;
+  let referenceDetailsPage: DOReferenceDetailsPage;
+  let customerQuotePostSubmitPage: DOCustomerQuotePostSubmitPage;
+  let personalDetailsPage: DOPersonalDetailsPage;
+
   test.beforeEach(async ({ page }) => {
-    loginPage = new DOLoginPage(page);
     dashboardPage = new DODashboardPage(page);
     addAssetPage = new DOAddAssetPage(page);
     assetDetailsPage = new DOAssetDetailsPage(page);
@@ -45,12 +41,11 @@ test.describe("DO Portal - CSAB Assigned(Individual-SOLE trade customer) - Sanit
     referenceDetailsPage = new DOReferenceDetailsPage(page);
     customerQuotePostSubmitPage = new DOCustomerQuotePostSubmitPage(page);
     personalDetailsPage = new DOPersonalDetailsPage(page);
-
   });
   test("CSAC Assigned - Create Standard Quote", async ({ page }) => {
     test.setTimeout(360000);
-    await loginPage.navigate("https://testportaludc.aurionpro.com/");
-    await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+    await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+    await dashboardPage.waitForAuthenticatedDashboard();
     await dashboardPage.clickCreateStandardQuote();
     await dashboardPage.selectCSAproduct();
     await assetDetailsPage.chooseProduct("CSA-B-Assigned");
@@ -199,8 +194,6 @@ test.describe("DO Portal - CSAB Assigned(Individual-SOLE trade customer) - Sanit
     await referenceDetailsPage.enterContactFirstName("Alex");
     await referenceDetailsPage.enterContactLastName("Referee");
     await referenceDetailsPage.clickAddContactInModal();
-
-    
 
     await referenceDetailsPage.confirmCustomerDetailsCorrect();
     await referenceDetailsPage.clickSubmitButton();
