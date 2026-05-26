@@ -15,6 +15,7 @@ import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/Cu
 
 const TLC_QQ_PRODUCT = "TL-C-Assigned";
 const TLC_QQ_PROGRAM = "Term Loan Personal - MV Dealer";
+const TLC_DEALER = "Armstrong Prestige Wellington";
 
 test(
   "DO Portal - TLC Quick Quote — PDF regression (single run)",
@@ -30,6 +31,8 @@ test(
     // -------------------------------------------------------------------------
     await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
     await dashboardPage.waitForAuthenticatedDashboard();
+    await dashboardPage.selectDealer(TLC_DEALER);
+
     await quickQuotePage.openQuickQuote();
     await expect(quickQuotePage.quickQuoteRoot).toBeVisible();
     await expect(quickQuotePage.quickQuoteForm).toBeVisible();
@@ -750,4 +753,3 @@ test(
     
   },
 );
-
