@@ -117,6 +117,46 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   /**
+   * In **Search Customer**, set search type to **Trust** (third radio: Individual | Business | Trust).
+   * Prefers `getByRole('radio')`; falls back to `.p-radiobutton-box` or SelectorHub `p-radiobutton[3]…`.
+   */
+  async selectSearchCustomerTrustType(): Promise<void> {
+    const dialog = this.searchCustomerDialog();
+    await dialog.waitFor({ state: "visible", timeout: 60000 });
+
+    const byRole = dialog.getByRole("radio", { name: /^Trust$/i });
+    if (await byRole.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await byRole.click({ timeout: 15_000, force: true });
+      await this.page.waitForTimeout(300);
+      return;
+    }
+
+    const box = dialog
+      .locator("p-radiobutton")
+      .filter({ hasText: /^Trust$/i })
+      .locator(".p-radiobutton-box")
+      .first();
+    if (await box.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await box.click({ timeout: 15_000, force: true });
+      await this.page.waitForTimeout(300);
+      return;
+    }
+
+    const thirdRadioBox = dialog.locator("p-radiobutton").nth(2).locator(".p-radiobutton-box").first();
+    if (await thirdRadioBox.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await thirdRadioBox.click({ timeout: 15_000, force: true });
+      await this.page.waitForTimeout(300);
+      return;
+    }
+
+    await dialog
+      .locator("xpath=.//p-radiobutton[3]//div[1]//div[contains(@class,'p-radiobutton-box')]")
+      .first()
+      .click({ timeout: 15_000, force: true });
+    await this.page.waitForTimeout(300);
+  }
+
+  /**
    * The Upload / Documents / Signing strip lives inside one PrimeNG `p-tabview`.
    * Resolving tabs from the whole page hits the wrong tab or misses role/name quirks.
    */
