@@ -903,24 +903,24 @@ export class DOQuickQuotePage extends BasePage {
 
   async expectFieldToBeVisible(fieldName: string): Promise<void> {
     const state = await this.getFieldVisibilityState(fieldName);
-    expect(state).not.toBe("hidden");
+    expect.soft(state).not.toBe("hidden");
   }
 
   async expectFieldToBeHidden(fieldName: string): Promise<void> {
     const state = await this.getFieldVisibilityState(fieldName);
-    expect(state).toBe("hidden");
+    expect.soft(state).toBe("hidden");
   }
 
   async expectMailButtonToBeDisabled(): Promise<void> {
-    await expect(this.mailButton).toBeDisabled();
+    await expect.soft(this.mailButton).toBeDisabled();
   }
 
   async expectMailButtonToBeEnabled(): Promise<void> {
-    await expect(this.mailButton).toBeEnabled();
+    await expect.soft(this.mailButton).toBeEnabled();
   }
 
   async expectCreateQuoteVisible(): Promise<void> {
-    await expect(this.createQuoteButton).toBeVisible({ timeout: 30_000 });
+    await expect.soft(this.createQuoteButton).toBeVisible({ timeout: 30_000 });
   }
 
   async enterDepositDollars(amount: string): Promise<void> {
@@ -1001,7 +1001,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async expectPleaseCompleteInForm(quoteIndex = 0): Promise<void> {
-    await expect(
+    await expect.soft(
       this.quoteForm(quoteIndex).getByText(/Please complete/i).first(),
     ).toBeVisible({ timeout: 20_000 });
   }
@@ -1011,7 +1011,7 @@ export class DOQuickQuotePage extends BasePage {
    * others disable Calculate and show inline copy (e.g. "This field cannot be blank").
    */
   async expectBlankTermsValidation(quoteIndex = 0): Promise<void> {
-    await expect(
+    await expect.soft(
       this.quoteForm(quoteIndex)
         .getByText(
           /Please complete|cannot be blank|must not be blank|this field cannot|field\s+cannot\s+be\s+blank|is required|enter.*term/i,
@@ -1021,7 +1021,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async expectTermExceedsMaxMessage(quoteIndex = 0): Promise<void> {
-    await expect(
+    await expect.soft(
       this.quoteForm(quoteIndex)
         .getByText(
           /Term\s+(must not be|cannot be)\s+greater than|Term.*greater than\s*\d+|exceeds.*maximum|maximum.*term/i,
@@ -1173,12 +1173,19 @@ export class DOQuickQuotePage extends BasePage {
       return false;
     };
 
-    await expect
-      .poll(async () => detectRejection(), {
-        timeout: 20_000,
-        intervals: [250, 500, 800, 1_200, 1_800, 2_500, 3_000],
-      })
-      .toBeTruthy();
+    const deadline = Date.now() + 20_000;
+    const intervals = [250, 500, 800, 1_200, 1_800, 2_500, 3_000];
+    let intervalIndex = 0;
+    let detected = false;
+    while (Date.now() < deadline) {
+      if (await detectRejection()) {
+        detected = true;
+        break;
+      }
+      const waitMs = intervals[Math.min(intervalIndex++, intervals.length - 1)] ?? 500;
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+    await expect.soft(detected).toBeTruthy();
   }
 
   async expectProgramDropdownDisabled(quoteIndex = 0): Promise<void> {
@@ -1188,12 +1195,12 @@ export class DOQuickQuotePage extends BasePage {
         : this.programDropdownOnQuote(quoteIndex).getByRole("button", {
             name: /dropdown trigger/i,
           });
-    await expect(trigger).toBeDisabled({ timeout: 15_000 });
+    await expect.soft(trigger).toBeDisabled({ timeout: 15_000 });
   }
 
   async expectCalculateButtonDisabled(quoteIndex = 0): Promise<void> {
     const btn = this.quoteForm(quoteIndex).getByRole("button", { name: /^Calculate$/i });
-    await expect(btn).toBeDisabled({ timeout: 15_000 });
+    await expect.soft(btn).toBeDisabled({ timeout: 15_000 });
   }
 
   /**
@@ -1209,7 +1216,7 @@ export class DOQuickQuotePage extends BasePage {
     if (!visible) {
       return;
     }
-    await expect(btn).toBeDisabled({ timeout: 15_000 });
+    await expect.soft(btn).toBeDisabled({ timeout: 15_000 });
   }
 
   async paymentAmountInputIsReadOnly(): Promise<boolean> {
