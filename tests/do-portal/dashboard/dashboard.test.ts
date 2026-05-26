@@ -7,6 +7,8 @@ import { test, expect } from '@playwright/test';
 import { DOLoginPage, DODashboardPage } from '../../../pages';
 import doLoginData from '../../../testData/do-portal/loginData.json';
 
+const DEALER_NAME = 'Armstrong Prestige Wellington';
+
 test.describe('DO Portal - Dashboard Module', () => {
   let loginPage: DOLoginPage;
   let dashboardPage: DODashboardPage;
@@ -48,6 +50,13 @@ test.describe('DO Portal - Dashboard Module', () => {
   test('should display notification count @do', async () => {
     const count = await dashboardPage.getNotificationCount();
     expect(count).toBeGreaterThanOrEqual(0);
+  });
+
+  test('should select dealer from dashboard header @do', async () => {
+    await dashboardPage.waitForAuthenticatedDashboard();
+    await dashboardPage.selectDealer(DEALER_NAME);
+
+    await expect(dashboardPage.dealerDropdownLabel).toHaveAttribute('aria-label', DEALER_NAME);
   });
 });
 

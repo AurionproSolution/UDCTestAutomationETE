@@ -17,6 +17,7 @@ export class DODashboardPage extends BasePage {
   readonly logoutButton: Locator;
   readonly notificationBell: Locator;
   readonly quickActions: Locator;
+  readonly dealerDropdownLabel: Locator;
 
   constructor(page: Page) {
     super(page);
@@ -44,6 +45,10 @@ export class DODashboardPage extends BasePage {
     this.quickActions = page.locator(
       '.quick-actions, [data-testid="quick-actions"]',
     );
+    this.dealerDropdownLabel = page
+      .locator("span[role='combobox'].p-dropdown-label")
+      .filter({ hasText: /\S/ })
+      .first();
   }
 
   /**
@@ -84,6 +89,38 @@ export class DODashboardPage extends BasePage {
     await this.waitForAppLoaderOverlayGone(120_000);
     await this.createStandardQuoteButton.waitFor({ state: "visible", timeout: 60_000 });
     await expect(this.createStandardQuoteButton).toBeEnabled({ timeout: 30_000 });
+  }
+
+  /**
+   * Selects the dealer shown in the top header dealer dropdown.
+   */
+  async ensureDealerSelected(dealerName: string): Promise<void> {
+    await this.waitForAppLoaderOverlayGone(120_000);
+    await expect(this.dealerDropdownLabel).toBeVisible({ timeout: 60_000 });
+
+    const selectedDealer =
+      (await this.dealerDropdownLabel.getAttribute("aria-label")) ??
+      (await this.dealerDropdownLabel.textContent()) ??
+      "";
+    if (selectedDealer.trim() === dealerName) {
+      return;
+    }
+
+    await this.dealerDropdownLabel.click();
+    await expect(this.page.getByRole("listbox")).toBeVisible({ timeout: 30_000 });
+
+    const dealerOption = this.page
+      .getByRole("option", { name: dealerName, exact: true })
+      .first();
+    await dealerOption.click();
+    await expect(this.dealerDropdownLabel).toHaveAttribute("aria-label", dealerName, {
+      timeout: 30_000,
+    });
+    await this.waitForAppLoaderOverlayGone(120_000);
+  }
+
+  async selectDealer(dealerName: string): Promise<void> {
+    await this.ensureDealerSelected(dealerName);
   }
 
   /**
