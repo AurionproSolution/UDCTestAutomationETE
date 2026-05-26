@@ -7,6 +7,8 @@ import { BasePage } from "../../../common";
  * - **CSA-B business:** `app-business-financial` (Profit declaration, Turnover, Balance information).
  * - **Sole Trader:** `app-sole-trade-financial` + `app-sole-trade-profit-declaration`, `app-sole-trade-turnover-info`,
  *   `app-sole-trade-assets`, `app-sole-trade-liabilities` (same business-style fields, different hosts).
+ * - **Trust (Standard Quote):** `app-trust-financial-details` (`app-trust-profit-declaration`, `app-trust-turnover-info`,
+ *   `app-trust-balance-info`, Statement of Position: `app-trust-assets`, `app-trust-liabilities`).
  * PrimeNG ids (`#pn_id_*`) are fallbacks — they can change between builds.
  */
 export class DOFinancialPositionPage extends BasePage {
@@ -15,6 +17,8 @@ export class DOFinancialPositionPage extends BasePage {
   readonly businessFinancialRoot: Locator;
   /** Sole Trader — Financial Position step (parallel to `app-business-financial`). */
   readonly soleTradeFinancialRoot: Locator;
+  /** Trust — Financial Position step (`app-trust-financial-details`). */
+  readonly trustFinancialRoot: Locator;
   readonly turnoverInformationRoot: Locator;
   /** `app-balance-information` or a card titled “Balance Information” under `app-business-financial`. */
   readonly balanceInformationHost: Locator;
@@ -32,6 +36,7 @@ export class DOFinancialPositionPage extends BasePage {
     this.financialRoot = page.locator("app-financial-position").first();
     this.businessFinancialRoot = page.locator("app-business-financial").first();
     this.soleTradeFinancialRoot = page.locator("app-sole-trade-financial").first();
+    this.trustFinancialRoot = page.locator("app-trust-financial-details").first();
     this.turnoverInformationRoot = page
       .locator("app-sole-trade-financial app-sole-trade-turnover-info")
       .filter({ visible: true })
@@ -66,8 +71,220 @@ export class DOFinancialPositionPage extends BasePage {
     await this.financialRoot
       .or(this.businessFinancialRoot)
       .or(this.soleTradeFinancialRoot)
+      .or(this.trustFinancialRoot)
       .first()
       .waitFor({ state: "visible", timeout: 120000 });
+  }
+
+  async waitForTrustFinancialPositionStep(): Promise<void> {
+    await this.trustFinancialRoot.waitFor({ state: "visible", timeout: 120_000 });
+    await this.trustFinancialRoot
+      .getByText(/Profit Declaration|Turnover Information/i)
+      .first()
+      .waitFor({ state: "visible", timeout: 60_000 });
+  }
+
+  private trustProfitDeclarationHost(): Locator {
+    return this.trustFinancialRoot.locator("app-trust-profit-declaration").first();
+  }
+
+  private trustTurnoverHost(): Locator {
+    return this.trustFinancialRoot.locator("app-trust-turnover-info").first();
+  }
+
+  private trustBalanceHost(): Locator {
+    return this.trustFinancialRoot.locator("app-trust-balance-info").first();
+  }
+
+  private trustAssetsHost(): Locator {
+    return this.trustFinancialRoot.locator("app-trust-assets").first();
+  }
+
+  private trustLiabilitiesHost(): Locator {
+    return this.trustFinancialRoot.locator("app-trust-liabilities").first();
+  }
+
+  /**
+   * Trust profit radios: **No** then **Yes** so the Net Profit amount control is shown and bound reliably
+   * (`isNetProfitLastYear` — hidden native `input` on `p-radiobutton`).
+   */
+  async primeTrustNetProfitLastYearNoThenYes(): Promise<void> {
+    const host = this.trustProfitDeclarationHost();
+    await host.waitFor({ state: "visible", timeout: 60_000 });
+    await host.scrollIntoViewIfNeeded().catch(() => {});
+
+    const noInput = host.locator('input[type="radio"][name="isNetProfitLastYear"][value="false"]');
+    const yesInput = host.locator('input[type="radio"][name="isNetProfitLastYear"][value="true"]');
+    await noInput.waitFor({ state: "attached", timeout: 15_000 });
+    await noInput.click({ force: true });
+    await this.page.waitForTimeout(350);
+    await yesInput.click({ force: true });
+    await this.page.waitForTimeout(450);
+
+    const netRow = host.locator("amount").locator("#amount").first();
+    await netRow.waitFor({ state: "visible", timeout: 20_000 });
+  }
+
+  /** “Net Profit last year” currency field (after Yes). */
+  async fillTrustNetProfitLastYear(value: string): Promise<void> {
+    const host = this.trustProfitDeclarationHost();
+    await host.waitFor({ state: "visible", timeout: 30_000 });
+    const input = host.locator("amount").locator("#amount").first();
+    await this.setCommittedAmount(input, value);
+  }
+
+  /** Turnover **(Latest Year)** — amount + Year Ending only (Previous row left to app defaults unless you fill it). */
+  async fillTrustTurnoverLatestYear(amount: string, yearEnding: string): Promise<void> {
+    const host = this.trustTurnoverHost();
+    await host.waitFor({ state: "visible", timeout: 30_000 });
+    await host.scrollIntoViewIfNeeded().catch(() => {});
+    const amountHost = host.locator("amount").first();
+    const amountInput = amountHost.locator("#amount").first();
+    await this.setCommittedAmount(amountInput, amount);
+    const calendarInput = this.yearEndingInputForAmountHost(amountHost);
+    await this.fillYearEndingField(calendarInput, yearEnding);
+    await this.page.waitForTimeout(400);
+  }
+
+  /**
+   * After Latest Turnover year ending is set, Balance Information year-ending fields often mirror it.
+   * Asserts `cashBalLatestYrEndDt`, `debtorBalLatestYrEndDt`, `creditorBalLatestYrEndDt`, `overdraftBalLastYrEndDt`
+   * match the Latest Turnover field (`turnoverLatestYearEndingDt`).
+   */
+  async expectTrustBalanceYearEndingsMatchLatestTurnoverDate(options?: {
+    timeoutMs?: number;
+  }): Promise<void> {
+    const timeout = options?.timeoutMs ?? 25_000;
+    const latestInp = this.trustTurnoverHost().locator('input[name="turnoverLatestYearEndingDt"]').first();
+    await expect(latestInp).not.toHaveValue("", { timeout });
+    const ref = (await latestInp.inputValue()).trim();
+    expect(ref.length).toBeGreaterThan(3);
+    const names = [
+      "cashBalLatestYrEndDt",
+      "debtorBalLatestYrEndDt",
+      "creditorBalLatestYrEndDt",
+      "overdraftBalLastYrEndDt",
+    ] as const;
+    for (const name of names) {
+      const inp = this.trustBalanceHost().locator(`input[name="${name}"]`).first();
+      await expect(inp).toHaveValue(ref, { timeout });
+    }
+  }
+
+  /** Balance Information — amount only (row **0** Cash … **3** Overdraft); leave calendars if app already populated them. */
+  async fillTrustBalanceRowAmountOnly(rowIndex: number, amount: string): Promise<void> {
+    const host = this.trustBalanceHost();
+    await host.waitFor({ state: "visible", timeout: 30_000 });
+    const amountHost = host.locator("amount").nth(rowIndex);
+    const amountInput = amountHost.locator("#amount").first();
+    await this.setCommittedAmount(amountInput, amount);
+  }
+
+  /** If a balance row’s Year Ending is still empty, set it (e.g. when propagation did not run). */
+  async fillTrustBalanceRowYearEndingIfEmpty(rowIndex: number, yearEnding: string): Promise<void> {
+    const host = this.trustBalanceHost();
+    const amountHost = host.locator("amount").nth(rowIndex);
+    const cal = this.yearEndingInputForAmountHost(amountHost);
+    const v = (await cal.inputValue().catch(() => "")).trim();
+    if (v.length > 0) return;
+    await this.fillYearEndingField(cal, yearEnding);
+  }
+
+  private async fillTrustAssetAmountByRowLabel(labelRx: RegExp, value: string): Promise<void> {
+    const host = this.trustAssetsHost();
+    await host.waitFor({ state: "visible", timeout: 30_000 });
+    const label = host.getByText(labelRx).first();
+    await label.scrollIntoViewIfNeeded();
+    const row = label.locator("xpath=ancestor::div[.//amount][1]");
+    const input = row.locator("amount").locator("#amount").first();
+    await this.setCommittedAmount(input, value);
+  }
+
+  async fillTrustPersonalPropertyAmount(value: string): Promise<void> {
+    await this.fillTrustAssetAmountByRowLabel(/Personal Property/i, value);
+  }
+
+  async fillTrustVehicleValueAmount(value: string): Promise<void> {
+    await this.fillTrustAssetAmountByRowLabel(/Vehicle Value/i, value);
+  }
+
+  /** “Other” asset row — amount beside `financialAssetType` dropdown. */
+  async fillTrustOtherAssetAmount(value: string): Promise<void> {
+    const host = this.trustAssetsHost();
+    await host.waitFor({ state: "visible", timeout: 30_000 });
+    const amtHost = host.locator('amount[formcontrolname="financialAssetTypeAmount"]').first();
+    const input = amtHost.locator("#amount").first();
+    await this.setCommittedAmount(input, value);
+  }
+
+  private async fillTrustLiabilityMonthlyByLabel(labelRx: RegExp, value: string): Promise<void> {
+    const host = this.trustLiabilitiesHost();
+    await host.waitFor({ state: "visible", timeout: 30_000 });
+    const label = host.getByText(labelRx).first();
+    await label.scrollIntoViewIfNeeded();
+    const row = label.locator("xpath=ancestor::*[.//amount][1]");
+    const input = row.locator("amount").locator("#amount").first();
+    await this.setCommittedAmount(input, value);
+  }
+
+  async fillTrustMortgageRentMonthlyAmount(value: string): Promise<void> {
+    await this.fillTrustLiabilityMonthlyByLabel(/Mortgage\s*\/\s*Rent/i, value);
+  }
+
+  async fillTrustLoansMonthlyAmount(value: string): Promise<void> {
+    await this.fillTrustLiabilityMonthlyByLabel(/\bLoans\b/i, value);
+  }
+
+  async fillTrustCreditCardsMonthlyAmount(value: string): Promise<void> {
+    await this.fillTrustLiabilityMonthlyByLabel(/Credit Cards/i, value);
+  }
+
+  async fillTrustOtherLiabilitiesMonthlyAmount(value: string): Promise<void> {
+    await this.fillTrustLiabilityMonthlyByLabel(/Other Liabilities/i, value);
+  }
+
+  /**
+   * One-shot happy path for **Trust** Financial Position (profit → turnover → balance → statement).
+   * Call after navigating to step 3 (Trust Financial Position).
+   */
+  async fillTrustFinancialPositionComplete(opts: {
+    netProfit: string;
+    turnoverLatestAmount: string;
+    turnoverYearEnding: string;
+    balanceCash: string;
+    balanceDebtor: string;
+    balanceCreditor: string;
+    balanceOverdraft: string;
+    assetPersonalProperty: string;
+    assetVehicle: string;
+    assetOther: string;
+    liabilityMortgage: string;
+    liabilityLoans: string;
+    liabilityCreditCards: string;
+    liabilityOther: string;
+  }): Promise<void> {
+    await this.waitForTrustFinancialPositionStep();
+    await this.primeTrustNetProfitLastYearNoThenYes();
+    await this.fillTrustNetProfitLastYear(opts.netProfit);
+    await this.fillTrustTurnoverLatestYear(opts.turnoverLatestAmount, opts.turnoverYearEnding);
+    await this.expectTrustBalanceYearEndingsMatchLatestTurnoverDate({ timeoutMs: 30_000 }).catch(
+      async () => {
+        for (let i = 0; i < 4; i++) {
+          await this.fillTrustBalanceRowYearEndingIfEmpty(i, opts.turnoverYearEnding);
+        }
+      },
+    );
+    await this.fillTrustBalanceRowAmountOnly(0, opts.balanceCash);
+    await this.fillTrustBalanceRowAmountOnly(1, opts.balanceDebtor);
+    await this.fillTrustBalanceRowAmountOnly(2, opts.balanceCreditor);
+    await this.fillTrustBalanceRowAmountOnly(3, opts.balanceOverdraft);
+    await this.fillTrustPersonalPropertyAmount(opts.assetPersonalProperty);
+    await this.fillTrustVehicleValueAmount(opts.assetVehicle);
+    await this.fillTrustOtherAssetAmount(opts.assetOther);
+    await this.fillTrustMortgageRentMonthlyAmount(opts.liabilityMortgage);
+    await this.fillTrustLoansMonthlyAmount(opts.liabilityLoans);
+    await this.fillTrustCreditCardsMonthlyAmount(opts.liabilityCreditCards);
+    await this.fillTrustOtherLiabilitiesMonthlyAmount(opts.liabilityOther);
   }
 
   private escapeRx(s: string): string {

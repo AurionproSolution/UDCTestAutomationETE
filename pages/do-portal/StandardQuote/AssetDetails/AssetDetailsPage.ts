@@ -16,6 +16,8 @@ export class DOAssetDetailsPage extends BasePage {
   readonly PPSRCount: Locator;
   readonly udcEstablishmentFeeInputField: Locator;
   readonly dealerOriginationFeeInputField: Locator;
+  /** Read-only total (UDC + Dealer establishment); `#amount` under `<amount>`. */
+  readonly totalEstablishmentFeeInputField: Locator;
   readonly termsOfFinanceInputField: Locator;
   readonly frequencyOfPayment: Locator;
   readonly interestRateInputField: Locator;
@@ -29,6 +31,20 @@ export class DOAssetDetailsPage extends BasePage {
   readonly addNewCustomerButton: Locator;
   /** Modal for borrower / customer search (wording varies by build) */
   readonly customerSearchDialog: Locator;
+  /** Host for Additional Funds block (may render after loaders). */
+  readonly additionalFundsRoot: Locator;
+  /** `app-additional-funds` — amount + purpose (standard quote left column). */
+  readonly additionalFundsInput: Locator;
+  readonly additionalFundsPurposeTextarea: Locator;
+  /** `app-less-deposit` — trade / settlement / net (read-only net). */
+  readonly tradeAmountInput: Locator;
+  readonly settlementAmountInput: Locator;
+  readonly netTradeAmountDisplayed: Locator;
+  /** `app-payment-summary` — balloon $ / % / Fixed (avoid SelectorHub `ng-tns-*` / `body>…nth-child`). */
+  readonly paymentSummaryRoot: Locator;
+  readonly balloonAmountInput: Locator;
+  readonly balloonPercentInput: Locator;
+  readonly balloonFixedCheckbox: Locator;
 
   constructor(page: Page) {
     super(page);
@@ -73,6 +89,10 @@ export class DOAssetDetailsPage extends BasePage {
     this.dealerOriginationFeeInputField = page
       .locator("amount")
       .filter({ hasText: "Dealer Origination Fee" })
+      .locator("#amount");
+    this.totalEstablishmentFeeInputField = page
+      .locator("amount")
+      .filter({ hasText: /Total\s+Establishment\s+Fee/i })
       .locator("#amount");
     this.termsOfFinanceInputField = page
       .locator("number")
@@ -141,6 +161,67 @@ export class DOAssetDetailsPage extends BasePage {
     this.addNewCustomerButton = this.customerSearchDialog.getByRole("button", {
       name: /Add New Customer/i,
     });
+
+    this.additionalFundsRoot = page.locator("app-additional-funds").first();
+    this.additionalFundsInput = this.additionalFundsRoot
+      .locator("amount")
+      .filter({ hasText: /Additional Funds/i })
+      .locator("#amount")
+      .first();
+    this.additionalFundsPurposeTextarea = this.additionalFundsRoot
+      .getByRole("textbox", { name: /Additional Funds Purpose/i })
+      .or(this.additionalFundsRoot.locator("textarea#note"))
+      .first();
+
+    const lessDeposit = page.locator("app-less-deposit").first();
+    this.tradeAmountInput = lessDeposit
+      .locator("amount")
+      .filter({ hasText: /Trade Amount/i })
+      .locator("#amount")
+      .first();
+    this.settlementAmountInput = lessDeposit
+      .locator("amount")
+      .filter({ hasText: /Settlement Amount/i })
+      .locator("#amount")
+      .first();
+    this.netTradeAmountDisplayed = lessDeposit
+      .locator("amount")
+      .filter({ hasText: /Net Trade Amount/i })
+      .locator("#amount")
+      .first();
+
+    const paymentSummary = page.locator("app-payment-summary").first();
+    this.paymentSummaryRoot = paymentSummary;
+    const balloonAmountHost = paymentSummary
+      .locator("amount")
+      .filter({ hasText: /Balloon\s+Amount/i })
+      .first();
+    this.balloonAmountInput = balloonAmountHost.locator("#amount").first();
+    // `percentage` host often has **no** inner text "Balloon" (label sits on sibling `amount`). Resolve % from the same grid row as Balloon Amount.
+    this.balloonPercentInput = balloonAmountHost
+      .locator(
+        "xpath=ancestor::div[contains(@class,'grid')][1]//percentage//input[contains(@class,'p-inputnumber-input') or contains(@class,'p-inputtext') or @role='spinbutton']",
+      )
+      .first()
+      .or(
+        balloonAmountHost.locator(
+          "xpath=ancestor::div[contains(@class,'grid')][1]//p-inputnumber//input[contains(@class,'p-inputtext') or contains(@class,'p-inputnumber-input') or @role='spinbutton']",
+        ).first(),
+      )
+      .or(
+        paymentSummary.locator(
+          "xpath=.//label[contains(normalize-space(.),'Balloon Amount')]/ancestor::div[contains(@class,'grid')][1]//percentage//input",
+        ).first(),
+      );
+    this.balloonFixedCheckbox = paymentSummary
+      .getByRole("checkbox", { name: /^Fixed$/i })
+      .or(
+        paymentSummary
+          .locator("p-checkbox")
+          .filter({ hasText: /^Fixed$/i })
+          .locator('input[type="checkbox"]'),
+      )
+      .first();
   }
 
   /**
@@ -267,6 +348,181 @@ export class DOAssetDetailsPage extends BasePage {
       .toMatch(opts.interestRate);
   }
 
+  /**
+   * **Additional Funds** often mounts only after quote/asset loaders finish (spinner over the left column).
+   * Call before any interaction with {@link additionalFundsInput} / purpose.
+   */
+  async waitForAdditionalFundsSectionReady(): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+    await this.page.waitForLoadState("networkidle", { timeout: 55_000 }).catch(() => {});
+
+    const root = this.additionalFundsRoot;
+    await expect(root).toBeVisible({ timeout: 120_000 });
+    await root.scrollIntoViewIfNeeded();
+    await expect(this.additionalFundsInput).toBeVisible({ timeout: 45_000 });
+    await expect(this.additionalFundsInput).toBeEnabled({ timeout: 20_000 });
+    await this.page.waitForTimeout(350);
+  }
+
+  /**
+   * Every visible **.app-loader-overlay** blocks pointer events (spinner on top of the form).
+   * Do not use `.first()` on mixed locators — a distant spinner can hide while the quote overlay stays up.
+   */
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const overlays = this.page.locator(".app-loader-overlay");
+      const count = await overlays.count();
+      let anyVisible = false;
+      for (let i = 0; i < count; i++) {
+        if (await overlays.nth(i).isVisible().catch(() => false)) {
+          anyVisible = true;
+          break;
+        }
+      }
+      if (!anyVisible) return;
+      await this.page.waitForTimeout(200);
+    }
+  }
+
+  /** Additional Funds row visible on load; masked value reads as zero (e.g. `$0.00`). */
+  async expectAdditionalFundsVisibleOnLoad(): Promise<void> {
+    await this.waitForAdditionalFundsSectionReady();
+    const v = (await this.additionalFundsInput.inputValue()).trim();
+    if (v.length > 0) {
+      const n = parseFloat(v.replace(/[^0-9.-]/g, ""));
+      expect(Number.isNaN(n) ? 0 : n).toBe(0);
+    }
+  }
+
+  async enterAdditionalFunds(amount: string): Promise<void> {
+    await this.waitForAdditionalFundsSectionReady();
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.additionalFundsInput.scrollIntoViewIfNeeded();
+    await this.additionalFundsInput.fill(amount, { force: true });
+    await this.additionalFundsInput.press("Tab").catch(() => {});
+  }
+
+  async clearAdditionalFunds(): Promise<void> {
+    await this.waitForAdditionalFundsSectionReady();
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.additionalFundsInput.scrollIntoViewIfNeeded();
+    await this.additionalFundsInput.click({ force: true, timeout: 20_000 });
+    await this.additionalFundsInput.press("ControlOrMeta+a");
+    await this.page.keyboard.press("Backspace");
+    await this.additionalFundsInput.press("Tab").catch(() => {});
+  }
+
+  async enterAdditionalFundsPurpose(text: string): Promise<void> {
+    await this.waitForAdditionalFundsSectionReady();
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.additionalFundsPurposeTextarea.scrollIntoViewIfNeeded();
+    await this.additionalFundsPurposeTextarea.fill(text, { force: true });
+  }
+
+  async clearAdditionalFundsPurpose(): Promise<void> {
+    await this.waitForAdditionalFundsSectionReady();
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.additionalFundsPurposeTextarea.scrollIntoViewIfNeeded();
+    await this.additionalFundsPurposeTextarea.fill("", { force: true });
+  }
+
+  /** Outlined **Save** on the Standard Quote step (inside `lib-stepper` when present). */
+  async clickSaveStandardQuoteStep(): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+
+    const stepper = this.page.locator("lib-stepper").first();
+    await stepper.waitFor({ state: "visible", timeout: 25_000 }).catch(() => {});
+
+    const inStepper = stepper.getByRole("button", { name: /^Save$/i }).first();
+    const save = (await inStepper.isVisible({ timeout: 10_000 }).catch(() => false))
+      ? inStepper
+      : this.page
+          .locator("button.p-ripple.p-element.p-button.p-component.p-button-outlined")
+          .filter({ hasText: /^Save$/i })
+          .first();
+
+    await save.waitFor({ state: "visible", timeout: 30_000 });
+    await stepper.scrollIntoViewIfNeeded().catch(() => {});
+    await save.scrollIntoViewIfNeeded();
+
+    const enableDeadline = Date.now() + 90_000;
+    while (Date.now() < enableDeadline) {
+      await this.waitUntilNoVisibleAppLoaderOverlays(5_000);
+      if (await save.isEnabled().catch(() => false)) break;
+      await this.page.waitForTimeout(400);
+    }
+    if (!(await save.isEnabled().catch(() => false))) {
+      throw new Error(
+        "Standard Quote **Save** stayed disabled after 90s (loaders cleared). Check required fields or whether Save is hidden on this build.",
+      );
+    }
+
+    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+
+    try {
+      await save.click({ timeout: 20_000 });
+    } catch {
+      await save.click({ force: true, timeout: 20_000 });
+    }
+
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    await this.page.waitForTimeout(600);
+  }
+
+  /**
+   * After **Save** with Additional Funds set but **Purpose** left blank, expect inline validation
+   * on or near the purpose field (copy varies by build).
+   */
+  async expectAdditionalFundsPurposeInlineErrorVisible(): Promise<void> {
+    await this.waitForAdditionalFundsSectionReady();
+    const root = this.additionalFundsRoot;
+    const inNote = root
+      .locator("note")
+      .first()
+      .locator(".p-error, .p-invalid-message, small, span[class*='error']")
+      .filter({ hasText: /required|must|enter|cannot|blank|invalid|provide/i });
+    if (await inNote.first().isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await expect(inNote.first()).toBeVisible({ timeout: 15_000 });
+      return;
+    }
+    await expect(
+      root.getByText(/required|must enter|cannot be blank|is required|invalid|provide a/i).first(),
+    ).toBeVisible({ timeout: 15_000 });
+  }
+
+  async enterTradeAmount(amount: string): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    await this.tradeAmountInput.scrollIntoViewIfNeeded();
+    await this.tradeAmountInput.click({ force: true });
+    await this.tradeAmountInput.press("ControlOrMeta+a");
+    await this.page.keyboard.press("Backspace");
+    await this.tradeAmountInput.fill(amount, { force: true });
+    await this.tradeAmountInput.press("Tab").catch(() => {});
+  }
+
+  async enterSettlementAmount(amount: string): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    await this.settlementAmountInput.scrollIntoViewIfNeeded();
+    await this.settlementAmountInput.click({ force: true });
+    await this.settlementAmountInput.press("ControlOrMeta+a");
+    await this.page.keyboard.press("Backspace");
+    await this.settlementAmountInput.fill(amount, { force: true });
+    await this.settlementAmountInput.press("Tab").catch(() => {});
+  }
+
+  /** Net Trade Amount (often read-only); assert displayed text matches `pattern` (product rules vary — may mirror Trade until Settlement is applied). */
+  async expectNetTradeAmountPattern(pattern: RegExp): Promise<void> {
+    await expect(this.netTradeAmountDisplayed).toBeVisible({ timeout: 15_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    await expect
+      .poll(async () => (await this.netTradeAmountDisplayed.inputValue()).trim(), {
+        timeout: 30_000,
+      })
+      .toMatch(pattern);
+  }
+
   /** UDC Establishment Fee: pre-populated from program; assert editable only when the control allows editing. */
   async expectUdcEstablishmentFeePrePopulatedFromProgram(): Promise<void> {
     const fee = this.udcEstablishmentFeeInputField;
@@ -335,6 +591,23 @@ export class DOAssetDetailsPage extends BasePage {
     expect(n).toBeGreaterThanOrEqual(0);
   }
 
+  /** **Total Establishment Fee** (read-only): parsed numeric equals UDC + Dealer (waits for recalculation). */
+  async expectTotalEstablishmentFeeSumDollars(expectedTotal: number): Promise<void> {
+    const f = this.totalEstablishmentFeeInputField;
+    await expect(f).toBeVisible({ timeout: 20_000 });
+    const want = Math.round(expectedTotal * 100) / 100;
+    await expect
+      .poll(
+        async () => {
+          const raw = (await f.inputValue()).trim();
+          const n = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+          return Number.isNaN(n) ? Number.NaN : Math.round(n * 100) / 100;
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(want);
+  }
+
   /** PPSR Count row visible with a value; fee line (@ rate / amount) visible when rendered for this product. */
   async expectPpsrCountAndFeeLineVisible(): Promise<void> {
     const root = this.standardQuoteRoot();
@@ -359,6 +632,112 @@ export class DOAssetDetailsPage extends BasePage {
     if (await feeLine.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await expect(feeLine).toBeVisible();
     }
+  }
+
+  /**
+   * **Dealer Finance** accordion on the Finance card (`:text-is("Dealer Finance")` / `p-button-label`).
+   * No-op if the panel is already expanded (Base Interest Rate visible).
+   */
+  async expandDealerFinanceSection(): Promise<void> {
+    const root = this.standardQuoteRoot();
+    if (
+      await root
+        .getByText(/Base\s+Interest\s+Rate/i)
+        .first()
+        .isVisible({ timeout: 2_000 })
+        .catch(() => false)
+    ) {
+      return;
+    }
+    const trigger = root.locator(':text-is("Dealer Finance")').first();
+    await expect(trigger).toBeVisible({ timeout: 20_000 });
+    await trigger.click({ timeout: 15_000 });
+    await expect(root.getByText(/Base\s+Interest\s+Rate/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  /**
+   * After **Dealer Finance** is expanded: labels and values in the expanded block.
+   * **Base Interest Rate** % is scenario-specific (shape-only). Commission and establishment
+   * lines are **priced** (incl. negatives) or `-` after **Calculate** — do not assert fixed `$0.00`.
+   * Prefer the a11y `region` for this block so we do not match the main **Interest Rate** % below.
+   */
+  async expectDealerFinanceExpandedSummary(): Promise<void> {
+    const root = this.standardQuoteRoot();
+    const panel = root
+      .getByRole("region")
+      .filter({ hasText: /Base\s+Interest\s+Rate/i })
+      .filter({ hasText: /Estimated\s+Commission\s*\/\s*Subsidy/i })
+      .filter({ hasText: /Establishment\s+Fee\s+Share/i })
+      .first();
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+
+    const baseLabel = panel.getByText(/Base\s+Interest\s+Rate/i).first();
+    await expect(baseLabel).toBeVisible();
+    const baseRateFromSibling = baseLabel
+      .locator("xpath=following-sibling::*[1]")
+      .getByText(/\d+(?:\.\d+)?\s*%/);
+    await expect(
+      baseRateFromSibling.or(panel.getByText(/\d+(?:\.\d+)?\s*%/).first()),
+    ).toBeVisible({ timeout: 10_000 });
+
+    await expect(
+      panel.getByText(/Estimated\s+Commission\s*\/\s*Subsidy/i).first(),
+    ).toBeVisible();
+    await expect(panel.getByText(/Establishment\s+Fee\s+Share/i).first()).toBeVisible();
+
+    const panelText = (await panel.innerText()).replace(/\r\n/g, "\n");
+    // Currency (e.g. $130.00, $0.00), negative lead (e.g. -$297.63), or placeholder dash.
+    const pricedOrDash =
+      /(-\$\s*[\d,]+(?:\.\d{1,2})?|\$\s*[\d,]+(?:\.\d{1,2})?|[-–—])/;
+    expect(
+      new RegExp(
+        `Estimated\\s+Commission\\s*/\\s*Subsidy[\\s\\S]{0,300}?(?:${pricedOrDash.source})`,
+        "i",
+      ).test(panelText),
+    ).toBeTruthy();
+    expect(
+      new RegExp(
+        `Establishment\\s+Fee\\s+Share[\\s\\S]{0,300}?(?:${pricedOrDash.source})`,
+        "i",
+      ).test(panelText),
+    ).toBeTruthy();
+  }
+
+  /** PPSR Count spinbutton in Loan Details (`div.col-4…` per SelectorHub), with row fallback. */
+  private ppsrCountLoanDetailsSpin(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .locator("div.col-4.pr-0.pt-1.ng-star-inserted")
+      .getByRole("spinbutton")
+      .first()
+      .or(
+        root
+          .locator(".p-field, [class*='col-']")
+          .filter({ hasText: /PPSR\s*Count/i })
+          .getByRole("spinbutton")
+          .first(),
+      );
+  }
+
+  async expectPpsrCountValue(expected: string): Promise<void> {
+    const spin = this.ppsrCountLoanDetailsSpin();
+    await expect(spin).toBeVisible({ timeout: 15_000 });
+    await expect(spin).toHaveValue(expected);
+    const now = await spin.getAttribute("aria-valuenow");
+    if (now != null && now !== "") {
+      expect(parseFloat(now)).toBe(parseFloat(expected));
+    }
+  }
+
+  async fillPpsrCountLoanDetails(count: string): Promise<void> {
+    const spin = this.ppsrCountLoanDetailsSpin();
+    await spin.waitFor({ state: "visible", timeout: 15_000 });
+    await spin.scrollIntoViewIfNeeded();
+    await spin.click({ clickCount: 3 });
+    await spin.fill(count);
+    await spin.press("Tab").catch(() => {});
   }
 
   /** LMF / Loan Maintenance Fee area (incl. Waive LMF) visible on Asset Details / totals. */
@@ -450,6 +829,104 @@ export class DOAssetDetailsPage extends BasePage {
     await this.termsOfFinance(opts.restoreTerm);
     await this.clickCalculateButton();
     await expect(this.standardQuoteRoot()).toBeVisible();
+  }
+
+  private static parseDdMmYyyyLoanDate(raw: string): Date | null {
+    const t = raw.trim();
+    const m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!m) return null;
+    const day = parseInt(m[1], 10);
+    const month = parseInt(m[2], 10) - 1;
+    const year = parseInt(m[3], 10);
+    const d = new Date(year, month, day);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  /**
+   * **Loan Date** on Payment Summary: defaults to **today** or **tomorrow** (runner local calendar day vs field).
+   */
+  async expectLoanDateOnLoadTodayOrTomorrow(): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    await expect(this.loanDate).toBeVisible({ timeout: 25_000 });
+    const raw = (await this.loanDate.inputValue()).trim();
+    expect(raw.length).toBeGreaterThan(6);
+    const parsed = DOAssetDetailsPage.parseDdMmYyyyLoanDate(raw);
+    expect(parsed).not.toBeNull();
+    const d = new Date(parsed!);
+    d.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+    expect(diffDays).toBeGreaterThanOrEqual(0);
+    expect(diffDays).toBeLessThanOrEqual(1);
+  }
+
+  /** Balloon **$** and **%** read zero-ish on load; **Fixed** is present and unchecked. */
+  async expectBalloonAmountAndFixedCheckboxOnLoad(): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    await expect(this.paymentSummaryRoot).toBeVisible({ timeout: 25_000 });
+    await expect(this.balloonAmountInput).toBeVisible({ timeout: 20_000 });
+    const amt = (await this.balloonAmountInput.inputValue()).trim();
+    expect(parseFloat(amt.replace(/[^0-9.-]/g, "")) || 0).toBe(0);
+    await expect(this.balloonPercentInput).toBeVisible({ timeout: 15_000 });
+    const pct = (await this.balloonPercentInput.inputValue()).trim();
+    const pv = parseFloat(pct.replace(/[^0-9.-]/g, ""));
+    expect(Number.isNaN(pv) ? 0 : pv).toBeCloseTo(0, 2);
+    await expect(this.balloonFixedCheckbox).toBeVisible({ timeout: 12_000 });
+    await expect(this.balloonFixedCheckbox).not.toBeChecked();
+  }
+
+  async enterBalloonAmount(amount: string): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    await expect(this.balloonAmountInput).toBeVisible({ timeout: 20_000 });
+    await this.balloonAmountInput.scrollIntoViewIfNeeded();
+    await this.balloonAmountInput.fill(amount, { force: true });
+    await this.balloonAmountInput.press("Tab").catch(() => {});
+  }
+
+  async expectBalloonPercentInputMatches(rx: RegExp): Promise<void> {
+    await expect(this.balloonPercentInput).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () => (await this.balloonPercentInput.inputValue()).replace(/%/g, "").trim(), {
+        timeout: 12_000,
+      })
+      .toMatch(rx);
+  }
+
+  async enterBalloonPercent(percentDigits: string): Promise<void> {
+    await expect(this.balloonPercentInput).toBeVisible({ timeout: 15_000 });
+    await this.balloonPercentInput.scrollIntoViewIfNeeded();
+    await this.balloonPercentInput.click({ force: true });
+    await this.balloonPercentInput.press("ControlOrMeta+a");
+    await this.balloonPercentInput.fill(percentDigits, { force: true });
+    await this.balloonPercentInput.press("Tab").catch(() => {});
+  }
+
+  async expectBalloonAmountInputMatches(rx: RegExp): Promise<void> {
+    await expect
+      .poll(async () => (await this.balloonAmountInput.inputValue()).trim(), { timeout: 12_000 })
+      .toMatch(rx);
+  }
+
+  async checkBalloonFixedCheckbox(): Promise<void> {
+    await expect(this.balloonFixedCheckbox).toBeVisible({ timeout: 12_000 });
+    await this.balloonFixedCheckbox.scrollIntoViewIfNeeded();
+    await this.balloonFixedCheckbox.check({ force: true });
+    await expect(this.balloonFixedCheckbox).toBeChecked({ timeout: 8_000 });
+  }
+
+  /**
+   * Last **Payment Schedule** currency row should include `pattern` (e.g. final balloon instalment).
+   */
+  async expectPaymentScheduleLastPaymentRowContains(pattern: RegExp): Promise<void> {
+    const root = this.standardQuoteRoot();
+    await expect(root.getByText(/Payment\s+Schedule/i).first()).toBeVisible({ timeout: 45_000 });
+    const row = root
+      .locator("tbody tr, table tbody tr, .p-datatable-tbody > tr")
+      .filter({ hasText: /\$\s*[\d,.]+/ })
+      .last();
+    await expect(row).toBeVisible({ timeout: 25_000 });
+    await expect(row).toContainText(pattern);
   }
 
   /**
@@ -1269,11 +1746,21 @@ export class DOAssetDetailsPage extends BasePage {
   async ppsrCount(count: string): Promise<void> {
     await this.PPSRCount.fill(count);
   }
+
+  /** PrimeNG `<amount>` / `#amount` currency: select-all behaviour via triple-click, then fill + blur. */
+  private async fillLoanDetailsCurrencyAmount(input: Locator, value: string): Promise<void> {
+    await input.waitFor({ state: "visible", timeout: 20_000 });
+    await input.scrollIntoViewIfNeeded();
+    await input.click({ clickCount: 3 });
+    await input.fill(value);
+    await input.press("Tab").catch(() => {});
+  }
+
   async udcEstablishmentFee(fee: string): Promise<void> {
-    await this.udcEstablishmentFeeInputField.fill(fee);
+    await this.fillLoanDetailsCurrencyAmount(this.udcEstablishmentFeeInputField, fee);
   }
   async dealerOriginationFee(fee: string): Promise<void> {
-    await this.dealerOriginationFeeInputField.fill(fee);
+    await this.fillLoanDetailsCurrencyAmount(this.dealerOriginationFeeInputField, fee);
   }
 
   async enterLoanDetails(
@@ -1679,11 +2166,7 @@ export class DOAssetDetailsPage extends BasePage {
       await btn.click({ force: true, timeout: 25_000 });
     }
 
-    await this.page
-      .locator(".app-loader-overlay, .p-progressspinner")
-      .first()
-      .waitFor({ state: "hidden", timeout: 90_000 })
-      .catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
     await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(
       () => {},
     );

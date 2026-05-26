@@ -484,11 +484,12 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   /**
-   * Cash / paired currency fields: click to focus (caret as in manual use), then paste or type —
-   * no Ctrl+A, triple-click, `clear()`, or `fill()` (fill clears the field in Playwright).
+   * PrimeNG **masked currency** (`p-inputNumber` / paired $ fields): click → paste or `pressSequentially`
+   * — never `fill()` / select-all shortcuts that break the mask. Single strategy for **all** dollar
+   * amounts on Quick Quote (cash, deposit $, balloon $, initial lease, AFV, payment amount, …).
    */
-  private async replaceCashPriceInInput(input: Locator, cashPrice: string): Promise<void> {
-    const trimmed = cashPrice.trim();
+  private async replaceCashPriceInInput(input: Locator, amount: string): Promise<void> {
+    const trimmed = amount.trim();
     const want = this.parseLocaleNumber(trimmed);
     await input.waitFor({ state: "visible", timeout: 10_000 });
 
@@ -580,7 +581,7 @@ export class DOQuickQuotePage extends BasePage {
       }
     }
 
-    throw new Error(`Quick Quote: could not commit cash price (${cashPrice})`);
+    throw new Error(`Quick Quote: could not commit masked currency (${amount})`);
   }
 
   private async selectFromDropdown(
@@ -619,6 +620,14 @@ export class DOQuickQuotePage extends BasePage {
     await this.replaceCashPriceInInput(this.cashPriceInput, cashPrice);
   }
 
+  /**
+   * Same entry path as {@link enterCashPrice} for any Quick Quote masked **$** field when you
+   * already hold the input locator (edge scenarios / new fields before a dedicated wrapper exists).
+   */
+  async enterQuickQuoteMaskedCurrency(input: Locator, amount: string): Promise<void> {
+    await this.replaceCashPriceInInput(input, amount);
+  }
+
   /** PrimeNG cash / paired $ fields: clear before a new value so digits do not append to the prior mask. */
   private async clearMaskedCurrencyInput(input: Locator): Promise<void> {
     await input.waitFor({ state: "visible", timeout: 10_000 });
@@ -640,7 +649,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async enterInitialLeaseAmount(initialLeaseAmount: string): Promise<void> {
-    await this.fillElement(this.initialLeaseAmountInput, initialLeaseAmount);
+    await this.replaceCashPriceInInput(this.initialLeaseAmountInput, initialLeaseAmount);
   }
 
   async enterDepositPercent(depositPercent: string): Promise<void> {
@@ -695,7 +704,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async enterAssuredFutureValue(value: string): Promise<void> {
-    await this.fillElement(this.assuredFutureValueInput, value);
+    await this.replaceCashPriceInInput(this.assuredFutureValueInput, value);
   }
 
   async enterYear(year: string): Promise<void> {
@@ -923,16 +932,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async enterPaymentAmount(payment: string): Promise<void> {
-    const input = this.paymentAmountInput;
-    await input.waitFor({ state: "visible", timeout: 10_000 });
-    await this.clickElement(input);
-    await input.evaluate((el: HTMLInputElement) => {
-      el.focus();
-      el.select();
-    });
-    await input.press("Backspace");
-    await input.pressSequentially(payment, { delay: 30 });
-    await input.blur();
+    await this.replaceCashPriceInInput(this.paymentAmountInput, payment);
   }
 
   async clearTermsMonths(quoteIndex = 0): Promise<void> {
