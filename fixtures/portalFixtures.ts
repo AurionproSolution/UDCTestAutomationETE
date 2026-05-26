@@ -4,6 +4,7 @@
  */
 
 import { test as base, Page } from '@playwright/test';
+import { DO_DEALER_STANDARD_QUOTE_URL } from '../config/env';
 import { DOLoginPage, DODashboardPage } from '../pages/do-portal';
 import { RSSLoginPage, RSSDashboardPage } from '../pages/rss-portal';
 import { CSSLoginPage, CSSDashboardPage } from '../pages/css-portal';
@@ -67,12 +68,19 @@ export const test = base.extend<PortalFixtures>({
     await use(dashboardPage);
   },
 
-  // Pre-authenticated DO Portal page
+  // Pre-authenticated DO dealer shell (uses project storageState when present; else full login)
   doAuthenticatedPage: async ({ page }, use) => {
-    const loginPage = new DOLoginPage(page);
-    await loginPage.navigate();
-    await loginPage.loginWithTestData(doLoginData.validUsers[0]);
-    await page.waitForLoadState('networkidle');
+    await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+    const dashboardPage = new DODashboardPage(page);
+    try {
+      await dashboardPage.waitForAuthenticatedDashboard();
+    } catch {
+      const loginPage = new DOLoginPage(page);
+      await loginPage.navigate();
+      await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+      await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+      await dashboardPage.waitForAuthenticatedDashboard();
+    }
     await use(page);
   },
 
@@ -130,9 +138,17 @@ export { expect } from '@playwright/test';
 export async function getAuthenticatedPage(page: Page, portal: PortalType): Promise<Page> {
   switch (portal) {
     case 'do': {
-      const loginPage = new DOLoginPage(page);
-      await loginPage.navigate();
-      await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+      await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+      const dashboardPage = new DODashboardPage(page);
+      try {
+        await dashboardPage.waitForAuthenticatedDashboard();
+      } catch {
+        const loginPage = new DOLoginPage(page);
+        await loginPage.navigate();
+        await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+        await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+        await dashboardPage.waitForAuthenticatedDashboard();
+      }
       break;
     }
     case 'rss': {

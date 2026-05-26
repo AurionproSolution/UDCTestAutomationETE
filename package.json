@@ -9,16 +9,13 @@
     "test:ui": "npx playwright test --ui",
     "test:debug": "npx playwright test --debug",
     "test:do": "npx playwright test --project=do-portal-chromium",
-    "test:do:sanity": "npx playwright test tests/do-portal/doSanityTest --project=do-sanity-chromium",
-    "test:do:firefox": "npx playwright test --project=do-portal-firefox",
-    "test:do:webkit": "npx playwright test --project=do-portal-webkit",
+    "test:do:auth": "npx playwright test --project=do-portal-auth-setup",
+    "test:do:sanity": "npx playwright test tests/do-portal/doSanityTest --project=do-portal-chromium",
+    "test:do:perf": "npx playwright test --project=do-portal-perf-data",
     "test:rss": "npx playwright test --project=rss-portal-chromium",
-    "test:rss:firefox": "npx playwright test --project=rss-portal-firefox",
     "test:css": "npx playwright test --project=css-portal-chromium",
-    "test:css:firefox": "npx playwright test --project=css-portal-firefox",
     "test:smoke": "npx playwright test --project=all-portals-smoke",
     "test:regression": "npx playwright test --project=all-portals-regression",
-    "test:mobile": "npx playwright test --project=mobile-chrome --project=mobile-safari",
     "test:all-portals": "npx playwright test --project=do-portal-chromium --project=rss-portal-chromium --project=css-portal-chromium",
     "test:env:dev": "cross-env TEST_ENV=dev npx playwright test",
     "test:env:qat": "cross-env TEST_ENV=qat npx playwright test",
@@ -26,7 +23,10 @@
     "test:env:prod": "cross-env TEST_ENV=prod npx playwright test",
     "report": "npx playwright show-report my-report",
     "report:ortoni": "npx playwright show-report ortoni-report",
-    "lint": "tsc --noEmit",
+    "lint": "tsc --noEmit && eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "clean": "rimraf test-results my-report ortoni-report"
   },
   "keywords": [
@@ -43,12 +43,16 @@
   "author": "UDC Team",
   "license": "ISC",
   "devDependencies": {
+    "@eslint/js": "^9.15.0",
     "@playwright/test": "^1.41.0",
     "@types/node": "^20.11.0",
     "cross-env": "^7.0.3",
+    "eslint": "^9.15.0",
     "ortoni-report": "^4.0.8",
+    "prettier": "^3.4.2",
     "rimraf": "^5.0.5",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.15.0"
   },
   "dependencies": {
     "dotenv": "^16.3.1"

@@ -20,29 +20,95 @@ const baseUserEditUrl =
   "https://udc-test.fiscloudservices.com/MIGBEnterprise/Admin/Setup/UsersAndTeams/Edit/";
 // 1720 users inclusive: endUserId = startUserId + 1719. On failure at user N, set startUserId = N and rerun.
 // Run 127336: failed at 2408 (Password textbox readonly / not editable). Rerun continues from here.
-const startUserId = 2408;
-const endUserId = 2416;
+const startUserId = 1603;
+const endUserId = 4007;
 const password = "Passw0rd1";
 
 async function savePassword(page: Page) {
   const save = page.getByRole("button", { name: "Save", exact: true });
+  const saveEnabled = await save.isEnabled().catch(() => false);
+  console.log(`[UDC perf] Save button enabled before wait? ${saveEnabled}`);
   await save.scrollIntoViewIfNeeded();
+
+  try {
+    await expect(save).toBeEnabled({ timeout: 30_000 });
+  } catch (error) {
+    const fieldValue = await page
+      .locator("#PasswordFld")
+      .inputValue()
+      .catch(() => "<no field>");
+    console.log(
+      `[UDC perf] Save button disabled after 30s. Password field: ${fieldValue}`,
+    );
+    throw error;
+  }
+
   await save.click({ timeout: 120_000 });
+  console.log("[UDC perf] Clicked Save button");
+
+  const successMessage = page.getByText(
+    /Saved|Success|Successfully|Update complete|Changes saved/i,
+  );
+  await successMessage
+    .first()
+    .waitFor({ timeout: 10_000 })
+    .catch(() => {
+      console.log("[UDC perf] No toast message appeared after save click");
+    });
 }
 
 /** Some users show Password as readonly until focused/unlocked; ensure the field accepts input. */
 async function fillPortalPassword(page: Page, value: string) {
   const pw = page.getByRole("textbox", { name: "Password" });
-  await pw.waitFor({ state: "visible" });
-  await pw.dblclick();
-  const readonly = await pw.getAttribute("readonly");
+  const passwordField = page.locator("#PasswordFld");
+
+  await pw.waitFor({ state: "visible", timeout: 20_000 });
+  await pw.click({ clickCount: 2 });
+
+  const readonly = await pw.getAttribute("readonly").catch(() => null);
+  console.log(`[UDC perf] Password wrapper readonly attr: ${readonly}`);
+
   if (readonly !== null) {
-    await page.locator("#PasswordFld").evaluate((el: HTMLInputElement) => {
+    await passwordField.evaluate((el: HTMLInputElement) => {
       el.removeAttribute("readonly");
       el.removeAttribute("aria-readonly");
     });
   }
-  await pw.fill(value, { timeout: 120_000 });
+
+  const candidates = page.locator(
+    '#PasswordFld, input[type="password"], input[name*="password" i], input[id*="Password" i]',
+  );
+  const candidateCount = await candidates.count();
+  console.log(`[UDC perf] password input candidate count: ${candidateCount}`);
+
+  for (let i = 0; i < candidateCount; i++) {
+    const field = candidates.nth(i);
+    const attr = await field.getAttribute("id").catch(() => "");
+    const visible = await field.isVisible().catch(() => false);
+    console.log(`    candidate[${i}] id=${attr} visible=${visible}`);
+    await field.fill(value, { timeout: 120_000 }).catch(() => undefined);
+    await field.evaluate((el: HTMLInputElement, newValue: string) => {
+      el.value = newValue;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, value);
+  }
+
+  await pw.fill(value, { timeout: 20_000 });
+  await pw.press("Tab");
+
+  const visiblePwValue = await pw.inputValue().catch(() => "<no visible pw>");
+  const hiddenPwValue = await passwordField
+    .inputValue()
+    .catch(() => "<no hidden field>");
+  console.log(`[UDC perf] visible password value: ${visiblePwValue}`);
+  console.log(`[UDC perf] hidden password value: ${hiddenPwValue}`);
+
+  // if ((await passwordField.count()) > 0) {
+  //   await expect(passwordField).toHaveValue(value, { timeout: 30_000 });
+  // } else {
+  //   await expect(pw).toHaveValue(value, { timeout: 30_000 });
+  // }
 }
 
 test("UDC DO perf password seed", async ({ page }) => {
@@ -89,8 +155,9 @@ test("UDC DO perf password seed", async ({ page }) => {
     .click();
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  // Wait for post-login page navigation to complete
-  await page.waitForURL("**/Admin/**").catch(() => {});
+  // Wait for post-login page navigation to complete+
+  await page.waitForTimeout(2000);
+  //await page.waitForURL("**/Admin/**").catch(() => {});
 
   // Navigate to first user ID after sign in with retry logic
   const firstUrl = `${baseUserEditUrl}${startUserId}`;
@@ -121,7 +188,9 @@ test("UDC DO perf password seed", async ({ page }) => {
     expect(page.url()).toContain(`/Edit/${startUserId}`);
 
     await fillPortalPassword(page, password);
+    await page.waitForTimeout(2000);
     await savePassword(page);
+    await page.waitForTimeout(2000);
     // Wait for save to complete
     await page.waitForLoadState("domcontentloaded").catch(() => {});
     console.log(`[UDC perf] completed userId ${startUserId} of ${endUserId}`);

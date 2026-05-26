@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 
 # Build output
 dist/
@@ -12,6 +11,7 @@ dist/
 /playwright/.cache/
 /playwright/.auth/do-sanity.json
 .tmp/
+/playwright/.auth/
 
 # Custom report folders
 my-report/

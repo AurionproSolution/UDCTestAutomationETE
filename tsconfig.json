@@ -13,7 +13,7 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": ".",
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
     "baseUrl": ".",
     "paths": {
       "@pages/*": ["pages/*"],
@@ -33,7 +33,8 @@
     "tests/**/*.ts",
     "testData/**/*.ts",
     "utils/**/*.ts",
-    "playwright.config.ts"
+    "playwright.config.ts",
+    "playwright/**/*.ts"
   ],
   "exclude": [
     "node_modules",

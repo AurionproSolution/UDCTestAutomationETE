@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       portal:
-        description: 'Portal to test (do, rss, css, all)'
+        description: "Portal to test (do, rss, css, all)"
         required: true
-        default: 'all'
+        default: "all"
         type: choice
         options:
           - all
@@ -18,34 +18,59 @@ on:
           - rss
           - css
       environment:
-        description: 'Test environment'
+        description: "Test environment"
         required: true
-        default: 'qat'
+        default: "qat"
         type: choice
         options:
           - dev
           - qat
           - uat
       test_type:
-        description: 'Test type to run'
+        description: "Test type to run"
         required: true
-        default: 'smoke'
+        default: "smoke"
         type: choice
         options:
           - smoke
           - regression
           - all
+      use_do_auth:
+        description: "1 = run DO playwright/do-portal-auth.setup.ts + storageState (OTP on runner). 0 = skip global DO auth on CI."
+        required: false
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm install
+      - name: Typecheck and ESLint
+        run: npm run lint
+
+  # Chromium only. Headed runs use Xvfb on Linux (see https://playwright.dev/docs/ci#running-headed).
+  # Default matrix omits DO on GitHub-hosted runners (OTP during do-portal-auth.setup). Run DO locally or set
+  # PLAYWRIGHT_USE_DO_GLOBAL_AUTH=1 when you have unattended storage (e.g. self-hosted runner).
   test:
+    needs: lint
     timeout-minutes: 60
     runs-on: ubuntu-latest
-    
+
     strategy:
       fail-fast: false
       matrix:
-        portal: [do-portal, rss-portal, css-portal]
-    
+        portal: [rss-portal, css-portal]
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -54,18 +79,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
 
+      - name: Install Xvfb (headed Chromium on Linux)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Run Playwright tests for ${{ matrix.portal }}
-        run: npx playwright test --project=${{ matrix.portal }}-chromium
+        run: xvfb-run -a npx playwright test --project=${{ matrix.portal }}-chromium
         env:
           TEST_ENV: ${{ github.event.inputs.environment || 'qat' }}
+          CI: true
 
       - name: Upload Test Results
         uses: actions/upload-artifact@v4
@@ -91,12 +120,12 @@ jobs:
           path: ortoni-report/
           retention-days: 30
 
-  # Smoke Tests - Quick validation
   smoke-tests:
+    needs: lint
     timeout-minutes: 30
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -105,18 +134,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
 
+      - name: Install Xvfb (headed Chromium on Linux)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Run Smoke Tests
-        run: npm run test:smoke
+        run: xvfb-run -a npm run test:smoke
         env:
           TEST_ENV: qat
+          CI: true
 
       - name: Upload Smoke Test Results
         uses: actions/upload-artifact@v4
@@ -128,12 +161,12 @@ jobs:
             my-report/
           retention-days: 7
 
-  # Manual Portal Test
   manual-test:
+    needs: lint
     timeout-minutes: 60
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -142,20 +175,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Xvfb (headed Chromium on Linux)
+        run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Determine test command
         id: test-cmd
         run: |
           PORTAL="${{ github.event.inputs.portal }}"
           TEST_TYPE="${{ github.event.inputs.test_type }}"
-          
+
           if [ "$PORTAL" = "all" ]; then
             if [ "$TEST_TYPE" = "smoke" ]; then
               echo "cmd=npm run test:smoke" >> $GITHUB_OUTPUT
@@ -169,9 +205,11 @@ jobs:
           fi
 
       - name: Run Tests
-        run: ${{ steps.test-cmd.outputs.cmd }}
+        run: xvfb-run -a ${{ steps.test-cmd.outputs.cmd }}
         env:
           TEST_ENV: ${{ github.event.inputs.environment }}
+          CI: true
+          PLAYWRIGHT_USE_DO_GLOBAL_AUTH: ${{ github.event.inputs.use_do_auth || '0' }}
 
       - name: Upload Results
         uses: actions/upload-artifact@v4
