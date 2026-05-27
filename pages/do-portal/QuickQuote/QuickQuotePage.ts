@@ -48,6 +48,7 @@ export class DOQuickQuotePage extends BasePage {
   readonly calculateForDropdownTrigger: Locator;
   readonly frequencyDropdownTrigger: Locator;
   readonly kmAllowanceDropdownTrigger: Locator;
+  readonly termsMonthsDropdownTrigger: Locator;
 
   // Quick quote fields - STANDARD
   readonly cashPriceInput: Locator;
@@ -122,6 +123,15 @@ export class DOQuickQuotePage extends BasePage {
     this.kmAllowanceDropdownTrigger = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'KM Allowance')]/following::p-dropdown[1]"
     ).getByRole("button", { name: /dropdown trigger/i });
+    // Terms may be `p-dropdown` (CSA) or spinbutton / p-inputNumber (TLC). Never use
+    // `following::p-dropdown[1]` from the label — the first p-dropdown in document order is often **KM Allowance**.
+    // Use a dropdown only when it is a **direct following sibling** of the Terms label (typical CSA row layout).
+    this.termsMonthsDropdownTrigger = this.quickQuoteForm
+      .locator("label")
+      .filter({ hasText: /Terms\s*\(Months\)/i })
+      .first()
+      .locator("xpath=following-sibling::p-dropdown[1]")
+      .getByRole("button", { name: /dropdown trigger/i });
 
     // Asset Type dropdown (p-inputgroup pattern)
     this.assetTypeDropdownTrigger = this.quickQuoteForm.locator(
@@ -310,6 +320,15 @@ export class DOQuickQuotePage extends BasePage {
     return this.quoteForm(quoteIndex).locator(
       "xpath=.//label[contains(normalize-space(.), 'Terms (Months)')]/following::input[@role='spinbutton'][1]",
     );
+  }
+
+  termsDropdownTriggerOnQuote(quoteIndex: number): Locator {
+    return this.quoteForm(quoteIndex)
+      .locator("label")
+      .filter({ hasText: /Terms\s*\(Months\)/i })
+      .first()
+      .locator("xpath=following-sibling::p-dropdown[1]")
+      .getByRole("button", { name: /dropdown trigger/i });
   }
 
   programDropdownOnQuote(quoteIndex: number): Locator {
@@ -588,20 +607,24 @@ export class DOQuickQuotePage extends BasePage {
     trigger: Locator,
     optionText: string,
   ): Promise<void> {
-    // #region agent log
-    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H2",location:"QuickQuotePage.ts:selectFromDropdown:before",message:"Select dropdown option start",data:{optionText,triggerVisible:await trigger.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     await trigger.waitFor({ state: "visible", timeout: 60_000 });
     await this.clickElement(trigger);
-    const option = this.page.getByRole("option").filter({ hasText: optionText }).first();
-    const optionsCount = await this.page.getByRole("option").count().catch(() => -1);
-    // #region agent log
-    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H2",location:"QuickQuotePage.ts:selectFromDropdown:afterOpen",message:"Dropdown opened",data:{optionText,optionsCount,targetOptionVisible:await option.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    await option.click();
-    // #region agent log
-    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H2",location:"QuickQuotePage.ts:selectFromDropdown:afterSelect",message:"Dropdown option selected",data:{optionText},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+    const trimmed = optionText.trim();
+    // `hasText: "Monthly"` matches **Semi Monthly** (substring). Prefer exact label first.
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const exactOption = this.page.getByRole("option", {
+      name: new RegExp(`^\\s*${escaped}\\s*$`, "i"),
+    });
+    if ((await exactOption.count()) > 0) {
+      await exactOption.first().click();
+    } else {
+      const option = this.page.getByRole("option").filter({ hasText: trimmed }).first();
+      await option.click();
+    }
+    // Dismiss overlays and wait for page to settle
+    await this.dismissQuickQuoteDropdownOverlays();
+    await new Promise((r) => setTimeout(r, 300));
+    await this.page.waitForLoadState("networkidle").catch(() => {});
   }
 
   async selectProduct(product: string): Promise<void> {
@@ -665,11 +688,20 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   /**
-   * PrimeNG p-inputNumber (Terms) does not reliably sync Angular model when using fill().
-   * Use real keyboard input + blur so validation sees the value.
+   * Terms field can be either a p-dropdown (CSA products) or a p-inputNumber input (TLC).
+   * PrimeNG p-inputNumber does not reliably sync Angular model when using fill().
+   * Use keyboard input for text input, or selectFromDropdown for dropdown.
    */
   async enterTermsMonths(termMonths: string): Promise<void> {
-    await this.replaceInputValueByKeyboard(this.termsMonthsInput, termMonths);
+    // Prefer **Terms-row** dropdown (direct sibling of label). If absent (TLC spinbutton), use keyboard on
+    // the first spinbutton after the Terms label — never `following::p-dropdown[1]` (that can be KM Allowance).
+    const isDropdown = await this.termsMonthsDropdownTrigger.isVisible({ timeout: 2000 }).catch(() => false);
+
+    if (isDropdown) {
+      await this.selectFromDropdown(this.termsMonthsDropdownTrigger, termMonths);
+    } else {
+      await this.replaceInputValueByKeyboard(this.termsMonthsInput, termMonths);
+    }
   }
 
   async selectCalculateFor(calculateFor: string): Promise<void> {
@@ -977,7 +1009,13 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async enterTermsMonthsOnQuote(quoteIndex: number, termMonths: string): Promise<void> {
-    await this.replaceInputValueByKeyboard(this.termsInputOnQuote(quoteIndex), termMonths);
+    const isDropdown = await this.termsDropdownTriggerOnQuote(quoteIndex).isVisible({ timeout: 2000 }).catch(() => false);
+
+    if (isDropdown) {
+      await this.selectFromDropdown(this.termsDropdownTriggerOnQuote(quoteIndex), termMonths);
+    } else {
+      await this.replaceInputValueByKeyboard(this.termsInputOnQuote(quoteIndex), termMonths);
+    }
   }
 
   async clickCalculateOnQuote(quoteIndex: number): Promise<void> {

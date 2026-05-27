@@ -38,7 +38,7 @@ const environments: Record<Environment, EnvironmentConfig> = {
   },
   qat: {
     do: {
-      baseUrl: "https://testportaludc.aurionpro.com/",
+      baseUrl: "https://aurpr-ia.assetfinance.myfis.cloud/IAUDCPortal/",
       apiUrl: "https://api-do-qat.udc.com",
       name: "DO Portal - QAT",
     },
@@ -119,3 +119,4 @@ export const RSS_BASE_URL = () => RSS_CONFIG().baseUrl;
 export const CSS_BASE_URL = () => CSS_CONFIG().baseUrl;
 
 export { environments };
+

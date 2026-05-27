@@ -326,9 +326,25 @@ export class DOAssetDetailsPage extends BasePage {
   }): Promise<void> {
     const root = this.standardQuoteRoot();
     await expect(this.cashPriceOfAssetInputField).toHaveValue(opts.cashPrice, { timeout: 30_000 });
-    await expect
-      .poll(async () => this.termsOfFinanceInputField.inputValue(), { timeout: 25_000 })
-      .toMatch(opts.term);
+    // Term: CSA uses PrimeNG dropdown (often not `label`→`following-sibling::p-dropdown`); TLC uses spinbutton.
+    // Scope to the Term field row — same variance as {@link termsOfFinance}.
+    const termRow = root
+      .locator(".p-field, [class*='p-field']")
+      .filter({ has: root.locator("label").filter({ hasText: /^Term\s*\*?$/i }) })
+      .first();
+    const termCombo = termRow.getByRole("combobox").first();
+    const termSpin = termRow.getByRole("spinbutton").first();
+    if (await termCombo.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect(termCombo).toContainText(opts.term, { timeout: 25_000 });
+    } else if (await termSpin.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect
+        .poll(async () => termSpin.inputValue(), { timeout: 25_000 })
+        .toMatch(opts.term);
+    } else {
+      await expect
+        .poll(async () => this.termsOfFinanceInputField.inputValue(), { timeout: 25_000 })
+        .toMatch(opts.term);
+    }
     const freqDropdown = root.locator(
       "xpath=.//label[contains(normalize-space(.),'Frequency')]/following::p-dropdown[1]",
     );

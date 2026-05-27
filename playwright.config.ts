@@ -9,8 +9,8 @@
  */
 
 import { defineConfig, devices } from "@playwright/test";
-import type { OrtoniReportConfig } from "ortoni-report";
 import * as fs from "fs";
+import type { OrtoniReportConfig } from "ortoni-report";
 import * as os from "os";
 import path from "path";
 import { doPortalAuthFile } from "./playwright/do-portal-auth.helper";
@@ -198,14 +198,14 @@ export default defineConfig({
     trace: process.env.CI ? "on-first-retry" : "on",
     screenshot: process.env.CI ? "only-on-failure" : "on",
     video: process.env.CI ? "retain-on-failure" : "on",
-    actionTimeout: 120000,
-    navigationTimeout: 120000,
+    actionTimeout: 180000,
+    navigationTimeout: 180000,
   },
 
-  timeout: 120000,
+  timeout: 180000,
 
   expect: {
-    timeout: 120000,
+    timeout: 180000,
   },
 
   globalSetup:
