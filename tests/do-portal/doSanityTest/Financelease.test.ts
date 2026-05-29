@@ -140,8 +140,26 @@ test.describe("DO Portal - Finance Lease - Sanity @do @smoke", () => {
 
     await addressDetailsPage.clickNextButton();
 
-    // Financial Position — Liabilities, Income, Expenditure, income-decrease radios, Essential Outgoings
+    // Financial Position — wait for business turnover/balance panels, then validations + same data as happy path.
     await financialPositionPage.waitForFinancialPositionStep();
+    await financialPositionPage.selectBusinessNetProfitLastYearNo();
+    await page.waitForTimeout(200);
+    await financialPositionPage.selectBusinessNetProfitLastYearYes();
+    await page.waitForTimeout(500);
+    await financialPositionPage.clickNextButton();
+    await financialPositionPage.expectFinancialPositionRequiredValidationMessages({
+      optional: true,
+      timeoutMs: 4_000,
+    });
+    await financialPositionPage.fillBusinessNetProfitLastYear("$0.00");
+    await financialPositionPage.fillBusinessTurnoverLatestYear("$0.00", "31/03/2025");
+    await financialPositionPage.fillBusinessCashBalance("$0.00", "31/03/2025");
+    await financialPositionPage.clickNextButton();
+    await financialPositionPage.expectFinancialPositionNetProfitLastYearAmountGreaterThanZeroValidation();
+
+    await financialPositionPage.waitForFinancialPositionStep();
+    await financialPositionPage.selectBusinessNetProfitLastYearNo();
+    await page.waitForTimeout(200);
     await financialPositionPage.selectBusinessNetProfitLastYearYes();
     await financialPositionPage.fillBusinessNetProfitLastYear("$50000.00");
     await financialPositionPage.fillBusinessTurnoverLatestYear(

@@ -47,7 +47,7 @@ export class CommonUtils {
    */
   async click(locator: Locator, clickTimeoutMs = 15_000): Promise<void> {
     await locator.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => {});
-    const waitMs = Math.min(Math.max(clickTimeoutMs, 10_000), 60_000);
+    const waitMs = Math.min(Math.max(clickTimeoutMs, 10_000), 180_000);
     await locator.waitFor({ state: "visible", timeout: waitMs });
     await this.highlight(locator);
     await locator.click({ timeout: clickTimeoutMs });

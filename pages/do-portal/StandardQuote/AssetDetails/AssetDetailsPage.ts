@@ -58,16 +58,18 @@ export class DOAssetDetailsPage extends BasePage {
     this.conditionDropdown = page.locator(
       `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[6]`,
     );
-    this.assetInsuranceTradeInSummaryHyperlink = page.getByRole("button", {
-      name: "Asset, Insurance & Trade-in",
-    });
+    this.assetInsuranceTradeInSummaryHyperlink = page
+      .locator("button")
+      .filter({ hasText: /Asset\s*&\s*Insurance\s*Summary/i })
+      .first();
     this.assetyEditButton = page.locator(".cursor-pointer.fa-pen-to-square");
     this.assetSummaryCancelButton = page.locator(
       "//timesicon//*[name()='svg']",
     );
-    this.cashPriceOfAssetInputField = page.getByRole("textbox", {
-      name: "Cash Price of Asset*",
-    });
+    /** FL lease card: "Cash Price of Assets (GST Inclusive)"; older builds: "Cash Price of Asset*". */
+    this.cashPriceOfAssetInputField = page
+      .getByRole("textbox", { name: /Cash Price of Asset/i })
+      .first();
     const rrpLabel = /Recommended\s+Retail\s+Price/i;
     // Float labels may sit outside the `col-6` wrapper; prefer ARIA name, then label text + `#amount`.
     this.recommendedRetailPriceInput = page
@@ -107,41 +109,46 @@ export class DOAssetDetailsPage extends BasePage {
       .locator("#percent");
     // Match visible Standard Quote shell (same as tests: `app-quote-details, app-standard-quote`).first()
     const quoteShell = page.locator("app-quote-details, app-standard-quote").first();
-    // Loan / First Payment: PrimeNG `p-calendar` often binds `name=` on a hidden input; prefer visible textbox / `.p-inputtext`.
-    this.loanDate = quoteShell
-      .getByRole("textbox", { name: /Loan Date/i })
-      .first()
-      .or(
-        quoteShell.locator(
-          "xpath=.//label[contains(normalize-space(.),'Loan Date')]/ancestor::p-calendar[1]//input[contains(@class,'p-inputtext')]",
-        ),
-      )
-      .or(
-        quoteShell.locator(
-          "xpath=.//label[contains(normalize-space(.),'Loan Date')]/following::p-calendar[1]//input[contains(@class,'p-inputtext')]",
-        ),
-      )
-      .or(quoteShell.locator('input[name="loanDate"]'))
+    /**
+     * **Lease Date** / loan calendar: must be scoped to **Payment Summary** + `visible:true`.
+     * Do **not** chain `.or()` to unscoped `loanDate` / `Loan Date` — a hidden disabled template in
+     * `app-quote-details` matches first and breaks `toBeVisible()`.
+     */
+    const paymentSummaryPanel = page
+      .locator("app-payment-summary")
+      .filter({ hasText: "Payment Summary" })
       .first();
-    // `p-calendar` often exposes the visible field as `role=combobox` (not `textbox`) in a11y snapshots.
-    this.firstPaymentDate = quoteShell
-      .locator(
-        "xpath=.//label[contains(normalize-space(.),'First Payment')]/following::p-calendar[1]//input[contains(@class,'p-inputtext') or @role='combobox']",
-      )
+    const leaseDateInPaymentSummary = paymentSummaryPanel
+      .getByRole("combobox", { name: /Lease Date/i })
+      .filter({ visible: true })
       .first()
-      .or(quoteShell.getByRole("combobox", { name: /First Payment/i }).first())
-      .or(quoteShell.getByRole("textbox", { name: /First Payment/i }).first())
       .or(
-        quoteShell.locator(
-          "xpath=.//label[contains(normalize-space(.),'First Payment')]/ancestor::div[contains(@class,'p-field')][1]//input[contains(@class,'p-inputtext') or @role='combobox']",
-        ),
+        paymentSummaryPanel
+          .locator('input[name="leaseDate"]')
+          .filter({ visible: true })
+          .first(),
+      );
+    const leaseDateFallback = quoteShell
+      .getByRole("combobox", { name: /Lease Date/i })
+      .filter({ visible: true })
+      .first();
+    this.loanDate = leaseDateInPaymentSummary.or(leaseDateFallback).first();
+    // `p-calendar` often exposes the visible field as `role=combobox` (not `textbox`) in a11y snapshots.
+    this.firstPaymentDate = paymentSummaryPanel
+      .getByRole("combobox", { name: /First Payment/i })
+      .filter({ visible: true })
+      .first()
+      .or(
+        paymentSummaryPanel.locator(
+          "xpath=.//label[contains(normalize-space(.),'First Payment')]/following::p-calendar[1]//input[contains(@class,'p-inputtext') or @role='combobox']",
+        ).filter({ visible: true }),
       )
       .or(
-        quoteShell.locator(
-          "xpath=.//label[contains(normalize-space(.),'First Payment')]/ancestor::p-calendar[1]//input[contains(@class,'p-inputtext') or @role='combobox']",
-        ),
+        quoteShell
+          .getByRole("combobox", { name: /First Payment/i })
+          .filter({ visible: true })
+          .first(),
       )
-      .or(quoteShell.locator('input[name="firstPaymentDate"]'))
       .first();
     this.calculateButton = page.getByRole("button", { name: /^Calculate$/i });
     this.nextButton = page.getByRole("button", { name: "Next" }).last();

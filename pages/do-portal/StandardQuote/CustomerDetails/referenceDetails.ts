@@ -16,10 +16,6 @@ export class DOReferenceDetailsPage extends BasePage {
     this.submitButton = page.getByRole("button", { name: "Submit" }).last();
   }
 
-  protected stepLogPrefix(): string {
-    return "Standard quote — Reference details";
-  }
-
   /**
    * “Add contact” modal — scoped by **Contact Type** so we never click inside the wrong
    * `role=dialog` (toast, confirm, etc.). Prefer **last** match when several exist in the DOM.
@@ -32,7 +28,6 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async waitForReferenceDetailsStep(): Promise<void> {
-    this.logStep("Wait For Reference Details Step");
     await this.addContactDetailsButton.waitFor({
       state: "visible",
       timeout: 120000,
@@ -40,7 +35,6 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async clickAddContactDetails(): Promise<void> {
-    this.logStep("Click Add Contact Details");
     await this.addContactDetailsButton.scrollIntoViewIfNeeded();
     await this.addContactDetailsButton.click({ timeout: 30000 });
     await this.contactAddModal().waitFor({ state: "visible", timeout: 20000 });
@@ -86,7 +80,6 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async selectContactType(optionName: string): Promise<void> {
-    this.logStep(`Selected contact type: ${this.stepValueDisplay(optionName)}`);
     await this.selectDropdownInRoot(
       this.contactAddModal(),
       "Contact Type",
@@ -114,7 +107,6 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async enterContactFirstName(value: string): Promise<void> {
-    this.logStep(`Entered contact first name as ${this.stepValueDisplay(value)}`);
     const input = this.contactNameInput(this.contactAddModal(), "first");
     await input.waitFor({ state: "visible", timeout: 15000 });
     await input.click();
@@ -122,7 +114,6 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async enterContactLastName(value: string): Promise<void> {
-    this.logStep(`Entered contact last name as ${this.stepValueDisplay(value)}`);
     const dialog = this.contactAddModal();
     const byLabelRow = this.contactNameInput(dialog, "last");
     if (await byLabelRow.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -147,7 +138,6 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async clickAddContactInModal(): Promise<void> {
-    this.logStep("Click Add Contact In Modal");
     const dialog = this.contactAddModal();
     await dialog.waitFor({ state: "visible", timeout: 20000 });
 
@@ -176,13 +166,35 @@ export class DOReferenceDetailsPage extends BasePage {
     await dialog.waitFor({ state: "hidden", timeout: 25000 }).catch(() => {});
   }
 
-  async confirmCustomerDetailsCorrect(): Promise<void> {
-    this.logStep("Confirm Customer Details Correct");
+  private confirmDetailsCheckboxHost(): Locator {
     const labelRx = /I confirm that all customer details are correct/i;
+    return this.page.locator("p-checkbox").filter({ hasText: labelRx }).first();
+  }
 
-    // PrimeNG: native `input` is often `hiddenInput` / off-viewport — `locator.check()` still
-    // targets it and fails "outside of the viewport". Click the visible box (SelectorHub-style).
-    const host = this.page.locator("p-checkbox").filter({ hasText: labelRx }).first();
+  /**
+   * Reference Details footer **Submit** without ticking **I confirm…** should surface a guard
+   * (e.g. “Please Confirm your details are correct”) before Post Submission.
+   */
+  async expectConfirmCustomerDetailsCheckboxRequiredValidation(): Promise<void> {
+    const host = this.confirmDetailsCheckboxHost();
+    await host.waitFor({ state: "visible", timeout: 20_000 });
+
+    const input = host.locator('input[type="checkbox"]').first();
+    if (await input.isChecked().catch(() => false)) {
+      return;
+    }
+
+    await this.submitButton.waitFor({ state: "visible", timeout: 60_000 });
+    await this.submitButton.scrollIntoViewIfNeeded();
+    await this.submitButton.click({ timeout: 30_000 });
+
+    const messageRx =
+      /Please\s+Confirm\s+your\s+details\s+are\s+correct|Please\s+[Cc]onfirm.*your\s+details.*correct|confirm\s+your\s+details\s+are\s+correct/i;
+    await expect(this.page.getByText(messageRx).first()).toBeVisible({ timeout: 20_000 });
+  }
+
+  async confirmCustomerDetailsCorrect(): Promise<void> {
+    const host = this.confirmDetailsCheckboxHost();
     await host.waitFor({ state: "visible", timeout: 15000 });
 
     const visibleBox = host.locator("div.p-checkbox-box:visible").first();
@@ -212,9 +224,43 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async clickSubmitButton(): Promise<void> {
-    this.logStep("Click Submit Button");
     await this.submitButton.waitFor({ state: "visible", timeout: 60000 });
     await this.submitButton.scrollIntoViewIfNeeded();
     await this.submitButton.click();
+  }
+
+  /**
+   * After contact + **I confirm…**: leave Customer Details for Post Submission.
+   * QAT often uses a sticky footer **Save and Next** or **Next** (`span.p-button-label`) before Post Submission;
+   * other builds use **Submit** only. Try advances in order, then **Submit** if Upload is not yet shown.
+   */
+  async advanceFromReferenceDetailsToPostSubmission(): Promise<void> {
+    const uploadBrowse = this.page.locator(':text-is("Browse Files")');
+
+    const footerAdvanceButtons: Locator[] = [
+      this.page.getByRole("button", { name: /Save\s+and\s+Next|Save\s*&\s*Next/i }).last(),
+      /** QAT: label is often a `span` with exact `Next` — resolve the real `<button>`. */
+      this.page.locator("button").filter({ has: this.page.locator(':text-is("Next")') }).last(),
+      this.page.getByRole("button", { name: /^Next$/i }).last(),
+      this.page
+        .locator("button.p-button, button.p-element")
+        .filter({ has: this.page.locator("span.p-button-label").filter({ hasText: /^Next$/ }) })
+        .last(),
+    ];
+
+    for (const btn of footerAdvanceButtons) {
+      const ready =
+        (await btn.isVisible({ timeout: 2_000 }).catch(() => false)) &&
+        (await btn.isEnabled().catch(() => false));
+      if (!ready) continue;
+      await btn.scrollIntoViewIfNeeded();
+      await btn.click({ timeout: 20_000 });
+      await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+      if (await uploadBrowse.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    await this.clickSubmitButton();
   }
 }
