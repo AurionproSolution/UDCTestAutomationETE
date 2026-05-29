@@ -13,6 +13,10 @@ export class RSSApplyNowAboutYouIndividualPage extends BasePage {
     super(page);
   }
 
+  protected stepLogPrefix(): string {
+    return "RSS Apply Now — About you";
+  }
+
   private async waitForProgressSpinnersHidden(
     timeoutMs = RSSApplyNowAboutYouIndividualPage.SPINNER_WAIT_MS,
   ): Promise<void> {
@@ -35,6 +39,7 @@ export class RSSApplyNowAboutYouIndividualPage extends BasePage {
 
   /** After asset/repayment "Next", stepper shows About You / Borrower. */
   async waitForAboutYouStep(): Promise<void> {
+    this.logStep("Wait For About You Step");
     await expect(this.page.getByText(/About You/i).first()).toBeVisible({
       timeout: 120_000,
     });
@@ -45,6 +50,7 @@ export class RSSApplyNowAboutYouIndividualPage extends BasePage {
    * SelectorHub: `(//*[name()='svg'][@class='p-icon'])[5]` — reveals Financial Position / Income block on QAT.
    */
   async clickFinancialPositionPerSelectorHub(): Promise<void> {
+    this.logStep("Click Financial Position Per Selector Hub");
     await this.waitForProgressSpinnersHidden();
     const icon = this.page.locator('xpath=(//*[name()="svg"][@class="p-icon"])[5]');
     await icon.waitFor({ state: "visible", timeout: 30_000 });
@@ -57,6 +63,7 @@ export class RSSApplyNowAboutYouIndividualPage extends BasePage {
    * Business: "Did you make a profit last year?" — **Yes** / **No** (`getByRole('radio')`, `input[value]`, or label in the same block as the question).
    */
   async selectMadeProfitLastYear(answer: "yes" | "no"): Promise<void> {
+    this.logStep("Select Made Profit Last Year");
     await this.waitForProgressSpinnersHidden();
     const q = this.page.getByText(/Did you make a profit last year\??\s*\*?/i).first();
     await q.waitFor({ state: "visible", timeout: 45_000 });
@@ -116,6 +123,7 @@ export class RSSApplyNowAboutYouIndividualPage extends BasePage {
    * Business — **Net Profit (Last Year)** (dollars). Use after {@link selectMadeProfitLastYear}("yes") when the field is visible.
    */
   async fillNetProfitLastYearDollars(amount: string): Promise<void> {
+    this.logStep("Fill Net Profit Last Year Dollars");
     await this.waitForProgressSpinnersHidden();
     await this.page
       .getByText(/Net Profit\s*\(?\s*Last Year\s*\)?\s*\*?/i)
@@ -148,6 +156,7 @@ export class RSSApplyNowAboutYouIndividualPage extends BasePage {
    * Prefer this over `input.custom-radio.ng-*` — Angular strips `ng-invalid` after selection.
    */
   async selectIncomeNotLikelyToDecreaseNo(): Promise<void> {
+    this.logStep("Select Income Not Likely To Decrease No");
     const no = this.page.locator(
       'input[type="radio"][formcontrolname="incomeChange"][value="false"]',
     );
@@ -163,6 +172,7 @@ export class RSSApplyNowAboutYouIndividualPage extends BasePage {
 
   /** Apply Now footer — SelectorHub `page.locator(':text-is("Next")')`. */
   async clickApplyNowFooterNext(clickTimeoutMs = 60_000): Promise<void> {
+    this.logStep("Click Apply Now Footer Next");
     await this.waitForProgressSpinnersHidden();
     const next = this.page
       .locator(':text-is("Next")')

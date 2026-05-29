@@ -8,3 +8,5 @@ export { TableUtils } from './tableUtils';
 export * from './csvHelper';
 export * from './apiHelpers';
 export * from './helpers';
+export { logTestStep, resetStepContext, getStepContext, logFailureSummary, parseStepsFromTestResult } from './testStepLog';
+export type { RecordedStep } from './testStepLog';

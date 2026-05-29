@@ -35,7 +35,8 @@ const ortoniConfig: OrtoniReportConfig = {
   testType: "E2E-Functional",
   authorName: os.userInfo().username,
   base64Image: false,
-  stdIO: false,
+  stdIO: true,
+  console: true,
   meta: {
     "Test Environment": TEST_ENV.toUpperCase(),
     "Executed On": new Date().toLocaleString(),
@@ -188,6 +189,7 @@ export default defineConfig({
   reporter: [
     ["list"],
     ["html", { outputFolder: "my-report", open: "never" }],
+    ["./playwright/step-failure-reporter.ts"],
     ...(process.env.PLAYWRIGHT_SKIP_ORTONI === "1"
       ? []
       : ([["ortoni-report", ortoniConfig]] as const)),

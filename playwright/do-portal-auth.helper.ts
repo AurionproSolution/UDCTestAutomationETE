@@ -9,6 +9,7 @@ import * as path from "path";
 import { DO_BASE_URL, DO_DEALER_STANDARD_QUOTE_URL } from "../config/env";
 import { DOLoginPage } from "../pages";
 import doLoginData from "../testData/do-portal/loginData.json";
+import { logTestStep } from "../utils/testStepLog";
 
 export const doPortalAuthFile = path.join(
   process.cwd(),
@@ -24,6 +25,7 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
   await loginPage.loginWithTestData(doLoginData.validUsers[0]);
   await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
   await page.waitForLoadState("domcontentloaded");
+  logTestStep(`Saving DO portal storage state to ${doPortalAuthFile}`);
   await page.context().storageState({ path: doPortalAuthFile });
 }
 

@@ -29,7 +29,6 @@ export type DOQuickQuoteData = {
 };
 
 export class DOQuickQuotePage extends BasePage {
-  private readonly debugRunId = "qq-module-debug";
   // Root containers
   readonly quickQuoteRoot: Locator;
   readonly quickQuoteCard: Locator;
@@ -279,6 +278,10 @@ export class DOQuickQuotePage extends BasePage {
     this.calculationSummaryRegion = summaryByClass.or(summaryByContent);
   }
 
+  protected stepLogPrefix(): string {
+    return "DO Portal — Quick quote";
+  }
+
   /** Scoped form for multi-comparison Quick Quote panels (0 = first). */
   quoteForm(quoteIndex: number): Locator {
     return this.quickQuoteRoot
@@ -343,9 +346,7 @@ export class DOQuickQuotePage extends BasePage {
    * Opens the quick quote panel from dashboard.
    */
   async openQuickQuote(): Promise<void> {
-    // #region agent log
-    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H1",location:"QuickQuotePage.ts:openQuickQuote:entry",message:"Open quick quote start",data:{buttonVisible:await this.createQuickQuoteButton.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+    this.log("Opening Quick Quote: waiting for app loader to clear…");
     const blockingOverlay = this.page.locator(".app-loader-overlay, [class*='app-loader']");
     const overlayCount = await blockingOverlay.count();
     if (overlayCount > 0) {
@@ -364,9 +365,7 @@ export class DOQuickQuotePage extends BasePage {
     }
     await this.clickElement(this.createQuickQuoteButton);
     await this.waitForLoadingComplete();
-    // #region agent log
-    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H1",location:"QuickQuotePage.ts:openQuickQuote:exit",message:"Open quick quote done",data:{rootVisible:await this.quickQuoteRoot.isVisible().catch(()=>false),formVisible:await this.quickQuoteForm.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+    this.log("Clicked Quick Quote from dashboard; panel load completed.");
   }
 
   /**
@@ -628,18 +627,22 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async selectProduct(product: string): Promise<void> {
+    this.logStep(`Selected product: ${this.stepValueDisplay(product)}`);
     await this.selectFromDropdown(this.productDropdownTrigger, product);
   }
 
   async selectProgram(program: string): Promise<void> {
+    this.logStep(`Selected program: ${this.stepValueDisplay(program)}`);
     await this.selectFromDropdown(this.programDropdownTrigger, program);
   }
 
   async selectDealer(dealer: string): Promise<void> {
+    this.logStep(`Selected dealer: ${this.stepValueDisplay(dealer)}`);
     await this.selectFromDropdown(this.dealerDropdownTrigger, dealer);
   }
 
   async enterCashPrice(cashPrice: string): Promise<void> {
+    this.logStep(`Entered cash price as ${this.stepValueDisplay(cashPrice)}`);
     await this.replaceCashPriceInInput(this.cashPriceInput, cashPrice);
   }
 
@@ -648,6 +651,7 @@ export class DOQuickQuotePage extends BasePage {
    * already hold the input locator (edge scenarios / new fields before a dedicated wrapper exists).
    */
   async enterQuickQuoteMaskedCurrency(input: Locator, amount: string): Promise<void> {
+    this.logStep(`Entered Quick Quote masked currency as ${this.stepValueDisplay(amount)}`);
     await this.replaceCashPriceInInput(input, amount);
   }
 
@@ -660,22 +664,27 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async clearCashPriceField(): Promise<void> {
+    this.logStep("Clear Cash Price Field");
     await this.clearMaskedCurrencyInput(this.cashPriceInput);
   }
 
   async clearDepositDollarField(): Promise<void> {
+    this.logStep("Clear Deposit Dollar Field");
     await this.clearMaskedCurrencyInput(this.depositDollarInput);
   }
 
   async clearBalloonDollarField(): Promise<void> {
+    this.logStep("Clear Balloon Dollar Field");
     await this.clearMaskedCurrencyInput(this.balloonDollarInput);
   }
 
   async enterInitialLeaseAmount(initialLeaseAmount: string): Promise<void> {
+    this.logStep(`Entered initial lease amount as ${this.stepValueDisplay(initialLeaseAmount)}`);
     await this.replaceCashPriceInInput(this.initialLeaseAmountInput, initialLeaseAmount);
   }
 
   async enterDepositPercent(depositPercent: string): Promise<void> {
+    this.logStep(`Entered deposit % as ${this.stepValueDisplay(depositPercent)}`);
     const t = depositPercent.trim();
     if (t !== "" && Number.isFinite(Number.parseFloat(t)) && Number.parseFloat(t) !== 0) {
       await this.ensureCashPricePositiveForDerivedFields();
@@ -684,6 +693,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async enterInterestRatePercent(interestRatePercent: string): Promise<void> {
+    this.logStep(`Entered interest rate % as ${this.stepValueDisplay(interestRatePercent)}`);
     await this.fillElement(this.interestRatePercentInput, interestRatePercent);
   }
 
@@ -693,6 +703,7 @@ export class DOQuickQuotePage extends BasePage {
    * Use keyboard input for text input, or selectFromDropdown for dropdown.
    */
   async enterTermsMonths(termMonths: string): Promise<void> {
+    this.logStep(`Entered terms (months) as ${this.stepValueDisplay(termMonths)}`);
     // Prefer **Terms-row** dropdown (direct sibling of label). If absent (TLC spinbutton), use keyboard on
     // the first spinbutton after the Terms label — never `following::p-dropdown[1]` (that can be KM Allowance).
     const isDropdown = await this.termsMonthsDropdownTrigger.isVisible({ timeout: 2000 }).catch(() => false);
@@ -705,24 +716,29 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async selectCalculateFor(calculateFor: string): Promise<void> {
+    this.logStep(`Selected Calculate For: ${this.stepValueDisplay(calculateFor)}`);
     await this.selectFromDropdown(this.calculateForDropdownTrigger, calculateFor);
   }
 
   async selectFrequency(frequency: string): Promise<void> {
+    this.logStep(`Selected frequency: ${this.stepValueDisplay(frequency)}`);
     await this.selectFromDropdown(this.frequencyDropdownTrigger, frequency);
   }
 
   async selectKMAllowance(kmAllowance: string): Promise<void> {
+    this.logStep(`Selected KM allowance: ${this.stepValueDisplay(kmAllowance)}`);
     await this.selectFromDropdown(this.kmAllowanceDropdownTrigger, kmAllowance);
   }
 
   async selectAssetType(assetType: string): Promise<void> {
+    this.logStep(`Selected asset type: ${this.stepValueDisplay(assetType)}`);
     await this.clickElement(this.assetTypeSelectButton);
     const option = this.page.getByRole("option").filter({ hasText: assetType }).first();
     await option.click();
   }
 
   async enterBalloonPercent(balloonPercent: string): Promise<void> {
+    this.logStep(`Entered balloon % as ${this.stepValueDisplay(balloonPercent)}`);
     const t = balloonPercent.trim();
     const n = Number.parseFloat(t);
     if (t !== "" && Number.isFinite(n) && n !== 0) {
@@ -732,26 +748,32 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async enterResidualValuePercent(residualValuePercent: string): Promise<void> {
+    this.logStep(`Entered residual value % as ${this.stepValueDisplay(residualValuePercent)}`);
     await this.fillElement(this.residualValuePercentInput, residualValuePercent);
   }
 
   async enterAssuredFutureValue(value: string): Promise<void> {
+    this.logStep(`Entered assured future value as ${this.stepValueDisplay(value)}`);
     await this.replaceCashPriceInInput(this.assuredFutureValueInput, value);
   }
 
   async enterYear(year: string): Promise<void> {
+    this.logStep(`Entered year as ${this.stepValueDisplay(year)}`);
     await this.fillElement(this.yearInput, year);
   }
 
   async enterNoOfRentalsInAdvance(count: string): Promise<void> {
+    this.logStep(`Entered number of rentals in advance as ${this.stepValueDisplay(count)}`);
     await this.replaceInputValueByKeyboard(this.noOfRentalsInAdvanceInput, count);
   }
 
   async confirmTermsAndConditions(): Promise<void> {
+    this.logStep("Confirm Terms And Conditions");
     await this.clickElement(this.termsCheckbox);
   }
 
   async checkFixedCheckbox(): Promise<void> {
+    this.logStep("Check Fixed Checkbox");
     await this.clickElement(this.fixedCheckbox);
   }
 
@@ -760,6 +782,7 @@ export class DOQuickQuotePage extends BasePage {
    * Resolves `fixedCheckbox` to the visible PrimeNG host, then clicks the box or [role=checkbox] surface.
    */
   async setFixedCheckbox(checked: boolean): Promise<void> {
+    this.logStep(`Set Fixed balloon checkbox to ${checked ? "checked" : "unchecked"}`);
     const host = this.fixedCheckbox;
     await expect(host).toBeVisible({ timeout: 20_000 });
     await host.scrollIntoViewIfNeeded().catch(() => {});
@@ -800,6 +823,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async clickCheckDisableCheckbox(): Promise<void> {
+    this.logStep("Click Check Disable Checkbox");
     await this.clickElement(this.checkDisableCheckbox);
   }
 
@@ -808,6 +832,7 @@ export class DOQuickQuotePage extends BasePage {
    * opening a Product/Program list and pressing Escape (TC_QQ_005 → TC_QQ_006).
    */
   async dismissQuickQuoteDropdownOverlays(): Promise<void> {
+    this.logStep("Dismiss Quick Quote Dropdown Overlays");
     const panel = this.page.locator(
       ".p-dropdown-panel.p-component, .p-select-panel.p-component, .p-connected-overlay .p-dropdown-panel",
     );
@@ -824,12 +849,15 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async clickCalculate(): Promise<void> {
-    await this.dismissQuickQuoteDropdownOverlays();
-    await this.calculateButton.scrollIntoViewIfNeeded().catch(() => {});
-    const isEnabled = await this.calculateButton.isEnabled().catch(() => false);
-    // #region agent log
-    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H3",location:"QuickQuotePage.ts:clickCalculate:before",message:"Calculate click start",data:{calculateEnabled:isEnabled},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+    this.logStep("Clicked Calculate (Quick Quote first panel)");
+    const isEnabled = await (async () => {
+      await this.dismissQuickQuoteDropdownOverlays();
+      await this.calculateButton.scrollIntoViewIfNeeded().catch(() => {});
+      return this.calculateButton.isEnabled().catch(() => false);
+    })();
+    this.log(
+      `Calculate: button ${isEnabled ? "enabled (normal click)" : "disabled — using force click path"}`,
+    );
     if (isEnabled) {
       await this.clickElement(this.calculateButton, 45_000);
     } else {
@@ -838,33 +866,30 @@ export class DOQuickQuotePage extends BasePage {
       await this.calculateButton.click({ force: true, timeout: 15_000 });
     }
     await this.waitForLoadingComplete();
-    // #region agent log
-    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H5",location:"QuickQuotePage.ts:clickCalculate:after",message:"Calculate click done",data:{createQuoteVisible:await this.createQuoteButton.isVisible().catch(()=>false),downloadVisible:await this.downloadButton.isVisible().catch(()=>false),printVisible:await this.printButton.isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+    this.log("Calculate action finished (loading complete).");
   }
 
   async clickCreateQuote(): Promise<void> {
-    // #region agent log
-    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H4",location:"QuickQuotePage.ts:clickCreateQuote:before",message:"Create quote click start",data:{currentUrl:this.page.url()},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+    this.log("Clicking Create Quote on Quick Quote.");
     await this.clickElement(this.createQuoteButton);
     await this.waitForLoadingComplete();
-    // #region agent log
-    fetch("http://127.0.0.1:7280/ingest/19704456-8fcb-4c08-838b-1b243840f653",{method:"POST",headers:{"Content-Type":"application/json","X-Debug-Session-Id":"44e672"},body:JSON.stringify({sessionId:"44e672",runId:this.debugRunId,hypothesisId:"H4",location:"QuickQuotePage.ts:clickCreateQuote:after",message:"Create quote click done",data:{currentUrl:this.page.url(),standardQuoteVisible:await this.page.locator("app-quote-details, app-standard-quote").first().isVisible().catch(()=>false)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
+    this.log("Create Quote navigation finished (loading complete).");
   }
 
   async clickReset(): Promise<void> {
+    this.logStep("Click Reset");
     await this.clickElement(this.resetButton);
     await this.waitForLoadingComplete();
   }
 
   async clickAddComparison2(): Promise<void> {
+    this.logStep("Click Add Comparison2");
     await this.clickElement(this.addComparison2Button);
     await this.waitForLoadingComplete();
   }
 
   async isMailButtonEnabled(): Promise<boolean> {
+    this.logStep("Is Mail Button Enabled");
     try {
       return await this.mailButton.isEnabled();
     } catch {
@@ -873,6 +898,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async isAddComparison2Enabled(): Promise<boolean> {
+    this.logStep("Is Add Comparison2 Enabled");
     try {
       return await this.addComparison2Button.isEnabled();
     } catch {
@@ -881,6 +907,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async isAddComparison3Enabled(): Promise<boolean> {
+    this.logStep("Is Add Comparison3 Enabled");
     try {
       return await this.addComparison3Button.isEnabled();
     } catch {
@@ -889,6 +916,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async getFieldVisibilityState(fieldName: string): Promise<"visible" | "hidden" | "disabled"> {
+    this.logStep("Get Field Visibility State");
     const containerMap: Record<string, Locator> = {
       cashPrice: this.cashPriceInput.locator("xpath=../.."),
       depositPercent: this.depositPercentInput.locator("xpath=../.."),
@@ -934,40 +962,49 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async expectFieldToBeVisible(fieldName: string): Promise<void> {
+    this.logStep("Expect Field To Be Visible");
     const state = await this.getFieldVisibilityState(fieldName);
     expect.soft(state).not.toBe("hidden");
   }
 
   async expectFieldToBeHidden(fieldName: string): Promise<void> {
+    this.logStep("Expect Field To Be Hidden");
     const state = await this.getFieldVisibilityState(fieldName);
     expect.soft(state).toBe("hidden");
   }
 
   async expectMailButtonToBeDisabled(): Promise<void> {
+    this.logStep("Expect Mail Button To Be Disabled");
     await expect.soft(this.mailButton).toBeDisabled();
   }
 
   async expectMailButtonToBeEnabled(): Promise<void> {
+    this.logStep("Expect Mail Button To Be Enabled");
     await expect.soft(this.mailButton).toBeEnabled();
   }
 
   async expectCreateQuoteVisible(): Promise<void> {
+    this.logStep("Expect Create Quote Visible");
     await expect.soft(this.createQuoteButton).toBeVisible({ timeout: 30_000 });
   }
 
   async enterDepositDollars(amount: string): Promise<void> {
+    this.logStep(`Entered deposit ($) as ${this.stepValueDisplay(amount)}`);
     await this.replaceCashPriceInInput(this.depositDollarInput, amount);
   }
 
   async enterBalloonDollars(amount: string): Promise<void> {
+    this.logStep(`Entered balloon ($) as ${this.stepValueDisplay(amount)}`);
     await this.replaceCashPriceInInput(this.balloonDollarInput, amount);
   }
 
   async enterPaymentAmount(payment: string): Promise<void> {
+    this.logStep(`Entered payment amount as ${this.stepValueDisplay(payment)}`);
     await this.replaceCashPriceInInput(this.paymentAmountInput, payment);
   }
 
   async clearTermsMonths(quoteIndex = 0): Promise<void> {
+    this.logStep(`Panel ${quoteIndex + 1}: cleared terms (months)`);
     const input =
       quoteIndex === 0 ? this.termsMonthsInput : this.termsInputOnQuote(quoteIndex);
     await input.waitFor({ state: "visible", timeout: 10_000 });
@@ -981,6 +1018,9 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async selectCalculateForOnQuote(quoteIndex: number, calculateFor: string): Promise<void> {
+    this.logStep(
+      `Panel ${quoteIndex + 1}: selected Calculate For: ${this.stepValueDisplay(calculateFor)}`,
+    );
     await this.selectFromDropdown(
       this.calculateForTriggerOnQuote(quoteIndex),
       calculateFor,
@@ -988,6 +1028,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async selectFrequencyOnQuote(quoteIndex: number, frequency: string): Promise<void> {
+    this.logStep(`Panel ${quoteIndex + 1}: selected frequency: ${this.stepValueDisplay(frequency)}`);
     await this.selectFromDropdown(
       this.frequencyTriggerOnQuote(quoteIndex),
       frequency,
@@ -995,6 +1036,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async enterCashPriceOnQuote(quoteIndex: number, cashPrice: string): Promise<void> {
+    this.logStep(`Panel ${quoteIndex + 1}: entered cash price as ${this.stepValueDisplay(cashPrice)}`);
     await this.replaceCashPriceInInput(this.cashPriceInputOnQuote(quoteIndex), cashPrice);
   }
 
@@ -1002,6 +1044,9 @@ export class DOQuickQuotePage extends BasePage {
     quoteIndex: number,
     interestRatePercent: string,
   ): Promise<void> {
+    this.logStep(
+      `Panel ${quoteIndex + 1}: entered interest rate % as ${this.stepValueDisplay(interestRatePercent)}`,
+    );
     await this.fillElement(
       this.interestRateInputOnQuote(quoteIndex),
       interestRatePercent,
@@ -1009,6 +1054,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async enterTermsMonthsOnQuote(quoteIndex: number, termMonths: string): Promise<void> {
+    this.logStep(`Panel ${quoteIndex + 1}: entered terms (months) as ${this.stepValueDisplay(termMonths)}`);
     const isDropdown = await this.termsDropdownTriggerOnQuote(quoteIndex).isVisible({ timeout: 2000 }).catch(() => false);
 
     if (isDropdown) {
@@ -1019,12 +1065,14 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async clickCalculateOnQuote(quoteIndex: number): Promise<void> {
+    this.logStep(`Panel ${quoteIndex + 1}: clicked Calculate`);
     const btn = this.quoteForm(quoteIndex).getByRole("button", { name: /^Calculate$/i });
     await this.clickElement(btn);
     await this.waitForLoadingComplete();
   }
 
   async clickAddComparisonPrimary(): Promise<void> {
+    this.logStep("Click Add Comparison Primary");
     const primary = this.addComparisonPrimaryButton;
     if (await primary.isVisible().catch(() => false)) {
       await this.clickElement(primary);
@@ -1035,10 +1083,12 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async quickQuotePanelCount(): Promise<number> {
+    this.logStep("Quick Quote Panel Count");
     return await this.quickQuoteRoot.locator("app-create-quick-quote").count();
   }
 
   async expectPleaseCompleteInForm(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Please Complete In Form");
     await expect.soft(
       this.quoteForm(quoteIndex).getByText(/Please complete/i).first(),
     ).toBeVisible({ timeout: 20_000 });
@@ -1049,6 +1099,7 @@ export class DOQuickQuotePage extends BasePage {
    * others disable Calculate and show inline copy (e.g. "This field cannot be blank").
    */
   async expectBlankTermsValidation(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Blank Terms Validation");
     await expect.soft(
       this.quoteForm(quoteIndex)
         .getByText(
@@ -1059,6 +1110,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async expectTermExceedsMaxMessage(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Term Exceeds Max Message");
     await expect.soft(
       this.quoteForm(quoteIndex)
         .getByText(
@@ -1074,6 +1126,7 @@ export class DOQuickQuotePage extends BasePage {
    * feedback to toasts/dialogs after Calculate completes.
    */
   async expectCashPriceNonNegativeMessage(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Cash Price Non Negative Message");
     const form = this.quoteForm(quoteIndex);
     const cashInput =
       quoteIndex === 0 ? this.cashPriceInput : this.cashPriceInputOnQuote(quoteIndex);
@@ -1227,6 +1280,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async expectProgramDropdownDisabled(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Program Dropdown Disabled");
     const trigger =
       quoteIndex === 0
         ? this.programDropdownTrigger
@@ -1237,6 +1291,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async expectCalculateButtonDisabled(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Calculate Button Disabled");
     const btn = this.quoteForm(quoteIndex).getByRole("button", { name: /^Calculate$/i });
     await expect.soft(btn).toBeDisabled({ timeout: 15_000 });
   }
@@ -1246,6 +1301,7 @@ export class DOQuickQuotePage extends BasePage {
    * (hidden in DOM or visible but disabled).
    */
   async expectCalculateButtonHiddenOrDisabled(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Calculate Button Hidden Or Disabled");
     const btn = this.quoteForm(quoteIndex).getByRole("button", { name: /^Calculate$/i });
     if ((await btn.count()) === 0) {
       return;
@@ -1258,6 +1314,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async paymentAmountInputIsReadOnly(): Promise<boolean> {
+    this.logStep("Payment Amount Input Is Read Only");
     const input = this.paymentAmountInput;
     if ((await input.count()) === 0) {
       return true;
@@ -1302,6 +1359,7 @@ export class DOQuickQuotePage extends BasePage {
    * End-to-end helper for common quick quote creation flow.
    */
   async createQuickQuote(data: DOQuickQuoteData): Promise<void> {
+    this.logStep("Create Quick Quote");
     await this.openQuickQuote();
     await this.selectProduct(data.product);
     await this.selectProgram(data.program);

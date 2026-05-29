@@ -29,10 +29,15 @@ export class CSSDashboardPage extends BasePage {
     this.helpButton = page.locator('#helpBtn, [data-testid="help"]');
   }
 
+  protected stepLogPrefix(): string {
+    return "CSS Portal — Dashboard";
+  }
+
   /**
    * Verify dashboard is loaded
    */
   async isDashboardLoaded(): Promise<boolean> {
+    this.logStep("Is Dashboard Loaded");
     await this.waitForLoadingComplete();
     return await this.isVisible(this.pageTitle);
   }
@@ -41,6 +46,7 @@ export class CSSDashboardPage extends BasePage {
    * Navigate to menu item
    */
   async navigateToMenuItem(menuText: string): Promise<void> {
+    this.logStep("Navigate To Menu Item");
     const menuItem = this.mainNavigation.locator(`text=${menuText}`);
     await this.click(menuItem);
     await this.waitForLoadingComplete();
@@ -58,6 +64,7 @@ export class CSSDashboardPage extends BasePage {
    * Get user info text
    */
   async getUserInfo(): Promise<string> {
+    this.logStep("Get User Info");
     return await this.getText(this.userInfo);
   }
 
@@ -65,6 +72,7 @@ export class CSSDashboardPage extends BasePage {
    * Click on dashboard card
    */
   async clickDashboardCard(cardTitle: string): Promise<void> {
+    this.logStep("Click Dashboard Card");
     const card = this.dashboardCards.locator(`text=${cardTitle}`);
     await this.click(card);
     await this.waitForLoadingComplete();
@@ -74,6 +82,7 @@ export class CSSDashboardPage extends BasePage {
    * Get activity feed items count
    */
   async getActivityCount(): Promise<number> {
+    this.logStep("Get Activity Count");
     const items = this.activityFeed.locator('.activity-item, li');
     return await items.count();
   }
@@ -82,6 +91,7 @@ export class CSSDashboardPage extends BasePage {
    * Open help
    */
   async openHelp(): Promise<void> {
+    this.logStep("Open Help");
     await this.click(this.helpButton);
   }
 }

@@ -51,6 +51,10 @@ export class DODashboardPage extends BasePage {
       .first();
   }
 
+  protected stepLogPrefix(): string {
+    return "DO Portal — Dashboard";
+  }
+
   /**
    * After login, Prime may show a full-page blocking overlay (app-loader + progress spinner) that
    * intercepts pointer events. Wait until it is gone before clicking dashboard CTAs.
@@ -83,18 +87,21 @@ export class DODashboardPage extends BasePage {
    * After `storageState` restore: ensure dashboard is ready (same readiness as before Create Standard Quote).
    */
   async waitForAuthenticatedDashboard(): Promise<void> {
+    this.log("Waiting for authenticated dashboard (session restored or after login)…");
     await this.page
       .waitForLoadState("domcontentloaded", { timeout: 30_000 })
       .catch(() => {});
     await this.waitForAppLoaderOverlayGone(120_000);
     await this.createStandardQuoteButton.waitFor({ state: "visible", timeout: 60_000 });
     await expect(this.createStandardQuoteButton).toBeEnabled({ timeout: 30_000 });
+    this.log("Verified dashboard is loaded (Create Standard Quote is visible and enabled).");
   }
 
   /**
    * Selects the dealer shown in the top header dealer dropdown.
    */
   async ensureDealerSelected(dealerName: string): Promise<void> {
+    this.logStep("Ensure Dealer Selected");
     await this.waitForAppLoaderOverlayGone(120_000);
     await expect(this.dealerDropdownLabel).toBeVisible({ timeout: 60_000 });
 
@@ -103,9 +110,11 @@ export class DODashboardPage extends BasePage {
       (await this.dealerDropdownLabel.textContent()) ??
       "";
     if (selectedDealer.trim() === dealerName) {
+      this.log(`Dealer already selected: ${dealerName}`);
       return;
     }
 
+    this.log(`Selecting dealer: ${dealerName}`);
     await this.dealerDropdownLabel.click();
     await expect(this.page.getByRole("listbox")).toBeVisible({ timeout: 30_000 });
 
@@ -117,9 +126,11 @@ export class DODashboardPage extends BasePage {
       timeout: 30_000,
     });
     await this.waitForAppLoaderOverlayGone(120_000);
+    this.log(`Verified dealer selected: ${dealerName}`);
   }
 
   async selectDealer(dealerName: string): Promise<void> {
+    this.logStep("Select Dealer");
     await this.ensureDealerSelected(dealerName);
   }
 
@@ -127,6 +138,7 @@ export class DODashboardPage extends BasePage {
    * Click "Create Standard Quote" — wait out the blocking loader, then click (with force retry).
    */
   async clickCreateStandardQuote(): Promise<void> {
+    this.logStep("Click Create Standard Quote");
     await this.page
       .waitForLoadState("domcontentloaded", { timeout: 30_000 })
       .catch(() => {});
@@ -136,6 +148,7 @@ export class DODashboardPage extends BasePage {
     await btn.waitFor({ state: "visible", timeout: 60_000 });
     await expect(btn).toBeEnabled({ timeout: 30_000 });
 
+    this.log('Clicking Create Standard Quote from dashboard');
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) {
         await this.waitForAppLoaderOverlayGone(30_000);
@@ -153,12 +166,14 @@ export class DODashboardPage extends BasePage {
       }
     }
     await this.waitForLoadingComplete(30_000);
+    this.log("Create Standard Quote navigation completed.");
   }
 
   /**
    * Select the Credit Sale Agreement (CSA) product from dialog box
    */
   async selectCSAproduct(): Promise<void> {
+    this.logStep("Select CSA product");
     // wait for the dialog to be visible
     const dialog = this.page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -168,23 +183,22 @@ export class DODashboardPage extends BasePage {
     await option.waitFor({ state: "attached" });
     await option.click({ force: false });
   }
-//finance lease
 
-async selectFinanceLeaseProduct(): Promise<void> {
-  // wait for the dialog to be visible
-  const dialog = this.page.getByRole("dialog");
-  await expect(dialog).toBeVisible();
-
-  // locate and click the CSA option
-  const option = dialog.locator("text= Finance Lease ");
-  await option.waitFor({ state: "attached" });
-  await option.click({ force: false });
-}
+  /** Select the Finance Lease product from the product dialog. */
+  async selectFinanceLeaseProduct(): Promise<void> {
+    this.logStep("Select Finance Lease product");
+    const dialog = this.page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    const option = dialog.locator("text= Finance Lease ");
+    await option.waitFor({ state: "attached" });
+    await option.click({ force: false });
+  }
 
   /**
    * Verify dashboard is loaded
    */
   async isDashboardLoaded(): Promise<boolean> {
+    this.logStep("Is Dashboard Loaded");
     await this.waitForLoadingComplete();
     return await this.isVisible(this.pageHeader);
   }
@@ -193,6 +207,7 @@ async selectFinanceLeaseProduct(): Promise<void> {
    * Get welcome message text
    */
   async getWelcomeMessage(): Promise<string> {
+    this.logStep("Get Welcome Message");
     return await this.getText(this.welcomeMessage);
   }
 
@@ -200,6 +215,7 @@ async selectFinanceLeaseProduct(): Promise<void> {
    * Navigate to menu item
    */
   async navigateToMenuItem(menuText: string): Promise<void> {
+    this.logStep("Navigate To Menu Item");
     const menuItem = this.sideMenu.locator(`text=${menuText}`);
     await this.clickElement(menuItem);
     await this.waitForLoadingComplete();
@@ -218,6 +234,7 @@ async selectFinanceLeaseProduct(): Promise<void> {
    * Get notification count
    */
   async getNotificationCount(): Promise<number> {
+    this.logStep("Get Notification Count");
     const badge = this.notificationBell.locator(".badge, .count");
     const text = await this.getText(badge);
     return parseInt(text) || 0;
@@ -227,6 +244,7 @@ async selectFinanceLeaseProduct(): Promise<void> {
    * Click quick action by name
    */
   async clickQuickAction(actionName: string): Promise<void> {
+    this.logStep("Click Quick Action");
     const action = this.quickActions.locator(`text=${actionName}`);
     await this.clickElement(action);
   }

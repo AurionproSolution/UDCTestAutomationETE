@@ -44,6 +44,10 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     this.proceedButton = page.locator(':text-is("Proceed")');
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Customer quote (post-submit)";
+  }
+
   /**
    * **Search Customer** modal (same host as {@link DOAssetDetailsPage} borrower search).
    */
@@ -59,6 +63,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * Prefer `getByRole("button")` when the control is a real button; fall back to exact text (may be a link).
    */
   async clickAddBorrowersOrGuarantorsButton(): Promise<void> {
+    this.logStep("Click Add Borrowers Or Guarantors Button");
     const byRole = this.page.getByRole("button", {
       name: /Add Borrowers\s*\/\s*Guarantors/i,
     });
@@ -89,6 +94,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * Prefers accessible name; falls back to PrimeNG box or Selector Hub xpath on first `p-radiobutton`.
    */
   async selectSearchCustomerIndividualType(): Promise<void> {
+    this.logStep("Select Search Customer Individual Type");
     const dialog = this.searchCustomerDialog();
     await dialog.waitFor({ state: "visible", timeout: 60000 });
 
@@ -121,6 +127,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * Prefers `getByRole('radio')`; falls back to `.p-radiobutton-box` or SelectorHub `p-radiobutton[3]…`.
    */
   async selectSearchCustomerTrustType(): Promise<void> {
+    this.logStep("Select Search Customer Trust Type");
     const dialog = this.searchCustomerDialog();
     await dialog.waitFor({ state: "visible", timeout: 60000 });
 
@@ -177,6 +184,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   async waitForUploadStep(): Promise<void> {
+    this.logStep("Wait For Upload Step");
     await this.browseFilesButton.waitFor({ state: "visible", timeout: 120000 });
   }
 
@@ -201,6 +209,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * upload response so we do not burn the test timeout when the backend URL does not match.
    */
   async uploadDocument(filePath: string = DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF): Promise<void> {
+    this.logStep(`Uploaded document: ${this.stepValueDisplay(path.basename(filePath))}`);
     const fileInput = this.page.locator('input[type="file"]');
     const count = await fileInput.count();
     if (count > 0) {
@@ -256,6 +265,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   async expectDocumentUploaded(
     filePath: string = DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF,
   ): Promise<void> {
+    this.logStep("Expect Document Uploaded");
     const base = path.basename(filePath);
     const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -294,6 +304,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   async openDocumentsTab(): Promise<void> {
+    this.logStep("Open Documents Tab");
     let root = this.documentManagementTabView();
     if ((await root.count()) === 0) {
       root = this.page
@@ -346,6 +357,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * SelectorHub-style row boxes are `tbody tr .p-checkbox-box`; the header control lives in `thead`.
    */
   async clickSelectAllCheckboxesDocumentsGeneratedTable(): Promise<void> {
+    this.logStep("Click Select All Checkboxes Documents Generated Table");
     const root = this.documentsGeneratedRoot();
     await root.waitFor({ state: "visible", timeout: 45000 });
     const headerBox = root
@@ -363,6 +375,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * until the row checkbox shows selected (`.p-checkbox-box.p-highlight`).
    */
   async selectEachCreditAdviceRowInDocumentsGeneratedTable(): Promise<void> {
+    this.logStep("Select Each Credit Advice Row In Documents Generated Table");
     const root = this.documentsGeneratedRoot();
     await root.waitFor({ state: "visible", timeout: 45000 });
     // Row text includes the document title; do not rely on `span.document-name` (class/markup varies).
@@ -387,6 +400,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * (excluded from select-all per product rules).
    */
   async selectAllDocumentsAndCreditAdviceRowsForBulkPreview(): Promise<void> {
+    this.logStep("Select All Documents And Credit Advice Rows For Bulk Preview");
     await this.clickSelectAllCheckboxesDocumentsGeneratedTable();
     await this.selectEachCreditAdviceRowInDocumentsGeneratedTable();
   }
@@ -396,6 +410,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * fill required fields, **Confirm**, then the preview opens in a new tab. If no modal appears, treat as direct new-tab preview.
    */
   async clickDocumentsTabPreviewOpensNewTab(): Promise<void> {
+    this.logStep("Click Documents Tab Preview Opens New Tab");
     const root = this.documentsGeneratedRoot();
     await root.waitFor({ state: "visible", timeout: 45000 });
     const previewBtn = root
@@ -455,6 +470,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   /** Select "Customer Quote - Basic" row checkbox (PrimeNG `.p-checkbox-box.p-highlight`). */
   async selectCustomerQuoteBasicRow(): Promise<void> {
+    this.logStep("Select Customer Quote Basic Row");
     const row = this.page
       .locator("tr")
       .filter({ hasText: /Customer Quote\s*-\s*Basic/i })
@@ -474,6 +490,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * match (menus, grids elsewhere also use that label).
    */
   async clickDownload(): Promise<void> {
+    this.logStep("Click Download");
     let root = this.documentManagementTabView();
     if ((await root.count()) === 0) {
       root = this.page
@@ -511,6 +528,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   async confirmDocumentParameters(): Promise<void> {
+    this.logStep("Confirm Document Parameters");
     const dialog = this.page.getByRole("dialog", { name: /Document Parameters/i });
     await dialog.waitFor({
       state: "visible",
@@ -568,6 +586,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   async addNoteAndSubmit(noteText: string): Promise<void> {
+    this.logStep(`Added note and submitted: ${this.stepValueDisplay(noteText)}`);
     await this.addNewNotesButton.waitFor({ state: "visible", timeout: 60000 });
     await this.addNewNotesButton.scrollIntoViewIfNeeded();
     await this.addNewNotesButton.click();
@@ -589,6 +608,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * When notes already exist, each card shows author (bold label) and a date | time line.
    */
   async expectExistingNoteCardsShowAuthorAndTimestamp(): Promise<void> {
+    this.logStep("Expect Existing Note Cards Show Author And Timestamp");
     const cards = this.page.locator("app-notes .notes-container .col-4");
     await this.addNewNotesButton.scrollIntoViewIfNeeded();
     if ((await cards.count()) === 0) {
@@ -618,6 +638,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * (copy varies slightly by build; we match common phrasings).
    */
   async expectOversizedNoteRejectedOnSubmit(): Promise<void> {
+    this.logStep("Expect Oversized Note Rejected On Submit");
     await this.addNewNotesButton.waitFor({ state: "visible", timeout: 60000 });
     await this.addNewNotesButton.scrollIntoViewIfNeeded();
     await this.addNewNotesButton.click();
@@ -647,6 +668,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   /** Submit a note of exactly `length` characters from the Add Note dialog. */
   async submitNoteOfExactLengthFromDialog(length: number, fillChar = "R"): Promise<void> {
+    this.logStep("Submit Note Of Exact Length From Dialog");
     await this.addNewNotesButton.waitFor({ state: "visible", timeout: 60000 });
     await this.addNewNotesButton.scrollIntoViewIfNeeded();
     await this.addNewNotesButton.click();
@@ -663,6 +685,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * Long notes are truncated in the list with a **More** link (preview > ~100 chars stored).
    */
   async expectNoteListShowsMoreForLongSavedNote(): Promise<void> {
+    this.logStep("Expect Note List Shows More For Long Saved Note");
     const list = this.notesListRoot();
     await expect(list.getByText("More", { exact: true })).toBeVisible({ timeout: 45000 });
     const cardWithMore = list.locator(".col-4").filter({ hasText: "More" }).first();
@@ -672,6 +695,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   /** Ensure the document tab strip is on **Upload** (Browse Files visible). */
   async ensureUploadTab(): Promise<void> {
+    this.logStep("Ensure Upload Tab");
     let root = this.documentManagementTabView();
     if ((await root.count()) === 0) {
       root = this.page
@@ -696,6 +720,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   /** Upload `.jpg` then default PDF; both appear under the Upload tab. */
   async uploadJpgThenPdfExpectBothVisible(): Promise<void> {
+    this.logStep("Upload Jpg Then Pdf Expect Both Visible");
     await this.ensureUploadTab();
     await this.uploadDocument(DEFAULT_CUSTOMER_QUOTE_UPLOAD_JPG);
     await this.expectDocumentUploaded(DEFAULT_CUSTOMER_QUOTE_UPLOAD_JPG);
@@ -713,6 +738,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * Attempt to upload a file larger than 20 MB — UI should reject / warn (toast or inline message).
    */
   async expectOversizeBinaryUploadRejected(): Promise<void> {
+    this.logStep("Expect Oversize Binary Upload Rejected");
     await this.ensureUploadTab();
     const dir = mkdtempSync(path.join(tmpdir(), "do-pw-upload-"));
     const hugePath = path.join(dir, "oversized.bin");
@@ -732,6 +758,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   /** Select the first row in the Upload tab supporting-documents table (checkbox). */
   async selectFirstUploadedDocumentRowInUploadTable(): Promise<void> {
+    this.logStep("Select First Uploaded Document Row In Upload Table");
     const root = this.uploadAppRoot();
     const firstRow = root.locator("tbody tr").first();
     await firstRow.waitFor({ state: "visible", timeout: 45000 });
@@ -744,6 +771,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   /** Select the supporting-documents table row whose name matches `basename`. */
   async selectUploadedDocumentRowByBasename(basename: string): Promise<void> {
+    this.logStep(`Selected uploaded document row: ${this.stepValueDisplay(basename)}`);
     const root = this.uploadAppRoot();
     const escaped = basename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const row = root.locator("tbody tr").filter({ hasText: new RegExp(escaped, "i") }).first();
@@ -776,6 +804,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   /** **Preview** on Upload tab opens a new browser tab. */
   async expectUploadTabPreviewOpensNewTab(): Promise<void> {
+    this.logStep("Expect Upload Tab Preview Opens New Tab");
     await this.ensureUploadTab();
     await this.selectFirstUploadedDocumentRowInUploadTable();
     const root = this.uploadAppRoot();
@@ -794,6 +823,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   /** **Download** on Upload tab triggers a file download in the browser. */
   async expectUploadTabDownloadStarts(): Promise<void> {
+    this.logStep("Expect Upload Tab Download Starts");
     await this.ensureUploadTab();
     await this.selectFirstUploadedDocumentRowInUploadTable();
     const root = this.uploadAppRoot();
@@ -814,6 +844,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * it disappeared from the table and optional preview tile.
    */
   async deleteUploadedDocumentTileByBasenameAndExpectRemoved(basename: string): Promise<void> {
+    this.logStep(`Deleted uploaded document and expect removed: ${this.stepValueDisplay(basename)}`);
     await this.ensureUploadTab();
     const root = this.uploadAppRoot();
     const escaped = basename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -842,6 +873,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * (not `li[role=option]` / `.p-dropdown-panel` only). Handle both.
    */
   async submitQuoteFromStatusMenu(): Promise<void> {
+    this.logStep("Submit Quote From Status Menu");
     const p = this.page;
 
     const openMenu = async (): Promise<void> => {
@@ -945,6 +977,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * Originator Declaration: tick the first two statement checkboxes, then Proceed.
    */
   async completeOriginatorDeclaration(): Promise<void> {
+    this.logStep("Complete Originator Declaration");
     const dialog = this.page.getByRole("dialog", {
       name: /Originator Declaration/i,
     });

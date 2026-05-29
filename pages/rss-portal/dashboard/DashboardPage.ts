@@ -39,10 +39,15 @@ export class RSSDashboardPage extends BasePage {
       .filter({ hasText: 'Apply Now' });
   }
 
+  protected stepLogPrefix(): string {
+    return "RSS Portal — Dashboard";
+  }
+
   /**
    * Verify dashboard is loaded
    */
   async isDashboardLoaded(): Promise<boolean> {
+    this.logStep("Is Dashboard Loaded");
     await this.waitForLoadingComplete();
     try {
       await this.page
@@ -66,6 +71,7 @@ export class RSSDashboardPage extends BasePage {
    * Opens the Apply Now area using the main dashboard tabs (desktop) or bottom tabs (mobile).
    */
   async clickApplyNow(): Promise<void> {
+    this.logStep("Click Apply Now");
     try {
       await this.applyNowSegmentTop.waitFor({ state: 'visible', timeout: 15_000 });
       await this.clickElement(this.applyNowSegmentTop);
@@ -78,6 +84,7 @@ export class RSSDashboardPage extends BasePage {
 
   /** True when Apply Now is the selected segment/tab (desktop or mobile layout). */
   async isApplyNowSelected(): Promise<boolean> {
+    this.logStep("Is Apply Now Selected");
     const desktopSelected = this.page.locator(
       'app-rss ion-segment-button[value="applyNow"].segment-button-checked',
     );
@@ -173,6 +180,7 @@ export class RSSDashboardPage extends BasePage {
    * Same open/panel pattern as Apply Now `p-dropdown` steps (`[role="combobox"]` or chevron, `.p-dropdown-panel` on `body`).
    */
   async selectHeaderBorrowerProfile(displayFullName: string, clickTimeoutMs = 90_000): Promise<void> {
+    this.logStep("Select Header Borrower Profile");
     const panel = await this.openHeaderBorrowerDropdownPanel(clickTimeoutMs);
     const looseName = new RegExp(this.escapeRx(displayFullName), 'i');
     const row = panel
@@ -198,6 +206,7 @@ export class RSSDashboardPage extends BasePage {
     exactDisplayName: string,
     clickTimeoutMs = 90_000,
   ): Promise<void> {
+    this.logStep("Select Header Borrower Profile By Text Is");
     const panel = await this.openHeaderBorrowerDropdownPanel(clickTimeoutMs);
     const textIsSel = `:text-is(${JSON.stringify(exactDisplayName)})`;
     const option = panel.locator(textIsSel).filter({ visible: true }).first();
@@ -211,6 +220,7 @@ export class RSSDashboardPage extends BasePage {
    * Navigate to menu item
    */
   async navigateToMenuItem(menuText: string): Promise<void> {
+    this.logStep("Navigate To Menu Item");
     const menuItem = this.navigationMenu.locator(`text=${menuText}`);
     await this.clickElement(menuItem);
     await this.waitForLoadingComplete();
@@ -220,6 +230,7 @@ export class RSSDashboardPage extends BasePage {
    * Perform global search
    */
   async globalSearch(searchText: string): Promise<void> {
+    this.logStep("Global Search");
     await this.fillElement(this.searchBox, searchText);
     await this.page.keyboard.press('Enter');
     await this.waitForLoadingComplete();
@@ -238,6 +249,7 @@ export class RSSDashboardPage extends BasePage {
    * Open reports section
    */
   async openReports(): Promise<void> {
+    this.logStep("Open Reports");
     await this.clickElement(this.reportsSection);
     await this.waitForLoadingComplete();
   }

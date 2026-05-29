@@ -277,6 +277,10 @@ export class DOAddressDetailsPage extends BasePage {
       .nth(2);
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Address details";
+  }
+
   /**
    * Active **Current Physical Address** host:
    * - **Sole Trader:** `app-sole-trade` often hosts `input[name="physicalSearchValue"]` without a nested
@@ -350,6 +354,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async selectResidenceType(residenceType: string) {
+    this.logStep(`Selected residence type: ${this.stepValueDisplay(residenceType)}`);
     const rx = new RegExp(residenceType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
 
     await this.page.keyboard.press("Escape");
@@ -531,6 +536,9 @@ export class DOAddressDetailsPage extends BasePage {
     query: string,
     optionContains: string,
   ) {
+    this.logStep(
+      `Filled physical search "${this.stepValueDisplay(query)}" and picked option matching ${this.stepValueDisplay(optionContains)}`,
+    );
     await this.physicalSearchInput.waitFor({
       state: "visible",
       timeout: 60000,
@@ -903,6 +911,9 @@ export class DOAddressDetailsPage extends BasePage {
    * months = `form > div > div:nth-child(6) > text > … > input` (gen-card physical form).
    */
   async timeAtAddress(year: string, month: string) {
+    this.logStep(
+      `Set time at address: years ${this.stepValueDisplay(year)}, months ${this.stepValueDisplay(month)}`,
+    );
     const bizRoot = this.businessPhysicalAddressRoot;
     if (await bizRoot.isVisible({ timeout: 5000 }).catch(() => false)) {
       await bizRoot.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
@@ -1160,10 +1171,12 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPhysicalBuildingName(value: string) {
+    this.logStep(`Entered physical building name as ${this.stepValueDisplay(value)}`);
     await this.physicalGenTextInput(/Building Name/i).fill(value);
   }
 
   async selectPhysicalFloorType(optionName: string) {
+    this.logStep(`Selected physical floor type: ${this.stepValueDisplay(optionName)}`);
     const root = this.physicalRootOrBlock();
     // SelectorHub PrimeNG id (may change per build); fall back to label row.
     const idContainer = root.locator("#pn_id_103_1");
@@ -1182,6 +1195,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPhysicalFloorNumber(value: string) {
+    this.logStep(`Entered physical floor number as ${this.stepValueDisplay(value)}`);
     const root = this.physicalRootOrBlock();
     const byLabel = root
       .locator("text, label")
@@ -1206,6 +1220,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async selectPhysicalUnitType(optionName: string) {
+    this.logStep(`Selected physical unit type: ${this.stepValueDisplay(optionName)}`);
     const root = this.physicalRootOrBlock();
     const unitTypeLabel = root
       .locator("text, label")
@@ -1228,6 +1243,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPhysicalUnitLotNumber(value: string) {
+    this.logStep(`Entered physical unit/lot number as ${this.stepValueDisplay(value)}`);
     const root = this.physicalRootOrBlock();
     // SelectorHub: p-inputtext under Unit/Lot row — resolve via label, not global class list.
     const afterLabel = root
@@ -1246,6 +1262,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async selectPhysicalStreetType(optionName: string) {
+    this.logStep(`Selected physical street type: ${this.stepValueDisplay(optionName)}`);
     const root = this.physicalRootOrBlock();
     await this.openPhysicalDropdownByLabelAndPick(
       /Street Type|Street suffix|Suffix/i,
@@ -1255,6 +1272,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPhysicalStreetDirection(value: string) {
+    this.logStep(`Entered physical street direction as ${this.stepValueDisplay(value)}`);
     const root = this.physicalRootOrBlock();
     const gen = root
       .locator("text")
@@ -1276,6 +1294,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPhysicalRuralDelivery(value: string) {
+    this.logStep(`Entered physical rural delivery as ${this.stepValueDisplay(value)}`);
     const root = this.physicalRootOrBlock();
     const hub = this.physicalHubRowInput(22);
     if (await hub.isVisible({ timeout: 2500 }).catch(() => false)) {
@@ -1286,6 +1305,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPhysicalSuburb(value: string) {
+    this.logStep(`Entered physical suburb as ${this.stepValueDisplay(value)}`);
     const root = this.physicalRootOrBlock();
     const hub = this.physicalHubRowInput(24);
     if (await hub.isVisible({ timeout: 2500 }).catch(() => false)) {
@@ -1296,6 +1316,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPhysicalPostcode(value: string) {
+    this.logStep(`Entered physical postcode as ${this.stepValueDisplay(value)}`);
     const root = this.physicalRootOrBlock();
     const hub = this.physicalHubRowInput(26);
     if (await hub.isVisible({ timeout: 2500 }).catch(() => false)) {
@@ -1306,14 +1327,17 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterStreetNumber(streetNumber: string) {
+    this.logStep(`Entered street number as ${this.stepValueDisplay(streetNumber)}`);
     await this.streetNumberInput.fill(streetNumber);
   }
 
   async enterStreetName(streetName: string) {
+    this.logStep(`Entered street name as ${this.stepValueDisplay(streetName)}`);
     await this.streetNameInput.fill(streetName);
   }
 
   async enterCity(city: string) {
+    this.logStep(`Entered city as ${this.stepValueDisplay(city)}`);
     if (!city.trim()) {
       await this.cityInput.click({ force: true }).catch(() => {});
       await this.cityInput.fill("");
@@ -1339,6 +1363,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async chooseCountry(country: string) {
+    this.logStep(`Chose country: ${this.stepValueDisplay(country)}`);
     await this.countryDropdown.scrollIntoViewIfNeeded();
     await this.countryDropdown.click({ timeout: 30000 });
     await this.page.getByRole("option", { name: country, exact: true }).click();
@@ -1349,6 +1374,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async fillPhysicalSearch(query: string) {
+    this.logStep(`Filled physical search as ${this.stepValueDisplay(query)}`);
     await this.physicalSearchInput.click();
     await this.physicalSearchInput.fill(query);
   }
@@ -1696,6 +1722,7 @@ export class DOAddressDetailsPage extends BasePage {
    * `app-business-address-details` rather than inside `app-sole-trade`).
    */
   async clickCreateNewAndCopyToPreviousAddressToggle(): Promise<void> {
+    this.logStep("Click Create New And Copy To Previous Address Toggle");
     const labelRx = /Create new and copy to previous\s*Address/i;
     // Same order as Reuse for Postal: `toggle-checkbox` row → `app-sole-trade` slider index (0 here, 1 for postal).
     if (await this.clickCreateNewAndCopyToggleOnce()) return;
@@ -1737,6 +1764,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async clickReuseForPostalAddressToggle(): Promise<void> {
+    this.logStep("Click Reuse For Postal Address Toggle");
     const ok = await this.clickReuseForPostalAddressToggleOnce();
     if (!ok) {
       throw new Error(
@@ -1763,6 +1791,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** True when PrimeNG switch is on (reuse physical for registered address). */
   async isReuseForRegisterAddressYes(): Promise<boolean> {
+    this.logStep("Is Reuse For Register Address Yes");
     if (!(await this.businessPhysicalAddressRoot.isVisible({ timeout: 2000 }).catch(() => false)))
       return false;
     const row = this.registerReuseToggleRow();
@@ -1787,6 +1816,7 @@ export class DOAddressDetailsPage extends BasePage {
    * {@link fillPreviousPhysicalRequiredIfPresent} so those steps auto-skip.
    */
   async ensureReuseForRegisterAddressYes(): Promise<void> {
+    this.logStep("Ensure Reuse For Register Address Yes");
     await this.businessPhysicalAddressRoot.waitFor({
       state: "visible",
       timeout: 30000,
@@ -1850,6 +1880,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** When Previous Physical is shown, keep **Overseas Address** off unless the test needs it on. */
   async ensureOverseasAddressNoIfPreviousPhysicalVisible(): Promise<void> {
+    this.logStep("Ensure Overseas Address No If Previous Physical Visible");
     const host = (await this.previousAddressRoot.isVisible({ timeout: 2000 }).catch(() => false))
       ? this.previousAddressRoot
       : (await this.businessPreviousPhysicalCard.isVisible({ timeout: 2000 }).catch(() => false))
@@ -1874,6 +1905,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** CSA-B business physical card — “Reuse for Register Address” (single flip). */
   async clickReuseForRegisterAddressToggle(): Promise<void> {
+    this.logStep("Click Reuse For Register Address Toggle");
     await this.businessPhysicalAddressRoot.waitFor({
       state: "visible",
       timeout: 15000,
@@ -1896,6 +1928,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async clickReuseForRegisterAddressToggleIfPresent(): Promise<void> {
+    this.logStep("Click Reuse For Register Address Toggle If Present");
     if (
       await this.businessPhysicalAddressRoot.isVisible({ timeout: 3000 }).catch(() => false)
     ) {
@@ -1907,6 +1940,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** Clicks reuse toggle only when shown (some products omit postal reuse). */
   async clickReuseForPostalAddressToggleIfPresent(): Promise<void> {
+    this.logStep("Click Reuse For Postal Address Toggle If Present");
     const row = await this.resolveReuseForPostalAddressToggleRow();
     if (row) {
       await this.clickToggleCheckboxRow(row);
@@ -1920,6 +1954,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** `app-previous-address` or CSA-B card under `app-business-address-details`. */
   async isPreviousPhysicalAddressVisible(timeout = 4000): Promise<boolean> {
+    this.logStep("Is Previous Physical Address Visible");
     if (await this.previousAddressRoot.isVisible({ timeout }).catch(() => false))
       return true;
     return this.businessPreviousPhysicalCard.isVisible({ timeout }).catch(() => false);
@@ -1927,6 +1962,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** Separate postal block (e.g. when reuse is off) — not present on all flows. */
   async isPostalAddressSectionVisible(timeout = 4000): Promise<boolean> {
+    this.logStep("Is Postal Address Section Visible");
     if (await this.postalSearchInput.isVisible({ timeout }).catch(() => false))
       return true;
     return this.page
@@ -1969,6 +2005,7 @@ export class DOAddressDetailsPage extends BasePage {
    * Toggles "Reuse for Postal Address" until the separate Postal Address card is visible.
    */
   async ensureManualPostalAddressVisible(): Promise<void> {
+    this.logStep("Ensure Manual Postal Address Visible");
     if (await this.isManualPostalBlockReady()) return;
 
     for (let i = 0; i < 6; i++) {
@@ -2099,6 +2136,9 @@ export class DOAddressDetailsPage extends BasePage {
     addressLine: string;
     country: string;
   }): Promise<void> {
+    this.logStep(
+      `Filled postal address: ${this.stepValueDisplay(data.addressLine)}, country ${this.stepValueDisplay(data.country)}`,
+    );
     await this.ensureManualPostalAddressVisible();
     const card = this.postalAddressCard();
     await card.waitFor({ state: "visible", timeout: 20000 });
@@ -2212,6 +2252,9 @@ export class DOAddressDetailsPage extends BasePage {
    * Optional properties are best-effort (ignored if that row is missing for the product).
    */
   async fillPhysicalAddressManual(data: DOPhysicalAddressManualData): Promise<void> {
+    this.logStep(
+      `Filled physical address manual: ${this.stepValueDisplay(data.streetNumber)} ${this.stepValueDisplay(data.streetName)}, ${this.stepValueDisplay(data.city)}`,
+    );
     await this.physicalAddressRoot.scrollIntoViewIfNeeded().catch(() => {});
     await this.enterStreetNumber(data.streetNumber);
     await this.enterStreetName(data.streetName);
@@ -2247,6 +2290,7 @@ export class DOAddressDetailsPage extends BasePage {
   async fillPreviousPhysicalRequiredIfPresent(
     fields: DOPreviousPhysicalRequiredData | null | undefined,
   ): Promise<void> {
+    this.logStep("Fill Previous Physical Required If Present");
     if (fields == null) return;
     if (!(await this.isPreviousPhysicalAddressVisible(5000))) return;
     await this.fillPreviousPhysicalRequired(fields);
@@ -2259,6 +2303,7 @@ export class DOAddressDetailsPage extends BasePage {
   async fillPostalAddressManualIfPresent(
     data: DOPostalAddressManualData | null | undefined,
   ): Promise<void> {
+    this.logStep("Fill Postal Address Manual If Present");
     if (data == null) return;
     if (!(await this.isPostalAddressSectionVisible(5000))) return;
     await this.enterPostalStreetNumber(data.streetNumber).catch(() => {});
@@ -2268,11 +2313,15 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async fillPreviousSearch(query: string) {
+    this.logStep(`Filled previous address search as ${this.stepValueDisplay(query)}`);
     await this.previousSearchInput.click();
     await this.previousSearchInput.fill(query);
   }
 
   async previousTimeAtAddress(year: string, month: string, scope?: Locator): Promise<void> {
+    this.logStep(
+      `Set previous time at address: years ${this.stepValueDisplay(year)}, months ${this.stepValueDisplay(month)}`,
+    );
     const root = await this.resolveOptionalPreviousPhysicalScope(scope);
     await root.waitFor({
       state: "visible",
@@ -2339,6 +2388,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPreviousStreetNumber(streetNumber: string, scope?: Locator): Promise<void> {
+    this.logStep(`Entered previous street number as ${this.stepValueDisplay(streetNumber)}`);
     const host = await this.resolveOptionalPreviousPhysicalScope(scope);
     const input = host
       .locator("text")
@@ -2358,6 +2408,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPreviousStreetName(streetName: string, scope?: Locator): Promise<void> {
+    this.logStep(`Entered previous street name as ${this.stepValueDisplay(streetName)}`);
     const host = await this.resolveOptionalPreviousPhysicalScope(scope);
     const input = host
       .locator("text")
@@ -2377,6 +2428,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterPreviousCity(city: string, scope?: Locator): Promise<void> {
+    this.logStep(`Entered previous city as ${this.stepValueDisplay(city)}`);
     const root = await this.resolveOptionalPreviousPhysicalScope(scope);
     await root.scrollIntoViewIfNeeded();
 
@@ -2441,6 +2493,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async choosePreviousCountry(country: string, scope?: Locator): Promise<void> {
+    this.logStep(`Chose previous country: ${this.stepValueDisplay(country)}`);
     const dd =
       scope != null
         ? scope.getByRole("button", { name: "dropdown trigger" }).last()
@@ -2490,6 +2543,9 @@ export class DOAddressDetailsPage extends BasePage {
   async fillPreviousPhysicalRequired(
     fields: DOPreviousPhysicalRequiredData,
   ): Promise<void> {
+    this.logStep(
+      `Filled previous physical required: ${this.stepValueDisplay(fields.streetNumber)} ${this.stepValueDisplay(fields.streetName)}, ${this.stepValueDisplay(fields.city)}, ${this.stepValueDisplay(fields.country)}`,
+    );
     const root = await this.resolvePreviousPhysicalFillRoot();
     await root.waitFor({ state: "visible", timeout: 60000 });
     await root.scrollIntoViewIfNeeded();
@@ -2505,27 +2561,33 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async clickPostalStreetType() {
+    this.logStep("Click Postal Street Type");
     await this.page.getByRole("radio", { name: "Street" }).click();
   }
 
   async fillPostalSearch(query: string) {
+    this.logStep(`Filled postal search as ${this.stepValueDisplay(query)}`);
     await this.postalSearchInput.click();
     await this.postalSearchInput.fill(query);
   }
 
   async enterPostalStreetNumber(streetNumber: string) {
+    this.logStep(`Entered postal street number as ${this.stepValueDisplay(streetNumber)}`);
     await this.postalStreetNumberInput.fill(streetNumber);
   }
 
   async enterPostalStreetName(streetName: string) {
+    this.logStep(`Entered postal street name as ${this.stepValueDisplay(streetName)}`);
     await this.postalStreetNameInput.fill(streetName);
   }
 
   async enterPostalCity(city: string) {
+    this.logStep(`Entered postal city as ${this.stepValueDisplay(city)}`);
     await this.postalCityInput.fill(city);
   }
 
   async choosePostalCountry(country: string) {
+    this.logStep(`Chose postal country: ${this.stepValueDisplay(country)}`);
     const host = this.postalFormHost();
     const dd = host
       .getByRole("button", { name: "dropdown trigger" })
@@ -2552,6 +2614,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async clickNextButton() {
+    this.logStep("Click Next Button");
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     await this.nextButton.scrollIntoViewIfNeeded();
     for (let i = 0; i < 120; i++) {
@@ -2662,6 +2725,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** Open **Residence Type** on the current physical card, then **Escape** without selecting (required-field validation). */
   async touchPhysicalResidenceTypeWithoutSelection(): Promise<void> {
+    this.logStep("Touch Physical Residence Type Without Selection");
     await this.page.keyboard.press("Escape").catch(() => {});
     const root = await this.activePhysicalHost();
     await root.waitFor({ state: "visible", timeout: 60_000 });
@@ -2683,6 +2747,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** Open **Residence Type** on **Previous Physical** (when shown), then **Escape** without selecting. */
   async touchPreviousPhysicalResidenceTypeWithoutSelection(): Promise<void> {
+    this.logStep("Touch Previous Physical Residence Type Without Selection");
     if (!(await this.isPreviousPhysicalAddressVisible(5_000))) {
       return;
     }
@@ -2707,6 +2772,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   /** Outlined **Save** on Address Details (validates current + previous cards on this step). */
   async clickSaveAddressDetails(): Promise<void> {
+    this.logStep("Click Save Address Details");
     await this.saveAddressDetailsButton.waitFor({
       state: "visible",
       timeout: 30_000,
@@ -2716,6 +2782,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async expectPhysicalAddressRequiredValidationMessages(): Promise<void> {
+    this.logStep("Expect Physical Address Required Validation Messages");
     await this.scrollPhysicalAddressSectionIntoViewForValidation();
     const host = await this.activePhysicalHost();
     const root = this.physicalAddressBlock.or(host);
@@ -2729,6 +2796,7 @@ export class DOAddressDetailsPage extends BasePage {
    * If **Residence Type** is not present on the card, it is not asserted.
    */
   async expectPreviousPhysicalAddressRequiredValidationMessages(): Promise<void> {
+    this.logStep("Expect Previous Physical Address Required Validation Messages");
     if (!(await this.isPreviousPhysicalAddressVisible(2_000))) {
       return;
     }
@@ -2743,6 +2811,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async waitForPhysicalAddressStep() {
+    this.logStep("Wait For Physical Address Step");
     const soleSearch = this.page
       .locator("app-sole-trade")
       .locator('input[name="physicalSearchValue"]')
@@ -2762,6 +2831,7 @@ export class DOAddressDetailsPage extends BasePage {
   // -------------------------------------------------------------------------
 
   async waitForTrustAddressStep(): Promise<void> {
+    this.logStep("Wait For Trust Address Step");
     await this.trustPhysicalAddressRoot.waitFor({ state: "visible", timeout: 120_000 });
     await expect(this.trustPhysicalAddressRoot.getByText(/^Physical Address$/i).first()).toBeVisible({
       timeout: 60_000,
@@ -2832,6 +2902,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async setTrustCopyPrimaryBorrowerAddressOn(): Promise<void> {
+    this.logStep("Set Trust Copy Primary Borrower Address On");
     const grid = this.trustAddressTopToggleGrid;
     const scope =
       (await grid.isVisible({ timeout: 2_000 }).catch(() => false)) ? grid : this.page;
@@ -2843,6 +2914,7 @@ export class DOAddressDetailsPage extends BasePage {
    * @returns `true` if the toggle was found and turned on.
    */
   async setTrustCreateNewAndCopyToPreviousAddressOnIfPresent(): Promise<boolean> {
+    this.logStep("Set Trust Create New And Copy To Previous Address On If Present");
     const labelRx = /Create new and copy to previous\s*Address/i;
     await this.waitForTrustAddressUiSettled();
     if (!(await this.isTrustToggleLabelVisible(labelRx))) {
@@ -2866,6 +2938,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async setTrustReuseForPostalAddressOn(): Promise<void> {
+    this.logStep("Set Trust Reuse For Postal Address On");
     await this.ensureTrustSwitchOnNearLabel(
       this.trustPhysicalAddressRoot,
       /Reuse for Postal Address/i,
@@ -2873,6 +2946,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async setTrustReuseForRegisteredAddressOn(): Promise<void> {
+    this.logStep("Set Trust Reuse For Registered Address On");
     await this.ensureTrustSwitchOnNearLabel(
       this.trustPhysicalAddressRoot,
       /Reuse for Registered Address/i,
@@ -2884,6 +2958,7 @@ export class DOAddressDetailsPage extends BasePage {
    * Skips “Create new and copy to previous Address” when that label is not on the step (TLC trust).
    */
   async enableAllTrustAddressCopyAndReuseToggles(): Promise<void> {
+    this.logStep("Enable All Trust Address Copy And Reuse Toggles");
     await this.setTrustCopyPrimaryBorrowerAddressOn();
     await this.waitForTrustAddressUiSettled();
     await this.setTrustCreateNewAndCopyToPreviousAddressOnIfPresent();
@@ -2922,6 +2997,7 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async expectTrustAddressDataPopulatedAfterToggles(): Promise<void> {
+    this.logStep("Expect Trust Address Data Populated After Toggles");
     await this.expectTrustAddressSectionPopulated(this.trustPhysicalAddressRoot);
     if (await this.trustPreviousPhysicalRoot.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await this.expectTrustAddressSectionPopulated(this.trustPreviousPhysicalRoot);
@@ -2941,10 +3017,16 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterTrustPhysicalTimeAtAddress(years: string, months: string): Promise<void> {
+    this.logStep(
+      `Entered trust physical time at address: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
     await this.fillTrustTimeAtAddressInSection(this.trustPhysicalAddressRoot, years, months);
   }
 
   async enterTrustPreviousPhysicalTimeAtAddress(years: string, months: string): Promise<void> {
+    this.logStep(
+      `Entered trust previous physical time at address: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
     if (!(await this.trustPreviousPhysicalRoot.isVisible({ timeout: 5_000 }).catch(() => false))) {
       return;
     }
@@ -2952,6 +3034,9 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterTrustRegisteredTimeAtAddress(years: string, months: string): Promise<void> {
+    this.logStep(
+      `Entered trust registered time at address: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
     await this.fillTrustTimeAtAddressInSection(this.trustRegisteredAddressRoot, years, months);
   }
 }

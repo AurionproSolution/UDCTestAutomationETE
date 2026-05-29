@@ -16,6 +16,10 @@ export class DOReferenceDetailsPage extends BasePage {
     this.submitButton = page.getByRole("button", { name: "Submit" }).last();
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Reference details";
+  }
+
   /**
    * “Add contact” modal — scoped by **Contact Type** so we never click inside the wrong
    * `role=dialog` (toast, confirm, etc.). Prefer **last** match when several exist in the DOM.
@@ -28,6 +32,7 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async waitForReferenceDetailsStep(): Promise<void> {
+    this.logStep("Wait For Reference Details Step");
     await this.addContactDetailsButton.waitFor({
       state: "visible",
       timeout: 120000,
@@ -35,6 +40,7 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async clickAddContactDetails(): Promise<void> {
+    this.logStep("Click Add Contact Details");
     await this.addContactDetailsButton.scrollIntoViewIfNeeded();
     await this.addContactDetailsButton.click({ timeout: 30000 });
     await this.contactAddModal().waitFor({ state: "visible", timeout: 20000 });
@@ -80,6 +86,7 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async selectContactType(optionName: string): Promise<void> {
+    this.logStep(`Selected contact type: ${this.stepValueDisplay(optionName)}`);
     await this.selectDropdownInRoot(
       this.contactAddModal(),
       "Contact Type",
@@ -107,6 +114,7 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async enterContactFirstName(value: string): Promise<void> {
+    this.logStep(`Entered contact first name as ${this.stepValueDisplay(value)}`);
     const input = this.contactNameInput(this.contactAddModal(), "first");
     await input.waitFor({ state: "visible", timeout: 15000 });
     await input.click();
@@ -114,6 +122,7 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async enterContactLastName(value: string): Promise<void> {
+    this.logStep(`Entered contact last name as ${this.stepValueDisplay(value)}`);
     const dialog = this.contactAddModal();
     const byLabelRow = this.contactNameInput(dialog, "last");
     if (await byLabelRow.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -138,6 +147,7 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async clickAddContactInModal(): Promise<void> {
+    this.logStep("Click Add Contact In Modal");
     const dialog = this.contactAddModal();
     await dialog.waitFor({ state: "visible", timeout: 20000 });
 
@@ -167,6 +177,7 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async confirmCustomerDetailsCorrect(): Promise<void> {
+    this.logStep("Confirm Customer Details Correct");
     const labelRx = /I confirm that all customer details are correct/i;
 
     // PrimeNG: native `input` is often `hiddenInput` / off-viewport — `locator.check()` still
@@ -201,6 +212,7 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   async clickSubmitButton(): Promise<void> {
+    this.logStep("Click Submit Button");
     await this.submitButton.waitFor({ state: "visible", timeout: 60000 });
     await this.submitButton.scrollIntoViewIfNeeded();
     await this.submitButton.click();

@@ -31,7 +31,12 @@ export class DOBusinessDetailsPage extends BasePage {
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Business details";
+  }
+
   async waitForBusinessDetailsStep(): Promise<void> {
+    this.logStep("Wait For Business Details Step");
     await this.businessRoot.waitFor({ state: "visible", timeout: 120000 });
     await this.businessRoot
       .getByText(/Organisation Type/i)
@@ -169,6 +174,7 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async selectOrganisationType(optionName: string): Promise<void> {
+    this.logStep(`Selected organisation type: ${this.stepValueDisplay(optionName)}`);
     await this.selectDropdownByLabel(this.businessRoot, "Organisation Type");
     await this.pickDropdownOption(optionName, true);
   }
@@ -178,6 +184,7 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async enterLegalName(value: string): Promise<void> {
+    this.logStep(`Entered legal name as ${this.stepValueDisplay(value)}`);
     const primary = this.floatTextInput(/^Legal Name/i);
     if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
       await primary.click();
@@ -194,6 +201,7 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async enterTradingName(value: string): Promise<void> {
+    this.logStep(`Entered trading name as ${this.stepValueDisplay(value)}`);
     const primary = this.floatTextInput(/^Trading Name/i);
     if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
       await primary.click();
@@ -208,6 +216,7 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async enterRegisteredCompanyNumber(value: string): Promise<void> {
+    this.logStep(`Entered registered company number as ${this.stepValueDisplay(value)}`);
     const primary = this.floatTextInput(/Registered Company Number/i);
     if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
       await primary.fill(value);
@@ -223,6 +232,7 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async enterNzBusinessNumber(value: string): Promise<void> {
+    this.logStep(`Entered NZ business number as ${this.stepValueDisplay(value)}`);
     const primary = this.floatTextInput(/New Zealand Business Number/i);
     if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
       await primary.fill(value);
@@ -238,6 +248,7 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async enterGstNumber(value: string): Promise<void> {
+    this.logStep(`Entered GST number as ${this.stepValueDisplay(value)}`);
     const primary = this.floatTextInput(/^GST Number/i);
     if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
       await primary.fill(value);
@@ -251,22 +262,28 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async fillBusinessDescription(note: string): Promise<void> {
+    this.logStep(`Filled business description as ${this.stepValueDisplay(note)}`);
     const ta = this.businessRoot.locator("#note").first();
     await ta.waitFor({ state: "visible", timeout: 15000 });
     await ta.fill(note);
   }
 
   async selectPrimaryNatureOfBusiness(optionText: string): Promise<void> {
+    this.logStep(`Selected primary nature of business: ${this.stepValueDisplay(optionText)}`);
     await this.selectDropdownByLabel(this.businessRoot, "Primary Nature of Business");
     await this.pickDropdownOption(optionText, false);
   }
 
   async selectSourceOfWealth(optionName: string): Promise<void> {
+    this.logStep(`Selected source of wealth: ${this.stepValueDisplay(optionName)}`);
     await this.selectDropdownByLabel(this.businessRoot, "Source of Wealth");
     await this.pickDropdownOption(optionName, true);
   }
 
   async enterTimeInBusiness(years: string, months: string): Promise<void> {
+    this.logStep(
+      `Entered time in business: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
     const yearsAnchor = this.businessRoot.getByText(/^Years$/i).first();
     const gridInputs = yearsAnchor
       .locator(
@@ -294,6 +311,7 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async enterBusinessAreaCode(areaCode: string): Promise<void> {
+    this.logStep(`Entered business area code as ${this.stepValueDisplay(areaCode)}`);
     const scoped = this.businessRoot.locator(
       "input.p-inputtext.p-component.p-element.w-full",
     ).first();
@@ -302,6 +320,7 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async enterBusinessPhoneNumber(phone: string): Promise<void> {
+    this.logStep(`Entered business phone number as ${this.stepValueDisplay(phone)}`);
     const byRole = this.businessRoot.getByRole("textbox", { name: /Phone number/i });
     if (await byRole.isVisible({ timeout: 4000 }).catch(() => false)) {
       await byRole.fill(phone);
@@ -316,6 +335,7 @@ export class DOBusinessDetailsPage extends BasePage {
    * @param emailFieldOverride optional Selector Hub / custom locator from the test (see CSABAssigned).
    */
   async enterBusinessEmail(email: string, emailFieldOverride?: Locator): Promise<void> {
+    this.logStep(`Entered business email as ${this.stepValueDisplay(email)}`);
     if (emailFieldOverride) {
       await emailFieldOverride.waitFor({ state: "visible", timeout: 30000 });
       await this.fillElement(emailFieldOverride, email);
@@ -433,6 +453,7 @@ export class DOBusinessDetailsPage extends BasePage {
   }
 
   async clickNextButton(): Promise<void> {
+    this.logStep("Click Next Button");
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     await this.nextButton.scrollIntoViewIfNeeded();
     await this.nextButton.click();

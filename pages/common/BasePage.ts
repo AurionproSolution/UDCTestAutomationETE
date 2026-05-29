@@ -5,6 +5,7 @@
 
 import { Locator, Page, expect } from "@playwright/test";
 import { CommonUtils } from "../../utils/commonUtils";
+import { logTestStep } from "../../utils/testStepLog";
 
 export class BasePage {
   readonly page: Page;
@@ -41,7 +42,7 @@ export class BasePage {
    * Navigate to a URL
    */
   async navigateTo(url: string): Promise<void> {
-    console.log(`📍 Navigating to: ${url}`);
+    this.log(`Navigating to: ${url}`);
     await this.page.goto(url, { waitUntil: "domcontentloaded" });
   }
 
@@ -173,6 +174,15 @@ export class BasePage {
   // ============ Screenshot & Debug ============
 
   /**
+   * Format a test-supplied value for step logs (trim, collapse spaces, truncate). Do not pass secrets.
+   */
+  protected stepValueDisplay(value: string | number, maxLen = 120): string {
+    const t = String(value).replace(/\s+/g, " ").trim();
+    if (!t) return "(empty)";
+    return t.length > maxLen ? `${t.slice(0, maxLen - 3)}...` : t;
+  }
+
+  /**
    * Take screenshot
    */
   async takeScreenshot(name: string): Promise<void> {
@@ -180,9 +190,23 @@ export class BasePage {
   }
 
   /**
-   * Log action for debugging
+   * Short label for step logs. Override in page objects, e.g. `"Standard quote — Personal details"`.
+   */
+  protected stepLogPrefix(): string {
+    return this.constructor.name;
+  }
+
+  /**
+   * Narrative step with {@link stepLogPrefix} (IDE console, Playwright annotations, Ortoni when stdIO is on).
+   */
+  protected logStep(action: string): void {
+    this.log(`${this.stepLogPrefix()}: ${action}`);
+  }
+
+  /**
+   * Log a narrative step (IDE console, Playwright annotations, Ortoni logs when stdIO is enabled).
    */
   log(message: string): void {
-    console.log(`[${new Date().toISOString()}] ${message}`);
+    logTestStep(message);
   }
 }

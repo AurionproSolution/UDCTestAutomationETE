@@ -20,7 +20,7 @@ const TLC_DEALER = "Armstrong Prestige Wellington";
 
 test(
   "DO Portal - CSA Quick Quote — PDF regression (single run)",
-  { tag: ["@do", "@sanity", "@regression"] },
+  { tag: ["@do", "@regression"] },
   async ({ page }) => {
     test.setTimeout(1_800_000); // 30 minutes
 

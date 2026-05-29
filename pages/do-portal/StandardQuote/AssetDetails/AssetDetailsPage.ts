@@ -224,10 +224,15 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Asset details";
+  }
+
   /**
    * Open the product dropdown in the quote dialog
    */
   async openProductDropdown(): Promise<void> {
+    this.logStep("Opened product dropdown");
     const productDropdown = this.page.locator(
       `//span//label[contains(text(), 'Product')]/following-sibling::div//span`,
     );
@@ -238,6 +243,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Choose an item from the product dropdown list
    */
   async selectProduct(productName: string): Promise<void> {
+    this.logStep(`Selected product: ${this.stepValueDisplay(productName)}`);
     await this.page.getByRole("option", { name: productName }).click();
   }
 
@@ -245,6 +251,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Open the program dropdown in the quote dialog
    */
   async openProgramDropdown(): Promise<void> {
+    this.logStep("Opened program dropdown");
     const programDropdown = this.page.locator(
       `//span//label[contains(text(), 'Program')]/following-sibling::div//span`,
     );
@@ -255,6 +262,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Choose an item from the program dropdown list
    */
   async selectProgram(programName: string): Promise<void> {
+    this.logStep(`Selected program: ${this.stepValueDisplay(programName)}`);
     await this.page.getByText(programName).click();
   }
 
@@ -262,6 +270,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Convenience wrapper: open product dropdown and select entry in one call
    */
   async chooseProduct(productName: string): Promise<void> {
+    this.logStep(`Chose product: ${this.stepValueDisplay(productName)}`);
     await this.openProductDropdown();
     await this.selectProduct(productName);
   }
@@ -270,6 +279,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Convenience wrapper: open program dropdown and select entry in one call
    */
   async chooseProgram(programName: string): Promise<void> {
+    this.logStep(`Chose program: ${this.stepValueDisplay(programName)}`);
     await this.openProgramDropdown();
     await this.selectProgram(programName);
   }
@@ -281,6 +291,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** After navigation to Asset Details: network settle + cash price field visible. */
   async waitForAssetDetailsStepReady(): Promise<void> {
+    this.logStep("Wait For Asset Details Step Ready");
     await this.page.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => {});
     await expect(this.cashPriceOfAssetInputField).toBeVisible({ timeout: 90_000 });
   }
@@ -292,6 +303,9 @@ export class DOAssetDetailsPage extends BasePage {
     productName: string,
     programName: string,
   ): Promise<void> {
+    this.logStep(
+      `Expect product/program from Quick Quote visible: ${this.stepValueDisplay(productName)} / ${this.stepValueDisplay(programName)}`,
+    );
     const root = this.standardQuoteRoot();
     await expect(root.getByText(productName).first()).toBeVisible({ timeout: 30_000 });
     await expect(root.getByText(programName).first()).toBeVisible({ timeout: 30_000 });
@@ -324,6 +338,7 @@ export class DOAssetDetailsPage extends BasePage {
     frequencyText: RegExp;
     interestRate: RegExp;
   }): Promise<void> {
+    this.logStep("Expect finance carried from Quick Quote");
     const root = this.standardQuoteRoot();
     await expect(this.cashPriceOfAssetInputField).toHaveValue(opts.cashPrice, { timeout: 30_000 });
     // Term: CSA uses PrimeNG dropdown (often not `label`→`following-sibling::p-dropdown`); TLC uses spinbutton.
@@ -369,6 +384,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Call before any interaction with {@link additionalFundsInput} / purpose.
    */
   async waitForAdditionalFundsSectionReady(): Promise<void> {
+    this.logStep("Wait For Additional Funds Section Ready");
     await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
     await this.page.waitForLoadState("networkidle", { timeout: 55_000 }).catch(() => {});
@@ -404,6 +420,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Additional Funds row visible on load; masked value reads as zero (e.g. `$0.00`). */
   async expectAdditionalFundsVisibleOnLoad(): Promise<void> {
+    this.logStep("Expect Additional Funds Visible On Load");
     await this.waitForAdditionalFundsSectionReady();
     const v = (await this.additionalFundsInput.inputValue()).trim();
     if (v.length > 0) {
@@ -413,6 +430,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async enterAdditionalFunds(amount: string): Promise<void> {
+    this.logStep(`Entered additional funds as ${this.stepValueDisplay(amount)}`);
     await this.waitForAdditionalFundsSectionReady();
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     await this.additionalFundsInput.scrollIntoViewIfNeeded();
@@ -421,6 +439,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async clearAdditionalFunds(): Promise<void> {
+    this.logStep("Clear Additional Funds");
     await this.waitForAdditionalFundsSectionReady();
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     await this.additionalFundsInput.scrollIntoViewIfNeeded();
@@ -431,6 +450,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async enterAdditionalFundsPurpose(text: string): Promise<void> {
+    this.logStep(`Entered additional funds purpose as ${this.stepValueDisplay(text)}`);
     await this.waitForAdditionalFundsSectionReady();
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     await this.additionalFundsPurposeTextarea.scrollIntoViewIfNeeded();
@@ -438,6 +458,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async clearAdditionalFundsPurpose(): Promise<void> {
+    this.logStep("Clear Additional Funds Purpose");
     await this.waitForAdditionalFundsSectionReady();
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     await this.additionalFundsPurposeTextarea.scrollIntoViewIfNeeded();
@@ -446,6 +467,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Outlined **Save** on the Standard Quote step (inside `lib-stepper` when present). */
   async clickSaveStandardQuoteStep(): Promise<void> {
+    this.logStep("Click Save Standard Quote Step");
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
 
     const stepper = this.page.locator("lib-stepper").first();
@@ -492,6 +514,7 @@ export class DOAssetDetailsPage extends BasePage {
    * on or near the purpose field (copy varies by build).
    */
   async expectAdditionalFundsPurposeInlineErrorVisible(): Promise<void> {
+    this.logStep("Expect Additional Funds Purpose Inline Error Visible");
     await this.waitForAdditionalFundsSectionReady();
     const root = this.additionalFundsRoot;
     const inNote = root
@@ -509,6 +532,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async enterTradeAmount(amount: string): Promise<void> {
+    this.logStep(`Entered trade amount as ${this.stepValueDisplay(amount)}`);
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     await this.tradeAmountInput.scrollIntoViewIfNeeded();
     await this.tradeAmountInput.click({ force: true });
@@ -519,6 +543,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async enterSettlementAmount(amount: string): Promise<void> {
+    this.logStep(`Entered settlement amount as ${this.stepValueDisplay(amount)}`);
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     await this.settlementAmountInput.scrollIntoViewIfNeeded();
     await this.settlementAmountInput.click({ force: true });
@@ -530,6 +555,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Net Trade Amount (often read-only); assert displayed text matches `pattern` (product rules vary — may mirror Trade until Settlement is applied). */
   async expectNetTradeAmountPattern(pattern: RegExp): Promise<void> {
+    this.logStep("Expect Net Trade Amount Pattern");
     await expect(this.netTradeAmountDisplayed).toBeVisible({ timeout: 15_000 });
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     await expect
@@ -541,6 +567,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** UDC Establishment Fee: pre-populated from program; assert editable only when the control allows editing. */
   async expectUdcEstablishmentFeePrePopulatedFromProgram(): Promise<void> {
+    this.logStep("Expect Udc Establishment Fee Pre Populated From Program");
     const fee = this.udcEstablishmentFeeInputField;
     await expect(fee).toBeVisible({ timeout: 20_000 });
     const raw = (await fee.inputValue()).trim();
@@ -555,6 +582,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Loan Date must be set; fill First Payment from loan date when the UI left it empty (required for Calculate). */
   async ensureLoanDateAndFirstPaymentReadyForCalculate(): Promise<void> {
+    this.logStep("Ensure Loan Date And First Payment Ready For Calculate");
     const loanIn = this.loanDate;
     const firstIn = this.firstPaymentDate;
     await expect(loanIn).toBeVisible({ timeout: 15_000 });
@@ -572,6 +600,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Clear origination reference and run **Calculate** (allowed with blank origin on some CSA builds). */
   async calculateWithOriginationBlank(): Promise<void> {
+    this.logStep("Calculate With Origination Blank");
     await this.clearOriginationReferences();
     await this.clickCalculateButton();
     await expect(this.standardQuoteRoot()).toBeVisible();
@@ -581,6 +610,9 @@ export class DOAssetDetailsPage extends BasePage {
    * Set Originator Reference; when Loan Purpose control exists (read-only CSA), expect it blank.
    */
   async enterOriginationReferenceAndExpectLoanPurposeBlank(origRef: string): Promise<void> {
+    this.logStep(
+      `Entered origination reference (expect loan purpose blank) as ${this.stepValueDisplay(origRef)}`,
+    );
     await this.enterOriginationReference(origRef);
     const root = this.standardQuoteRoot();
     const loanPurposeInput = root
@@ -598,6 +630,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Dealer Origination Fee: visible and pre-populated (program setup), same pattern as UDC Establishment Fee. */
   async expectDealerOriginationFeePopulatedFromProgram(): Promise<void> {
+    this.logStep("Expect Dealer Origination Fee Populated From Program");
     const f = this.dealerOriginationFeeInputField;
     await expect(f).toBeVisible({ timeout: 20_000 });
     const raw = (await f.inputValue()).trim();
@@ -609,6 +642,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** **Total Establishment Fee** (read-only): parsed numeric equals UDC + Dealer (waits for recalculation). */
   async expectTotalEstablishmentFeeSumDollars(expectedTotal: number): Promise<void> {
+    this.logStep(`Expect total establishment fee sum: ${this.stepValueDisplay(String(expectedTotal))}`);
     const f = this.totalEstablishmentFeeInputField;
     await expect(f).toBeVisible({ timeout: 20_000 });
     const want = Math.round(expectedTotal * 100) / 100;
@@ -626,6 +660,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** PPSR Count row visible with a value; fee line (@ rate / amount) visible when rendered for this product. */
   async expectPpsrCountAndFeeLineVisible(): Promise<void> {
+    this.logStep("Expect Ppsr Count And Fee Line Visible");
     const root = this.standardQuoteRoot();
     await expect(root.getByText(/PPSR\s*Count/i).first()).toBeVisible({ timeout: 20_000 });
     const ppsrRow = root
@@ -655,6 +690,7 @@ export class DOAssetDetailsPage extends BasePage {
    * No-op if the panel is already expanded (Base Interest Rate visible).
    */
   async expandDealerFinanceSection(): Promise<void> {
+    this.logStep("Expand Dealer Finance Section");
     const root = this.standardQuoteRoot();
     if (
       await root
@@ -680,6 +716,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Prefer the a11y `region` for this block so we do not match the main **Interest Rate** % below.
    */
   async expectDealerFinanceExpandedSummary(): Promise<void> {
+    this.logStep("Expect Dealer Finance Expanded Summary");
     const root = this.standardQuoteRoot();
     const panel = root
       .getByRole("region")
@@ -738,6 +775,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async expectPpsrCountValue(expected: string): Promise<void> {
+    this.logStep(`Expect PPSR count value: ${this.stepValueDisplay(expected)}`);
     const spin = this.ppsrCountLoanDetailsSpin();
     await expect(spin).toBeVisible({ timeout: 15_000 });
     await expect(spin).toHaveValue(expected);
@@ -748,6 +786,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async fillPpsrCountLoanDetails(count: string): Promise<void> {
+    this.logStep(`Filled PPSR count (loan details) as ${this.stepValueDisplay(count)}`);
     const spin = this.ppsrCountLoanDetailsSpin();
     await spin.waitFor({ state: "visible", timeout: 15_000 });
     await spin.scrollIntoViewIfNeeded();
@@ -758,6 +797,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** LMF / Loan Maintenance Fee area (incl. Waive LMF) visible on Asset Details / totals. */
   async expectLoanMaintenanceFeeOrLmfAreaVisible(): Promise<void> {
+    this.logStep("Expect Loan Maintenance Fee Or Lmf Area Visible");
     const root = this.standardQuoteRoot();
     await expect(
       root.getByText(/Loan\s+Maintenance\s+Fee|LMF|Waive\s+LMF/i).first(),
@@ -769,6 +809,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Use for CSA when observing brand / hierarchy behaviour after edits.
    */
   async enterInterestRatePercentSimple(percentDigits: string): Promise<void> {
+    this.logStep(`Entered interest rate % (simple) as ${this.stepValueDisplay(percentDigits)}`);
     const field = this.interestRateInputField;
     const digits = percentDigits.replace(/%/g, "").trim();
     await field.waitFor({ state: "visible", timeout: 30_000 });
@@ -782,6 +823,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** After an interest edit, assert optional **Brand / hierarchy / tier** copy when the build shows it. */
   async expectBrandHierarchyOrRateHintIfShown(): Promise<void> {
+    this.logStep("Expect Brand Hierarchy Or Rate Hint If Shown");
     const root = this.standardQuoteRoot();
     const hint = root.getByText(
       /Brand|Hierarchy|Interest\s*tier|Pricing\s*tier|Rate\s*card|Subsidy|Commission|Dealer\s+buy/i,
@@ -793,6 +835,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Interest Rate control is editable (program may still re-price on Calculate). */
   async expectInterestRateEditable(): Promise<void> {
+    this.logStep("Expect Interest Rate Editable");
     await expect(this.interestRateInputField).toBeVisible({ timeout: 20_000 });
     await expect(this.interestRateInputField).toBeEditable();
   }
@@ -839,6 +882,9 @@ export class DOAssetDetailsPage extends BasePage {
     overMaxTerm: string;
     restoreTerm: string;
   }): Promise<void> {
+    this.logStep(
+      `Expect term exceeds program max then restore: over ${this.stepValueDisplay(opts.overMaxTerm)}, restore ${this.stepValueDisplay(opts.restoreTerm)}`,
+    );
     await this.termsOfFinance(opts.overMaxTerm);
     await this.clickCalculateButton();
     await this.expectTermCannotExceedProgramMaxMessageBelowTermField();
@@ -862,6 +908,7 @@ export class DOAssetDetailsPage extends BasePage {
    * **Loan Date** on Payment Summary: defaults to **today** or **tomorrow** (runner local calendar day vs field).
    */
   async expectLoanDateOnLoadTodayOrTomorrow(): Promise<void> {
+    this.logStep("Expect Loan Date On Load Today Or Tomorrow");
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     await expect(this.loanDate).toBeVisible({ timeout: 25_000 });
     const raw = (await this.loanDate.inputValue()).trim();
@@ -879,6 +926,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Balloon **$** and **%** read zero-ish on load; **Fixed** is present and unchecked. */
   async expectBalloonAmountAndFixedCheckboxOnLoad(): Promise<void> {
+    this.logStep("Expect Balloon Amount And Fixed Checkbox On Load");
     await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
     await expect(this.paymentSummaryRoot).toBeVisible({ timeout: 25_000 });
     await expect(this.balloonAmountInput).toBeVisible({ timeout: 20_000 });
@@ -893,6 +941,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async enterBalloonAmount(amount: string): Promise<void> {
+    this.logStep(`Entered balloon amount as ${this.stepValueDisplay(amount)}`);
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     await expect(this.balloonAmountInput).toBeVisible({ timeout: 20_000 });
     await this.balloonAmountInput.scrollIntoViewIfNeeded();
@@ -901,6 +950,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async expectBalloonPercentInputMatches(rx: RegExp): Promise<void> {
+    this.logStep("Expect Balloon Percent Input Matches");
     await expect(this.balloonPercentInput).toBeVisible({ timeout: 15_000 });
     await expect
       .poll(async () => (await this.balloonPercentInput.inputValue()).replace(/%/g, "").trim(), {
@@ -910,6 +960,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async enterBalloonPercent(percentDigits: string): Promise<void> {
+    this.logStep(`Entered balloon % as ${this.stepValueDisplay(percentDigits)}`);
     await expect(this.balloonPercentInput).toBeVisible({ timeout: 15_000 });
     await this.balloonPercentInput.scrollIntoViewIfNeeded();
     await this.balloonPercentInput.click({ force: true });
@@ -919,12 +970,14 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async expectBalloonAmountInputMatches(rx: RegExp): Promise<void> {
+    this.logStep("Expect Balloon Amount Input Matches");
     await expect
       .poll(async () => (await this.balloonAmountInput.inputValue()).trim(), { timeout: 12_000 })
       .toMatch(rx);
   }
 
   async checkBalloonFixedCheckbox(): Promise<void> {
+    this.logStep("Check Balloon Fixed Checkbox");
     await expect(this.balloonFixedCheckbox).toBeVisible({ timeout: 12_000 });
     await this.balloonFixedCheckbox.scrollIntoViewIfNeeded();
     await this.balloonFixedCheckbox.check({ force: true });
@@ -935,6 +988,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Last **Payment Schedule** currency row should include `pattern` (e.g. final balloon instalment).
    */
   async expectPaymentScheduleLastPaymentRowContains(pattern: RegExp): Promise<void> {
+    this.logStep("Expect Payment Schedule Last Payment Row Contains");
     const root = this.standardQuoteRoot();
     await expect(root.getByText(/Payment\s+Schedule/i).first()).toBeVisible({ timeout: 45_000 });
     const row = root
@@ -950,6 +1004,7 @@ export class DOAssetDetailsPage extends BasePage {
    * (CSA / legacy: SVG `text#text` under "Originator Reference" label in some builds.)
    */
   async enterOriginationReference(origRef: string): Promise<void> {
+    this.logStep(`Entered origination reference as ${this.stepValueDisplay(origRef)}`);
     await this.originationRefInput.fill(origRef);
   }
 
@@ -957,6 +1012,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Clears Origination / Originator Reference for validation tests (CSA SVG path or Finance Lease textbox).
    */
   async clearOriginationReferences(): Promise<void> {
+    this.logStep("Clear Origination References");
     if (await this.originationRefInput.isVisible({ timeout: 4_000 }).catch(() => false)) {
       await this.originationRefInput.click({ force: true }).catch(() => {});
       await this.originationRefInput.fill("");
@@ -1014,6 +1070,7 @@ export class DOAssetDetailsPage extends BasePage {
     origRef: string,
     skipOverlayDismiss = false,
   ): Promise<void> {
+    this.logStep(`Entered origination reference (finance lease) as ${this.stepValueDisplay(origRef)}`);
     // After add-asset dialogs close, Esc can dismiss Prime overlays — but after **Calculate** it also
     // blurs reactive fields and can make Origination flicker/clear; use skipOverlayDismiss then.
     if (!skipOverlayDismiss) {
@@ -1262,6 +1319,7 @@ export class DOAssetDetailsPage extends BasePage {
   async enterOriginationReferenceFinanceLeaseStable(
     origRef: string,
   ): Promise<void> {
+    this.logStep(`Entered origination reference (finance lease, stable) as ${this.stepValueDisplay(origRef)}`);
     await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(
       () => {},
     );
@@ -1318,6 +1376,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Enter text into the Asset input field
    */
   async enterAsset(asset: string): Promise<void> {
+    this.logStep(`Entered asset search/selection as ${this.stepValueDisplay(asset)}`);
     await this.assetInputField.click();
     await this.assetSearchField.fill(asset);
     await this.page.getByRole("option", { name: asset }).click();
@@ -1326,15 +1385,18 @@ export class DOAssetDetailsPage extends BasePage {
    * Select a condition from the Condition dropdown
    */
   async selectCondition(condition: string): Promise<void> {
+    this.logStep(`Selected condition: ${this.stepValueDisplay(condition)}`);
     await this.conditionDropdown.click();
     await this.page.getByRole("option", { name: condition }).click();
   }
 
   async scrollRecommendedRetailPriceIntoView(): Promise<void> {
+    this.logStep("Scroll Recommended Retail Price Into View");
     await this.scrollIfNeeded(this.recommendedRetailPriceInput);
   }
 
   async fillRecommendedRetailPrice(value: string): Promise<void> {
+    this.logStep(`Filled recommended retail price as ${this.stepValueDisplay(value)}`);
     await this.scrollRecommendedRetailPriceIntoView();
     await this.recommendedRetailPriceInput.click();
     await this.recommendedRetailPriceInput.fill(value);
@@ -1344,6 +1406,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Click on Asset, Insurance & Trade-in Summary hyperlink to open the summary dialog
    */
   async openAssetInsuranceTradeInSummary(): Promise<void> {
+    this.logStep("Open Asset Insurance Trade In Summary");
     await this.scrollIfNeeded(this.assetInsuranceTradeInSummaryHyperlink);
     await this.assetInsuranceTradeInSummaryHyperlink.click();
     await this.page
@@ -1358,6 +1421,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Clicks it and asserts a follow-on UI appears (extra dialog, searchbox, or trade-in copy).
    */
   async clickSearchAddTradeInAndExpectChooserOpened(): Promise<void> {
+    this.logStep("Click Search Add Trade In And Expect Chooser Opened");
     const dialog = this.page.getByRole("dialog").last();
     await dialog.waitFor({ state: "visible", timeout: 30_000 });
 
@@ -1417,6 +1481,7 @@ export class DOAssetDetailsPage extends BasePage {
    * `p-dialog-header-close`), not a generic page button.
    */
   async closeSearchTradeInAssetDialog(): Promise<void> {
+    this.logStep("Close Search Trade In Asset Dialog");
     const dlg = this.page
       .getByRole("dialog")
       .filter({ hasText: /Search Trade\s*in\s*Asset|Search\s+Trade-?\s*in\s+Asset/i })
@@ -1437,6 +1502,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Targets the top dialog after inner modals are closed (e.g. **Asset & Insurance Summary**).
    */
   async clickFrontPrimeDialogHeaderMaximizeIfVisible(): Promise<void> {
+    this.logStep("Click Front Prime Dialog Header Maximize If Visible");
     const dlg = this.page.getByRole("dialog").last();
     await dlg.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
     const btn = dlg.locator(
@@ -1452,6 +1518,7 @@ export class DOAssetDetailsPage extends BasePage {
    * wrap lines; after **maximize**, the close control may sit in a slightly different header layout.
    */
   async closeAssetInsuranceSummaryDialog(): Promise<void> {
+    this.logStep("Close Asset Insurance Summary Dialog");
     const dlg = this.page
       .getByRole("dialog")
       .filter({ hasText: /Asset/i })
@@ -1492,6 +1559,7 @@ export class DOAssetDetailsPage extends BasePage {
    * After **Asset & Insurance Summary** closes, the control may sit on the quote shell or the open page.
    */
   async openKeyInformationDisclosureDialog(): Promise<void> {
+    this.logStep("Open Key Information Disclosure Dialog");
     const trigger = this.standardQuoteRoot()
       .locator(':text-is("Key Information Disclosure >")')
       .or(this.page.locator(':text-is("Key Information Disclosure >")'))
@@ -1511,6 +1579,7 @@ export class DOAssetDetailsPage extends BasePage {
    * times icon; some builds expose only `button.p-dialog-header-icon.p-dialog-header-maximize.p-link` (omit volatile `ng-tns-*`).
    */
   async closeKeyInformationDisclosureDialog(): Promise<void> {
+    this.logStep("Close Key Information Disclosure Dialog");
     const dlg = this.page
       .getByRole("dialog")
       .filter({ hasText: /Key Information Disclosure/i })
@@ -1543,6 +1612,7 @@ export class DOAssetDetailsPage extends BasePage {
    * with a currency amount (after **Calculate**).
    */
   async expectPaymentScheduleSectionWithTableData(): Promise<void> {
+    this.logStep("Expect Payment Schedule Section With Table Data");
     const root = this.standardQuoteRoot();
     await expect(root.getByText(/Payment\s+Schedule/i).first()).toBeVisible({
       timeout: 45_000,
@@ -1611,6 +1681,7 @@ export class DOAssetDetailsPage extends BasePage {
    * narrow `p-card` title ancestor used for header buttons.
    */
   async clickPaymentScheduleViewTogglesAndExpectRowsRemain(): Promise<void> {
+    this.logStep("Click Payment Schedule View Toggles And Expect Rows Remain");
     const root = this.standardQuoteRoot();
     const card = this.paymentScheduleCard();
     const scope = (await card.isVisible({ timeout: 4_000 }).catch(() => false))
@@ -1688,6 +1759,7 @@ export class DOAssetDetailsPage extends BasePage {
    * and the sibling mode when the UI exposes a **button group**, asserting **$** rows stay visible.
    */
   async expectPaymentScheduleViewTogglesWorkAndTablePopulated(): Promise<void> {
+    this.logStep("Expect Payment Schedule View Toggles Work And Table Populated");
     await this.expectPaymentScheduleSectionWithTableData();
     await this.clickPaymentScheduleViewTogglesAndExpectRowsRemain();
   }
@@ -1697,6 +1769,7 @@ export class DOAssetDetailsPage extends BasePage {
    * `.fa-pen-to-square`, `fa-pen`, Prime `pi-pen`, or a text "Edit" button.
    */
   async clickAssetSummaryEditButton(): Promise<void> {
+    this.logStep("Click Asset Summary Edit Button");
     const dialogLast = this.page.getByRole("dialog").last();
     await dialogLast.waitFor({ state: "visible", timeout: 30_000 });
 
@@ -1757,9 +1830,11 @@ export class DOAssetDetailsPage extends BasePage {
     );
   }
   async cashPriceOfAsset(cashprice: string): Promise<void> {
+    this.logStep(`Entered cash price of asset as ${this.stepValueDisplay(cashprice)}`);
     await this.cashPriceOfAssetInputField.fill(cashprice);
   }
   async ppsrCount(count: string): Promise<void> {
+    this.logStep(`Entered PPSR count as ${this.stepValueDisplay(count)}`);
     await this.PPSRCount.fill(count);
   }
 
@@ -1773,9 +1848,11 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async udcEstablishmentFee(fee: string): Promise<void> {
+    this.logStep(`Entered UDC establishment fee as ${this.stepValueDisplay(fee)}`);
     await this.fillLoanDetailsCurrencyAmount(this.udcEstablishmentFeeInputField, fee);
   }
   async dealerOriginationFee(fee: string): Promise<void> {
+    this.logStep(`Entered dealer origination fee as ${this.stepValueDisplay(fee)}`);
     await this.fillLoanDetailsCurrencyAmount(this.dealerOriginationFeeInputField, fee);
   }
 
@@ -1785,6 +1862,9 @@ export class DOAssetDetailsPage extends BasePage {
     udcEstablishmentFee: string,
     dealerOriginationFee: string,
   ): Promise<void> {
+    this.logStep(
+      `Entered loan details: cash ${this.stepValueDisplay(cashprice)}, PPSR ${this.stepValueDisplay(ppsrCount)}, UDC fee ${this.stepValueDisplay(udcEstablishmentFee)}, dealer fee ${this.stepValueDisplay(dealerOriginationFee)}`,
+    );
     this.cashPriceOfAsset(cashprice);
     this.ppsrCount(ppsrCount);
     this.udcEstablishmentFee(udcEstablishmentFee);
@@ -1794,6 +1874,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Term: numeric **spinbutton** inside `<number>` (some builds), or **dropdown** (QAT / other products).
    */
   async termsOfFinance(term: string): Promise<void> {
+    this.logStep(`Set terms of finance as ${this.stepValueDisplay(term)}`);
     const spin = this.termsOfFinanceInputField;
     if (await spin.isVisible({ timeout: 10000 }).catch(() => false)) {
       await spin.scrollIntoViewIfNeeded();
@@ -1867,6 +1948,7 @@ export class DOAssetDetailsPage extends BasePage {
    * window so we do not return while a late patch is still about to apply.
    */
   async interestRate(rate: string): Promise<void> {
+    this.logStep(`Set interest rate as ${this.stepValueDisplay(rate)}`);
     const field = this.interestRateInputField;
     const target = parseFloat(rate);
     if (Number.isNaN(target)) {
@@ -1927,6 +2009,9 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async financeDetails(term: string, rate: string): Promise<void> {
+    this.logStep(
+      `Set finance details: term ${this.stepValueDisplay(term)}, rate ${this.stepValueDisplay(rate)}`,
+    );
     await this.termsOfFinance(term);
     await this.interestRate(rate);
   }
@@ -1936,6 +2021,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Uses the label, then the row’s `p-inputtext` / input; avoids brittle `ng-pristine` / `ng-touched` classes.
    */
   async enterInitialLeaseAmountFinanceLease(amount: string): Promise<void> {
+    this.logStep(`Entered initial lease amount (finance lease) as ${this.stepValueDisplay(amount)}`);
     const root = this.page
       .locator("app-quote-details, app-standard-quote, app-payment-summary")
       .last();
@@ -2032,6 +2118,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async enterResidualValuePercentFinanceLease(percent: string): Promise<void> {
+    this.logStep(`Entered residual value % (finance lease) as ${this.stepValueDisplay(percent)}`);
     const page = this.page;
     const root = page.locator("app-quote-details, app-standard-quote").first();
     await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
@@ -2065,9 +2152,11 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async loanDAte(): Promise<void> {
+    this.logStep("Loan date");
     await this.loanDate.click();
   }
   async firstPayment(): Promise<void> {
+    this.logStep("First Payment");
     await this.firstPaymentDate.click();
   }
 
@@ -2107,6 +2196,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Uses **dd/MM/yyyy** to match the portal date inputs.
    */
   async enterFirstPaymentDateDdMmYyyy(value: string): Promise<void> {
+    this.logStep(`Entered first payment date as ${this.stepValueDisplay(value)}`);
     const inp = this.firstPaymentDate;
     const v = value.trim();
     await inp.waitFor({ state: "visible", timeout: 25_000 });
@@ -2153,10 +2243,14 @@ export class DOAssetDetailsPage extends BasePage {
   async enterFirstPaymentSuggestedFromLoanDdMmYyyy(): Promise<void> {
     const loanVal = (await this.loanDate.inputValue()).trim();
     const suggested = DOAssetDetailsPage.suggestFirstPaymentDdMmYyyy(loanVal);
+    this.logStep(
+      `Set first payment from loan date: loan ${this.stepValueDisplay(loanVal)} → ${this.stepValueDisplay(suggested)}`,
+    );
     await this.enterFirstPaymentDateDdMmYyyy(suggested);
   }
 
   async clickCalculateButton(): Promise<void> {
+    this.logStep("Click Calculate Button");
     const scoped = this.page
       .locator("app-quote-details")
       .getByRole("button", { name: /^Calculate$/i })
@@ -2190,11 +2284,13 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.waitForTimeout(1_500);
   }
   async paymentSummary(): Promise<void> {
+    this.logStep("Payment Summary");
     // await this.loanDAte();
     // await this.firstPayment();
     await this.clickCalculateButton();
   }
   async clickNextButton(): Promise<void> {
+    this.logStep("Click Next Button");
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     for (let i = 0; i < 120; i++) {
       if (await this.nextButton.isEnabled().catch(() => false)) break;
@@ -2211,6 +2307,11 @@ export class DOAssetDetailsPage extends BasePage {
    * If **Next** stays disabled (validation), optionally pass `origRef` to re-fill + patch origination while waiting.
    */
   async clickNextButtonFinanceLease(origRef?: string): Promise<void> {
+    this.logStep(
+      origRef != null && origRef !== ""
+        ? `Click Next (finance lease); origination ref ${this.stepValueDisplay(origRef)}`
+        : "Click Next (finance lease)",
+    );
     const quote = this.page.locator("app-quote-details").first();
     await quote.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
     await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(() => {});
@@ -2277,6 +2378,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async waitForAddBorrowerButton(): Promise<void> {
+    this.logStep("Wait For Add Borrower Button");
     await this.addBorrowerorGuarantorButton.waitFor({
       state: "visible",
       timeout: 120000,
@@ -2285,6 +2387,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async clickAddBorrowerorGuarantorButton(): Promise<void> {
+    this.logStep("Click Add Borroweror Guarantor Button");
     await this.addBorrowerorGuarantorButton.click();
     await this.customerSearchDialog.waitFor({
       state: "visible",
@@ -2292,6 +2395,7 @@ export class DOAssetDetailsPage extends BasePage {
     });
   }
   async searchByDropdownClick(): Promise<void> {
+    this.logStep("Search By Dropdown Click");
     await this.customerSearchDialog.waitFor({
       state: "visible",
       timeout: 60000,
@@ -2300,6 +2404,7 @@ export class DOAssetDetailsPage extends BasePage {
     await this.searchByDropdown.click();
   }
   async selectUDCSelectOption(): Promise<void> {
+    this.logStep("Select UDC option");
     const panel = this.page.locator(".p-dropdown-panel").last();
     const opt = panel.getByRole("option", { name: /UDC Customer Number/i });
     await opt.waitFor({ state: "visible", timeout: 30000 });
@@ -2311,6 +2416,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async enterUDCCustomerNumber(customerNumber: string): Promise<void> {
+    this.logStep(`Entered UDC customer number as ${this.stepValueDisplay(customerNumber)}`);
     await this.customerSearchDialog.waitFor({
       state: "visible",
       timeout: 60000,
@@ -2384,6 +2490,7 @@ export class DOAssetDetailsPage extends BasePage {
     );
   }
   async clickSearchButton(): Promise<void> {
+    this.logStep("Click Search Button");
     await this.searchButton.waitFor({ state: "visible", timeout: 30000 });
     await this.searchButton.click();
     await this.page
@@ -2415,6 +2522,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async clickAddNewCustomerButton(): Promise<void> {
+    this.logStep("Click Add New Customer Button");
     const deadlineEnable = Date.now() + 90000;
     let addBtn: Locator | null = null;
 

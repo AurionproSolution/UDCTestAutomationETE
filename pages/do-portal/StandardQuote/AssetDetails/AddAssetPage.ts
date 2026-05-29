@@ -129,128 +129,169 @@ export class DOAddAssetPage extends BasePage {
     this.summitButton = page.locator("//span[text()='Submit']");
     this.crossButton = page.locator("//button[@role='button']");
   }
+
+  protected stepLogPrefix(): string {
+    return "Standard quote — Add asset";
+  }
+
   async enterAssetValue(value: string): Promise<void> {
+    this.logStep(`Entered asset value as ${this.stepValueDisplay(value)}`);
     await this.assetValueInputField.type(value);
   }
   async selectCondition(condition: string): Promise<void> {
+    this.logStep(`Selected condition: ${this.stepValueDisplay(condition)}`);
     await this.conditionDropdown.click();
     await this.page.getByRole("option", { name: condition }).click();
   }
   async selectYear(year: string): Promise<void> {
+    this.logStep(`Selected year: ${this.stepValueDisplay(year)}`);
     await this.yearInputField.fill(year);
   }
   async enterMake(make: string): Promise<void> {
+    this.logStep(`Entered make as ${this.stepValueDisplay(make)}`);
     await this.makeInputField.fill(make);
   }
   async enterModel(model: string): Promise<void> {
+    this.logStep(`Entered model as ${this.stepValueDisplay(model)}`);
     await this.modelInputField.fill(model);
   }
   async enterVariant(variant: string): Promise<void> {
+    this.logStep(`Entered variant as ${this.stepValueDisplay(variant)}`);
     await this.variantInputField.fill(variant);
   }
   async enterRegoNO(regoNO: string): Promise<void> {
+    this.logStep(`Entered rego number as ${this.stepValueDisplay(regoNO)}`);
     await this.regoNOInputField.fill(regoNO);
   }
   async enterVIN(vin: string): Promise<void> {
+    this.logStep(`Entered VIN as ${this.stepValueDisplay(vin)}`);
     await this.vinInputField.fill(vin);
   }
   async enterOdometer(odometer: string): Promise<void> {
+    this.logStep(`Entered odometer as ${this.stepValueDisplay(odometer)}`);
     await this.odometerInputField.fill(odometer);
   }
   async enterColour(colour: string): Promise<void> {
+    this.logStep(`Entered colour as ${this.stepValueDisplay(colour)}`);
     await this.colourInputField.fill(colour);
   }
   async enterSerialNO(serialNO: string): Promise<void> {
+    this.logStep(`Entered serial / chassis number as ${this.stepValueDisplay(serialNO)}`);
     await this.serialNOInputField.fill(serialNO);
   }
   async enterEngineNO(engineNO: string): Promise<void> {
+    this.logStep(`Entered engine number as ${this.stepValueDisplay(engineNO)}`);
     await this.engineNOInputField.fill(engineNO);
   }
   async enterCCRating(ccRating: string): Promise<void> {
+    this.logStep(`Entered CC rating as ${this.stepValueDisplay(ccRating)}`);
     await this.ccRatingInputField.fill(ccRating);
   }
   async motiveePowerDropdown(): Promise<void> {
+    this.logStep("Opened Motive Power dropdown");
     await this.motivePowerDropdown.click();
   }
   async SelectMotivePower(motiveName: string): Promise<void> {
+    this.logStep(`Selected motive power: ${this.stepValueDisplay(motiveName)}`);
     await this.page
       .getByRole("option", { name: motiveName, exact: true })
       .click();
   }
   async chooseMotivePower(motiveName: string): Promise<void> {
+    this.logStep(`Chose motive power: ${this.stepValueDisplay(motiveName)}`);
     await this.motiveePowerDropdown();
     await this.SelectMotivePower(motiveName);
   }
   async CountryFirstRegisteredDropdown(): Promise<void> {
+    this.logStep("Opened Country First Registered dropdown");
     await this.countryFirstRegisteredDropdown.click();
   }
   async selectCountryFirstRegistered(countryName: string) {
+    this.logStep(`Selected country first registered: ${this.stepValueDisplay(countryName)}`);
     await this.page
       .getByRole("option", { name: countryName, exact: true })
       .click();
   }
   async chooseCountryRegistered(countryName: string): Promise<void> {
+    this.logStep(`Chose country registered: ${this.stepValueDisplay(countryName)}`);
     await this.CountryFirstRegisteredDropdown();
     await this.selectCountryFirstRegistered(countryName);
   }
   async AssetLocationDropdown(): Promise<void> {
+    this.logStep("Opened Asset Location dropdown");
     await this.assetLocationDropdown.click();
   }
   async selectAssetLocation(assetLocation: string): Promise<void> {
+    this.logStep(`Selected asset location: ${this.stepValueDisplay(assetLocation)}`);
     await this.page
       .getByRole("option", { name: assetLocation, exact: true })
       .click();
   }
   async chooseAssetLocation(assetLocation: string): Promise<void> {
+    this.logStep(`Chose asset location: ${this.stepValueDisplay(assetLocation)}`);
     await this.AssetLocationDropdown();
     await this.selectAssetLocation(assetLocation);
   }
   async enterSupplier(supplier: string): Promise<void> {
+    this.logStep(`Entered supplier as ${this.stepValueDisplay(supplier)}`);
     await this.supplierInputField.fill(supplier);
   }
   async enterDescription(description: string): Promise<void> {
+    this.logStep(`Entered description as ${this.stepValueDisplay(description)}`);
     await this.descriptionInputField.fill(description);
   }
   async insurerDetailsdropdown(): Promise<void> {
+    this.logStep("Opened Insurer dropdown");
     await this.insurerDetailsInputField.click();
   }
   async selectInsurerDetails(insurerDetails: string): Promise<void> {
+    this.logStep(`Selected insurer: ${this.stepValueDisplay(insurerDetails)}`);
     await this.page
       .getByRole("option", { name: insurerDetails, exact: true })
       .click();
   }
   async chooseInsurerDetails(insurerDetails: string): Promise<void> {
+    this.logStep(`Chose insurer: ${this.stepValueDisplay(insurerDetails)}`);
     await this.insurerDetailsdropdown();
     await this.selectInsurerDetails(insurerDetails);
   }
 
   async enterBrokerDetails(brokerDetails: string): Promise<void> {
+    this.logStep(`Entered broker as ${this.stepValueDisplay(brokerDetails)}`);
     await this.brokerDetailsInputField.fill(brokerDetails);
   }
   async enterSumInsured(sumInsured: string): Promise<void> {
+    this.logStep(`Entered sum insured as ${this.stepValueDisplay(sumInsured)}`);
     await this.sumInsuredInputField.fill(sumInsured);
   }
   async enterPolicyNumber(policyNumber: string): Promise<void> {
+    this.logStep(`Entered policy number as ${this.stepValueDisplay(policyNumber)}`);
     await this.policyNumberInputField.fill(policyNumber);
   }
   async enterPolicyExpiryDateButton(policyExpiryDate: string): Promise<void> {
+    this.logStep(`Opened policy expiry date (target: ${this.stepValueDisplay(policyExpiryDate)})`);
     await this.policyExpiryDateInputField.click();
   }
   async selectPolicyExpiryDate(policyExpiryDate: string): Promise<void> {
+    this.logStep(`Selected policy expiry date: ${this.stepValueDisplay(policyExpiryDate)}`);
     await this.enterPolicyExpiryDateButton(policyExpiryDate);
     await this.selectDateButton.click();
   }
 
   async clickCancelButton(): Promise<void> {
+    this.logStep("Clicked Cancel on Add Asset");
     await this.cancelButton.click();
   }
   async clickSearchForAssetButton(): Promise<void> {
+    this.logStep("Clicked Search for Asset");
     await this.searchForAssetButton.click();
   }
   async clickSummitButton(): Promise<void> {
+    this.logStep("Clicked Submit on Add Asset");
     await this.summitButton.click();
   }
   async clickCrossButton(): Promise<void> {
+    this.logStep("Clicked close (cross) on Add Asset");
     await this.crossButton.click();
   }
 }

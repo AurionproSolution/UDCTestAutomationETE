@@ -22,7 +22,12 @@ export class DOTrustDetailsPage extends BasePage {
     this.nextButton = page.getByRole("button", { name: /^Next$/i }).last();
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Trust details";
+  }
+
   async waitForTrustDetailsStep(): Promise<void> {
+    this.logStep("Wait For Trust Details Step");
     await this.root.waitFor({ state: "visible", timeout: 120_000 });
     await expect(this.root.getByText(/^Trust Details$/i).first()).toBeVisible({
       timeout: 60_000,
@@ -73,33 +78,42 @@ export class DOTrustDetailsPage extends BasePage {
   }
 
   async touchTrustTypeDropdownWithoutSelection(): Promise<void> {
+    this.logStep("Touch Trust Type Dropdown Without Selection");
     await this.touchDropdownWithoutSelection(this.dropdownTriggerNearLabel(/Trust Type/i));
   }
 
   async touchPrimaryNatureOfTrustDropdownWithoutSelection(): Promise<void> {
+    this.logStep("Touch Primary Nature Of Trust Dropdown Without Selection");
     await this.touchDropdownWithoutSelection(this.dropdownTriggerNearLabel(/Primary Nature of Trust/i));
   }
 
   async enterTrustName(name: string): Promise<void> {
+    this.logStep(`Entered trust name as ${this.stepValueDisplay(name)}`);
     const el = this.inputAfterLabel("Trust Name");
     await el.fill(name);
   }
 
   async enterRegisteredNumber(value: string): Promise<void> {
+    this.logStep(`Entered registered number as ${this.stepValueDisplay(value)}`);
     const el = this.inputAfterLabel("Registered Number");
     await el.fill(value);
   }
 
   async enterGstNumber(value: string): Promise<void> {
+    this.logStep(`Entered GST number as ${this.stepValueDisplay(value)}`);
     const el = this.inputAfterLabel("GST Number");
     await el.fill(value);
   }
 
   async enterTrustPurpose(text: string): Promise<void> {
+    this.logStep(`Entered trust purpose as ${this.stepValueDisplay(text)}`);
     await this.trustDetailsForm.locator("textarea#note").fill(text);
   }
 
   async enterTimeInTrustYearsMonths(years: string, months: string): Promise<void> {
+    this.logStep(
+      `Entered time in trust: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
     const yearsIn = this.root.locator(".time-in-business-start input").first();
     const monthsIn = this.root.locator(".timeInBusinessMonthsClass input").first();
     await yearsIn.fill(years);
@@ -107,42 +121,54 @@ export class DOTrustDetailsPage extends BasePage {
   }
 
   async enterBusinessPhone(areaCode: string, phone: string): Promise<void> {
+    this.logStep(
+      `Entered trust business phone: area ${this.stepValueDisplay(areaCode)}, number ${this.stepValueDisplay(phone)}`,
+    );
     const root = this.contactRoot;
     await root.locator('input[placeholder="Area code"]').fill(areaCode);
     await root.locator('input[placeholder="Phone number"]').fill(phone);
   }
 
   async enterContactEmail(email: string): Promise<void> {
+    this.logStep(`Entered trust contact email as ${this.stepValueDisplay(email)}`);
     await this.page.locator("app-trust-email-contact-details input[type='text']").first().fill(email);
   }
 
   /** Leave required text fields empty (validation scenario — do not enter Trust Name / Registered Number / phone / email). */
   async clearTrustName(): Promise<void> {
+    this.logStep("Clear Trust Name");
     await this.inputAfterLabel("Trust Name").clear();
   }
 
   async clearRegisteredNumber(): Promise<void> {
+    this.logStep("Clear Registered Number");
     await this.inputAfterLabel("Registered Number").clear();
   }
 
   async clearTimeInTrust(): Promise<void> {
+    this.logStep("Clear Time In Trust");
     await this.root.locator(".time-in-business-start input").first().clear();
     await this.root.locator(".timeInBusinessMonthsClass input").first().clear();
   }
 
   async clearBusinessPhone(): Promise<void> {
+    this.logStep("Clear Business Phone");
     const root = this.contactRoot;
     await root.locator('input[placeholder="Area code"]').clear();
     await root.locator('input[placeholder="Phone number"]').clear();
   }
 
   async clearContactEmail(): Promise<void> {
+    this.logStep("Clear Contact Email");
     await this.page.locator("app-trust-email-contact-details input[type='text']").first().clear();
   }
 
   /** Same pattern as {@link DOReferenceDetailsPage.selectContactType}. */
   async selectTrustType(optionText: string): Promise<void> {
-    await this.selectTrustTypeOption(optionText);
+    this.logStep(`Selected trust type: ${this.stepValueDisplay(optionText)}`);
+    const t = this.dropdownTriggerNearLabel(/Trust Type/i);
+    await t.click({ timeout: 15_000 });
+    await this.clickDropdownOption(optionText);
   }
 
   private async clickDropdownOption(optionText: string): Promise<void> {
@@ -157,17 +183,8 @@ export class DOTrustDetailsPage extends BasePage {
     await panel.waitFor({ state: "hidden", timeout: 12_000 }).catch(() => {});
   }
 
-  async selectTrustTypeOption(optionText: string): Promise<void> {
-    const t = this.dropdownTriggerNearLabel(/Trust Type/i);
-    await t.click({ timeout: 15_000 });
-    await this.clickDropdownOption(optionText);
-  }
-
   async selectPrimaryNatureOfTrust(optionText: string): Promise<void> {
-    await this.selectPrimaryNatureOfTrustOption(optionText);
-  }
-
-  async selectPrimaryNatureOfTrustOption(optionText: string): Promise<void> {
+    this.logStep(`Selected primary nature of trust: ${this.stepValueDisplay(optionText)}`);
     const t = this.dropdownTriggerNearLabel(/Primary Nature of Trust/i);
     await t.click({ timeout: 15_000 });
     await this.clickDropdownOption(optionText);
@@ -175,22 +192,26 @@ export class DOTrustDetailsPage extends BasePage {
 
   /** When list copy is environment-specific, pick the first non-empty panel row. */
   async selectTrustTypeFirstAvailableOption(): Promise<void> {
+    this.logStep("Select Trust Type First Available Option");
     await this.dropdownTriggerNearLabel(/Trust Type/i).click({ timeout: 15_000 });
     await this.selectPrimeNgFirstRealOption();
   }
 
   async selectPrimaryNatureOfTrustFirstAvailableOption(): Promise<void> {
+    this.logStep("Select Primary Nature Of Trust First Available Option");
     await this.dropdownTriggerNearLabel(/Primary Nature of Trust/i).click({ timeout: 15_000 });
     await this.selectPrimeNgFirstRealOption();
   }
 
   async clickSaveTrustDetails(): Promise<void> {
+    this.logStep("Click Save Trust Details");
     await this.saveButton.waitFor({ state: "visible", timeout: 30_000 });
     await this.saveButton.scrollIntoViewIfNeeded();
     await this.saveButton.click({ timeout: 20_000 });
   }
 
   async clickNextTrustDetails(): Promise<void> {
+    this.logStep("Click Next Trust Details");
     await this.nextButton.waitFor({ state: "visible", timeout: 30_000 });
     await this.nextButton.click({ timeout: 20_000 });
   }
@@ -200,6 +221,7 @@ export class DOTrustDetailsPage extends BasePage {
    * fields left empty, and invalid GST — matches validation screenshot (no dropdown required errors).
    */
   async expectTrustDetailsValidationWithDropdownsSelected(): Promise<void> {
+    this.logStep("Expect Trust Details Validation With Dropdowns Selected");
     await expect(this.page.getByText(/Trust Name is required/i).first()).toBeVisible({
       timeout: 20_000,
     });

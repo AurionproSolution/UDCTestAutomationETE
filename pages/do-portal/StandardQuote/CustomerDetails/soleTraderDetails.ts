@@ -30,7 +30,12 @@ export class DOSoleTraderDetailsPage extends BasePage {
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Sole trader details";
+  }
+
   async waitForSoleTraderBusinessDetailsStep(): Promise<void> {
+    this.logStep("Wait For Sole Trader Business Details Step");
     await this.soleTradeRoot.waitFor({ state: "visible", timeout: 120000 });
     await this.businessCard.waitFor({ state: "visible", timeout: 60000 });
     await this.businessCard
@@ -84,6 +89,7 @@ export class DOSoleTraderDetailsPage extends BasePage {
    * `input.p-element…ng-tns-*…p-inputtext.p-component` — we match stable classes under `app-sole-trade` only.
    */
   async enterDateOfBirth(dob: string): Promise<void> {
+    this.logStep(`Entered date of birth as ${this.stepValueDisplay(dob)}`);
     const personal = this.personalDetailsCard();
     await personal.waitFor({ state: "visible", timeout: 30000 });
 
@@ -256,6 +262,7 @@ export class DOSoleTraderDetailsPage extends BasePage {
 
   /** Trading Name * — float `text#text`, label→input, or first `form-control` in the business card. */
   async enterTradingName(value: string): Promise<void> {
+    this.logStep(`Entered trading name as ${this.stepValueDisplay(value)}`);
     const root = this.businessCard;
     const primary = this.floatTextInput(root, /^Trading Name/i);
     if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
@@ -281,6 +288,7 @@ export class DOSoleTraderDetailsPage extends BasePage {
 
   /** GST Number — float `text#text`, label→input, or Selector Hub row under `app-sole-trade-business-details`. */
   async enterGstNumber(value: string): Promise<void> {
+    this.logStep(`Entered GST number as ${this.stepValueDisplay(value)}`);
     const root = this.businessCard;
     const primary = this.floatTextInput(root, /^GST Number/i);
     if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
@@ -306,18 +314,23 @@ export class DOSoleTraderDetailsPage extends BasePage {
 
   /** Business Description — `#note` in the business details card. */
   async fillBusinessDescription(note: string): Promise<void> {
+    this.logStep(`Filled business description as ${this.stepValueDisplay(note)}`);
     const ta = this.businessCard.locator("#note").first();
     await ta.waitFor({ state: "visible", timeout: 20000 });
     await ta.fill(note);
   }
 
   async selectPrimaryNatureOfBusiness(optionText: string): Promise<void> {
+    this.logStep(`Selected primary nature of business: ${this.stepValueDisplay(optionText)}`);
     await this.selectDropdownByLabel(this.businessCard, "Primary Nature of Business");
     await this.pickDropdownOption(optionText, false);
   }
 
   /** Time in Business — Years / Months (label grid, then Selector Hub `div:nth-child(6|8)` rows). */
   async enterTimeInBusiness(years: string, months: string): Promise<void> {
+    this.logStep(
+      `Entered time in business: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
     const root = this.businessCard;
     const yearsAnchor = root.getByText(/^Years$/i).first();
     const gridInputs = yearsAnchor
@@ -356,6 +369,7 @@ export class DOSoleTraderDetailsPage extends BasePage {
   }
 
   async enterBusinessAreaCode(areaCode: string): Promise<void> {
+    this.logStep(`Entered business area code as ${this.stepValueDisplay(areaCode)}`);
     const byRole = this.soleTradeRoot.getByRole("textbox", { name: /Area code/i });
     if (await byRole.isVisible({ timeout: 5000 }).catch(() => false)) {
       await byRole.fill(areaCode);
@@ -369,6 +383,7 @@ export class DOSoleTraderDetailsPage extends BasePage {
   }
 
   async enterBusinessPhoneNumber(phone: string): Promise<void> {
+    this.logStep(`Entered business phone number as ${this.stepValueDisplay(phone)}`);
     const byRole = this.soleTradeRoot.getByRole("textbox", { name: /Phone number/i });
     if (await byRole.isVisible({ timeout: 5000 }).catch(() => false)) {
       await byRole.fill(phone);
@@ -378,6 +393,7 @@ export class DOSoleTraderDetailsPage extends BasePage {
   }
 
   async enterBusinessEmail(email: string, emailFieldOverride?: Locator): Promise<void> {
+    this.logStep(`Entered business email as ${this.stepValueDisplay(email)}`);
     if (emailFieldOverride) {
       await emailFieldOverride.waitFor({ state: "visible", timeout: 30000 });
       await this.fillElement(emailFieldOverride, email);
@@ -476,6 +492,7 @@ export class DOSoleTraderDetailsPage extends BasePage {
   }
 
   async clickNextButton(): Promise<void> {
+    this.logStep("Click Next Button");
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     await this.nextButton.scrollIntoViewIfNeeded();
     await this.nextButton.click();

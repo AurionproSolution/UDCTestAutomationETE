@@ -34,6 +34,10 @@ export class CSSLoginPage extends BasePage {
     this.captchaBox = page.locator('.captcha, [data-testid="captcha"]');
   }
 
+  protected stepLogPrefix(): string {
+    return "CSS Portal — Login";
+  }
+
   /**
    * Navigate to CSS Portal login page
    */
@@ -57,6 +61,7 @@ export class CSSLoginPage extends BasePage {
    * Login with test data from JSON
    */
   async loginWithTestData(testData: { username: string; password: string }): Promise<void> {
+    this.logStep("Login With Test Data");
     await this.login(testData.username, testData.password);
   }
 
@@ -64,6 +69,7 @@ export class CSSLoginPage extends BasePage {
    * Navigate to forgot password
    */
   async navigateToForgotPassword(): Promise<void> {
+    this.logStep("Navigate To Forgot Password");
     await this.navigate();
     await this.click(this.forgotPasswordLink);
   }
@@ -72,6 +78,7 @@ export class CSSLoginPage extends BasePage {
    * Get error message
    */
   async getErrorMessage(): Promise<string> {
+    this.logStep("Get Error Message");
     await this.waitForVisible(this.errorMessage, 10000);
     return await this.getText(this.errorMessage);
   }
@@ -80,6 +87,7 @@ export class CSSLoginPage extends BasePage {
    * Verify logo is visible
    */
   async isLogoVisible(): Promise<boolean> {
+    this.logStep("Is Logo Visible");
     return await this.isVisible(this.logo);
   }
 
@@ -87,6 +95,7 @@ export class CSSLoginPage extends BasePage {
    * Check if captcha is present
    */
   async isCaptchaPresent(): Promise<boolean> {
+    this.logStep("Is Captcha Present");
     return await this.isVisible(this.captchaBox);
   }
 }

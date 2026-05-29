@@ -22,6 +22,10 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
     super(page);
   }
 
+  protected stepLogPrefix(): string {
+    return "RSS Apply Now — Application documents";
+  }
+
   private async waitForProgressSpinnersHidden(
     timeoutMs = RSSApplyNowApplicationDocumentsPage.SPINNER_WAIT_MS,
   ): Promise<void> {
@@ -43,6 +47,7 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
   }
 
   async waitForApplicationDocumentsStep(): Promise<void> {
+    this.logStep("Wait For Application Documents Step");
     await expect(this.page.getByText(/Application documents/i).first()).toBeVisible({
       timeout: 120_000,
     });
@@ -55,6 +60,7 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
   async uploadSupportingDocument(
     filePath: string = RSS_DEFAULT_APPLY_NOW_UPLOAD_PDF,
   ): Promise<void> {
+    this.logStep("Upload Supporting Document");
     await this.waitForProgressSpinnersHidden();
     const input = this.page.locator("#fileInput");
     await input.waitFor({ state: "attached", timeout: 30_000 });
@@ -78,16 +84,19 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
 
   /** APLYiD — `ion-checkbox[name="startVerification"]` beside the logo. */
   async checkApplyIdStartVerification(): Promise<void> {
+    this.logStep("Check Apply Id Start Verification");
     await this.checkIonCheckboxByName("startVerification");
   }
 
   /** Acknowledgements* — required before Submit in the live form. */
   async confirmLegalAcknowledgements(): Promise<void> {
+    this.logStep("Confirm Legal Acknowledgements");
     await this.checkIonCheckboxByName("legalConfirmed");
   }
 
   /** Footer primary — solid Submit (same pattern as `:text-is("Next")`). */
   async clickSubmit(clickTimeoutMs = 60_000): Promise<void> {
+    this.logStep("Click Submit");
     await this.waitForProgressSpinnersHidden();
     const submit = this.page
       .locator(':text-is("Submit")')

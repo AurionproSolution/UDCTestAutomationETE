@@ -41,6 +41,10 @@ export class RSSLoginPage extends BasePage {
     this.loginWithFisButton = page.getByRole('button', { name: /Login with FIS/i });
   }
 
+  protected stepLogPrefix(): string {
+    return "RSS Portal — Login";
+  }
+
   /**
    * Page that holds the RSS session after login (same as constructor `page`, or a window opened by FIS).
    * Use this for dashboard assertions when FIS opens a new tab.
@@ -224,6 +228,7 @@ export class RSSLoginPage extends BasePage {
    * @param urlOverride optional base URL (e.g. QA host); defaults to {@link RSS_BASE_URL}
    */
   async navigate(urlOverride?: string): Promise<void> {
+    this.logStep("Navigate");
     this.sessionPage = null;
     const targetUrl = urlOverride ?? this.url;
     this.log(`Navigating to RSS Portal login page: ${targetUrl}`);
@@ -239,6 +244,7 @@ export class RSSLoginPage extends BasePage {
     password: string,
     options?: { navigationTimeoutMs?: number },
   ): Promise<void> {
+    this.logStep("Login");
     const navigationTimeoutMs = options?.navigationTimeoutMs ?? 30_000;
     this.log(`Logging in to RSS Portal as: ${username}`);
     const surface = await this.openFisLoginSurface();
@@ -257,6 +263,7 @@ export class RSSLoginPage extends BasePage {
     testData: { username: string; password: string },
     options?: { navigationTimeoutMs?: number },
   ): Promise<void> {
+    this.logStep("Login With Test Data");
     await this.login(testData.username, testData.password, options);
   }
 
@@ -274,6 +281,7 @@ export class RSSLoginPage extends BasePage {
       retailSelfServiceClickTimeoutMs?: number;
     },
   ): Promise<void> {
+    this.logStep("Login With Local Shell Form");
     const navigationTimeoutMs = options?.navigationTimeoutMs ?? 30_000;
     const retailSpinnerWaitMs = options?.retailSelfServiceSpinnerWaitMs ?? 120_000;
     const retailClickTimeoutMs = options?.retailSelfServiceClickTimeoutMs ?? 90_000;
@@ -336,6 +344,7 @@ export class RSSLoginPage extends BasePage {
    * Navigate to forgot password
    */
   async navigateToForgotPassword(): Promise<void> {
+    this.logStep("Navigate To Forgot Password");
     await this.navigate();
     await this.clickElement(this.forgotPasswordLink);
   }
@@ -344,6 +353,7 @@ export class RSSLoginPage extends BasePage {
    * Get error message
    */
   async getErrorMessage(): Promise<string> {
+    this.logStep("Get Error Message");
     await this.waitForVisible(this.errorAlert, 10000);
     return await this.getText(this.errorAlert);
   }
@@ -352,6 +362,7 @@ export class RSSLoginPage extends BasePage {
    * Verify logo is visible
    */
   async isLogoVisible(): Promise<boolean> {
+    this.logStep("Is Logo Visible");
     return await this.isVisible(this.logo);
   }
 }

@@ -87,6 +87,10 @@ export class DOPersonalDetailsPage extends BasePage {
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Personal details";
+  }
+
   /**
    * Open a PrimeNG dropdown trigger, then dismiss the panel **without** choosing an option.
    * Required so Angular marks the control touched and **Save** surfaces `… is required` messages.
@@ -104,12 +108,15 @@ export class DOPersonalDetailsPage extends BasePage {
   }
 
   async selectTitle(): Promise<void> {
+    this.logStep("Opened title dropdown");
     await this.titleDropdown.click();
   }
   async selectTitleOption(title: string): Promise<void> {
+    this.logStep(`Selected title: ${this.stepValueDisplay(title)}`);
     await this.page.getByRole("option", { name: title, exact: true }).click();
   }
   async chooseTitle(title: string): Promise<void> {
+    this.logStep(`Chose title: ${this.stepValueDisplay(title)}`);
     const t = title.trim();
     if (!t) {
       await this.touchRequiredDropdownWithoutSelection(this.titleDropdown);
@@ -119,24 +126,30 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectTitleOption(t);
   }
   async enterFirstName(firstName: string): Promise<void> {
+    this.logStep(`Entered first name as ${this.stepValueDisplay(firstName)}`);
     await this.fillElement(this.firstNameInput, firstName);
   }
   async enterMiddleName(middleName: string): Promise<void> {
+    this.logStep(`Entered middle name as ${this.stepValueDisplay(middleName)}`);
     if (!middleName.trim()) {
       return;
     }
     await this.fillElement(this.middleNameInput, middleName);
   }
   async enterLastName(lastName: string): Promise<void> {
+    this.logStep(`Entered last name as ${this.stepValueDisplay(lastName)}`);
     await this.fillElement(this.lastNameInput, lastName);
   }
   async selectGender(gender: string): Promise<void> {
+    this.logStep(`Opened gender dropdown (for: ${this.stepValueDisplay(gender)})`);
     await this.genderDropdown.click();
   }
   async selectGenderOption(gender: string): Promise<void> {
+    this.logStep(`Selected gender: ${this.stepValueDisplay(gender)}`);
     await this.page.getByRole("option", { name: gender, exact: true }).click();
   }
   async chooseGender(gender: string): Promise<void> {
+    this.logStep(`Chose gender: ${this.stepValueDisplay(gender)}`);
     const g = gender.trim();
     if (!g) {
       await this.touchRequiredDropdownWithoutSelection(this.genderDropdown);
@@ -199,6 +212,7 @@ export class DOPersonalDetailsPage extends BasePage {
   }
 
   async enterDateOfBirth(dob: string): Promise<void> {
+    this.logStep(`Entered date of birth as ${this.stepValueDisplay(dob)}`);
     const dateOfBirthInput = await this.resolveDateOfBirthInput();
     if (!dob.trim()) {
       await dateOfBirthInput.waitFor({ state: "visible", timeout: 20_000 });
@@ -217,14 +231,17 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.page.keyboard.press("Escape").catch(() => {});
   }
   async selectMarritalStatus(maritalStatus: string): Promise<void> {
+    this.logStep(`Opened marital status dropdown (for: ${this.stepValueDisplay(maritalStatus)})`);
     await this.maritalStatusDropdown.click();
   }
   async selectMarritalStatusOption(maritalStatus: string): Promise<void> {
+    this.logStep(`Selected marital status: ${this.stepValueDisplay(maritalStatus)}`);
     await this.page
       .getByRole("option", { name: maritalStatus, exact: true })
       .click();
   }
   async chooseMarritalStatus(maritalStatus: string): Promise<void> {
+    this.logStep(`Chose marital status: ${this.stepValueDisplay(maritalStatus)}`);
     const m = maritalStatus.trim();
     if (!m) {
       await this.touchRequiredDropdownWithoutSelection(
@@ -236,14 +253,17 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectMarritalStatusOption(m);
   }
   async selectNoOfDependents(noOfDependents: string): Promise<void> {
+    this.logStep(`Opened no. of dependants dropdown (for: ${this.stepValueDisplay(noOfDependents)})`);
     await this.noOfDependentsDropdown.click();
   }
   async selectNoOfDependentsOption(noOfDependents: string): Promise<void> {
+    this.logStep(`Selected no. of dependants: ${this.stepValueDisplay(noOfDependents)}`);
     await this.page
       .getByRole("option", { name: noOfDependents, exact: true })
       .click();
   }
   async chooseNoOfDependents(noOfDependents: string): Promise<void> {
+    this.logStep(`Chose no. of dependants: ${this.stepValueDisplay(noOfDependents)}`);
     const n = noOfDependents.trim();
     if (!n) {
       await this.touchRequiredDropdownWithoutSelection(
@@ -266,6 +286,9 @@ export class DOPersonalDetailsPage extends BasePage {
    * same grid as the dependants dropdown. Values use **keystrokes** + Tab so `p-inputnumber` binds correctly.
    */
   async fillDependantsAgesInYears(ages: string[]): Promise<void> {
+    this.logStep(
+      `Filled dependants ages (years): ${this.stepValueDisplay(ages.join(", "), 200)}`,
+    );
     if (ages.length === 0) {
       return;
     }
@@ -329,20 +352,25 @@ export class DOPersonalDetailsPage extends BasePage {
   }
 
   async enterMobileNumber(mobileNumber: string): Promise<void> {
+    this.logStep(`Entered mobile number as ${this.stepValueDisplay(mobileNumber)}`);
     await this.fillElement(this.mobileNumberInput, mobileNumber);
   }
   async enterEmail(email: string): Promise<void> {
+    this.logStep(`Entered email as ${this.stepValueDisplay(email)}`);
     await this.fillElement(this.emailInput, email);
   }
   async selectLicenceTypeDropdown(): Promise<void> {
+    this.logStep("Opened licence type dropdown");
     await this.licenceTypeDropdown.click();
   }
   async selectLicenceTypeOption(licenceType: string): Promise<void> {
+    this.logStep(`Selected licence type: ${this.stepValueDisplay(licenceType)}`);
     await this.page
       .getByRole("option", { name: licenceType, exact: true })
       .click();
   }
   async chooseLicenceType(licenceType: string): Promise<void> {
+    this.logStep(`Chose licence type: ${this.stepValueDisplay(licenceType)}`);
     const l = licenceType.trim();
     if (!l) {
       await this.touchRequiredDropdownWithoutSelection(
@@ -354,14 +382,17 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectLicenceTypeOption(l);
   }
   async selectCountryOfIssue(): Promise<void> {
+    this.logStep("Opened country of issue dropdown");
     await this.CountryOfIssueDropDown.click();
   }
   async selectCountryOfIssueOption(countryOfIssue: string): Promise<void> {
+    this.logStep(`Selected country of issue: ${this.stepValueDisplay(countryOfIssue)}`);
     await this.page
       .getByRole("option", { name: countryOfIssue, exact: true })
       .click();
   }
   async chooseCountryOfIssue(countryOfIssue: string): Promise<void> {
+    this.logStep(`Chose country of issue: ${this.stepValueDisplay(countryOfIssue)}`);
     const c = countryOfIssue.trim();
     if (!c) {
       await this.touchRequiredDropdownWithoutSelection(
@@ -373,21 +404,26 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectCountryOfIssueOption(c);
   }
   async enterLicenceNumber(licenceNumber: string): Promise<void> {
+    this.logStep(`Entered licence number as ${this.stepValueDisplay(licenceNumber)}`);
     await this.fillElement(this.licenceNumber, licenceNumber);
   }
   async enterVersionNumber(versionNumber: string): Promise<void> {
+    this.logStep(`Entered version number as ${this.stepValueDisplay(versionNumber)}`);
     await this.fillElement(this.versionNumber, versionNumber);
   }
 
   async selectNewZealandResident(): Promise<void> {
+    this.logStep("Opened New Zealand resident dropdown");
     await this.newZealandResidentDropdown.click();
   }
   async selectNewZealandResidentOption(residentStatus: string): Promise<void> {
+    this.logStep(`Selected New Zealand resident: ${this.stepValueDisplay(residentStatus)}`);
     await this.page
       .getByRole("option", { name: residentStatus, exact: true })
       .click();
   }
   async chooseNewZealandResident(residentStatus: string): Promise<void> {
+    this.logStep(`Chose New Zealand resident: ${this.stepValueDisplay(residentStatus)}`);
     const r = residentStatus.trim();
     if (!r) {
       await this.touchRequiredDropdownWithoutSelection(
@@ -399,14 +435,17 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectNewZealandResidentOption(r);
   }
   async selectCountryOfBirth(): Promise<void> {
+    this.logStep("Opened country of birth dropdown");
     await this.countryOfBirthDropdown.click();
   }
   async selectCountryOfBirthOption(countryOfBirth: string): Promise<void> {
+    this.logStep(`Selected country of birth: ${this.stepValueDisplay(countryOfBirth)}`);
     await this.page
       .getByRole("option", { name: countryOfBirth, exact: true })
       .click();
   }
   async chooseCountryOfBirth(countryOfBirth: string): Promise<void> {
+    this.logStep(`Chose country of birth: ${this.stepValueDisplay(countryOfBirth)}`);
     const c = countryOfBirth.trim();
     if (!c) {
       await this.touchRequiredDropdownWithoutSelection(
@@ -418,11 +457,13 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectCountryOfBirthOption(c);
   }
   async selectCountryOfCitizenship(): Promise<void> {
+    this.logStep("Opened country of citizenship dropdown");
     await this.countryOfCitizenshipDropdown.click();
   }
   async selectCountryOfCitizenshipOption(
     countryOfCitizenship: string,
   ): Promise<void> {
+    this.logStep(`Selected country of citizenship: ${this.stepValueDisplay(countryOfCitizenship)}`);
     await this.page
       .getByRole("option", { name: countryOfCitizenship, exact: true })
       .click();
@@ -430,6 +471,7 @@ export class DOPersonalDetailsPage extends BasePage {
   async chooseCountryOfCitizenship(
     countryOfCitizenship: string,
   ): Promise<void> {
+    this.logStep(`Chose country of citizenship: ${this.stepValueDisplay(countryOfCitizenship)}`);
     const c = countryOfCitizenship.trim();
     if (!c) {
       await this.touchRequiredDropdownWithoutSelection(
@@ -443,6 +485,7 @@ export class DOPersonalDetailsPage extends BasePage {
 
   /** Clicks outlined **Save**; Angular then shows `p-error` / inline messages for empty required fields. */
   async clickSavePersonalDetails(): Promise<void> {
+    this.logStep("Click Save Personal Details");
     await this.savePersonalDetailsButton.waitFor({
       state: "visible",
       timeout: 30_000,
@@ -456,6 +499,7 @@ export class DOPersonalDetailsPage extends BasePage {
    * (matches on-screen `* is required` messages).
    */
   async expectPersonalDetailsRequiredValidationMessages(): Promise<void> {
+    this.logStep("Expect Personal Details Required Validation Messages");
     const root = this.personalDetailsRoot;
     const messages = [
       "Title is required",
@@ -484,6 +528,7 @@ export class DOPersonalDetailsPage extends BasePage {
    * the format / pattern messages for those fields (other sections should be valid from prior steps).
    */
   async expectPersonalDetailsInvalidFormatValidationMessages(): Promise<void> {
+    this.logStep("Expect Personal Details Invalid Format Validation Messages");
     const root = this.personalDetailsRoot;
     const messages = [
       "First Name is in an incorrect format",
@@ -501,32 +546,35 @@ export class DOPersonalDetailsPage extends BasePage {
   }
 
   async clickNextButton(): Promise<void> {
+    this.logStep("Click Next Button");
     const startTime = Date.now();
     try {
       await this.nextButton.waitFor({ state: "visible", timeout: 120000 });
-      console.log(`⏱️ clickNextButton: button visible after ${Date.now() - startTime}ms`);
-      
+      this.log(`clickNextButton: button visible after ${Date.now() - startTime}ms`);
+
       for (let i = 0; i < 120; i++) {
         if (await this.nextButton.isEnabled().catch(() => false)) break;
         await this.page.waitForTimeout(500);
       }
-      console.log(`⏱️ clickNextButton: button enabled after ${Date.now() - startTime}ms`);
-      
+      this.log(`clickNextButton: button enabled after ${Date.now() - startTime}ms`);
+
       await this.nextButton.scrollIntoViewIfNeeded();
       await this.clickElement(this.nextButton);
-      console.log(`⏱️ clickNextButton: click done after ${Date.now() - startTime}ms`);
-      
+      this.log(`clickNextButton: click done after ${Date.now() - startTime}ms`);
+
       // Guard against page closure and reduce blocking waits
       if (!this.page.isClosed()) {
         await this.page.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
-        console.log(`⏱️ clickNextButton: domcontentloaded done after ${Date.now() - startTime}ms`);
+        this.log(`clickNextButton: domcontentloaded done after ${Date.now() - startTime}ms`);
       }
       if (!this.page.isClosed()) {
         await this.page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-        console.log(`⏱️ clickNextButton: networkidle done after ${Date.now() - startTime}ms`);
+        this.log(`clickNextButton: networkidle done after ${Date.now() - startTime}ms`);
       }
     } catch (err) {
-      console.error(`❌ clickNextButton failed after ${Date.now() - startTime}ms:`, err);
+      this.log(
+        `clickNextButton failed after ${Date.now() - startTime}ms: ${err instanceof Error ? err.message : String(err)}`,
+      );
       throw err;
     }
   }

@@ -69,6 +69,10 @@ export class DOEmploymentDetailsPage extends BasePage {
       .filter({ hasText: /^Save$/i });
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Employment details";
+  }
+
   /** Row for "Have the Employment Details Changed?" — avoid `.first()` slider in the whole card (wrong control). */
   private employmentDetailsChangedRow(): Locator {
     return this.employmentRoot
@@ -80,6 +84,7 @@ export class DOEmploymentDetailsPage extends BasePage {
   }
 
   async waitForEmploymentDetailsStep(): Promise<void> {
+    this.logStep("Wait For Employment Details Step");
     await this.page
       .locator(".app-loader-overlay, .p-blockui, .p-progress-spinner, p-progressspinner")
       .first()
@@ -148,6 +153,7 @@ export class DOEmploymentDetailsPage extends BasePage {
 
   /** Turns on "Have the Employment Details Changed?" so Previous Employment is shown. */
   async turnOnEmploymentDetailsChanged(): Promise<void> {
+    this.logStep("Turn On Employment Details Changed");
     await this.employmentRoot.waitFor({ state: "visible", timeout: 60000 });
     if (await this.previousEmploymentRoot.isVisible().catch(() => false)) {
       return;
@@ -198,6 +204,7 @@ export class DOEmploymentDetailsPage extends BasePage {
    * (use when you need to assert both states; avoid before Next if the step validates previous data).
    */
   async turnOffEmploymentDetailsChanged(): Promise<void> {
+    this.logStep("Turn Off Employment Details Changed");
     await this.employmentRoot.waitFor({ state: "visible", timeout: 60000 });
     if (!(await this.previousEmploymentRoot.isVisible().catch(() => false))) {
       return;
@@ -508,16 +515,19 @@ export class DOEmploymentDetailsPage extends BasePage {
   }
 
   async touchCurrentOccupationDropdownWithoutSelection(): Promise<void> {
+    this.logStep("Touch Current Occupation Dropdown Without Selection");
     const root = await this.resolveEmploymentFormRoot();
     await this.touchEmploymentDropdownWithoutSelection(root, "Occupation");
   }
 
   async touchCurrentEmploymentTypeDropdownWithoutSelection(): Promise<void> {
+    this.logStep("Touch Current Employment Type Dropdown Without Selection");
     const root = await this.resolveEmploymentFormRoot();
     await this.touchEmploymentDropdownWithoutSelection(root, "Employment Type");
   }
 
   async touchPreviousOccupationDropdownWithoutSelection(): Promise<void> {
+    this.logStep("Touch Previous Occupation Dropdown Without Selection");
     const root = await this.resolvePreviousEmploymentFormRoot();
     const scope = await this.resolvePreviousEmployeeAngularHost(root);
     if (await scope.isVisible({ timeout: 2_500 }).catch(() => false)) {
@@ -528,6 +538,7 @@ export class DOEmploymentDetailsPage extends BasePage {
   }
 
   async touchPreviousEmploymentTypeDropdownWithoutSelection(): Promise<void> {
+    this.logStep("Touch Previous Employment Type Dropdown Without Selection");
     const root = await this.resolvePreviousEmploymentFormRoot();
     const scope = await this.resolvePreviousEmployeeAngularHost(root);
     if (await scope.isVisible({ timeout: 2_500 }).catch(() => false)) {
@@ -539,6 +550,7 @@ export class DOEmploymentDetailsPage extends BasePage {
 
   /** Outlined **Save** on Employment Details. */
   async clickSaveEmploymentDetails(): Promise<void> {
+    this.logStep("Click Save Employment Details");
     await this.saveEmploymentDetailsButton.waitFor({
       state: "visible",
       timeout: 30_000,
@@ -591,6 +603,7 @@ export class DOEmploymentDetailsPage extends BasePage {
    * **Previous Employment** to be shown.
    */
   async expectPreviousEmploymentSectionVisible(timeout = 45_000): Promise<void> {
+    this.logStep("Expect Previous Employment Section Visible");
     await this.scrollPreviousEmploymentSectionIntoViewForValidation();
     const root = await this.resolvePreviousEmploymentFormRoot();
     const title = root
@@ -605,6 +618,7 @@ export class DOEmploymentDetailsPage extends BasePage {
    * Time copy may be misspelled **Employeer** on some builds — {@link expectPreviousEmploymentRequiredValidationMessages} accepts both.
    */
   async expectPreviousEmploymentRequiredValidationMessages(): Promise<void> {
+    this.logStep("Expect Previous Employment Required Validation Messages");
     await this.scrollPreviousEmploymentSectionIntoViewForValidation();
     const root = await this.resolvePreviousEmploymentFormRoot();
 
@@ -646,6 +660,7 @@ export class DOEmploymentDetailsPage extends BasePage {
    * (screenshot copy: Employer Name, Occupation, Employment Type, Time with Employer ×2).
    */
   async expectCurrentEmploymentRequiredValidationMessages(): Promise<void> {
+    this.logStep("Expect Current Employment Required Validation Messages");
     await this.scrollCurrentEmploymentSectionIntoViewForValidation();
     const root = await this.resolveEmploymentFormRoot();
 
@@ -733,6 +748,7 @@ export class DOEmploymentDetailsPage extends BasePage {
   }
 
   async enterCurrentEmployerName(name: string): Promise<void> {
+    this.logStep(`Entered current employer name as ${this.stepValueDisplay(name)}`);
     const root = await this.resolveEmploymentFormRoot();
     const input = this.employerNameInputFor(root);
     await input.waitFor({ state: "visible", timeout: 30000 });
@@ -746,11 +762,13 @@ export class DOEmploymentDetailsPage extends BasePage {
   }
 
   async selectCurrentOccupation(optionName: string): Promise<void> {
+    this.logStep(`Selected current occupation: ${this.stepValueDisplay(optionName)}`);
     const root = await this.resolveEmploymentFormRoot();
     await this.selectDropdownInEmploymentCard(root, "Occupation", optionName);
   }
 
   async selectCurrentEmploymentType(optionName: string): Promise<void> {
+    this.logStep(`Selected current employment type: ${this.stepValueDisplay(optionName)}`);
     const root = await this.resolveEmploymentFormRoot();
     await this.selectDropdownInEmploymentCard(root, "Employment Type", optionName);
   }
@@ -903,11 +921,15 @@ export class DOEmploymentDetailsPage extends BasePage {
     years: string,
     months: string,
   ): Promise<void> {
+    this.logStep(
+      `Entered current time with employer: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
     const root = await this.resolveEmploymentFormRoot();
     await this.fillTimeYearsMonthsInCard(root, years, months);
   }
 
   async enterPreviousEmployerName(name: string): Promise<void> {
+    this.logStep(`Entered previous employer name as ${this.stepValueDisplay(name)}`);
     const root = await this.resolvePreviousEmploymentFormRoot();
     const input = this.previousEmploymentEmployerNameInput(root);
     await input.waitFor({ state: "visible", timeout: 30_000 });
@@ -921,11 +943,13 @@ export class DOEmploymentDetailsPage extends BasePage {
   }
 
   async selectPreviousOccupation(optionName: string): Promise<void> {
+    this.logStep(`Selected previous occupation: ${this.stepValueDisplay(optionName)}`);
     const root = await this.resolvePreviousEmploymentFormRoot();
     await this.selectPreviousEmploymentDropdown(root, "Occupation", 0, optionName);
   }
 
   async selectPreviousEmploymentType(optionName: string): Promise<void> {
+    this.logStep(`Selected previous employment type: ${this.stepValueDisplay(optionName)}`);
     const root = await this.resolvePreviousEmploymentFormRoot();
     await this.selectPreviousEmploymentDropdown(root, "Employment Type", 1, optionName);
   }
@@ -934,11 +958,15 @@ export class DOEmploymentDetailsPage extends BasePage {
     years: string,
     months: string,
   ): Promise<void> {
+    this.logStep(
+      `Entered previous time with employer: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
     const root = await this.resolvePreviousEmploymentFormRoot();
     await this.fillTimeYearsMonthsInCard(root, years, months);
   }
 
   async clickNextButton(): Promise<void> {
+    this.logStep("Click Next Button");
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     await this.nextButton.scrollIntoViewIfNeeded();
     await this.nextButton.click();

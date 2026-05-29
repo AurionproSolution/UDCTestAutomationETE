@@ -67,7 +67,12 @@ export class DOFinancialPositionPage extends BasePage {
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
   }
 
+  protected stepLogPrefix(): string {
+    return "Standard quote — Financial position";
+  }
+
   async waitForFinancialPositionStep(): Promise<void> {
+    this.logStep("Wait For Financial Position Step");
     await this.financialRoot
       .or(this.businessFinancialRoot)
       .or(this.soleTradeFinancialRoot)
@@ -77,6 +82,7 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async waitForTrustFinancialPositionStep(): Promise<void> {
+    this.logStep("Wait For Trust Financial Position Step");
     await this.trustFinancialRoot.waitFor({ state: "visible", timeout: 120_000 });
     await this.trustFinancialRoot
       .getByText(/Profit Declaration|Turnover Information/i)
@@ -109,6 +115,7 @@ export class DOFinancialPositionPage extends BasePage {
    * (`isNetProfitLastYear` — hidden native `input` on `p-radiobutton`).
    */
   async primeTrustNetProfitLastYearNoThenYes(): Promise<void> {
+    this.logStep("Prime Trust Net Profit Last Year No Then Yes");
     const host = this.trustProfitDeclarationHost();
     await host.waitFor({ state: "visible", timeout: 60_000 });
     await host.scrollIntoViewIfNeeded().catch(() => {});
@@ -127,6 +134,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** “Net Profit last year” currency field (after Yes). */
   async fillTrustNetProfitLastYear(value: string): Promise<void> {
+    this.logStep(`Filled trust net profit last year as ${this.stepValueDisplay(value)}`);
     const host = this.trustProfitDeclarationHost();
     await host.waitFor({ state: "visible", timeout: 30_000 });
     const input = host.locator("amount").locator("#amount").first();
@@ -135,6 +143,9 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Turnover **(Latest Year)** — amount + Year Ending only (Previous row left to app defaults unless you fill it). */
   async fillTrustTurnoverLatestYear(amount: string, yearEnding: string): Promise<void> {
+    this.logStep(
+      `Filled trust turnover (latest): amount ${this.stepValueDisplay(amount)}, year ending ${this.stepValueDisplay(yearEnding)}`,
+    );
     const host = this.trustTurnoverHost();
     await host.waitFor({ state: "visible", timeout: 30_000 });
     await host.scrollIntoViewIfNeeded().catch(() => {});
@@ -154,6 +165,7 @@ export class DOFinancialPositionPage extends BasePage {
   async expectTrustBalanceYearEndingsMatchLatestTurnoverDate(options?: {
     timeoutMs?: number;
   }): Promise<void> {
+    this.logStep("Expect trust balance year endings match latest turnover date");
     const timeout = options?.timeoutMs ?? 25_000;
     const latestInp = this.trustTurnoverHost().locator('input[name="turnoverLatestYearEndingDt"]').first();
     await expect(latestInp).not.toHaveValue("", { timeout });
@@ -173,6 +185,9 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Balance Information — amount only (row **0** Cash … **3** Overdraft); leave calendars if app already populated them. */
   async fillTrustBalanceRowAmountOnly(rowIndex: number, amount: string): Promise<void> {
+    this.logStep(
+      `Filled trust balance row ${rowIndex} amount as ${this.stepValueDisplay(amount)}`,
+    );
     const host = this.trustBalanceHost();
     await host.waitFor({ state: "visible", timeout: 30_000 });
     const amountHost = host.locator("amount").nth(rowIndex);
@@ -182,6 +197,9 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** If a balance row’s Year Ending is still empty, set it (e.g. when propagation did not run). */
   async fillTrustBalanceRowYearEndingIfEmpty(rowIndex: number, yearEnding: string): Promise<void> {
+    this.logStep(
+      `Filled trust balance row ${rowIndex} year ending (if empty) as ${this.stepValueDisplay(yearEnding)}`,
+    );
     const host = this.trustBalanceHost();
     const amountHost = host.locator("amount").nth(rowIndex);
     const cal = this.yearEndingInputForAmountHost(amountHost);
@@ -201,15 +219,18 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async fillTrustPersonalPropertyAmount(value: string): Promise<void> {
+    this.logStep(`Filled trust personal property amount as ${this.stepValueDisplay(value)}`);
     await this.fillTrustAssetAmountByRowLabel(/Personal Property/i, value);
   }
 
   async fillTrustVehicleValueAmount(value: string): Promise<void> {
+    this.logStep(`Filled trust vehicle value amount as ${this.stepValueDisplay(value)}`);
     await this.fillTrustAssetAmountByRowLabel(/Vehicle Value/i, value);
   }
 
   /** “Other” asset row — amount beside `financialAssetType` dropdown. */
   async fillTrustOtherAssetAmount(value: string): Promise<void> {
+    this.logStep(`Filled trust other asset amount as ${this.stepValueDisplay(value)}`);
     const host = this.trustAssetsHost();
     await host.waitFor({ state: "visible", timeout: 30_000 });
     const amtHost = host.locator('amount[formcontrolname="financialAssetTypeAmount"]').first();
@@ -228,18 +249,22 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async fillTrustMortgageRentMonthlyAmount(value: string): Promise<void> {
+    this.logStep(`Filled trust mortgage/rent monthly as ${this.stepValueDisplay(value)}`);
     await this.fillTrustLiabilityMonthlyByLabel(/Mortgage\s*\/\s*Rent/i, value);
   }
 
   async fillTrustLoansMonthlyAmount(value: string): Promise<void> {
+    this.logStep(`Filled trust loans monthly as ${this.stepValueDisplay(value)}`);
     await this.fillTrustLiabilityMonthlyByLabel(/\bLoans\b/i, value);
   }
 
   async fillTrustCreditCardsMonthlyAmount(value: string): Promise<void> {
+    this.logStep(`Filled trust credit cards monthly as ${this.stepValueDisplay(value)}`);
     await this.fillTrustLiabilityMonthlyByLabel(/Credit Cards/i, value);
   }
 
   async fillTrustOtherLiabilitiesMonthlyAmount(value: string): Promise<void> {
+    this.logStep(`Filled trust other liabilities monthly as ${this.stepValueDisplay(value)}`);
     await this.fillTrustLiabilityMonthlyByLabel(/Other Liabilities/i, value);
   }
 
@@ -263,6 +288,9 @@ export class DOFinancialPositionPage extends BasePage {
     liabilityCreditCards: string;
     liabilityOther: string;
   }): Promise<void> {
+    this.logStep(
+      `Filled trust financial position (complete); turnover year ending ${this.stepValueDisplay(opts.turnoverYearEnding)}`,
+    );
     await this.waitForTrustFinancialPositionStep();
     await this.primeTrustNetProfitLastYearNoThenYes();
     await this.fillTrustNetProfitLastYear(opts.netProfit);
@@ -419,6 +447,9 @@ export class DOFinancialPositionPage extends BasePage {
     balanceLimit: string,
     amount: string,
   ): Promise<void> {
+    this.logStep(
+      `Filled first liability: balance/limit ${this.stepValueDisplay(balanceLimit)}, amount ${this.stepValueDisplay(amount)}`,
+    );
     const fields = this.amountInputsInCard(this.liabilitiesCard);
     await this.setCommittedAmount(fields.nth(0), balanceLimit);
     await this.setCommittedAmount(fields.nth(1), amount);
@@ -426,6 +457,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Liabilities — first row frequency column → Monthly. */
   async setFirstLiabilityRowFrequencyMonthly(): Promise<void> {
+    this.logStep("Set First Liability Row Frequency Monthly");
     const card = this.liabilitiesCard;
     const freqCell = card.locator(
       "form > div > div:nth-child(1) > div:nth-child(1) > div:nth-child(4)",
@@ -438,12 +470,14 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Income details — first row (e.g. Take Home Pay) amount. */
   async fillFirstIncomeAmount(value: string): Promise<void> {
+    this.logStep(`Filled first income amount as ${this.stepValueDisplay(value)}`);
     const input = this.amountInputsInCard(this.incomeDetailsCard).first();
     await this.setCommittedAmount(input, value);
   }
 
   /** Income frequency — QAT trigger id `#pn_id_107_2`, then Monthly. */
   async setIncomeFrequencyMonthly(): Promise<void> {
+    this.logStep("Set Income Frequency Monthly");
     const byId = this.page.locator("#pn_id_107_2");
     const inCard = this.incomeDetailsCard.locator("#pn_id_107_2");
     let clickTarget: Locator | null = null;
@@ -464,12 +498,14 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Expenditure — first row amount (e.g. Council Rates). */
   async fillFirstExpenditureAmount(value: string): Promise<void> {
+    this.logStep(`Filled first expenditure amount as ${this.stepValueDisplay(value)}`);
     const input = this.amountInputsInCard(this.expenditureCard).first();
     await this.setCommittedAmount(input, value);
   }
 
   /** Expenditure frequency — `#pn_id_111_2`, then Monthly. */
   async setExpenditureFrequencyMonthly(): Promise<void> {
+    this.logStep("Set Expenditure Frequency Monthly");
     const byId = this.page.locator("#pn_id_111_2");
     const inCard = this.expenditureCard.locator("#pn_id_111_2");
     let clickTarget: Locator;
@@ -494,6 +530,7 @@ export class DOFinancialPositionPage extends BasePage {
    * `p-radiobutton` + `.p-radiobutton-box` without a reliable `radio` name.
    */
   async selectIncomeLikelyToDecreaseNo(): Promise<void> {
+    this.logStep("Select Income Likely To Decrease No");
     const root = this.financialRoot;
     const question = root.getByText(/Is your income likely to decrease/i).first();
     await question.waitFor({ state: "visible", timeout: 20000 });
@@ -554,6 +591,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Individual Financial Position — expect host cards from your layout (`app-individual-*`, income, expenditure, recurring). */
   async expectIndividualFinancialPositionSectionsVisible(): Promise<void> {
+    this.logStep("Expect Individual Financial Position Sections Visible");
     await this.financialRoot.waitFor({ state: "visible", timeout: 60_000 });
     await expect(this.individualAssetDetailsCard).toBeVisible({ timeout: 30_000 });
     await expect(
@@ -592,6 +630,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Individual Assets — **Home Ownership Type** (`assestHomeOwnerType` in template). */
   async selectIndividualHomeOwnershipType(optionLabel: string): Promise<void> {
+    this.logStep(`Selected individual home ownership type: ${this.stepValueDisplay(optionLabel)}`);
     const card = this.individualAssetDetailsCard;
     await card.waitFor({ state: "visible", timeout: 30_000 });
     await card.scrollIntoViewIfNeeded();
@@ -606,6 +645,7 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async fillIndividualVehicleValueAmount(value: string): Promise<void> {
+    this.logStep(`Filled individual vehicle value as ${this.stepValueDisplay(value)}`);
     const input = this.amountInputInIndividualCardRow(
       this.individualAssetDetailsCard,
       /Vehicle Value/i,
@@ -614,6 +654,7 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async fillIndividualFurnitureEffectsValueAmount(value: string): Promise<void> {
+    this.logStep(`Filled individual furniture & effects value as ${this.stepValueDisplay(value)}`);
     const input = this.amountInputInIndividualCardRow(
       this.individualAssetDetailsCard,
       /Furniture\s*&\s*Effects Value/i,
@@ -623,6 +664,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Other asset row — `financialAssetType` must be a real option (clears “Select a valid value”). */
   async selectIndividualOtherFinancialAssetType(optionLabel: string): Promise<void> {
+    this.logStep(`Selected individual other financial asset type: ${this.stepValueDisplay(optionLabel)}`);
     const card = this.individualAssetDetailsCard;
     await card.waitFor({ state: "visible", timeout: 30_000 });
     const dd = card.locator(`p-dropdown[formcontrolname="financialAssetType"]`).first();
@@ -633,6 +675,7 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async fillIndividualOtherFinancialAssetAmount(value: string): Promise<void> {
+    this.logStep(`Filled individual other financial asset amount as ${this.stepValueDisplay(value)}`);
     const card = this.individualAssetDetailsCard;
     const host = card.locator(`amount[formcontrolname="financialAssetTypeAmount"]`).first();
     const input = host.locator("#amount").first();
@@ -641,6 +684,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Income — second row (e.g. **Spouse / Partner Pay**) amount. */
   async fillSecondIncomeRowAmount(value: string): Promise<void> {
+    this.logStep(`Filled second income row amount as ${this.stepValueDisplay(value)}`);
     const input = this.amountInputsInCard(this.incomeDetailsCard).nth(1);
     await this.setCommittedAmount(input, value);
   }
@@ -659,17 +703,20 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async setTakeHomePayFrequencyMonthly(): Promise<void> {
+    this.logStep("Set Take Home Pay Frequency Monthly");
     await this.incomeDetailsCard.waitFor({ state: "visible", timeout: 30_000 });
     await this.setRowFrequencyMonthlyInCard(this.incomeDetailsCard, /Take Home Pay/i);
   }
 
   async setSpousePartnerPayFrequencyMonthly(): Promise<void> {
+    this.logStep("Set Spouse Partner Pay Frequency Monthly");
     await this.incomeDetailsCard.waitFor({ state: "visible", timeout: 30_000 });
     await this.setRowFrequencyMonthlyInCard(this.incomeDetailsCard, /Spouse\s*\/\s*Partner Pay/i);
   }
 
   /** “Is your income likely to decrease…” → **Yes** (shows **Details** textarea). */
   async selectIncomeLikelyToDecreaseYes(): Promise<void> {
+    this.logStep("Select Income Likely To Decrease Yes");
     const root = this.incomeDetailsCard;
     await root.waitFor({ state: "visible", timeout: 30_000 });
     const question = root.getByText(/Is your income likely to decrease/i).first();
@@ -693,12 +740,14 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async expectIncomeDecreaseDetailsTextareaVisibleAndEnabled(): Promise<void> {
+    this.logStep("Expect Income Decrease Details Textarea Visible And Enabled");
     const ta = this.incomeDecreaseDetailsTextarea();
     await expect(ta).toBeVisible({ timeout: 15_000 });
     await expect(ta).toBeEnabled({ timeout: 10_000 });
   }
 
   async expectIncomeDecreaseDetailsTextareaHiddenOrDisabled(): Promise<void> {
+    this.logStep("Expect Income Decrease Details Textarea Hidden Or Disabled");
     const ta = this.incomeDecreaseDetailsTextarea();
     const visible = await ta.isVisible().catch(() => false);
     if (!visible) {
@@ -709,6 +758,7 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async fillIncomeDecreaseDetails(text: string): Promise<void> {
+    this.logStep(`Filled income decrease details as ${this.stepValueDisplay(text)}`);
     const ta = this.incomeDecreaseDetailsTextarea();
     await ta.waitFor({ state: "visible", timeout: 15_000 });
     await ta.fill(text);
@@ -717,17 +767,22 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async fillExpenditureAmountByLabel(labelRx: RegExp, value: string): Promise<void> {
+    this.logStep(
+      `Filled expenditure (${labelRx.source}) as ${this.stepValueDisplay(value)}`,
+    );
     const input = this.amountInputInIndividualCardRow(this.expenditureCard, labelRx);
     await this.setCommittedAmount(input, value);
   }
 
   async setExpenditureRowFrequencyMonthlyByLabel(labelRx: RegExp): Promise<void> {
+    this.logStep(`Set expenditure frequency monthly (label ${labelRx.source})`);
     await this.expenditureCard.waitFor({ state: "visible", timeout: 30_000 });
     await this.setRowFrequencyMonthlyInCard(this.expenditureCard, labelRx);
   }
 
   /** Essential Outgoings — outgoing type combobox should show **Other** by default (`recurringDescription`). */
   async expectEssentialOutgoingTypeDefaultOther(): Promise<void> {
+    this.logStep("Expect Essential Outgoing Type Default Other");
     const card = this.essentialOutgoingsCard;
     await card.waitFor({ state: "visible", timeout: 30_000 });
     const combo = card
@@ -770,6 +825,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Outgoing type → **Lifestyle** (`#pn_id_93_2` or first row’s first PrimeNG dropdown). */
   async selectEssentialOutgoingTypeLifestyle(): Promise<void> {
+    this.logStep("Select Essential Outgoing Type Lifestyle");
     await this.scrollEssentialOutgoingsCardIntoView();
     const section = this.essentialOutgoingsSection();
 
@@ -820,6 +876,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Amount in Regular Recurring Essential Outgoings row. */
   async fillEssentialOutgoingAmount(value: string): Promise<void> {
+    this.logStep(`Filled essential outgoing amount as ${this.stepValueDisplay(value)}`);
     await this.scrollEssentialOutgoingsCardIntoView();
     const section = this.essentialOutgoingsSection();
     const byAmountHost = section.locator("amount").first().locator("#amount");
@@ -841,6 +898,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Essential Outgoings row frequency → **Monthly** (`recurringFrequency` or second `p-dropdown` in card). */
   async setEssentialOutgoingFrequencyMonthly(): Promise<void> {
+    this.logStep("Set Essential Outgoing Frequency Monthly");
     await this.scrollEssentialOutgoingsCardIntoView();
     const section = this.essentialOutgoingsSection();
 
@@ -922,6 +980,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** CSA-B **Financial Accounts** or **Sole Trader** — “Did you make a Net Profit last year?” → **Yes**. */
   async selectBusinessNetProfitLastYearYes(): Promise<void> {
+    this.logStep("Select Business Net Profit Last Year Yes");
     try {
       await Promise.any([
         this.businessFinancialRoot.waitFor({ state: "visible", timeout: 120000 }),
@@ -996,6 +1055,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** “Net Profit last year *” (`<amount>` / `input.valueClass`). */
   async fillBusinessNetProfitLastYear(value: string): Promise<void> {
+    this.logStep(`Filled business net profit last year as ${this.stepValueDisplay(value)}`);
     await Promise.any([
       this.businessFinancialRoot.waitFor({ state: "visible", timeout: 60000 }),
       this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 60000 }),
@@ -1022,6 +1082,9 @@ export class DOFinancialPositionPage extends BasePage {
     amount: string,
     yearEnding: string,
   ): Promise<void> {
+    this.logStep(
+      `Filled business turnover (latest): amount ${this.stepValueDisplay(amount)}, year ending ${this.stepValueDisplay(yearEnding)}`,
+    );
     await this.fillBusinessTurnoverRow(0, amount, yearEnding);
   }
 
@@ -1030,6 +1093,9 @@ export class DOFinancialPositionPage extends BasePage {
     amount: string,
     yearEnding: string,
   ): Promise<void> {
+    this.logStep(
+      `Filled business turnover (previous): amount ${this.stepValueDisplay(amount)}, year ending ${this.stepValueDisplay(yearEnding)}`,
+    );
     await this.fillBusinessTurnoverRow(1, amount, yearEnding);
   }
 
@@ -1060,18 +1126,30 @@ export class DOFinancialPositionPage extends BasePage {
    * Balance Information — row order in DOM: **0** Cash, **1** Debtor, **2** Creditor, **3** Overdraft.
    */
   async fillBusinessCashBalance(amount: string, yearEnding: string): Promise<void> {
+    this.logStep(
+      `Filled business cash balance: ${this.stepValueDisplay(amount)}, year ending ${this.stepValueDisplay(yearEnding)}`,
+    );
     await this.fillBusinessBalanceRow(0, amount, yearEnding);
   }
 
   async fillBusinessDebtorBalance(amount: string, yearEnding: string): Promise<void> {
+    this.logStep(
+      `Filled business debtor balance: ${this.stepValueDisplay(amount)}, year ending ${this.stepValueDisplay(yearEnding)}`,
+    );
     await this.fillBusinessBalanceRow(1, amount, yearEnding);
   }
 
   async fillBusinessCreditorBalance(amount: string, yearEnding: string): Promise<void> {
+    this.logStep(
+      `Filled business creditor balance: ${this.stepValueDisplay(amount)}, year ending ${this.stepValueDisplay(yearEnding)}`,
+    );
     await this.fillBusinessBalanceRow(2, amount, yearEnding);
   }
 
   async fillBusinessOverdraftBalance(amount: string, yearEnding: string): Promise<void> {
+    this.logStep(
+      `Filled business overdraft balance: ${this.stepValueDisplay(amount)}, year ending ${this.stepValueDisplay(yearEnding)}`,
+    );
     await this.fillBusinessBalanceRow(3, amount, yearEnding);
   }
 
@@ -1100,6 +1178,7 @@ export class DOFinancialPositionPage extends BasePage {
 
   /** Sole: **Personal Statement of Position** → **Home Ownership Type** (e.g. **Joint**). No-op if not Sole layout. */
   async selectSoleTradeHomeOwnershipType(optionLabel: string): Promise<void> {
+    this.logStep(`Selected sole trader home ownership type: ${this.stepValueDisplay(optionLabel)}`);
     const host = this.page.locator("app-sole-trade-financial app-sole-trade-assets").first();
     if (!(await host.isVisible({ timeout: 5000 }).catch(() => false))) return;
     await host.scrollIntoViewIfNeeded();
@@ -1121,6 +1200,7 @@ export class DOFinancialPositionPage extends BasePage {
    * No-op if not Sole layout.
    */
   async fillSoleTradeHomeOwnershipAmount(value: string): Promise<void> {
+    this.logStep(`Filled sole trader home ownership amount as ${this.stepValueDisplay(value)}`);
     const host = this.page.locator("app-sole-trade-financial app-sole-trade-assets").first();
     if (!(await host.isVisible({ timeout: 5000 }).catch(() => false))) return;
     await host.scrollIntoViewIfNeeded();
@@ -1190,6 +1270,7 @@ export class DOFinancialPositionPage extends BasePage {
    * No-op if not Sole layout.
    */
   async fillSoleTradeMortgageRentMonthlyAmount(value: string): Promise<void> {
+    this.logStep(`Filled sole trader mortgage/rent monthly as ${this.stepValueDisplay(value)}`);
     const host = this.page.locator("app-sole-trade-financial app-sole-trade-liabilities").first();
     if (!(await host.isVisible({ timeout: 5000 }).catch(() => false))) return;
     await host.scrollIntoViewIfNeeded();
@@ -1252,6 +1333,7 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   async clickNextButton(): Promise<void> {
+    this.logStep("Click Next Button");
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     await this.nextButton.scrollIntoViewIfNeeded();
     await this.nextButton.click();

@@ -50,10 +50,15 @@ export class DOLoginPage extends BasePage {
     );
   }
 
+  protected stepLogPrefix(): string {
+    return "DO Portal — Login";
+  }
+
   /**
    * Navigate to DO Portal login page
    */
   async navigate(urlOverride?: string): Promise<void> {
+    this.logStep("Navigate");
     const targetUrl = urlOverride ?? this.url; // this.url = default from the page object
     this.log(`Navigating to DO Portal login page: ${targetUrl}`);
     await this.navigateTo(targetUrl);
@@ -64,20 +69,39 @@ export class DOLoginPage extends BasePage {
    */
   async login(username: string, password: string): Promise<void> {
     this.log(`Logging in as: ${username}`);
+
+    this.log("Clicking Login with FIS button");
     await this.clickElement(this.loginWithFisButton);
+
+    this.log(`Entering username: ${username}`);
     await this.fillElement(this.usernameInput, username);
+
+    this.log("Clicking Proceed");
     await this.clickElement(this.proceedButton);
+
     await this.fillElement(this.passwordInput, password);
+    this.log("Entered password (value not logged).");
+
     // Blur so Angular/async validators can run and enable Sign in
     await this.passwordInput.press("Tab");
+    this.log("Selecting 'Yes, this is my computer'");
     await this.clickElement(this.yesThisIsMyComputerRadio);
     await expect(this.yesThisIsMyComputerRadio).toBeChecked({ timeout: 15_000 });
+
+    this.log('Waiting for Sign in button to become enabled');
     await expect(this.signinButton).toBeEnabled({ timeout: 90_000 });
+
+    this.log('Clicking Sign in');
     await this.clickElement(this.signinButton);
+
     await this.waitForLoadingComplete();
+    this.log('Verified dashboard is loaded or navigation completed');
+
+    this.log('Clicking Quotes & Applications from dashboard');
     await expect(this.quoteAndAppButton).toBeVisible({ timeout: 90_000 });
     await this.clickElement(this.quoteAndAppButton);
     await this.waitForLoadingComplete();
+    this.log('Opened Quotes & Applications');
   }
 
   /**
@@ -87,6 +111,7 @@ export class DOLoginPage extends BasePage {
     username: string;
     password: string;
   }): Promise<void> {
+    this.logStep("Login with test data");
     await this.login(testData.username, testData.password);
   }
 
@@ -94,6 +119,7 @@ export class DOLoginPage extends BasePage {
    * Navigate to forgot password
    */
   async navigateToForgotPassword(): Promise<void> {
+    this.logStep("Navigate To Forgot Password");
     await this.navigate();
     await this.clickElement(this.forgotPasswordLink);
   }
@@ -102,6 +128,7 @@ export class DOLoginPage extends BasePage {
    * Get error message
    */
   async getErrorMessage(): Promise<string> {
+    this.logStep("Get Error Message");
     await this.waitForVisible(this.errorAlert, 10000);
     return await this.getText(this.errorAlert);
   }
@@ -110,6 +137,7 @@ export class DOLoginPage extends BasePage {
    * Verify logo is visible
    */
   async isLogoVisible(): Promise<boolean> {
+    this.logStep("Is Logo Visible");
     return await this.isVisible(this.logo);
   }
 
@@ -117,6 +145,7 @@ export class DOLoginPage extends BasePage {
    * Toggle remember me checkbox
    */
   async toggleRememberMe(): Promise<void> {
+    this.logStep("Toggle Remember Me");
     await this.clickElement(this.rememberMeCheckbox);
   }
 }

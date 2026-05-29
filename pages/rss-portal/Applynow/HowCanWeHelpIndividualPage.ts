@@ -51,8 +51,13 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
     this.purchaseThroughDropdownRoot = byFormName.or(byLabel).first();
   }
 
+  protected stepLogPrefix(): string {
+    return "RSS Apply Now — How can we help";
+  }
+
   /** Waits for Apply Now step 1 content (Who are you applying under?). */
   async waitForHowCanWeHelpStep(): Promise<void> {
+    this.logStep("Wait For How Can We Help Step");
     await this.page
       .getByText(/Who are you applying under/i)
       .first()
@@ -62,6 +67,7 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
 
   /** Selects the Individual applicant type tile. */
   async clickIndividual(): Promise<void> {
+    this.logStep("Click Individual");
     await this.individualTileButton.waitFor({ state: "visible", timeout: 15_000 });
     await this.clickElement(this.individualTileButton);
     await this.waitForLoadingComplete();
@@ -69,6 +75,7 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
 
   /** Selects the Business applicant type tile. */
   async clickBusiness(): Promise<void> {
+    this.logStep("Click Business");
     await this.businessTileButton.waitFor({ state: "visible", timeout: 15_000 });
     await this.clickElement(this.businessTileButton);
     await this.waitForLoadingComplete();
@@ -122,6 +129,7 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
 
   /** Sets “What would you like to do?” to Purchase through a dealership. */
   async selectPurchaseThroughDealership(): Promise<void> {
+    this.logStep("Select Purchase Through Dealership");
     await this.pickPrimeNgDropdownOption("Purchase through a dealership");
   }
 
@@ -129,6 +137,7 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
    * Sets “What would you like to do?” to **I am after a Conditional Approval** (Business conditional-approval path).
    */
   async selectConditionalApproval(): Promise<void> {
+    this.logStep("Select Conditional Approval");
     await this.pickPrimeNgDropdownOption("I am after a Conditional Approval");
   }
 
@@ -136,6 +145,7 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
   async expectPurchaseThroughDealershipSelected(
     timeoutMs = 15_000,
   ): Promise<void> {
+    this.logStep("Expect Purchase Through Dealership Selected");
     const face = this.purchaseThroughDropdownRoot
       .locator('[role="combobox"]')
       .first();
@@ -146,6 +156,7 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
 
   /** Asserts “What would you like to do?” shows **I am after a Conditional Approval**. */
   async expectConditionalApprovalSelected(timeoutMs = 15_000): Promise<void> {
+    this.logStep("Expect Conditional Approval Selected");
     const face = this.purchaseThroughDropdownRoot
       .locator('[role="combobox"]')
       .first();
@@ -174,6 +185,10 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     super(page);
     this.assetRoot = page.locator("app-asset-select");
     this.repaymentRoot = page.locator("app-repayment-calculator");
+  }
+
+  protected stepLogPrefix(): string {
+    return "RSS Apply Now — Dealership & asset";
   }
 
   private escapeRx(s: string): string {
@@ -240,6 +255,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
   }
 
   async waitForDealershipSection(): Promise<void> {
+    this.logStep("Wait For Dealership Section");
     await this.page
       .getByText(/Select a UDC Dealership you have used before/i)
       .first()
@@ -256,6 +272,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
   }
 
   async waitForDealersLoaded(timeoutMs = 300_000): Promise<void> {
+    this.logStep("Wait For Dealers Loaded");
     const root = this.dealershipDropdownRoot();
     await root.waitFor({ state: "visible", timeout: 30_000 });
     const combobox = root.locator('[role="combobox"]').first();
@@ -279,12 +296,14 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
    * `p-dropdown` bound as `selectDelearship` (server-side spelling).
    */
   async selectDealerYouHaveUsedBefore(dealerLabel: string): Promise<void> {
+    this.logStep("Select Dealer You Have Used Before");
     const root = this.dealershipDropdownRoot();
     await this.pickPrimeNgDropdownOption(root, dealerLabel);
   }
 
   /** Ensures “Car or Van” asset type tile is selected (desktop `app-asset-select` layout). */
   async ensureCarOrVanAssetTypeSelected(): Promise<void> {
+    this.logStep("Ensure Car Or Van Asset Type Selected");
     await this.waitForProgressSpinnersHidden(60_000);
     const tile = this.assetRoot
       .locator(".icon-container")
@@ -308,6 +327,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
    * Click target when not selected: `div.icon-container_business` with label **Car or Light Commercial**.
    */
   async ensureCarOrLightCommercialAssetTypeSelected(): Promise<void> {
+    this.logStep("Ensure Car Or Light Commercial Asset Type Selected");
     await this.waitForProgressSpinnersHidden(60_000);
 
     const selectedTile = this.assetRoot
@@ -521,6 +541,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
    * Fills required fields then clicks **Add** when it becomes enabled (RSS applies the row to the flow).
    */
   async fillCarOrVanAssetRow(data: CarOrVanAssetData): Promise<void> {
+    this.logStep("Fill Car Or Van Asset Row");
     await this.assetRoot.waitFor({ state: "visible", timeout: 20_000 });
     await this.page
       .getByText(/What are you looking to purchase/i)
@@ -535,6 +556,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
    * Same field values as {@link fillCarOrVanAssetRow}, but selects **Car or Light Commercial** (Business apply flow).
    */
   async fillCarOrLightCommercialAssetRow(data: CarOrVanAssetData): Promise<void> {
+    this.logStep("Fill Car Or Light Commercial Asset Row");
     await this.assetRoot.waitFor({ state: "visible", timeout: 20_000 });
     await this.page
       .getByText(/What are you looking to purchase/i)
@@ -546,6 +568,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
   }
 
   async fillRepaymentCalculatorFields(data: RepaymentCalculatorData): Promise<void> {
+    this.logStep("Fill Repayment Calculator Fields");
     await this.repaymentRoot.waitFor({ state: "visible", timeout: 20_000 });
 
     const depositInput = this.repaymentRoot.locator(
@@ -571,6 +594,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
   }
 
   async clickRepaymentCalculate(): Promise<void> {
+    this.logStep("Click Repayment Calculate");
     const btn = this.repaymentRoot.getByRole("button", { name: /^Calculate$/i });
     await btn.waitFor({ state: "visible", timeout: 15_000 });
     await this.clickElement(btn);
@@ -579,6 +603,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
 
   /** Soft checks matching the reference screenshot (localhost apply-now). */
   async expectRepaymentSummaryLikeScreenshot(): Promise<void> {
+    this.logStep("Expect Repayment Summary Like Screenshot");
     const scope = this.repaymentRoot;
     await expect(scope.getByText(/\$4,725\.42/)).toBeVisible({ timeout: 30_000 });
     await expect(scope.getByText(/Monthly/i).first()).toBeVisible();
@@ -594,6 +619,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
    * Scope: visible text node only; long click timeout for QAT spinners over the card.
    */
   async clickApplyNowFooterNext(clickTimeoutMs = 60_000): Promise<void> {
+    this.logStep("Click Apply Now Footer Next");
     await this.waitForProgressSpinnersHidden();
     const next = this.page
       .locator(':text-is("Next")')
