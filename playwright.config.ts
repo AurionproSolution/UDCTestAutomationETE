@@ -24,10 +24,16 @@ const ignoreDoPerfInPortalOnly = "**/udc-perf-test-data.test.ts";
 // Environment variable for selecting test environment
 const TEST_ENV = process.env.TEST_ENV || "qat";
 
+// Ortoni Report Configuration — unique folder per process avoids Windows EPERM when
+// ortoni-report tries to rmSync locked videos under a previous run's ortoni-data.
+const ortoniReportFolder =
+  process.env.ORTONI_REPORT_FOLDER ||
+  path.join("ortoni-report", `run-${Date.now()}-${process.pid}`);
+
 // Ortoni Report Configuration
 const ortoniConfig: OrtoniReportConfig = {
   open: process.env.CI ? "never" : "on-failure",
-  folderPath: "ortoni-report",
+  folderPath: ortoniReportFolder,
   filename: "index.html",
   title: "UDC Automation Tests Report",
   showProject: true,

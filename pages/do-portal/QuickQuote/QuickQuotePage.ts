@@ -59,6 +59,8 @@ export class DOQuickQuotePage extends BasePage {
   readonly balloonDollarInput: Locator;
   readonly depositDollarInput: Locator;
   readonly residualValuePercentInput: Locator;
+  /** Residual Value row: $ amount paired with % (OR column layout). */
+  readonly residualValueDollarInput: Locator;
 
   // Quick quote fields - AFV SPECIFIC
   readonly assuredFutureValueInput: Locator;
@@ -140,9 +142,17 @@ export class DOQuickQuotePage extends BasePage {
       "xpath=.//label[contains(normalize-space(.), 'Asset Type')]/following::button[contains(., 'Select')]"
     );
 
-    this.cashPriceInput = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Cash Price')]/following::input[1]",
-    );
+    // Prefer currencymask input after the Cash Price label — duplicate id="amount" is common in Angular templates.
+    this.cashPriceInput = this.quickQuoteForm
+      .locator("label")
+      .filter({ hasText: /^Cash Price/i })
+      .first()
+      .locator("xpath=following::input[@currencymask][1]")
+      .or(
+        this.quickQuoteForm.locator(
+          "xpath=.//label[contains(normalize-space(.), 'Cash Price')]/following::input[1]",
+        ),
+      );
     this.initialLeaseAmountInput = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Initial Lease Amount')]/following::input[1]",
     );
@@ -220,6 +230,9 @@ export class DOQuickQuotePage extends BasePage {
     this.residualValuePercentInput = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Residual Value')]/following::input[@id='percent'][1]",
     );
+    this.residualValueDollarInput = this.quickQuoteForm.locator(
+      `xpath=.//label[contains(normalize-space(.), 'Residual Value')]/following::${orSep}[1]/following::input[@id='amount'][1]`,
+    );
 
     // AFV SPECIFIC - Assured Future Value
     this.assuredFutureValueInput = this.quickQuoteForm.locator(
@@ -271,10 +284,15 @@ export class DOQuickQuotePage extends BasePage {
     const summaryByClass = this.quickQuoteCard.locator(
       ".calculation-result, [class*='calculation'], [class*='summary'], app-calculation-result, app-calculation-summary",
     );
+    /** CSA often shows "Loan Amount"; FL Quick Quote uses lease / financed / total copy instead. */
     const summaryByContent = this.quickQuoteCard
       .locator("div, section, article")
-      .filter({ hasText: /Loan Amount/i })
-      .filter({ hasText: /Total (Amount )?Payable|Total Fees|Total Interest/i });
+      .filter({
+        hasText: /Loan Amount|Amount Financed|Finance\s*Lease|Lease\s*(Amount|Payment|Cost)/i,
+      })
+      .filter({
+        hasText: /Total (Amount )?Payable|Total Fees|Total Interest|Total.*Cost|Lease/i,
+      });
     this.calculationSummaryRegion = summaryByClass.or(summaryByContent);
   }
 
@@ -289,6 +307,19 @@ export class DOQuickQuotePage extends BasePage {
       .nth(quoteIndex)
       .locator("form")
       .first();
+  }
+
+  /**
+   * One comparison card (`app-create-quick-quote`). Index 0 = "Quick Quote 1", 1 = QQ2, 2 = QQ3.
+   * Use with `createQuoteButtonOnPanel` when tests need a panel-scoped button or assertion.
+   */
+  quoteCard(quoteIndex: number): Locator {
+    return this.quickQuoteRoot.locator("app-create-quick-quote").nth(quoteIndex);
+  }
+
+  /** Create Quote on a specific comparison panel (regression: panel 0 = first / primary quote). */
+  createQuoteButtonOnPanel(quoteIndex: number): Locator {
+    return this.quoteCard(quoteIndex).getByRole("button", { name: /^Create Quote$/i });
   }
 
   calculateForTriggerOnQuote(quoteIndex: number): Locator {
@@ -308,9 +339,16 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   cashPriceInputOnQuote(quoteIndex: number): Locator {
-    return this.quoteForm(quoteIndex).locator(
-      "xpath=.//label[contains(normalize-space(.), 'Cash Price')]/following::input[1]",
-    );
+    return this.quoteForm(quoteIndex)
+      .locator("label")
+      .filter({ hasText: /^Cash Price/i })
+      .first()
+      .locator("xpath=following::input[@currencymask][1]")
+      .or(
+        this.quoteForm(quoteIndex).locator(
+          "xpath=.//label[contains(normalize-space(.), 'Cash Price')]/following::input[1]",
+        ),
+      );
   }
 
   interestRateInputOnQuote(quoteIndex: number): Locator {
@@ -340,6 +378,26 @@ export class DOQuickQuotePage extends BasePage {
         "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
       )
       .first();
+  }
+
+  initialLeaseAmountInputOnQuote(quoteIndex: number): Locator {
+    return this.quoteForm(quoteIndex).locator(
+      "xpath=.//label[contains(normalize-space(.), 'Initial Lease Amount')]/following::input[1]",
+    );
+  }
+
+  residualPercentInputOnQuote(quoteIndex: number): Locator {
+    return this.quoteForm(quoteIndex).locator(
+      "xpath=.//label[contains(normalize-space(.), 'Residual Value')]/following::input[@id='percent'][1]",
+    );
+  }
+
+  residualDollarInputOnQuote(quoteIndex: number): Locator {
+    const orSep =
+      "*[normalize-space(.)='OR' or normalize-space(.)='or' or normalize-space(.)='Or' or normalize-space(.)='oR']";
+    return this.quoteForm(quoteIndex).locator(
+      `xpath=.//label[contains(normalize-space(.), 'Residual Value')]/following::${orSep}[1]/following::input[@id='amount'][1]`,
+    );
   }
 
   /**
@@ -510,6 +568,7 @@ export class DOQuickQuotePage extends BasePage {
     const trimmed = amount.trim();
     const want = this.parseLocaleNumber(trimmed);
     await input.waitFor({ state: "visible", timeout: 10_000 });
+    await input.scrollIntoViewIfNeeded().catch(() => {});
 
     const read = async (): Promise<number> =>
       this.parseLocaleNumber(await input.inputValue().catch(() => ""));
@@ -602,25 +661,63 @@ export class DOQuickQuotePage extends BasePage {
     throw new Error(`Quick Quote: could not commit masked currency (${amount})`);
   }
 
+  /**
+   * PrimeNG p-dropdown: a real pointer click can miss the trigger when an ancestor uses
+   * `pointer-events: none` (FL "Calculate For" row). `HTMLElement.click()` still runs handlers on the trigger.
+   */
+  private async openPrimeDropdownAndSelectOption(trigger: Locator, optionText: string): Promise<void> {
+    await trigger.waitFor({ state: "visible", timeout: 60_000 });
+    await trigger.scrollIntoViewIfNeeded().catch(() => {});
+
+    const option = this.page.getByRole("option").filter({ hasText: optionText }).first();
+
+    const tryDomClickOpen = async (): Promise<void> => {
+      await trigger.evaluate((el: HTMLElement) => {
+        el.click();
+      });
+      await option.waitFor({ state: "visible", timeout: 8_000 });
+    };
+
+    try {
+      await tryDomClickOpen();
+    } catch {
+      await this.clickElement(trigger);
+      await option.waitFor({ state: "visible", timeout: 15_000 });
+    }
+    await option.click();
+  }
+
   private async selectFromDropdown(
     trigger: Locator,
     optionText: string,
   ): Promise<void> {
     await trigger.waitFor({ state: "visible", timeout: 60_000 });
-    await this.clickElement(trigger);
+    await trigger.scrollIntoViewIfNeeded().catch(() => {});
     const trimmed = optionText.trim();
-    // `hasText: "Monthly"` matches **Semi Monthly** (substring). Prefer exact label first.
     const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const exactOption = this.page.getByRole("option", {
       name: new RegExp(`^\\s*${escaped}\\s*$`, "i"),
     });
+
+    const tryOpenDropdown = async (): Promise<void> => {
+      try {
+        await trigger.evaluate((el: HTMLElement) => {
+          el.click();
+        });
+      } catch {
+        await this.clickElement(trigger);
+      }
+    };
+    await tryOpenDropdown();
+
     if ((await exactOption.count()) > 0) {
+      await exactOption.first().waitFor({ state: "visible", timeout: 15_000 });
       await exactOption.first().click();
     } else {
       const option = this.page.getByRole("option").filter({ hasText: trimmed }).first();
+      await option.waitFor({ state: "visible", timeout: 15_000 });
       await option.click();
     }
-    // Dismiss overlays and wait for page to settle
     await this.dismissQuickQuoteDropdownOverlays();
     await new Promise((r) => setTimeout(r, 300));
     await this.page.waitForLoadState("networkidle").catch(() => {});
@@ -668,6 +765,11 @@ export class DOQuickQuotePage extends BasePage {
     await this.clearMaskedCurrencyInput(this.cashPriceInput);
   }
 
+  /** Same as `clearCashPriceField` for comparison panels 1+ so copied cash does not merge with the next entry. */
+  async clearCashPriceFieldOnQuote(quoteIndex: number): Promise<void> {
+    await this.clearMaskedCurrencyInput(this.cashPriceInputOnQuote(quoteIndex));
+  }
+
   async clearDepositDollarField(): Promise<void> {
     this.logStep("Clear Deposit Dollar Field");
     await this.clearMaskedCurrencyInput(this.depositDollarInput);
@@ -683,6 +785,23 @@ export class DOQuickQuotePage extends BasePage {
     await this.replaceCashPriceInInput(this.initialLeaseAmountInput, initialLeaseAmount);
   }
 
+  async enterInitialLeaseAmountOnQuote(quoteIndex: number, initialLeaseAmount: string): Promise<void> {
+    const input = this.initialLeaseAmountInputOnQuote(quoteIndex);
+    await this.fillElement(input, initialLeaseAmount);
+  }
+
+  /** Clear copied QQ1 values on comparison panels before entering panel-specific amounts. */
+  async clearInitialLeaseAmountOnQuote(quoteIndex: number): Promise<void> {
+    await this.replaceInputValueByKeyboard(this.initialLeaseAmountInputOnQuote(quoteIndex), "");
+  }
+
+  async enterResidualValuePercentOnQuote(quoteIndex: number, residualValuePercent: string): Promise<void> {
+    await this.replaceInputValueByKeyboard(
+      this.residualPercentInputOnQuote(quoteIndex),
+      residualValuePercent,
+    );
+  }
+
   async enterDepositPercent(depositPercent: string): Promise<void> {
     this.logStep(`Entered deposit % as ${this.stepValueDisplay(depositPercent)}`);
     const t = depositPercent.trim();
@@ -694,7 +813,7 @@ export class DOQuickQuotePage extends BasePage {
 
   async enterInterestRatePercent(interestRatePercent: string): Promise<void> {
     this.logStep(`Entered interest rate % as ${this.stepValueDisplay(interestRatePercent)}`);
-    await this.fillElement(this.interestRatePercentInput, interestRatePercent);
+    await this.replaceInputValueByKeyboard(this.interestRatePercentInput, interestRatePercent);
   }
 
   /**
@@ -718,6 +837,38 @@ export class DOQuickQuotePage extends BasePage {
   async selectCalculateFor(calculateFor: string): Promise<void> {
     this.logStep(`Selected Calculate For: ${this.stepValueDisplay(calculateFor)}`);
     await this.selectFromDropdown(this.calculateForDropdownTrigger, calculateFor);
+  }
+
+  /**
+   * Finance Lease often defaults "Calculate For" to Payment while the row uses `pointer-events: none`
+   * (so a normal Playwright click never opens the list). Switches to Cash Price when the control exists
+   * and lists that option; no-ops when already Cash Price or when the dropdown is absent / disabled.
+   */
+  async ensureCalculateForCashPriceMode(quoteIndex = 0): Promise<void> {
+    await this.dismissQuickQuoteDropdownOverlays();
+    const trig =
+      quoteIndex === 0 ? this.calculateForDropdownTrigger : this.calculateForTriggerOnQuote(quoteIndex);
+    if ((await trig.count()) === 0) return;
+    if (!(await trig.isEnabled().catch(() => false))) return;
+
+    const form = quoteIndex === 0 ? this.quickQuoteForm : this.quoteForm(quoteIndex);
+    const displayed = await form
+      .locator(
+        "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]//*[self::span[@role='combobox'] or contains(@class,'p-dropdown-label')][1]",
+      )
+      .first()
+      .innerText()
+      .catch(() => "");
+    if (/cash\s*price/i.test((displayed ?? "").trim())) {
+      return;
+    }
+
+    try {
+      await this.openPrimeDropdownAndSelectOption(trig, "Cash Price");
+    } catch {
+      /* Single-mode programs or list copy without "Cash Price" */
+    }
+    await this.dismissQuickQuoteDropdownOverlays();
   }
 
   async selectFrequency(frequency: string): Promise<void> {
@@ -749,7 +900,15 @@ export class DOQuickQuotePage extends BasePage {
 
   async enterResidualValuePercent(residualValuePercent: string): Promise<void> {
     this.logStep(`Entered residual value % as ${this.stepValueDisplay(residualValuePercent)}`);
-    await this.fillElement(this.residualValuePercentInput, residualValuePercent);
+    await this.replaceInputValueByKeyboard(this.residualValuePercentInput, residualValuePercent);
+  }
+
+  async enterResidualValueDollars(residualDollars: string): Promise<void> {
+    await this.replaceCashPriceInInput(this.residualValueDollarInput, residualDollars);
+  }
+
+  async clearResidualValueDollarField(): Promise<void> {
+    await this.clearMaskedCurrencyInput(this.residualValueDollarInput);
   }
 
   async enterAssuredFutureValue(value: string): Promise<void> {
@@ -869,9 +1028,13 @@ export class DOQuickQuotePage extends BasePage {
     this.log("Calculate action finished (loading complete).");
   }
 
-  async clickCreateQuote(): Promise<void> {
-    this.log("Clicking Create Quote on Quick Quote.");
-    await this.clickElement(this.createQuoteButton);
+  async clickCreateQuote(quoteIndex = 0): Promise<void> {
+    this.log(
+      quoteIndex === 0
+        ? "Clicking Create Quote on Quick Quote."
+        : `Clicking Create Quote on comparison panel ${quoteIndex + 1}.`,
+    );
+    await this.clickElement(this.createQuoteButtonOnPanel(quoteIndex));
     await this.waitForLoadingComplete();
     this.log("Create Quote navigation finished (loading complete).");
   }
@@ -1353,6 +1516,39 @@ export class DOQuickQuotePage extends BasePage {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Third comparison panel (enabled only after Quick Quote 2 has been calculated).
+   * Separate from `clickAddComparison2` so regressions can assert the gated sequence (2 → calculate → 3).
+   */
+  async clickAddComparison3(): Promise<void> {
+    await this.clickElement(this.addComparison3Button);
+    await this.waitForLoadingComplete();
+  }
+
+  /** Product allows at most three side-by-side quotes — no fourth "Add Comparison" control. */
+  async expectNoAddComparison4Button(): Promise<void> {
+    await expect(this.page.getByRole("button", { name: /Add Comparison 4/i })).toHaveCount(0);
+  }
+
+  /**
+   * When the UI exposes a choice of which calculated quote becomes the standard quote, select the given panel.
+   * Typical regression path: `quoteIndex` **0** (Quick Quote 1). No-op if no radio / selector is present on that card.
+   */
+  async selectQuickQuotePanelForStandardQuoteIfShown(quoteIndex: number): Promise<void> {
+    const card = this.quoteCard(quoteIndex);
+    const radio = card.getByRole("radio").first();
+    if ((await radio.count()) > 0 && (await radio.isVisible().catch(() => false))) {
+      await radio.check({ force: true }).catch(async () => {
+        await this.clickElement(radio);
+      });
+      return;
+    }
+    const pRadioBox = card.locator(".p-radiobutton .p-radiobutton-box").first();
+    if ((await pRadioBox.count()) > 0 && (await pRadioBox.isVisible().catch(() => false))) {
+      await this.clickElement(pRadioBox);
+    }
   }
 
   /**
