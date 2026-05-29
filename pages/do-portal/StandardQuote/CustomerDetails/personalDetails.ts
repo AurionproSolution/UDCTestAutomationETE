@@ -8,7 +8,6 @@ export class DOPersonalDetailsPage extends BasePage {
   readonly middleNameInput: Locator;
   readonly lastNameInput: Locator;
   readonly genderDropdown: Locator;
-  readonly dateOfBirthInput: Locator;
   readonly maritalStatusDropdown: Locator;
   readonly noOfDependentsDropdown: Locator;
   readonly mobileNumberInput: Locator;
@@ -43,12 +42,6 @@ export class DOPersonalDetailsPage extends BasePage {
     this.genderDropdown = page.locator(
       `//label[text()=' Gender ']/following-sibling::div//div[@aria-label='dropdown trigger']`,
     );
-    this.dateOfBirthInput = page
-      .locator(
-        "body > app-root:nth-child(1) > div:nth-child(1) > div:nth-child(4) > div:nth-child(2) > app-individual:nth-child(2) > lib-stepper:nth-child(1) > div:nth-child(2) > app-personal-details:nth-child(1) > base-form:nth-child(2) > gen-card:nth-child(1) > p-card:nth-child(1) > div:nth-child(1) > div:nth-child(1) > div:nth-child(1) > div:nth-child(2) > form:nth-child(1) > div:nth-child(1) > div:nth-child(8) > div:nth-child(1)",
-      )
-      .locator("p-calendar input, input.p-inputtext, input[type='text']")
-      .first();
     this.maritalStatusDropdown = page.locator(
       `//label[text()=' Marital Status ']/following-sibling::div//div[@aria-label='dropdown trigger']`,
     );
@@ -119,12 +112,77 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectGender(gender);
     await this.selectGenderOption(gender);
   }
+
+  /**
+   * **Date of Birth** (`p-calendar`). Scoped to `app-personal-details` only — avoid full-page
+   * `nth-child` chains from SelectorHub (they break when step layout or wrapper depth changes).
+   */
+  private async resolveDateOfBirthInput(): Promise<Locator> {
+    const root = this.personalDetailsRoot;
+    await root.waitFor({ state: "visible", timeout: 60_000 });
+
+    const byRole = root.getByRole("textbox", { name: /Date of Birth/i });
+    if (await byRole.isVisible({ timeout: 6_000 }).catch(() => false)) {
+      return byRole;
+    }
+
+    const byName = root.locator('input[name="dateOfBirth"]');
+    if (await byName.first().isVisible({ timeout: 6_000 }).catch(() => false)) {
+      return byName.first();
+    }
+
+    const labelCal = root
+      .locator("label")
+      .filter({ hasText: /Date of Birth/i })
+      .first()
+      .locator(
+        "xpath=following::p-calendar[1]//input[contains(@class,'p-inputtext')][1]",
+      );
+    if (await labelCal.isVisible({ timeout: 6_000 }).catch(() => false)) {
+      return labelCal;
+    }
+
+    const floatCal = root
+      .locator(".p-float-label")
+      .filter({ hasText: /Date of Birth/i })
+      .first()
+      .locator("input.p-inputtext");
+    if (await floatCal.isVisible({ timeout: 6_000 }).catch(() => false)) {
+      return floatCal;
+    }
+
+    const firstCal = root
+      .locator("p-calendar")
+      .first()
+      .locator("input.p-inputtext");
+    if (await firstCal.isVisible({ timeout: 6_000 }).catch(() => false)) {
+      return firstCal;
+    }
+
+    throw new Error(
+      "Date of Birth input not found under app-personal-details " +
+        "(tried accessible name, input[name=dateOfBirth], label→p-calendar, float-label, first p-calendar).",
+    );
+  }
+
   async enterDateOfBirth(dob: string): Promise<void> {
+<<<<<<< Updated upstream
     await this.dateOfBirthInput.waitFor({ state: "visible", timeout: 20000 });
+=======
+    const dateOfBirthInput = await this.resolveDateOfBirthInput();
+    if (!dob.trim()) {
+      await dateOfBirthInput.waitFor({ state: "visible", timeout: 20_000 });
+      await dateOfBirthInput.click();
+      await this.page.keyboard.press("Escape").catch(() => {});
+      await this.page.keyboard.press("Tab").catch(() => {});
+      return;
+    }
+    await dateOfBirthInput.waitFor({ state: "visible", timeout: 20_000 });
+>>>>>>> Stashed changes
     try {
-      await this.clickAndFillElement(this.dateOfBirthInput, dob);
+      await this.clickAndFillElement(dateOfBirthInput, dob);
     } catch {
-      await this.dateOfBirthInput.fill(dob, { force: true });
+      await dateOfBirthInput.fill(dob, { force: true });
     }
     await this.page.keyboard.press("Tab");
     await this.page.keyboard.press("Escape").catch(() => {});
@@ -305,10 +363,40 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectCountryOfCitizenshipOption(countryOfCitizenship);
   }
   async clickNextButton(): Promise<void> {
+<<<<<<< Updated upstream
     await this.nextButton.waitFor({ state: "visible", timeout: 120000 });
     for (let i = 0; i < 120; i++) {
       if (await this.nextButton.isEnabled().catch(() => false)) break;
       await this.page.waitForTimeout(500);
+=======
+    const startTime = Date.now();
+    try {
+      await this.nextButton.waitFor({ state: "visible", timeout: 120000 });
+      console.log(`⏱️ clickNextButton: button visible after ${Date.now() - startTime}ms`);
+     
+      for (let i = 0; i < 120; i++) {
+        if (await this.nextButton.isEnabled().catch(() => false)) break;
+        await this.page.waitForTimeout(500);
+      }
+      console.log(`⏱️ clickNextButton: button enabled after ${Date.now() - startTime}ms`);
+     
+      await this.nextButton.scrollIntoViewIfNeeded();
+      await this.clickElement(this.nextButton);
+      console.log(`⏱️ clickNextButton: click done after ${Date.now() - startTime}ms`);
+     
+      // Guard against page closure and reduce blocking waits
+      if (!this.page.isClosed()) {
+        await this.page.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
+        console.log(`⏱️ clickNextButton: domcontentloaded done after ${Date.now() - startTime}ms`);
+      }
+      if (!this.page.isClosed()) {
+        await this.page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+        console.log(`⏱️ clickNextButton: networkidle done after ${Date.now() - startTime}ms`);
+      }
+    } catch (err) {
+      console.error(`❌ clickNextButton failed after ${Date.now() - startTime}ms:`, err);
+      throw err;
+>>>>>>> Stashed changes
     }
     await this.nextButton.scrollIntoViewIfNeeded();
     await this.clickElement(this.nextButton);

@@ -35,9 +35,13 @@ export class DOLoginPage extends BasePage {
     this.yesThisIsMyComputerRadio = page.getByRole("radio", {
       name: "Yes, this is my computer",
     });
-    this.loginWithFisButton = page.getByRole("button", {
-      name: "Login with FIS",
-    });
+    /** IdP / marketing shell: entry may be button or link; copy varies (Login with FIS, Sign in with FIS, spacing). */
+    this.loginWithFisButton = page
+      .getByRole("button", { name: /login\s*(with)?\s*fis/i })
+      .or(page.getByRole("link", { name: /login\s*(with)?\s*fis/i }))
+      .or(page.getByRole("button", { name: /sign\s*in\s*(with)?\s*fis/i }))
+      .or(page.getByRole("link", { name: /sign\s*in\s*(with)?\s*fis/i }))
+      .first();
     this.signinButton = page.getByRole("button", { name: "Sign in" });
     this.quoteAndAppButton = page.getByRole("link", {
       name: /Quotes & Applications/i,
@@ -57,6 +61,9 @@ export class DOLoginPage extends BasePage {
     const targetUrl = urlOverride ?? this.url; // this.url = default from the page object
     this.log(`Navigating to DO Portal login page: ${targetUrl}`);
     await this.navigateTo(targetUrl);
+    // domcontentloaded returns before SPA/SSO shell paints the FIS button; wait for the real login entry.
+    await this.page.waitForLoadState("load");
+    await expect(this.loginWithFisButton).toBeVisible({ timeout: 90_000 });
   }
 
   /**
@@ -64,7 +71,7 @@ export class DOLoginPage extends BasePage {
    */
   async login(username: string, password: string): Promise<void> {
     this.log(`Logging in as: ${username}`);
-    await this.clickElement(this.loginWithFisButton);
+    await this.clickElement(this.loginWithFisButton, 90_000);
     await this.fillElement(this.usernameInput, username);
     await this.clickElement(this.proceedButton);
     await this.fillElement(this.passwordInput, password);

@@ -166,6 +166,7 @@ export class DOReferenceDetailsPage extends BasePage {
     await dialog.waitFor({ state: "hidden", timeout: 25000 }).catch(() => {});
   }
 
+<<<<<<< Updated upstream
   async confirmCustomerDetailsCorrect(): Promise<void> {
     const byRole = this.page.getByRole("checkbox", {
       name: /I confirm that all customer details are correct/i,
@@ -182,11 +183,103 @@ export class DOReferenceDetailsPage extends BasePage {
     const box = confirmRow.locator("div.p-checkbox-box").first();
     await box.scrollIntoViewIfNeeded();
     await box.click();
+=======
+  private confirmDetailsCheckboxHost(): Locator {
+    const labelRx = /I confirm that all customer details are correct/i;
+    return this.page.locator("p-checkbox").filter({ hasText: labelRx }).first();
+  }
+
+  /**
+   * Reference Details footer **Submit** without ticking **I confirm…** should surface a guard
+   * (e.g. “Please Confirm your details are correct”) before Post Submission.
+   */
+  async expectConfirmCustomerDetailsCheckboxRequiredValidation(): Promise<void> {
+    const host = this.confirmDetailsCheckboxHost();
+    await host.waitFor({ state: "visible", timeout: 20_000 });
+
+    const input = host.locator('input[type="checkbox"]').first();
+    if (await input.isChecked().catch(() => false)) {
+      return;
+    }
+
+    await this.submitButton.waitFor({ state: "visible", timeout: 60_000 });
+    await this.submitButton.scrollIntoViewIfNeeded();
+    await this.submitButton.click({ timeout: 30_000 });
+
+    const messageRx =
+      /Please\s+Confirm\s+your\s+details\s+are\s+correct|Please\s+[Cc]onfirm.*your\s+details.*correct|confirm\s+your\s+details\s+are\s+correct/i;
+    await expect(this.page.getByText(messageRx).first()).toBeVisible({ timeout: 20_000 });
+  }
+
+  async confirmCustomerDetailsCorrect(): Promise<void> {
+    const host = this.confirmDetailsCheckboxHost();
+    await host.waitFor({ state: "visible", timeout: 15000 });
+
+    const visibleBox = host.locator("div.p-checkbox-box:visible").first();
+    await visibleBox.waitFor({ state: "visible", timeout: 15000 });
+    await visibleBox.scrollIntoViewIfNeeded();
+    await visibleBox.evaluate((el) =>
+      (el as HTMLElement).scrollIntoView({ block: "center", inline: "nearest" }),
+    );
+
+    const isChecked = async (): Promise<boolean> => {
+      const visual = await host
+        .locator(".p-checkbox-box.p-checkbox-checked, .p-checkbox-box.p-highlight")
+        .first()
+        .isVisible({ timeout: 1500 })
+        .catch(() => false);
+      if (visual) return true;
+      const input = host.locator('input[type="checkbox"]').first();
+      return input.isChecked().catch(() => false);
+    };
+
+    if (await isChecked()) return;
+
+    await visibleBox.click({ timeout: 15000 });
+    if (await isChecked()) return;
+
+    await visibleBox.click({ force: true, timeout: 15000 });
+>>>>>>> Stashed changes
   }
 
   async clickSubmitButton(): Promise<void> {
     await this.submitButton.waitFor({ state: "visible", timeout: 60000 });
     await this.submitButton.scrollIntoViewIfNeeded();
     await this.submitButton.click();
+  }
+
+  /**
+   * After contact + **I confirm…**: leave Customer Details for Post Submission.
+   * QAT often uses a sticky footer **Save and Next** or **Next** (`span.p-button-label`) before Post Submission;
+   * other builds use **Submit** only. Try advances in order, then **Submit** if Upload is not yet shown.
+   */
+  async advanceFromReferenceDetailsToPostSubmission(): Promise<void> {
+    const uploadBrowse = this.page.locator(':text-is("Browse Files")');
+
+    const footerAdvanceButtons: Locator[] = [
+      this.page.getByRole("button", { name: /Save\s+and\s+Next|Save\s*&\s*Next/i }).last(),
+      /** QAT: label is often a `span` with exact `Next` — resolve the real `<button>`. */
+      this.page.locator("button").filter({ has: this.page.locator(':text-is("Next")') }).last(),
+      this.page.getByRole("button", { name: /^Next$/i }).last(),
+      this.page
+        .locator("button.p-button, button.p-element")
+        .filter({ has: this.page.locator("span.p-button-label").filter({ hasText: /^Next$/ }) })
+        .last(),
+    ];
+
+    for (const btn of footerAdvanceButtons) {
+      const ready =
+        (await btn.isVisible({ timeout: 2_000 }).catch(() => false)) &&
+        (await btn.isEnabled().catch(() => false));
+      if (!ready) continue;
+      await btn.scrollIntoViewIfNeeded();
+      await btn.click({ timeout: 20_000 });
+      await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+      if (await uploadBrowse.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        return;
+      }
+    }
+
+    await this.clickSubmitButton();
   }
 }

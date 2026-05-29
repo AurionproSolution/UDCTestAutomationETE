@@ -172,6 +172,8 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
 
     // Financial Position — Liabilities, Income, Expenditure, income-decrease radios, Essential Outgoings
     await financialPositionPage.waitForFinancialPositionStep();
+    await financialPositionPage.selectBusinessNetProfitLastYearNo();
+    await page.waitForTimeout(200);
     await financialPositionPage.selectBusinessNetProfitLastYearYes();
     await financialPositionPage.fillBusinessNetProfitLastYear("$50000.00");
     await financialPositionPage.fillBusinessTurnoverLatestYear(

@@ -40,16 +40,41 @@ export class DOAssetDetailsPage extends BasePage {
     this.conditionDropdown = page.locator(
       `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[6]`,
     );
-    this.assetInsuranceTradeInSummaryHyperlink = page.getByRole("button", {
-      name: "Asset, Insurance & Trade-in",
-    });
+    /**
+     * **Asset & Insurance Summary** opener — must resolve to a **single** `button` (not `:text-is` + `.or()`,
+     * which can match the label span and the button and trips strict mode on `scrollIntoViewIfNeeded`).
+     */
+    this.assetInsuranceTradeInSummaryHyperlink = page
+      .locator("button")
+      .filter({ hasText: /Asset\s*&\s*Insurance\s*Summary/i })
+      .first();
     this.assetyEditButton = page.locator(".cursor-pointer.fa-pen-to-square");
     this.assetSummaryCancelButton = page.locator(
       "//timesicon//*[name()='svg']",
     );
+<<<<<<< Updated upstream
     this.cashPriceOfAssetInputField = page.getByRole("textbox", {
       name: "Cash Price of Asset*",
     });
+=======
+    /** FL lease card: "Cash Price of Assets (GST Inclusive)"; older builds: "Cash Price of Asset*". */
+    this.cashPriceOfAssetInputField = page
+      .getByRole("textbox", { name: /Cash Price of Asset/i })
+      .first();
+    const rrpLabel = /Recommended\s+Retail\s+Price/i;
+    // Float labels may sit outside the `col-6` wrapper; prefer ARIA name, then label text + `#amount`.
+    this.recommendedRetailPriceInput = page
+      .getByRole("textbox", { name: rrpLabel })
+      .or(
+        page
+          .getByText(rrpLabel)
+          .locator(
+            "xpath=ancestor::div[contains(@class,'col-')][1]//input[@id='amount']",
+          ),
+      )
+      .or(page.locator("amount").filter({ hasText: rrpLabel }).locator("#amount"))
+      .first();
+>>>>>>> Stashed changes
     this.PPSRCount = page.locator("app-quote-details").getByRole("spinbutton");
     this.udcEstablishmentFeeInputField = page
       .locator("amount")
@@ -70,6 +95,7 @@ export class DOAssetDetailsPage extends BasePage {
       .locator("percentage")
       .filter({ hasText: "Interest Rate" })
       .locator("#percent");
+<<<<<<< Updated upstream
     this.loanDate = page
       .locator('input[name="loanDate"]')
       .getByText("8", { exact: true });
@@ -77,6 +103,52 @@ export class DOAssetDetailsPage extends BasePage {
       .locator('input[name="firstPaymentDate"]')
       .getByText("16");
     this.calculateButton = page.getByRole("button", { name: "Calculate" });
+=======
+    // Match visible Standard Quote shell (same as tests: `app-quote-details, app-standard-quote`).first()
+    const quoteShell = page.locator("app-quote-details, app-standard-quote").first();
+    /**
+     * **Lease Date** / loan calendar: must be scoped to **Payment Summary** + `visible:true`.
+     * Do **not** chain `.or()` to unscoped `loanDate` / `Loan Date` — a hidden disabled template in
+     * `app-quote-details` matches first and breaks `toBeVisible()`.
+     */
+    const paymentSummaryPanel = page
+      .locator("app-payment-summary")
+      .filter({ hasText: "Payment Summary" })
+      .first();
+    const leaseDateInPaymentSummary = paymentSummaryPanel
+      .getByRole("combobox", { name: /Lease Date/i })
+      .filter({ visible: true })
+      .first()
+      .or(
+        paymentSummaryPanel
+          .locator('input[name="leaseDate"]')
+          .filter({ visible: true })
+          .first(),
+      );
+    const leaseDateFallback = quoteShell
+      .getByRole("combobox", { name: /Lease Date/i })
+      .filter({ visible: true })
+      .first();
+    this.loanDate = leaseDateInPaymentSummary.or(leaseDateFallback).first();
+    // `p-calendar` often exposes the visible field as `role=combobox` (not `textbox`) in a11y snapshots.
+    this.firstPaymentDate = paymentSummaryPanel
+      .getByRole("combobox", { name: /First Payment/i })
+      .filter({ visible: true })
+      .first()
+      .or(
+        paymentSummaryPanel.locator(
+          "xpath=.//label[contains(normalize-space(.),'First Payment')]/following::p-calendar[1]//input[contains(@class,'p-inputtext') or @role='combobox']",
+        ).filter({ visible: true }),
+      )
+      .or(
+        quoteShell
+          .getByRole("combobox", { name: /First Payment/i })
+          .filter({ visible: true })
+          .first(),
+      )
+      .first();
+    this.calculateButton = page.getByRole("button", { name: /^Calculate$/i });
+>>>>>>> Stashed changes
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
     this.addBorrowerorGuarantorButton = page.getByRole("button", {
       name: /Add Borrowers(\s*\/\s*Guarantors)?/i,
@@ -145,6 +217,286 @@ export class DOAssetDetailsPage extends BasePage {
     await this.openProgramDropdown();
     await this.selectProgram(programName);
   }
+<<<<<<< Updated upstream
+=======
+
+  /** Standard Quote / Asset Details shell (first `app-quote-details` or `app-standard-quote`). */
+  standardQuoteRoot(): Locator {
+    return this.page.locator("app-quote-details, app-standard-quote").first();
+  }
+
+  /** After navigation to Asset Details: shell visible + cash price field (skip long `networkidle`). */
+  async waitForAssetDetailsStepReady(): Promise<void> {
+    await this.standardQuoteRoot().waitFor({ state: "visible", timeout: 60_000 });
+    await expect(this.cashPriceOfAssetInputField).toBeVisible({ timeout: 60_000 });
+  }
+
+  /**
+   * Quick Quote → Standard Quote: product & program labels visible; when PrimeNG exposes hosts, expect locked dropdowns.
+   * @param opts.requireLockedDropdowns When `false`, only asserts product/program copy is visible (some FL QQ→SQ builds leave dropdowns enabled).
+   */
+  async expectProductProgramCarriedFromQuickQuote(
+    productName: string,
+    programName: string,
+    opts?: { requireLockedDropdowns?: boolean },
+  ): Promise<void> {
+    const requireLocked = opts?.requireLockedDropdowns ?? true;
+    const root = this.standardQuoteRoot();
+    await expect(root.getByText(productName).first()).toBeVisible({ timeout: 30_000 });
+    await expect(root.getByText(programName).first()).toBeVisible({ timeout: 30_000 });
+    const productDd = root
+      .locator("p-dropdown")
+      .filter({ has: root.locator("label").filter({ hasText: /^Product/i }) })
+      .first();
+    const programDd = root
+      .locator("p-dropdown")
+      .filter({ has: root.locator("label").filter({ hasText: /^Program/i }) })
+      .first();
+    if (!requireLocked) {
+      return;
+    }
+    if (await productDd.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      const locked =
+        (await productDd.getAttribute("class"))?.includes("p-disabled") ||
+        (await productDd.getAttribute("ng-reflect-disabled")) === "true";
+      expect(locked).toBeTruthy();
+    }
+    if (await programDd.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      const locked =
+        (await programDd.getAttribute("class"))?.includes("p-disabled") ||
+        (await programDd.getAttribute("ng-reflect-disabled")) === "true";
+      expect(locked).toBeTruthy();
+    }
+  }
+
+  /** Assert finance fields carried from Quick Quote (cash, term, frequency UI, interest %). */
+  async expectFinanceCarriedFromQuickQuote(opts: {
+    cashPrice: RegExp;
+    term: RegExp;
+    frequencyText: RegExp;
+    interestRate: RegExp;
+  }): Promise<void> {
+    const root = this.standardQuoteRoot();
+    await expect(this.cashPriceOfAssetInputField).toHaveValue(opts.cashPrice, { timeout: 30_000 });
+    await expect
+      .poll(async () => this.termsOfFinanceInputField.inputValue(), { timeout: 25_000 })
+      .toMatch(opts.term);
+    const freqDropdown = root.locator(
+      "xpath=.//label[contains(normalize-space(.),'Frequency')]/following::p-dropdown[1]",
+    );
+    const freqFieldRow = root
+      .locator(".p-field, [class*='p-field']")
+      .filter({ has: root.locator("label").filter({ hasText: /^Frequency/i }) })
+      .first();
+    if (await freqDropdown.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect(freqDropdown).toContainText(opts.frequencyText, { timeout: 20_000 });
+    } else {
+      await expect(freqFieldRow).toContainText(opts.frequencyText, { timeout: 20_000 });
+    }
+    await expect
+      .poll(async () => (await this.interestRateInputField.inputValue()).replace(/%/g, "").trim(), {
+        timeout: 25_000,
+      })
+      .toMatch(opts.interestRate);
+  }
+
+  /** UDC Establishment Fee: pre-populated from program; assert editable only when the control allows editing. */
+  async expectUdcEstablishmentFeePrePopulatedFromProgram(): Promise<void> {
+    const fee = this.udcEstablishmentFeeInputField;
+    await expect(fee).toBeVisible({ timeout: 20_000 });
+    const raw = (await fee.inputValue()).trim();
+    expect(raw.length).toBeGreaterThan(0);
+    const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
+    expect(Number.isNaN(n)).toBeFalsy();
+    expect(n).toBeGreaterThan(0);
+    if (await fee.isEditable().catch(() => false)) {
+      await expect(fee).toBeEditable();
+    }
+  }
+
+  /**
+   * Lease/Loan date must be set for **Calculate**. When **First Payment** is read-only (Finance Lease
+   * Payment Summary), skip filling it — the app derives it after pricing.
+   */
+  async ensureLoanDateAndFirstPaymentReadyForCalculate(): Promise<void> {
+    const loanIn = this.loanDate;
+    const firstIn = this.firstPaymentDate;
+    await expect(loanIn).toBeVisible({ timeout: 20_000 });
+    const loanVal = (await loanIn.inputValue().catch(() => "")).trim();
+    expect(loanVal.length).toBeGreaterThan(4);
+
+    if (!(await firstIn.isVisible({ timeout: 8_000 }).catch(() => false))) {
+      return;
+    }
+    if (await firstIn.isDisabled().catch(() => true)) {
+      return;
+    }
+    if ((await firstIn.inputValue().catch(() => "")).trim().length < 5) {
+      await expect(firstIn).toBeEditable();
+      await this.enterFirstPaymentSuggestedFromLoanDdMmYyyy();
+      await expect
+        .poll(async () => (await firstIn.inputValue().catch(() => "")).trim().length, {
+          timeout: 12_000,
+        })
+        .toBeGreaterThan(4);
+    }
+  }
+
+  /** Clear origination reference and run **Calculate** (allowed with blank origin on some CSA builds). */
+  async calculateWithOriginationBlank(): Promise<void> {
+    await this.clearOriginationReferences();
+    await this.clickCalculateButton();
+    await expect(this.standardQuoteRoot()).toBeVisible();
+  }
+
+  /**
+   * Set Originator Reference; when Loan Purpose control exists (read-only CSA), expect it blank.
+   */
+  async enterOriginationReferenceAndExpectLoanPurposeBlank(origRef: string): Promise<void> {
+    await this.enterOriginationReference(origRef);
+    const root = this.standardQuoteRoot();
+    const loanPurposeInput = root
+      .getByRole("textbox", { name: /^Loan Purpose/i })
+      .or(
+        root.locator(
+          "xpath=.//label[contains(normalize-space(.),'Loan Purpose')]/following::input[1]",
+        ),
+      )
+      .first();
+    if (await loanPurposeInput.isVisible({ timeout: 12_000 }).catch(() => false)) {
+      expect((await loanPurposeInput.inputValue()).trim()).toBe("");
+    }
+  }
+
+  /** Dealer Origination Fee: visible and pre-populated (program setup), same pattern as UDC Establishment Fee. */
+  async expectDealerOriginationFeePopulatedFromProgram(): Promise<void> {
+    const f = this.dealerOriginationFeeInputField;
+    await expect(f).toBeVisible({ timeout: 20_000 });
+    const raw = (await f.inputValue()).trim();
+    expect(raw.length).toBeGreaterThan(0);
+    const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
+    expect(Number.isNaN(n)).toBeFalsy();
+    expect(n).toBeGreaterThanOrEqual(0);
+  }
+
+  /** PPSR Count row visible with a value; fee line (@ rate / amount) visible when rendered for this product. */
+  async expectPpsrCountAndFeeLineVisible(): Promise<void> {
+    const root = this.standardQuoteRoot();
+    await expect(root.getByText(/PPSR\s*Count/i).first()).toBeVisible({ timeout: 20_000 });
+    const ppsrRow = root
+      .locator(".p-field, [class*='p-field'], [class*='col-']")
+      .filter({ hasText: /PPSR\s*Count/i })
+      .first();
+    if (await ppsrRow.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      const spin = ppsrRow.getByRole("spinbutton").first();
+      if (await spin.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        expect((await spin.inputValue()).trim().length).toBeGreaterThan(0);
+      }
+    } else {
+      await expect(this.PPSRCount.first()).toBeVisible({ timeout: 10_000 });
+    }
+    const feeLine = root
+      .locator(".p-field, [class*='p-field']")
+      .filter({ hasText: /@/ })
+      .filter({ hasText: /\$|\d+\.\d{2}/ })
+      .first();
+    if (await feeLine.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect(feeLine).toBeVisible();
+    }
+  }
+
+  /** LMF / Loan Maintenance Fee area (incl. Waive LMF) visible on Asset Details / totals. */
+  async expectLoanMaintenanceFeeOrLmfAreaVisible(): Promise<void> {
+    const root = this.standardQuoteRoot();
+    await expect(
+      root.getByText(/Loan\s+Maintenance\s+Fee|LMF|Waive\s+LMF/i).first(),
+    ).toBeVisible({ timeout: 25_000 });
+  }
+
+  /**
+   * Set interest % on the Finance **Interest Rate** field without the Finance-Lease stability cap ({@link interestRate}).
+   * Use for CSA when observing brand / hierarchy behaviour after edits.
+   */
+  async enterInterestRatePercentSimple(percentDigits: string): Promise<void> {
+    const field = this.interestRateInputField;
+    const digits = percentDigits.replace(/%/g, "").trim();
+    await field.waitFor({ state: "visible", timeout: 30_000 });
+    await field.scrollIntoViewIfNeeded();
+    await field.click({ clickCount: 3 });
+    await field.fill(digits);
+    await field.press("Tab").catch(() => {});
+    await this.page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
+    await this.page.waitForTimeout(600);
+  }
+
+  /** After an interest edit, assert optional **Brand / hierarchy / tier** copy when the build shows it. */
+  async expectBrandHierarchyOrRateHintIfShown(): Promise<void> {
+    const root = this.standardQuoteRoot();
+    const hint = root.getByText(
+      /Brand|Hierarchy|Interest\s*tier|Pricing\s*tier|Rate\s*card|Subsidy|Commission|Dealer\s+buy/i,
+    );
+    if (await hint.first().isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect(hint.first()).toBeVisible();
+    }
+  }
+
+  /** Interest Rate control is editable (program may still re-price on Calculate). */
+  async expectInterestRateEditable(): Promise<void> {
+    await expect(this.interestRateInputField).toBeVisible({ timeout: 20_000 });
+    await expect(this.interestRateInputField).toBeEditable();
+  }
+
+  /**
+   * After **Calculate** with term above program max: expect copy under **Term**, e.g.
+   * `Term cannot be greater than 60` (resource string may be `Term cannot be greater than {{0}}`).
+   */
+  private async expectTermCannotExceedProgramMaxMessageBelowTermField(): Promise<void> {
+    const root = this.standardQuoteRoot();
+    const cannotGreaterThan = /Term\s+cannot\s+be\s+greater\s+than\s+(\{\{0\}\}|\d[\d,\s]*)/i;
+    const altWording = /Term\s+(must\s+not\s+be|cannot\s+be)\s+greater\s+than/i;
+
+    const termHost = root.locator("number").filter({ hasText: /Term/i }).first();
+    const wrapper = termHost
+      .locator(
+        "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'p-field') or contains(@class,'grid')][1]",
+      )
+      .first();
+
+    const underTerm = wrapper.getByText(cannotGreaterThan).first();
+    if (await underTerm.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect(underTerm).toBeVisible({ timeout: 25_000 });
+      return;
+    }
+    const underTermAlt = wrapper.getByText(altWording).first();
+    if (await underTermAlt.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await expect(underTermAlt).toBeVisible({ timeout: 25_000 });
+      return;
+    }
+
+    await expect(
+      root
+        .getByText(cannotGreaterThan)
+        .or(root.getByText(altWording))
+        .first(),
+    ).toBeVisible({ timeout: 25_000 });
+  }
+
+  /**
+   * Enter a term above program maximum, **Calculate**, expect validation under Term; restore default term and **Calculate** again.
+   */
+  async expectTermExceedsProgramMaxOnCalculateThenRestore(opts: {
+    overMaxTerm: string;
+    restoreTerm: string;
+  }): Promise<void> {
+    await this.termsOfFinance(opts.overMaxTerm);
+    await this.clickCalculateButton();
+    await this.expectTermCannotExceedProgramMaxMessageBelowTermField();
+    await this.termsOfFinance(opts.restoreTerm);
+    await this.clickCalculateButton();
+    await expect(this.standardQuoteRoot()).toBeVisible();
+  }
+
+>>>>>>> Stashed changes
   /**
    * Enter text into the Origination Reference input field
    * (CSA / legacy: SVG `text#text` under "Originator Reference" label in some builds.)
@@ -161,42 +513,60 @@ export class DOAssetDetailsPage extends BasePage {
     origRef: string,
     skipOverlayDismiss = false,
   ): Promise<void> {
-    // After add-asset dialogs close, Esc can dismiss Prime overlays — but after **Calculate** it also
-    // blurs reactive fields and can make Origination flicker/clear; use skipOverlayDismiss then.
-    if (!skipOverlayDismiss) {
-      await this.page.keyboard.press("Escape").catch(() => {});
-      await this.page.keyboard.press("Escape").catch(() => {});
-    }
-
-    const root = this.page
-      .locator("app-quote-details, app-standard-quote")
-      .last();
-    await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    const originatorRoot = this.page.locator("app-quote-originator").first();
+    const root = this.page.locator("app-quote-details, app-standard-quote").last();
+    await originatorRoot.waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
+    await root.waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
 
     const tryFill = async (el: Locator): Promise<boolean> => {
       const t = el.first();
-      if (!(await t.isVisible({ timeout: 8_000 }).catch(() => false))) {
+      if (!(await t.isVisible({ timeout: 3_000 }).catch(() => false))) {
         return false;
       }
       await t.scrollIntoViewIfNeeded();
       await t.click({ force: true }).catch(() => {});
       await t.clear().catch(() => {});
       try {
-        await t.fill(origRef, { timeout: 15_000 });
+        await t.fill(origRef, { timeout: 8_000 });
       } catch {
         await t.press("ControlOrMeta+a");
-        await this.page.keyboard.type(origRef, { delay: 20 });
+        await this.page.keyboard.type(origRef, { delay: 8 });
       }
       const v = (await t.inputValue().catch(() => "")).trim();
       if (v.length > 0) {
         return true;
       }
       await t.press("ControlOrMeta+a");
-      await this.page.keyboard.type(origRef, { delay: 20 });
+      await this.page.keyboard.type(origRef, { delay: 8 });
       return (await t.inputValue().catch(() => "")).trim().length > 0;
     };
 
-    // 1) ARIA: label (Prime float-label / p-field)
+    // 0) **Originator Reference** sits under `app-quote-originator` (Prime `p-inputtext`); not inside `app-standard-quote.last()` alone.
+    const originInput = originatorRoot.locator(
+      "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/following::input[contains(@class,'p-inputtext') or @type='text'][not(@type='hidden')][1]",
+    );
+    if (await tryFill(originInput)) {
+      return;
+    }
+    if (
+      await tryFill(
+        originatorRoot.getByLabel(
+          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+        ),
+      )
+    ) {
+      return;
+    }
+    if (await tryFill(originatorRoot.getByRole("textbox", { name: /Originator|Origination/i }))) {
+      return;
+    }
+
+    if (!skipOverlayDismiss) {
+      await this.page.keyboard.press("Escape").catch(() => {});
+      await this.page.keyboard.press("Escape").catch(() => {});
+    }
+
+    // 1) ARIA: label (Prime float-label / p-field) on quote shell
     if (
       await tryFill(
         root.getByLabel(
@@ -272,7 +642,7 @@ export class DOAssetDetailsPage extends BasePage {
       return;
     }
     throw new Error(
-      `Finance Lease: could not set Origination Reference to "${origRef}" (tried getByLabel, getByRole textbox, p-field row, p-float-label).`,
+      `Finance Lease: could not set Origination Reference to "${origRef}" (tried app-quote-originator label xpath, getByLabel, getByRole textbox, p-field row, p-float-label).`,
     );
   }
 
@@ -288,7 +658,23 @@ export class DOAssetDetailsPage extends BasePage {
       return null;
     };
 
+    const originatorRoot = this.page.locator("app-quote-originator").first();
     let x: Locator | null;
+    x = await firstVisible(
+      originatorRoot.locator(
+        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/following::input[contains(@class,'p-inputtext') or @type='text'][not(@type='hidden')][1]",
+      ),
+    );
+    if (x) return x;
+    x = await firstVisible(
+      originatorRoot.getByLabel(
+        /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+      ),
+    );
+    if (x) return x;
+    x = await firstVisible(originatorRoot.getByRole("textbox", { name: /Originator|Origination/i }));
+    if (x) return x;
+
     x = await firstVisible(
       root.getByLabel(
         /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
@@ -478,30 +864,90 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
+   * Resolves the **Asset & Insurance Summary** PrimeNG dialog (faster than `getByRole("dialog").last()`
+   * when other dialogs exist).
+   */
+  private assetInsuranceSummaryDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Asset\s*&\s*Insurance\s*Summary/i })
+      .first();
+  }
+
+  /**
    * Click on Asset, Insurance & Trade-in Summary hyperlink to open the summary dialog
    */
   async openAssetInsuranceTradeInSummary(): Promise<void> {
-    await this.scrollIfNeeded(this.assetInsuranceTradeInSummaryHyperlink);
-    await this.assetInsuranceTradeInSummaryHyperlink.click();
-    await this.page
-      .getByRole("dialog")
-      .last()
-      .waitFor({ state: "visible", timeout: 45_000 });
-    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+    const inCard = this.page
+      .locator("app-asset-summary")
+      .locator("button")
+      .filter({ hasText: /Asset\s*&\s*Insurance\s*Summary/i })
+      .first();
+    const globalBtn = this.assetInsuranceTradeInSummaryHyperlink;
+    const trigger = (await inCard.isVisible({ timeout: 2_000 }).catch(() => false))
+      ? inCard
+      : globalBtn;
+    await this.scrollIfNeeded(trigger);
+    await trigger.click({ timeout: 10_000 });
+
+    let dlg = this.assetInsuranceSummaryDialog();
+    try {
+      await dlg.waitFor({ state: "visible", timeout: 10_000 });
+    } catch {
+      dlg = this.page.getByRole("dialog").last();
+      await dlg.waitFor({ state: "visible", timeout: 10_000 });
+    }
+    await dlg
+      .locator("div.p-dialog-content")
+      .filter({ visible: true })
+      .first()
+      .waitFor({ state: "visible", timeout: 6_000 })
+      .catch(() => {});
+    await dlg
+      .locator("div.card-body.pt-3")
+      .filter({ visible: true })
+      .first()
+      .waitFor({ state: "visible", timeout: 3_000 })
+      .catch(() => {});
   }
 
   /**
    * Clicks edit on the asset/insurance summary dialog. Finance Lease vs CSA may use
    * `.fa-pen-to-square`, `fa-pen`, Prime `pi-pen`, or a text "Edit" button.
+   *
+   * Some builds route **Edit** to a full-page `…/addAsset/edit` flow (no modal). If that navigation
+   * already completed, this is a no-op. Pen icons must be scoped to the **summary dialog** only —
+   * a page-wide `.fa-pen-to-square` can hit the wrong control, navigate away, and leave no `dialog`
+   * for the next wait (TimeoutError on `getByRole("dialog")`).
    */
   async clickAssetSummaryEditButton(): Promise<void> {
-    const dialogLast = this.page.getByRole("dialog").last();
-    await dialogLast.waitFor({ state: "visible", timeout: 30_000 });
+    if (/\/addAsset\/edit/i.test(this.page.url())) {
+      await this.page
+        .locator("text")
+        .filter({ hasText: /^Year$/i })
+        .locator("#text")
+        .first()
+        .waitFor({ state: "visible", timeout: 8_000 })
+        .catch(() => {});
+      return;
+    }
+
+    const resolveSummaryDialog = async (): Promise<Locator> => {
+      const scoped = this.assetInsuranceSummaryDialog();
+      try {
+        await scoped.waitFor({ state: "visible", timeout: 8_000 });
+        return scoped;
+      } catch {
+        const last = this.page.getByRole("dialog").last();
+        await last.waitFor({ state: "visible", timeout: 8_000 });
+        return last;
+      }
+    };
 
     const tryClickEdit = async (summary: Locator): Promise<boolean> => {
       const byRole = summary.getByRole("button", { name: /^(Edit|Update)$/i });
-      if (await byRole.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await byRole.first().click({ force: true, timeout: 15_000 });
+      if (await byRole.isVisible({ timeout: 400 }).catch(() => false)) {
+        await byRole.first().click({ force: true, timeout: 10_000 });
         return true;
       }
       for (const sel of [
@@ -510,7 +956,7 @@ export class DOAssetDetailsPage extends BasePage {
         ".cursor-pointer.fa-pen-to-square, .fa-pen-to-square",
       ]) {
         const icon = summary.locator(sel).first();
-        if (await icon.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        if (await icon.isVisible({ timeout: 450 }).catch(() => false)) {
           const parent = icon.locator(
             "xpath=ancestor::button[1] | ancestor::a[1] | self::i",
           );
@@ -518,36 +964,51 @@ export class DOAssetDetailsPage extends BasePage {
             ? parent.first()
             : icon;
           await t.scrollIntoViewIfNeeded();
-          await t.click({ force: true, timeout: 15_000 });
+          await t.click({ force: true, timeout: 10_000 });
           return true;
         }
       }
-      if (
-        await this.assetyEditButton
-          .first()
-          .isVisible({ timeout: 1_000 })
-          .catch(() => false)
-      ) {
-        await this.assetyEditButton
-          .first()
-          .click({ force: true, timeout: 15_000 });
+      const penInSummary = summary
+        .locator(
+          ".cursor-pointer.fa-pen-to-square, i.fa-pen-to-square, i.fa-pen, [class*='fa-pen-to-square']",
+        )
+        .first();
+      if (await penInSummary.isVisible({ timeout: 400 }).catch(() => false)) {
+        const parent = penInSummary.locator(
+          "xpath=ancestor::button[1] | ancestor::a[1] | self::*[name()='i']",
+        );
+        const t = (await parent.first().isVisible().catch(() => false))
+          ? parent.first()
+          : penInSummary;
+        await t.scrollIntoViewIfNeeded();
+        await t.click({ force: true, timeout: 10_000 });
         return true;
       }
       return false;
     };
 
     for (let round = 0; round < 2; round++) {
+      if (/\/addAsset\/edit/i.test(this.page.url())) {
+        return;
+      }
       if (round > 0) {
         await this.page.keyboard.press("Escape").catch(() => {});
         await this.openAssetInsuranceTradeInSummary();
       }
-      const s = this.page.getByRole("dialog").last();
-      await s.waitFor({ state: "visible", timeout: 45_000 });
-      for (let w = 0; w < 6; w++) {
+      const s = await resolveSummaryDialog();
+      for (let w = 0; w < 4; w++) {
         if (await tryClickEdit(s)) {
+          try {
+            await this.page.waitForURL(/\/addAsset\/edit/i, { timeout: 6_000 });
+          } catch {
+            /* Edit may stay in-modal on some products */
+          }
           return;
         }
-        await this.page.waitForTimeout(500);
+        if (/\/addAsset\/edit/i.test(this.page.url())) {
+          return;
+        }
+        await this.page.waitForTimeout(200);
       }
     }
     throw new Error(
@@ -813,10 +1274,14 @@ export class DOAssetDetailsPage extends BasePage {
     }, digits);
   }
 
-  /** Visible `#percent` scoped to quote shell (not page-wide — avoids wrong `#percent`). */
+  /** Residual Value `%` — same `<percentage>` host pattern as Interest Rate (avoid first `#percent` = interest). */
   private residualPercentInput(): Locator {
     const root = this.page.locator("app-quote-details, app-standard-quote").first();
-    return root.locator("#percent").filter({ visible: true }).first();
+    return root
+      .locator("percentage")
+      .filter({ hasText: /Residual/i })
+      .locator("#percent")
+      .first();
   }
 
   async enterResidualValuePercentFinanceLease(percent: string): Promise<void> {

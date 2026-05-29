@@ -494,6 +494,21 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   /**
+   * Select **Residence Type** only when that control exists on the active physical card.
+   * **`app-business-physical-address`** (FL business) often omits Residence Type — calling {@link selectResidenceType}
+   * then scans many unrelated dropdowns and throws; this is a fast no-op instead.
+   */
+  async selectResidenceTypeIfPresent(residenceType: string): Promise<void> {
+    const root = await this.activePhysicalHost();
+    await root.waitFor({ state: "visible", timeout: 15_000 }).catch(() => {});
+    const trig = this.residenceTypeTrigger(root);
+    if (!(await trig.isVisible({ timeout: 1_500 }).catch(() => false))) {
+      return;
+    }
+    await this.selectResidenceType(residenceType);
+  }
+
+  /**
    * Physical address search: optionContains is a substring or regex-safe fragment
    * (full label text often differs by environment).
    */
@@ -1247,18 +1262,75 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async enterStreetNumber(streetNumber: string) {
+    const biz = this.businessPhysicalAddressRoot;
+    if (await biz.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const inp = biz
+        .locator("text")
+        .filter({ hasText: /^Street Number/i })
+        .locator("#text")
+        .first()
+        .or(biz.locator('input[name="physicalStreetNumber"]'))
+        .first();
+      await inp.waitFor({ state: "visible", timeout: 20_000 });
+      await inp.scrollIntoViewIfNeeded();
+      await inp.click({ timeout: 15_000 }).catch(() => {});
+      await inp.fill("");
+      if (streetNumber.length > 0) {
+        await inp.fill(streetNumber);
+      }
+      await inp.press("Tab").catch(() => {});
+      await this.page.waitForTimeout(200);
+      return;
+    }
     await this.streetNumberInput.fill(streetNumber);
   }
 
   async enterStreetName(streetName: string) {
+    const biz = this.businessPhysicalAddressRoot;
+    if (await biz.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const inp = biz
+        .locator("text")
+        .filter({ hasText: /^Street Name/i })
+        .locator("#text")
+        .first()
+        .or(biz.locator('input[name="physicalStreetName"]'))
+        .first();
+      await inp.waitFor({ state: "visible", timeout: 20_000 });
+      await inp.scrollIntoViewIfNeeded();
+      await inp.click({ timeout: 15_000 }).catch(() => {});
+      await inp.fill("");
+      if (streetName.length > 0) {
+        await inp.fill(streetName);
+      }
+      await inp.press("Tab").catch(() => {});
+      await this.page.waitForTimeout(200);
+      return;
+    }
     await this.streetNameInput.fill(streetName);
   }
 
   async enterCity(city: string) {
+<<<<<<< Updated upstream
+=======
+    const biz = this.businessPhysicalAddressRoot;
+    const cityInBiz = biz.locator('input[name="physicalCity"]').first();
+    const useBizCity =
+      (await biz.isVisible({ timeout: 4_000 }).catch(() => false)) &&
+      (await cityInBiz.isVisible({ timeout: 3_000 }).catch(() => false));
+    const cityInput = useBizCity ? cityInBiz : this.cityInput;
+
+    if (!city.trim()) {
+      await cityInput.click({ force: true }).catch(() => {});
+      await cityInput.fill("");
+      await cityInput.press("Tab").catch(() => {});
+      await this.page.keyboard.press("Escape").catch(() => {});
+      return;
+    }
+>>>>>>> Stashed changes
     const rx = new RegExp(city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    await this.cityInput.click();
-    await this.cityInput.fill("");
-    await this.cityInput.type(city, { delay: 30 });
+    await cityInput.click();
+    await cityInput.fill("");
+    await cityInput.type(city, { delay: 30 });
     const fromPanel = this.page
       .locator(".p-autocomplete-panel")
       .getByRole("option", { name: rx })
@@ -1273,6 +1345,29 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   async chooseCountry(country: string) {
+    const biz = this.businessPhysicalAddressRoot;
+    if (await biz.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const host = biz;
+      const dd = host
+        .locator(".p-dropdown")
+        .filter({ has: host.getByText(/^Country/i) })
+        .locator(".p-dropdown-trigger, button[aria-label='dropdown trigger']")
+        .first()
+        .or(host.getByRole("button", { name: "dropdown trigger" }).last());
+      if (await dd.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await dd.scrollIntoViewIfNeeded();
+        await dd.click({ timeout: 30_000 });
+        const rx = new RegExp(country.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+        await this.page.getByRole("option", { name: rx }).first().click();
+        await this.page
+          .getByRole("listbox")
+          .waitFor({ state: "hidden", timeout: 10_000 })
+          .catch(() => {});
+        await this.page.keyboard.press("Escape").catch(() => {});
+        return;
+      }
+    }
+
     await this.countryDropdown.scrollIntoViewIfNeeded();
     await this.countryDropdown.click({ timeout: 30000 });
     await this.page.getByRole("option", { name: country, exact: true }).click();
@@ -1531,6 +1626,31 @@ export class DOAddressDetailsPage extends BasePage {
       throw new Error(
         'Address Details: "Reuse for Postal Address" toggle not found (check Sole Trader / business physical card).',
       );
+    }
+  }
+
+  /**
+   * Prefer **Reuse for Postal Address = Yes** so physical copies to postal and the separate Postal block
+   * is not required. Clicks the toggle while a manual **Postal Address** section stays visible; if reuse cannot
+   * be inferred, falls back to {@link fillPostalAddressManualIfPresent} with the same line as physical.
+   */
+  async ensureReuseForPostalAddressYes(): Promise<void> {
+    await this.businessPhysicalAddressRoot
+      .waitFor({ state: "visible", timeout: 30_000 })
+      .catch(() => {});
+    for (let i = 0; i < 6; i++) {
+      if (!(await this.isPostalAddressSectionVisible(2_000))) return;
+      const clicked = await this.clickReuseForPostalAddressToggleOnce();
+      if (!clicked) break;
+      await this.page.waitForTimeout(450);
+    }
+    if (await this.isPostalAddressSectionVisible(2_500)) {
+      await this.fillPostalAddressManualIfPresent({
+        streetNumber: "123",
+        streetName: "Main Street",
+        city: "Wellington",
+        country: "New Zealand",
+      });
     }
   }
 
@@ -2313,6 +2433,235 @@ export class DOAddressDetailsPage extends BasePage {
     await this.nextButton.click();
   }
 
+<<<<<<< Updated upstream
+=======
+  /** Inline `… is required` messages on a Physical / Previous Physical card after **Save**. */
+  private async assertPhysicalAddressCardRequiredErrors(
+    root: Locator,
+    options: { expectResidenceType: boolean },
+  ): Promise<void> {
+    /** CSA-B errors sometimes render on `app-business-address-details` while inputs stay under physical host. */
+    const detailsShell = this.page
+      .locator("app-business-address-details")
+      .filter({ visible: true })
+      .first();
+    const scope = (await detailsShell.isVisible({ timeout: 2_000 }).catch(() => false))
+      ? root.or(detailsShell)
+      : root;
+
+    const assertRequiredFlexible = async (
+      exactPrimary: string,
+      patterns: RegExp[],
+    ): Promise<void> => {
+      let loc = scope.getByText(exactPrimary, { exact: true });
+      for (const p of patterns) {
+        loc = loc.or(scope.getByText(p));
+      }
+      const errLines = scope.locator(
+        ".p-error, small.p-error, span.p-error, mat-error, .p-message-error",
+      );
+      for (const p of patterns) {
+        loc = loc.or(errLines.filter({ hasText: p }));
+      }
+      const el = loc.first();
+      await el.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+      await expect(el).toBeVisible({ timeout: 20_000 });
+    };
+
+    const { expectResidenceType } = options;
+    if (expectResidenceType) {
+      await assertRequiredFlexible("Residence Type is required", [
+        /Residence\s+Type\s+is\s+required/i,
+        /Residence\s+type\s+is\s+required/i,
+        /Type\s+of\s+Residence.*required/i,
+      ]);
+    }
+    const timeMsgs = scope.getByText("Time at Address is required", {
+      exact: true,
+    });
+    try {
+      await expect(timeMsgs).toHaveCount(2, { timeout: 8_000 });
+      const scrollTimeMsg = async (loc: Locator): Promise<void> => {
+        await loc
+          .evaluate((el: Element) => {
+            (el as HTMLElement).scrollIntoView({
+              block: "center",
+              behavior: "instant",
+            });
+          })
+          .catch(() => {});
+      };
+      await scrollTimeMsg(timeMsgs.nth(0));
+      await scrollTimeMsg(timeMsgs.nth(1));
+      await expect(timeMsgs.nth(0)).toBeVisible({ timeout: 15_000 });
+      await expect(timeMsgs.nth(1)).toBeVisible({ timeout: 15_000 });
+    } catch {
+      await assertRequiredFlexible("Time at Address is required", [
+        /Time\s+at\s+Address.*required/i,
+        /Years\s+is\s+required/i,
+        /Months\s+is\s+required/i,
+      ]);
+    }
+    await assertRequiredFlexible("Street Number is required", [
+      /Street\s+Number.*(is\s+)?required/i,
+      /Please\s+enter.*Street\s+Number/i,
+      /Street\s+number.*required/i,
+    ]);
+    await assertRequiredFlexible("Street Name is required", [
+      /Street\s+Name.*(is\s+)?required/i,
+      /Please\s+enter.*Street\s+Name/i,
+      /Street\s+name.*required/i,
+    ]);
+    await assertRequiredFlexible("City is required", [
+      /City.*(is\s+)?required/i,
+      /Please\s+enter.*City/i,
+      /Suburb.*City.*required/i,
+    ]);
+  }
+
+  /**
+   * After **Save**, the viewport often sits on **Postal Address** (footer). Scroll the **Physical Address**
+   * block to the top so validation copy under Residence / Time / Street is in view and in scope.
+   */
+  private async scrollPhysicalAddressSectionIntoViewForValidation(): Promise<void> {
+    await this.page.keyboard.press("Escape").catch(() => {});
+    const heading = this.page
+      .getByRole("heading", { name: /Physical\s+Address/i })
+      .first();
+    if (await heading.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await heading.evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({
+          block: "start",
+          behavior: "instant",
+        });
+      });
+    }
+    if (await this.physicalAddressBlock.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await this.physicalAddressBlock.evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({
+          block: "start",
+          behavior: "instant",
+        });
+      });
+    }
+    try {
+      const host = await this.activePhysicalHost();
+      await host.evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({
+          block: "start",
+          behavior: "instant",
+        });
+      });
+    } catch {
+      /* host not ready */
+    }
+  }
+
+  private async scrollPreviousPhysicalSectionIntoViewForValidation(
+    root: Locator,
+  ): Promise<void> {
+    const heading = this.page
+      .getByRole("heading", { name: /Previous\s+Physical\s+Address/i })
+      .first();
+    if (await heading.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await heading.evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({
+          block: "start",
+          behavior: "instant",
+        });
+      });
+    }
+    await root.evaluate((el: Element) => {
+      (el as HTMLElement).scrollIntoView({ block: "start", behavior: "instant" });
+    }).catch(() => {});
+  }
+
+  /** Open **Residence Type** on the current physical card, then **Escape** without selecting (required-field validation). */
+  async touchPhysicalResidenceTypeWithoutSelection(): Promise<void> {
+    await this.page.keyboard.press("Escape").catch(() => {});
+    const root = await this.activePhysicalHost();
+    await root.waitFor({ state: "visible", timeout: 60_000 });
+    await root.scrollIntoViewIfNeeded();
+    const trig = this.residenceTypeTrigger(root);
+    if (await trig.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await trig.click({ timeout: 12_000 });
+      await this.page
+        .getByRole("listbox")
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .catch(() => {});
+      await this.page.keyboard.press("Escape");
+      await this.page
+        .getByRole("listbox")
+        .waitFor({ state: "hidden", timeout: 8_000 })
+        .catch(() => {});
+    }
+  }
+
+  /** Open **Residence Type** on **Previous Physical** (when shown), then **Escape** without selecting. */
+  async touchPreviousPhysicalResidenceTypeWithoutSelection(): Promise<void> {
+    if (!(await this.isPreviousPhysicalAddressVisible(5_000))) {
+      return;
+    }
+    const root = await this.resolvePreviousPhysicalFillRoot();
+    await root.waitFor({ state: "visible", timeout: 60_000 });
+    await root.scrollIntoViewIfNeeded();
+    await this.page.keyboard.press("Escape").catch(() => {});
+    const trig = this.residenceTypeTrigger(root);
+    if (await trig.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await trig.click({ timeout: 10_000 });
+      await this.page
+        .getByRole("listbox")
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .catch(() => {});
+      await this.page.keyboard.press("Escape");
+      await this.page
+        .getByRole("listbox")
+        .waitFor({ state: "hidden", timeout: 8_000 })
+        .catch(() => {});
+    }
+  }
+
+  /** Outlined **Save** on Address Details (validates current + previous cards on this step). */
+  async clickSaveAddressDetails(): Promise<void> {
+    await this.saveAddressDetailsButton.waitFor({
+      state: "visible",
+      timeout: 30_000,
+    });
+    await this.saveAddressDetailsButton.scrollIntoViewIfNeeded();
+    await this.saveAddressDetailsButton.click({ timeout: 15_000 });
+  }
+
+  async expectPhysicalAddressRequiredValidationMessages(): Promise<void> {
+    await this.scrollPhysicalAddressSectionIntoViewForValidation();
+    const host = await this.activePhysicalHost();
+    const root = this.physicalAddressBlock.or(host);
+    const hasResidence = await this.residenceTypeTrigger(host)
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
+    await this.assertPhysicalAddressCardRequiredErrors(root, {
+      expectResidenceType: hasResidence,
+    });
+  }
+
+  /**
+   * Assert required messages on the **Previous Physical** card (skips when section is not in DOM).
+   * If **Residence Type** is not present on the card, it is not asserted.
+   */
+  async expectPreviousPhysicalAddressRequiredValidationMessages(): Promise<void> {
+    if (!(await this.isPreviousPhysicalAddressVisible(2_000))) {
+      return;
+    }
+    const root = await this.resolvePreviousPhysicalFillRoot();
+    await this.scrollPreviousPhysicalSectionIntoViewForValidation(root);
+    const hasResidence = await this.residenceTypeTrigger(root)
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
+    await this.assertPhysicalAddressCardRequiredErrors(root, {
+      expectResidenceType: hasResidence,
+    });
+  }
+
+>>>>>>> Stashed changes
   async waitForPhysicalAddressStep() {
     const soleSearch = this.page
       .locator("app-sole-trade")

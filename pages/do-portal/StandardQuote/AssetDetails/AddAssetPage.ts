@@ -129,8 +129,27 @@ export class DOAddAssetPage extends BasePage {
     this.summitButton = page.locator("//span[text()='Submit']");
     this.crossButton = page.locator("//button[@role='button']");
   }
+
+  /** Strip `$` / `,` — PrimeNG `currencymask` binds on keystrokes; typing `$5,000.00` can merge with other digits (e.g. QQ `30000`). */
+  private normalizeAssetValueDigits(raw: string): string {
+    return raw.replace(/[$,\s]/g, "").trim() || "0";
+  }
+
+  /**
+   * **Cost of Asset** / Sum Insured Net — clear field then type **digits only** + **Tab** so the model matches
+   * the display (avoids overlap with carried numbers like `30000` from Quick Quote).
+   */
   async enterAssetValue(value: string): Promise<void> {
-    await this.assetValueInputField.type(value);
+    const input = this.assetValueInputField;
+    await input.waitFor({ state: "visible", timeout: 25_000 });
+    await input.scrollIntoViewIfNeeded();
+    const digits = this.normalizeAssetValueDigits(value);
+    await input.click({ timeout: 15_000 });
+    await input.press("Control+A");
+    await input.press("Backspace");
+    await input.pressSequentially(digits, { delay: 35 });
+    await input.press("Tab");
+    await this.page.waitForTimeout(400);
   }
   async selectCondition(condition: string): Promise<void> {
     await this.conditionDropdown.click();

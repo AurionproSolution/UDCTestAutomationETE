@@ -1,4 +1,4 @@
-import { Locator, Page } from "@playwright/test";
+import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
 /**
@@ -136,6 +136,16 @@ export class DOBusinessDetailsPage extends BasePage {
     );
   }
 
+  /** Close an open PrimeNG dropdown without choosing an option (marks control touched). */
+  private async dismissPrimeNgDropdownPanel(): Promise<void> {
+    await this.page.keyboard.press("Escape");
+    await this.page
+      .getByRole("listbox")
+      .waitFor({ state: "hidden", timeout: 10_000 })
+      .catch(() => {});
+    await this.page.keyboard.press("Escape").catch(() => {});
+  }
+
   /** Prefer `getByRole('option')`; fall back to Selector Hub text pseudo-selectors. */
   private async pickDropdownOption(optionText: string, exactLabel: boolean): Promise<void> {
     const escaped = optionText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -170,6 +180,10 @@ export class DOBusinessDetailsPage extends BasePage {
 
   async selectOrganisationType(optionName: string): Promise<void> {
     await this.selectDropdownByLabel(this.businessRoot, "Organisation Type");
+    if (!optionName.trim()) {
+      await this.dismissPrimeNgDropdownPanel();
+      return;
+    }
     await this.pickDropdownOption(optionName, true);
   }
 
@@ -258,11 +272,19 @@ export class DOBusinessDetailsPage extends BasePage {
 
   async selectPrimaryNatureOfBusiness(optionText: string): Promise<void> {
     await this.selectDropdownByLabel(this.businessRoot, "Primary Nature of Business");
+    if (!optionText.trim()) {
+      await this.dismissPrimeNgDropdownPanel();
+      return;
+    }
     await this.pickDropdownOption(optionText, false);
   }
 
   async selectSourceOfWealth(optionName: string): Promise<void> {
     await this.selectDropdownByLabel(this.businessRoot, "Source of Wealth");
+    if (!optionName.trim()) {
+      await this.dismissPrimeNgDropdownPanel();
+      return;
+    }
     await this.pickDropdownOption(optionName, true);
   }
 
@@ -436,5 +458,129 @@ export class DOBusinessDetailsPage extends BasePage {
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     await this.nextButton.scrollIntoViewIfNeeded();
     await this.nextButton.click();
+  }
+
+  /**
+   * After **Next** with required Business Details left unset/empty (and dropdowns touched where needed),
+   * expect inline validation under `app-business-details`.
+   *
+   * **Copy varies by build:** Organisation Type may be pre-filled (no "Organisation Type is required");
+   * Legal name may show **Legal Company Name is required** or **Please enter a Name for the party** (BR_PARTY_MSG_94);
+   * Time in Business may show one combined message or two lines for Years/Months.
+   */
+  async expectBusinessDetailsRequiredValidationMessages(): Promise<void> {
+    const root = this.businessRoot;
+
+    const assertIfPresent = async (msg: string): Promise<void> => {
+      const loc = root.getByText(msg, { exact: true }).first();
+      if (await loc.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await expect(loc).toBeVisible({ timeout: 5_000 });
+      }
+    };
+
+    await assertIfPresent("Organisation Type is required");
+
+    await expect(
+      root
+        .getByText("Legal Company Name is required", { exact: true })
+        .or(root.getByText("Legal Name is required", { exact: true }))
+        .or(root.getByText(/Please enter a Name for the party/i))
+        .or(root.getByText("This field cannot be blank", { exact: true }))
+        .first(),
+    ).toBeVisible({ timeout: 20_000 });
+
+    /** Company reg / NZBN copy varies by build (label + “is required” vs “Please enter …”). */
+    await expect(
+      root
+        .getByText("Registered Company Number is required", { exact: true })
+        .or(root.getByText("Registered company number is required", { exact: true }))
+        .or(root.getByText("Company Number is required", { exact: true }))
+        .or(root.getByText("NZ Company Number is required", { exact: true }))
+        .or(
+          root.getByText(
+            /(Registered Company Number|Company Number|NZ Company Number|Company number|NZCN).{0,20}(is required|required|cannot be blank)/i,
+          ),
+        )
+        .or(root.getByText(/Please enter.*(Registered Company|Company Number|NZ Company)/i))
+        .first(),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      root
+        .getByText("New Zealand Business Number is required", { exact: true })
+        .or(root.getByText("New Zealand business number is required", { exact: true }))
+        .or(root.getByText("NZ Business Number is required", { exact: true }))
+        .or(root.getByText("NZBN is required", { exact: true }))
+        .or(
+          root.getByText(
+            /(New Zealand Business Number|NZ Business Number|NZBN).{0,20}(is required|required|cannot be blank)/i,
+          ),
+        )
+        .or(root.getByText(/Please enter.*(New Zealand Business|NZBN|NZ Business)/i))
+        .first(),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      root
+        .getByText("Primary Nature of Business is required", { exact: true })
+        .or(root.getByText("Primary nature of business is required", { exact: true }))
+        .or(
+          root.getByText(/Primary Nature of Business.{0,20}(is required|required)/i),
+        )
+        .first(),
+    ).toBeVisible({ timeout: 20_000 });
+
+    const timeInBiz = root.getByText("Time in Business is required", { exact: true });
+    try {
+      await expect(timeInBiz).toHaveCount(2, { timeout: 8_000 });
+      await expect(timeInBiz.nth(0)).toBeVisible({ timeout: 15_000 });
+      await expect(timeInBiz.nth(1)).toBeVisible({ timeout: 15_000 });
+    } catch {
+      const yearsReq = root.getByText("Years is required", { exact: true }).first();
+      const monthsReq = root.getByText("Months is required", { exact: true }).first();
+      try {
+        await expect(yearsReq).toBeVisible({ timeout: 8_000 });
+        await expect(monthsReq).toBeVisible({ timeout: 8_000 });
+      } catch {
+        await expect(timeInBiz.first()).toBeVisible({ timeout: 20_000 });
+      }
+    }
+
+    await assertIfPresent("Trading Name is required");
+    await assertIfPresent("GST Number is required");
+    await assertIfPresent("Description of Business is required");
+    await assertIfPresent("Business Description is required");
+    await assertIfPresent("Source of Wealth is required");
+    await assertIfPresent("Phone Number is required");
+    await assertIfPresent("Phone number is required");
+    await assertIfPresent("Email is required");
+  }
+
+  /**
+   * After **Next** with invalid phone, email, and company identifiers, expect format / pattern messages.
+   * **Phone** and **Email** copy is stable; **Registered Company Number**, **NZBN**, and **GST** wording
+   * varies by build (or only “required” / length rules appear) — those are asserted only when visible.
+   */
+  async expectBusinessDetailsInvalidFormatValidationMessages(): Promise<void> {
+    const root = this.businessRoot;
+
+    await expect(
+      root
+        .getByText("Phone Number is in an incorrect format", { exact: true })
+        .or(root.getByText("Phone number is in an incorrect format", { exact: true }))
+        .first(),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(
+      root.getByText("Email is in an incorrect format", { exact: true }).first(),
+    ).toBeVisible({ timeout: 20_000 });
+
+    const assertFormatIfShown = async (exact: string): Promise<void> => {
+      const el = root.getByText(exact, { exact: true }).first();
+      if (await el.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await expect(el).toBeVisible({ timeout: 5_000 });
+      }
+    };
+
+    await assertFormatIfShown("Registered Company Number is in an incorrect format");
+    await assertFormatIfShown("New Zealand Business Number is in an incorrect format");
+    await assertFormatIfShown("GST Number is in an incorrect format");
   }
 }

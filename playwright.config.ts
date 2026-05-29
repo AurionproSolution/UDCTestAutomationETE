@@ -23,10 +23,16 @@ const ignoreDoSanityFolder = "**/doSanityTest/**";
 // Environment variable for selecting test environment
 const TEST_ENV = process.env.TEST_ENV || "qat";
 
+// Ortoni Report Configuration — unique folder per process avoids Windows EPERM when
+// ortoni-report tries to rmSync locked videos under a previous run's ortoni-data.
+const ortoniReportFolder =
+  process.env.ORTONI_REPORT_FOLDER ||
+  path.join("ortoni-report", `run-${Date.now()}-${process.pid}`);
+
 // Ortoni Report Configuration
 const ortoniConfig: OrtoniReportConfig = {
   open: process.env.CI ? "never" : "on-failure",
-  folderPath: "ortoni-report",
+  folderPath: ortoniReportFolder,
   filename: "index.html",
   title: "UDC Automation Tests Report",
   showProject: true,
@@ -159,6 +165,8 @@ export default defineConfig({
       name: "do-sanity-setup",
       testDir: "./tests/do-portal/doSanityTest",
       testMatch: "**/*.auth.setup.ts",
+      /** DO marketing shell + FIS + IdP often exceeds the global 120s on QAT / slow links. */
+      timeout: 300_000,
       use: maximizedChrome,
     },
     {
@@ -166,6 +174,8 @@ export default defineConfig({
       testDir: "./tests/do-portal/doSanityTest",
       testIgnore: "**/*.auth.setup.ts",
       dependencies: ["do-sanity-setup"],
+      /** FinanceLease_SingleFlow and similar E2E use test.setTimeout(1_200_000); project must allow it. */
+      timeout: 1_500_000,
       use: {
         ...maximizedChrome,
         storageState: doSanityAuthStorage,

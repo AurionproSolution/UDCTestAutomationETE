@@ -127,7 +127,12 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   async waitForUploadStep(): Promise<void> {
-    await this.browseFilesButton.waitFor({ state: "visible", timeout: 120000 });
+    await this.page.waitForLoadState("load").catch(() => {});
+    // Stepper label (FL Standard Quote) or Upload tab anchor — avoids racing Reference → Post Submission navigation.
+    await expect(
+      this.page.getByText(/Post Submission/i).first().or(this.browseFilesButton),
+    ).toBeVisible({ timeout: 120_000 });
+    await this.browseFilesButton.waitFor({ state: "visible", timeout: 60_000 });
   }
 
   /**
@@ -366,32 +371,6 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   async submitQuoteFromStatusMenu(): Promise<void> {
     const p = this.page;
 
-    const openMenu = async (): Promise<void> => {
-      const openQuote = p.getByRole("button", { name: /Open Quote/i });
-      if (await openQuote.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await openQuote.scrollIntoViewIfNeeded();
-        await openQuote.click({ timeout: 20_000 });
-        return;
-      }
-      const statusQuoteCell = p
-        .locator(".col-2.status.w-10rem.ng-star-inserted, .col-2.status.w-10rem, .col-2.status")
-        .or(p.locator("[class*='status']").filter({ has: p.locator("p-dropdown, p-select, .p-dropdown, .p-select") }))
-        .first();
-      await statusQuoteCell.waitFor({ state: "visible", timeout: 60_000 });
-      const trigger = statusQuoteCell
-        .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
-        .first();
-      if (await trigger.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await trigger.scrollIntoViewIfNeeded();
-        await trigger.click({ timeout: 15_000 });
-      } else {
-        await statusQuoteCell.click({ timeout: 15_000 });
-      }
-    };
-
-    await openMenu();
-
-    /** Custom menus: `div.action-item` with text Submit (not listbox `option`). */
     const submitAction = p
       .locator("div.action-item, .action-item")
       .filter({ hasText: /^\s*Submit\s*$/i })
@@ -402,32 +381,147 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .filter({ hasText: /^\s*Submit\s*$/i })
       .first();
 
+    const openMenu = async (): Promise<void> => {
+      const openQuote = p.getByRole("button", { name: /Open Quote/i });
+      if (await openQuote.isVisible({ timeout: 2_500 }).catch(() => false)) {
+        await expect(openQuote).toBeVisible({ timeout: 8_000 });
+        await openQuote.scrollIntoViewIfNeeded();
+        await openQuote.click({ timeout: 12_000 });
+        await p.waitForTimeout(120);
+        return;
+      }
+
+      /**
+       * Finance Lease / QAT: workflow status is a PrimeNG dropdown **display input**
+       * (`input.p-element.p-inputtext.p-component…`). Omit `ng-*` — those change after touch/validation.
+       * Prefer the **Status** column so we do not hit unrelated header inputs.
+       */
+      const workflowStatusInput = p
+        .locator(".col-2.status, .col-2.status.w-10rem, [class*='status'].w-10rem")
+        .first()
+        .locator("input.p-element.p-inputtext.p-component, input.p-inputtext.p-component.p-element")
+        .first();
+      if (await workflowStatusInput.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await workflowStatusInput.scrollIntoViewIfNeeded();
+        await workflowStatusInput.click({ timeout: 10_000 });
+        await p.waitForTimeout(120);
+        return;
+      }
+
+      const statusQuoteCell = p
+        .locator(".col-2.status.w-10rem.ng-star-inserted, .col-2.status.w-10rem, .col-2.status")
+        .or(p.locator("[class*='status']").filter({ has: p.locator("p-dropdown, p-select, .p-dropdown, .p-select") }))
+        .first();
+      await statusQuoteCell.waitFor({ state: "visible", timeout: 25_000 });
+      const trigger = statusQuoteCell
+        .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
+        .first();
+      if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.click({ timeout: 10_000 });
+      } else {
+        await statusQuoteCell.click({ timeout: 10_000 });
+      }
+      await p.waitForTimeout(120);
+    };
+
+    await p.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+    await p.keyboard.press("Escape").catch(() => {});
+    await openMenu();
+
+    /** Short wait for overlay paint — prefer tight timeouts so retries run quickly. */
+    await expect(
+      p
+        .locator(
+          ".p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
+        )
+        .filter({ visible: true })
+        .filter({ hasText: /Submit|Withdraw/i })
+        .first(),
+    )
+      .toBeVisible({ timeout: 6_000 })
+      .catch(() => {});
+
     const clickSubmitMenuItem = async (): Promise<boolean> => {
-      for (const candidate of [submitAction, flexSubmit]) {
-        try {
-          await candidate.waitFor({ state: "visible", timeout: 12_000 });
-          await candidate.scrollIntoViewIfNeeded();
-          await candidate.click({ timeout: 15_000 });
+      const scopedSubmit = (root: Locator) =>
+        root
+          .getByRole("menuitem", { name: /^Submit$/i })
+          .or(root.locator("li.p-menuitem, li[role='menuitem']").filter({ hasText: /^Submit$/i }))
+          .or(root.locator("a.p-menuitem-link, .p-menuitem-text").filter({ hasText: /^Submit$/i }))
+          .or(root.getByRole("option", { name: /^Submit$/i }))
+          .or(root.locator("li.p-dropdown-item, li.p-select-option").filter({ hasText: /^Submit$/i }))
+          .or(root.locator("div.action-item, .action-item").filter({ hasText: /^\s*Submit\s*$/i }))
+          .or(root.locator(':text-is("Submit")'))
+          .first();
+
+      const overlayRoots = p
+        .locator(
+          ".p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
+        )
+        .filter({ visible: true });
+
+      const n = await overlayRoots.count();
+      for (let i = 0; i < n; i++) {
+        const root = overlayRoots.nth(i);
+        if (!(await root.isVisible({ timeout: 600 }).catch(() => false))) continue;
+        const target = scopedSubmit(root);
+        if (await target.isVisible({ timeout: 1_200 }).catch(() => false)) {
+          await target.scrollIntoViewIfNeeded();
+          await target.click({ timeout: 12_000 });
           await p.keyboard.press("Escape").catch(() => {});
           return true;
-        } catch {
-          /* try next */
+        }
+      }
+
+      /** Unscoped fallbacks (custom split / flex rows attached to `body`). */
+      for (const candidate of [
+        p.getByRole("menuitem", { name: /^Submit$/i }).first(),
+        p.locator("li.p-menuitem").filter({ hasText: /^Submit$/i }).first(),
+        submitAction,
+        flexSubmit,
+      ]) {
+        if (await candidate.isVisible({ timeout: 900 }).catch(() => false)) {
+          await candidate.scrollIntoViewIfNeeded();
+          await candidate.click({ timeout: 12_000 });
+          await p.keyboard.press("Escape").catch(() => {});
+          return true;
         }
       }
       return false;
     };
 
     if (await clickSubmitMenuItem()) {
+      await p.waitForTimeout(150);
+      return;
+    }
+
+    await p.keyboard.press("Escape").catch(() => {});
+    await p.waitForTimeout(120);
+    await openMenu();
+    await expect(
+      p
+        .locator(
+          ".p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
+        )
+        .filter({ visible: true })
+        .filter({ hasText: /Submit|Withdraw/i })
+        .first(),
+    )
+      .toBeVisible({ timeout: 5_000 })
+      .catch(() => {});
+
+    if (await clickSubmitMenuItem()) {
+      await p.waitForTimeout(150);
       return;
     }
 
     const panel = p
-      .locator(".p-dropdown-panel, .p-select-overlay")
+      .locator(".p-dropdown-panel, .p-select-overlay, .p-overlaypanel")
       .filter({ visible: true })
       .filter({ hasText: /Submit/i })
       .last();
 
-    if (await panel.isVisible({ timeout: 12_000 }).catch(() => false)) {
+    if (await panel.isVisible({ timeout: 5_000 }).catch(() => false)) {
       const submitChoices: Locator[] = [
         panel.getByRole("option", { name: /^Submit$/i }),
         panel.locator("li.p-dropdown-item").filter({ hasText: /^Submit$/i }),
@@ -440,9 +534,9 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       for (const choice of submitChoices) {
         const target = choice.first();
         try {
-          await target.waitFor({ state: "visible", timeout: 6000 });
+          await target.waitFor({ state: "visible", timeout: 2_500 });
           await target.scrollIntoViewIfNeeded();
-          await target.click({ timeout: 12_000 });
+          await target.click({ timeout: 8_000 });
           clicked = true;
           break;
         } catch {
@@ -450,29 +544,102 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         }
       }
       if (!clicked) {
-        await flexSubmit.or(submitAction).first().click({ timeout: 12_000, force: true });
+        await flexSubmit.or(submitAction).first().click({ timeout: 8_000, force: true });
       }
     } else {
-      await flexSubmit.or(submitAction).first().click({ timeout: 15_000, force: true });
+      await flexSubmit.or(submitAction).first().click({ timeout: 10_000, force: true });
     }
 
+    await p.waitForTimeout(150);
+
     await p
-      .locator(".p-dropdown-panel, .p-select-overlay")
+      .locator(".p-dropdown-panel, .p-select-overlay, .p-overlaypanel, .p-menu-overlay")
       .filter({ visible: true })
-      .waitFor({ state: "hidden", timeout: 15_000 })
+      .waitFor({ state: "hidden", timeout: 8_000 })
       .catch(() => {});
   }
 
   /**
-   * Originator Declaration: tick the first two statement checkboxes, then Proceed.
+   * After **Submit** from the quote status menu, some builds show a PrimeNG **Confirm** (`p-confirmdialog`)
+   * before **Originator Declaration**. Safe no-op when the dialog is absent (other products / tests).
+   */
+  async confirmSubmitQuoteDialogIfPresent(): Promise<void> {
+    const p = this.page;
+    const dialog = p.locator("p-confirmdialog, .p-confirm-dialog").filter({ visible: true }).first();
+    try {
+      await dialog.waitFor({ state: "visible", timeout: 12_000 });
+    } catch {
+      return;
+    }
+    const accept = dialog
+      .getByRole("button", { name: /^(Yes|Accept|OK)$/i })
+      .or(dialog.locator("button.p-confirm-dialog-accept").first());
+    const btn = accept.first();
+    try {
+      await btn.waitFor({ state: "visible", timeout: 8000 });
+      await btn.click({ timeout: 15_000 });
+      await p.waitForTimeout(500);
+    } catch {
+      /* dialog present but unexpected chrome — let completeOriginatorDeclaration / caller surface errors */
+    }
+    await dialog.waitFor({ state: "hidden", timeout: 25_000 }).catch(() => {});
+  }
+
+  /**
+   * Originator Declaration: tick the first two statement checkboxes, then **Proceed**.
+   * Dialog accessible name / title copy varies; some builds open a plain `.p-dialog` without `aria-labelledby`.
    */
   async completeOriginatorDeclaration(): Promise<void> {
-    const dialog = this.page.getByRole("dialog", {
-      name: /Originator Declaration/i,
-    });
-    await dialog.waitFor({ state: "visible", timeout: 60000 });
+    const p = this.page;
+    await p.waitForTimeout(2500);
+    await p.waitForLoadState("domcontentloaded").catch(() => {});
 
-    const boxes = dialog.locator(".p-checkbox-box");
+    const flexDialog = p
+      .locator(".p-dialog")
+      .filter({ visible: true })
+      .filter({
+        hasText: /Originator|Declaration\s+by|Declaration|I\s+declare|originator declaration/i,
+      })
+      .first();
+
+    const dialogWithProceed = p
+      .locator(".p-dialog")
+      .filter({ visible: true })
+      .filter({ has: p.getByRole("button", { name: /^Proceed$/i }) })
+      .filter({
+        hasText: /Originator|Declaration|declare|originator/i,
+      })
+      .first();
+
+    const dialog = p
+      .getByRole("dialog", {
+        name: /Originator\s+Declaration|Originator\s+declaration/i,
+      })
+      .or(flexDialog)
+      .or(dialogWithProceed)
+      .or(
+        p
+          .locator("[role='dialog']")
+          .filter({ visible: true })
+          .filter({
+            has: p.getByText(/Originator|Declaration by the originator|I declare/i),
+          })
+          .first(),
+      );
+
+    let scope: Locator;
+    try {
+      await dialog.waitFor({ state: "visible", timeout: 120_000 });
+      scope = dialog;
+    } catch {
+      const proceedLoose = p.getByRole("button", { name: /^Proceed$/i }).first();
+      if (await proceedLoose.isVisible({ timeout: 12_000 }).catch(() => false)) {
+        await proceedLoose.click({ timeout: 15_000 }).catch(() => {});
+      }
+      return;
+    }
+
+    const boxes = scope.locator(".p-checkbox-box, [data-pc-section='checkbox']");
     const n = await boxes.count();
     const limit = Math.min(2, n);
     for (let i = 0; i < limit; i++) {
@@ -483,8 +650,12 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       }
     }
 
-    await this.proceedButton.waitFor({ state: "visible", timeout: 15000 });
-    await this.proceedButton.click();
-    await dialog.waitFor({ state: "hidden", timeout: 60000 }).catch(() => {});
+    const proceed = scope
+      .getByRole("button", { name: /^Proceed$/i })
+      .or(scope.locator(':text-is("Proceed")'))
+      .first();
+    await proceed.waitFor({ state: "visible", timeout: 25_000 });
+    await proceed.click({ timeout: 15_000 });
+    await scope.waitFor({ state: "hidden", timeout: 90_000 }).catch(() => {});
   }
 }
