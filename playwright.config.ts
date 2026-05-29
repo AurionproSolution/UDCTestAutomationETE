@@ -193,6 +193,7 @@ export default defineConfig({
     ...(process.env.PLAYWRIGHT_SKIP_ORTONI === "1"
       ? []
       : ([["ortoni-report", ortoniConfig]] as const)),
+    ["./playwright/report-backup-reporter.ts"],
   ],
 
   use: {

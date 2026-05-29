@@ -179,13 +179,58 @@ npm run format:check
 
 ## 📊 Reports
 
+### Live reports (current run)
+
+These folders always hold the **latest** run. Round 2 overwrites Round 1 here — that is expected.
+
 ```bash
-# View Playwright HTML report
+# View Playwright HTML report (live)
 npm run report
 
-# View Ortoni custom report
+# View Ortoni custom report (live)
 npm run report:ortoni
 ```
+
+| Folder | Purpose |
+|--------|---------|
+| `ortoni-report/` | Live Ortoni report (`index.html`, screenshots, videos, traces, steps, logs) |
+| `my-report/` | Live Playwright HTML report |
+
+### Automatic backups (`results/`)
+
+After each **CLI** test run completes, a timestamped backup is created automatically:
+
+```
+results/report-2026-05-29_09-15-30/
+  run-info.json
+  ortoni-report/    ← full recursive copy (identical to live)
+  my-report/        ← full copy when present
+```
+
+The Ortoni backup is a **complete copy** of the live folder: `index.html`, `ortoni-data/` (screenshots, videos, trace files), `trace/` (in-report trace viewer), step logs, console output, and `ortoni-data-history.sqlite` when present. Open a past round the same way as live:
+
+```bash
+# Example: open Round 1 Ortoni backup
+npx playwright show-report results/report-2026-05-29_09-15-30/ortoni-report
+```
+
+To share with stakeholders, **zip the entire `ortoni-report` subfolder** inside the backup (not `index.html` alone).
+
+List backups (newest last):
+
+```powershell
+Get-ChildItem results -Directory | Sort-Object Name
+```
+
+`npm run clean` removes live `ortoni-report/` and `my-report/` only — **`results/` is never deleted**.
+
+### Skip flags
+
+| Variable | When set | Effect |
+|----------|----------|--------|
+| `PLAYWRIGHT_SKIP_REPORT_BACKUP=1` | Manual / CI | No backup to `results/` |
+| `PLAYWRIGHT_IDE=1` | VS Code / Cursor Test Explorer | No backup (avoids flooding `results/` on debug runs) |
+| `PLAYWRIGHT_SKIP_ORTONI=1` | IDE (default in `.vscode/settings.json`) | Ortoni not generated; backup skipped if no `ortoni-report/index.html` |
 
 ## 🏷️ Test Tags
 
@@ -256,6 +301,8 @@ test('should display dashboard @do', async ({ doAuthenticatedPage, doDashboardPa
 | `CI` | Set automatically on GitHub Actions | - |
 | `PLAYWRIGHT_IDE` | Set to `1` in VS Code/Cursor (`.vscode/settings.json`) for a **single** `udc-chromium` project so Test Explorer lists all portals under `tests/` | unset (multi-project config for CLI/CI) |
 | `PLAYWRIGHT_USE_DO_GLOBAL_AUTH` | On CI, set to `1` to run `playwright/do-portal-auth.setup.ts` and apply DO `storageState` for tag projects and DO matrix jobs | unset (DO auth off on CI) |
+| `PLAYWRIGHT_SKIP_ORTONI` | Set to `1` to skip Ortoni reporter (IDE default) | unset (Ortoni enabled on CLI) |
+| `PLAYWRIGHT_SKIP_REPORT_BACKUP` | Set to `1` to skip automatic copy to `results/report-<timestamp>/` | unset (backup enabled on CLI) |
 
 ### Portal URLs
 

@@ -22,7 +22,8 @@
   "playwright.env": {
     "PLAYWRIGHT_IDE": "1",
     "PLAYWRIGHT_USE_DO_GLOBAL_AUTH": "1",
-    "PLAYWRIGHT_SKIP_ORTONI": "1"
+    "PLAYWRIGHT_SKIP_ORTONI": "1",
+    "PLAYWRIGHT_SKIP_REPORT_BACKUP": "1"
   },
   "playwright.configs": ["playwright.config.ts"]
 }

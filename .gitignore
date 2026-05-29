@@ -16,6 +16,7 @@ dist/
 # Custom report folders
 my-report/
 ortoni-report/
+results/
 
 # IDE
 .idea/
