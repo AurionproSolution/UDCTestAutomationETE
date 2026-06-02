@@ -206,7 +206,6 @@ test.describe("DO Portal - Finance Lease Individual (SOLE trade) - Sanity @do @s
     await customerQuotePostSubmitPage.addNoteAndSubmit(
       "Automated sanity note — Financelease Individual quote.", 
     );
-    await customerQuotePostSubmitPage.submitQuoteFromStatusMenu();
-    await customerQuotePostSubmitPage.completeOriginatorDeclaration();
+    await customerQuotePostSubmitPage.submitQuoteThroughWorkflowDeclaration();
   });
 });

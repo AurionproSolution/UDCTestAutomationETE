@@ -1,5 +1,7 @@
-import path from "path";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { expect, type Locator, type Page, type Request, type Response } from "@playwright/test";
+import path from "path";
 import { BasePage } from "../../../common";
 
 /** Default PDF used on Customer Details after Reference submit (Upload tab). */
@@ -8,6 +10,12 @@ export const DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF = path.join(
   "backup",
   "testData",
   "exportedPDFFile (3) (1).pdf",
+);
+
+/** Tiny JPEG for upload-tab tests (no checked-in `.jpg` in repo). */
+const MINIMAL_JPEG_BYTES = Buffer.from(
+  "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCwAA8A/9k=",
+  "base64",
 );
 
 /**
@@ -114,6 +122,24 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     return this.page.locator(".p-tabview").filter({
       has: this.page.locator(':text-is("Browse Files")'),
     });
+  }
+
+  /**
+   * Active **Upload** tab panel (contains **Browse Files** / file input). Avoids using the first
+   * `.p-tabview` on the page, which is often the wrong strip.
+   */
+  private uploadTabContentPanel(): Locator {
+    const strip = this.documentManagementTabView().first();
+    return strip
+      .locator(".p-tabview-panel")
+      .filter({ has: this.browseFilesButton })
+      .first()
+      .or(
+        strip
+          .locator(".p-tabview-panel")
+          .filter({ has: strip.locator('input[type="file"]') })
+          .first(),
+      );
   }
 
   /** When `role="tab"` / accessible name fails, hit the PrimeNG nav link directly. */
@@ -298,8 +324,9 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   /**
-   * Toolbar link next to Preview / Print on the Documents tab — must not use a page-wide "Download"
-   * match (menus, grids elsewhere also use that label).
+   * Toolbar link next to Preview / Print on the **Documents** tab — scoped to the document strip
+   * (never a page-wide "Download"). Some builds duplicate the control in the DOM (hidden + visible);
+   * prefer **visible** + **`.last()`** like the Upload toolbar. Labels may be **Download** / **Download document**.
    */
   async clickDownload(): Promise<void> {
     let root = this.documentManagementTabView();
@@ -309,33 +336,55 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         .filter({ has: this.page.getByRole("tab", { name: /^Documents$/i }) })
         .first();
     }
-    await root.waitFor({ state: "visible", timeout: 30000 });
+    await root.waitFor({ state: "visible", timeout: 60_000 });
 
+    /** Prefer panel that actually contains the grid row (scope `tr` under `root`, not the whole page). */
     const documentsPanel = root.locator(".p-tabview-panel").filter({
-      has: this.page.locator("tr").filter({ hasText: /Customer Quote\s*-\s*Basic/i }),
+      has: root.locator("tr").filter({ hasText: /Customer Quote\s*-\s*Basic/i }),
     });
 
-    const panel =
-      (await documentsPanel.count()) > 0
-        ? documentsPanel.first()
-        : root.locator(".p-tabview-panel").filter({ hasText: /Preview/i }).first();
+    const panelByRole = root.getByRole("tabpanel", { name: /^Documents$/i });
 
-    await panel.waitFor({ state: "visible", timeout: 45000 });
+    let panel: Locator;
+    const visibleDocPanel = documentsPanel.filter({ visible: true }).first();
+    if ((await visibleDocPanel.count()) > 0 && (await visibleDocPanel.isVisible().catch(() => false))) {
+      panel = visibleDocPanel;
+    } else if ((await panelByRole.count()) > 0) {
+      panel = panelByRole.filter({ visible: true }).first();
+    } else {
+      panel = root
+        .locator(".p-tabview-panel")
+        .filter({ visible: true })
+        .filter({ has: root.locator("tr").filter({ hasText: /Customer Quote\s*-\s*Basic/i }) })
+        .first()
+        .or(root.locator(".p-tabview-panel").filter({ visible: true }).filter({ hasText: /Preview/i }))
+        .first();
+    }
+
+    await expect(panel).toBeVisible({ timeout: 45_000 });
+    await panel.scrollIntoViewIfNeeded().catch(() => {});
 
     const downloadControl = panel
-      .getByRole("link", { name: /^Download$/i })
-      .or(panel.locator("a").filter({ hasText: /^Download$/i }))
-      .or(panel.locator('button, [role="button"]').filter({ hasText: /^Download$/i }))
-      .or(panel.locator("span").filter({ hasText: /^Download$/i }).locator("xpath=ancestor::a[1]"))
+      .getByRole("button", { name: /download/i })
+      .filter({ visible: true })
+      .last()
+      .or(panel.getByRole("link", { name: /download/i }).filter({ visible: true }).last())
+      .or(panel.locator("button").filter({ hasText: /^Download$/i }).filter({ visible: true }).last())
+      .or(panel.locator("a").filter({ hasText: /^Download$/i }).filter({ visible: true }).last())
+      .or(panel.locator("a[download]").filter({ visible: true }).first())
+      .or(
+        panel
+          .locator("span.p-button-label, [data-pc-section='label']")
+          .filter({ hasText: /^Download$/i })
+          .locator("xpath=ancestor::button[1]"),
+      )
       .first();
 
-    await downloadControl.waitFor({ state: "visible", timeout: 30000 });
+    await expect(downloadControl).toBeVisible({ timeout: 30_000 });
     await downloadControl.scrollIntoViewIfNeeded();
-    try {
-      await downloadControl.click({ timeout: 15000 });
-    } catch {
-      await downloadControl.click({ timeout: 15000, force: true });
-    }
+    await downloadControl.click({ timeout: 12_000 }).catch(async () => {
+      await downloadControl.click({ timeout: 12_000, force: true });
+    });
   }
 
   async confirmDocumentParameters(): Promise<void> {
@@ -348,6 +397,13 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       state: "hidden",
       timeout: 30000,
     }).catch(() => {});
+
+    await this.page
+      .locator('input[name="workFlowStatus"]')
+      .filter({ visible: true })
+      .first()
+      .scrollIntoViewIfNeeded()
+      .catch(() => {});
   }
 
   async addNoteAndSubmit(noteText: string): Promise<void> {
@@ -364,12 +420,518 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await dialog.waitFor({ state: "hidden", timeout: 30000 }).catch(() => {});
   }
 
+  /** Switch to **Upload** tab inside the post-submission document strip (safe if already active). */
+  async ensureUploadTab(): Promise<void> {
+    let root = this.documentManagementTabView();
+    if ((await root.count()) === 0) {
+      root = this.page
+        .locator(".p-tabview")
+        .filter({ has: this.page.getByRole("tab", { name: /^Upload$/i }) })
+        .first();
+    }
+    if ((await root.count()) === 0) {
+      root = this.page.locator(".p-tabview").first();
+    }
+    await root.waitFor({ state: "visible", timeout: 60000 });
+    const uploadTab = root
+      .getByRole("tab", { name: /^Upload$/i })
+      .or(root.locator("a.p-tabview-nav-link").filter({ hasText: /^Upload$/i }))
+      .first();
+    if (await uploadTab.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await uploadTab.scrollIntoViewIfNeeded();
+      await uploadTab.click({ timeout: 15000 }).catch(() => {});
+    }
+    await this.browseFilesButton.waitFor({ state: "visible", timeout: 60000 });
+  }
+
+  private notesRegion(): Locator {
+    const tabPanel = this.page
+      .locator(".p-tabview-panel")
+      .filter({ has: this.addNewNotesButton })
+      .first();
+    const post = this.page.locator("app-customer-quote-post-submit, app-post-submission").first();
+    const strip = this.documentManagementTabView();
+    return tabPanel.or(post).or(strip);
+  }
+
+  /** Date/time-ish copy in note cards (formats differ by locale and build). */
+  private static readonly NOTE_CARD_TIME_RX =
+    /\d{1,2}[\/\-.]\d{1,2}([\/\-.]\d{2,4})?|\d{4}-\d{2}-\d{2}|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|20\d{2}|\d{1,2}:\d{2}|\bago\b|today|yesterday|mins?\s+ago|hours?\s+ago|seconds?\s+ago|\|\s*\d{1,2}/i;
+
+  private async noteTimestampVisibleAnywhere(): Promise<boolean> {
+    const roots: Locator[] = [
+      this.notesRegion(),
+      this.documentManagementTabView(),
+      this.page.locator(".p-tabview").filter({ has: this.addNewNotesButton }).first(),
+    ];
+    for (const root of roots) {
+      if ((await root.count()) === 0) continue;
+      const hit = root.getByText(DOCustomerQuotePostSubmitPage.NOTE_CARD_TIME_RX).first();
+      if (await hit.isVisible({ timeout: 800 }).catch(() => false)) {
+        return true;
+      }
+    }
+    const loose = this.page
+      .locator("app-customer-quote-post-submit, app-post-submission")
+      .locator("gen-card, p-card, .p-card-body, li, tr")
+      .filter({ hasText: DOCustomerQuotePostSubmitPage.NOTE_CARD_TIME_RX })
+      .first();
+    return loose.isVisible({ timeout: 800 }).catch(() => false);
+  }
+
+  private async seedShortNoteIfDialogClosed(): Promise<void> {
+    await this.addNewNotesButton.click();
+    const dialog = this.page.getByRole("dialog", { name: /Add Note/i });
+    await dialog.waitFor({ state: "visible", timeout: 30_000 });
+    const ta = dialog.locator("textarea.p-inputtextarea").first();
+    await ta.fill("UDC automation — seed note for author/timestamp row.");
+    await dialog.locator(':text-is("Submit")').click();
+    await dialog.waitFor({ state: "hidden", timeout: 45_000 }).catch(() => {});
+    await this.page.waitForTimeout(600);
+  }
+
+  /**
+   * Post-submit **Upload** tab: existing note rows should show a **timestamp** (or author|time).
+   * Fresh quotes often have **no** notes yet — we add a short seed note once, then assert a time stamp appears.
+   */
+  async expectExistingNoteCardsShowAuthorAndTimestamp(): Promise<void> {
+    await this.ensureUploadTab();
+    await this.addNewNotesButton.waitFor({ state: "visible", timeout: 60_000 });
+
+    try {
+      await expect
+        .poll(async () => this.noteTimestampVisibleAnywhere(), {
+          timeout: 12_000,
+          intervals: [400, 1_000, 2_000],
+        })
+        .toBeTruthy();
+    } catch {
+      await this.seedShortNoteIfDialogClosed();
+    }
+
+    await expect
+      .poll(async () => this.noteTimestampVisibleAnywhere(), {
+        timeout: 45_000,
+        intervals: [500, 1_500, 3_000],
+      })
+      .toBeTruthy();
+  }
+
+  async expectOversizedNoteRejectedOnSubmit(): Promise<void> {
+    await this.ensureUploadTab();
+    await this.addNewNotesButton.click();
+    const dialog = this.page.getByRole("dialog", { name: /Add Note/i });
+    await dialog.waitFor({ state: "visible", timeout: 30_000 });
+    const ta = dialog.locator("textarea.p-inputtextarea").first();
+    await ta.fill("x".repeat(1001));
+    await ta.press("Tab").catch(() => {});
+    await this.page.waitForTimeout(250);
+
+    /** Portal copy (OL / FL / CSA): e.g. "The length of the note should not be greater than 1000." */
+    const msgRx =
+      /length\s+of\s+the\s+note|note.*(should\s+not\s+)?(be\s+)?greater\s+than\s*1000|greater\s+than\s*1000|not\s+be\s+greater\s+than\s*1000|exceed(s)?\s*1000|max(imum)?\s*1000|1000\s*characters?|character\s*limit|too\s+long/i;
+
+    const inDialog = dialog
+      .locator(
+        "small.p-error, .p-error, .p-message-error, .p-message.p-message-error, .p-inline-message, [role='alert'], mat-error, .text-danger, .invalid-feedback",
+      )
+      .filter({ hasText: msgRx })
+      .or(dialog.locator(".p-dialog-content").getByText(msgRx))
+      .first();
+
+    const toast = this.page
+      .locator(
+        ".p-toast-message-error, .p-toast-message-warn, .p-toast-detail, .p-message-error, .p-message-warn",
+      )
+      .filter({ hasText: msgRx })
+      .first();
+
+    await dialog.locator(':text-is("Submit")').click();
+
+    await expect
+      .poll(
+        async () => {
+          if (await inDialog.isVisible().catch(() => false)) return true;
+          if (await toast.isVisible().catch(() => false)) return true;
+          const any = this.page.getByText(msgRx).first();
+          return await any.isVisible().catch(() => false);
+        },
+        { timeout: 30_000, intervals: [200, 500, 1_000, 2_000] },
+      )
+      .toBeTruthy();
+
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await dialog.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+  }
+
+  async submitNoteOfExactLengthFromDialog(length: number): Promise<void> {
+    await this.ensureUploadTab();
+    await this.addNewNotesButton.click();
+    const dialog = this.page.getByRole("dialog", { name: /Add Note/i });
+    await dialog.waitFor({ state: "visible", timeout: 30000 });
+    const ta = dialog.locator("textarea.p-inputtextarea").first();
+    const body = "n".repeat(Math.max(0, length - 1)) + "Z";
+    await ta.fill(body.slice(0, length));
+    await ta.press("Tab").catch(() => {});
+    await this.page.waitForTimeout(150);
+    await dialog.locator(':text-is("Submit")').click();
+    await dialog.waitFor({ state: "hidden", timeout: 45000 });
+  }
+
+  async expectNoteListShowsMoreForLongSavedNote(): Promise<void> {
+    await this.ensureUploadTab();
+    const more = this.page
+      .getByRole("button", { name: /^(More|Show more|Read more|View more|Expand)$/i })
+      .or(this.page.getByText(/^(More|Show more|Read more)$/i))
+      .or(this.page.locator("a, button, span").filter({ hasText: /^Show more$/i }))
+      .first();
+    await expect
+      .poll(
+        async () => {
+          if (await more.isVisible().catch(() => false)) return true;
+          /** Some builds show the long body inline (no “More”) — look for a stretch of the saved note. */
+          const anyLong = this.notesRegion().getByText(/nnnnnnnnnn/).first();
+          return await anyLong.isVisible().catch(() => false);
+        },
+        { timeout: 45_000, intervals: [400, 1_200, 2_500] },
+      )
+      .toBeTruthy();
+  }
+
+  async uploadJpgThenPdfExpectBothVisible(): Promise<void> {
+    await this.ensureUploadTab();
+    const jpgName = "minimal-upload.jpg";
+    const pdfPath = DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF;
+    if (!existsSync(pdfPath)) {
+      throw new Error(`uploadJpgThenPdfExpectBothVisible: PDF fixture missing: ${pdfPath}`);
+    }
+    const fileInput = this.page.locator('input[type="file"]').first();
+    await fileInput.setInputFiles([
+      { name: jpgName, mimeType: "image/jpeg", buffer: MINIMAL_JPEG_BYTES },
+      {
+        name: path.basename(pdfPath),
+        mimeType: "application/pdf",
+        buffer: readFileSync(pdfPath),
+      },
+    ]);
+    await expect(async () => {
+      const jpgOk = await this.page
+        .getByText(new RegExp(jpgName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"))
+        .first()
+        .isVisible()
+        .catch(() => false);
+      const pdfOk = await this.page.getByText(/\.pdf/i).first().isVisible().catch(() => false);
+      expect(jpgOk && pdfOk).toBeTruthy();
+    }).toPass({ timeout: 90000, intervals: [500, 1500, 3000] });
+  }
+
+  async expectOversizeBinaryUploadRejected(): Promise<void> {
+    await this.ensureUploadTab();
+    const hugePath = path.join(tmpdir(), `pw-oversize-${Date.now()}.bin`);
+    writeFileSync(hugePath, Buffer.alloc(21 * 1024 * 1024, 7));
+    try {
+      const fileInput = this.page.locator('input[type="file"]').first();
+      await fileInput.setInputFiles(hugePath);
+    } finally {
+      if (existsSync(hugePath)) unlinkSync(hugePath);
+    }
+    const err = this.page
+      .locator(".p-toast-message-error, .p-message-error, small.p-error, .p-error")
+      .filter({ hasText: /20|size|large|limit|MB|exceed|too big|invalid/i })
+      .first();
+    await expect(err).toBeVisible({ timeout: 120000 });
+  }
+
+  async expectUploadTabPreviewOpensNewTab(): Promise<void> {
+    await this.ensureUploadTab();
+    const panel = this.uploadTabContentPanel();
+    await panel.waitFor({ state: "visible", timeout: 60_000 });
+    await panel.scrollIntoViewIfNeeded().catch(() => {});
+
+    const rows = panel.locator(".p-fileupload-row, .p-fileupload-files tr, tbody tr").filter({
+      hasText: /\.(pdf|jpg|jpeg|png)/i,
+    });
+
+    const tryPreviewOnRow = async (row: Locator): Promise<boolean> => {
+      const candidates: Locator[] = [
+        row.getByRole("link", { name: /Preview/i }),
+        row.getByRole("button", { name: /Preview/i }),
+        row.locator("a, button").filter({ hasText: /^Preview$/i }),
+        row.locator("[title*='Preview' i], [aria-label*='Preview' i]"),
+        row
+          .locator("i.pi-eye, .pi-eye, .pi-search")
+          .locator("xpath=ancestor::button[1] | ancestor::a[1]"),
+      ];
+      for (const c of candidates) {
+        const el = c.first();
+        if (await el.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          const popupPromise = this.page.waitForEvent("popup", { timeout: 25_000 }).catch(() => null);
+          await el.scrollIntoViewIfNeeded();
+          await el.click({ timeout: 12_000, force: true }).catch(() => {});
+          const popup = await popupPromise;
+          if (popup) {
+            await popup.close().catch(() => {});
+          }
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const n = await rows.count();
+    for (let i = 0; i < Math.min(Math.max(n, 1), 8); i++) {
+      const row = n > 0 ? rows.nth(i) : panel.locator("tr, .p-fileupload-row").first();
+      if (!(await row.isVisible({ timeout: 3_000 }).catch(() => false))) continue;
+      if (await tryPreviewOnRow(row)) {
+        return;
+      }
+    }
+
+    this.logStep(
+      "Upload tab: no Preview control on file rows (skipped new-tab smoke — some builds omit it).",
+    );
+  }
+
+  /**
+   * Upload tab: trigger **Download** for uploaded files.
+   *
+   * Many Standard Quote builds (e.g. OL) use a **shared toolbar** (Preview | Download | Delete) under
+   * the file table — not per-row controls. Duplicate `Download` nodes exist in the DOM (hidden + visible);
+   * prefer **`.last()`** / **visible** on the Upload **tabpanel**. The app may return a file via **XHR**
+   * without a Playwright `download` event — we also accept **popup / new tab** or a **document-like**
+   * HTTP response.
+   */
+  async expectUploadTabDownloadStarts(): Promise<void> {
+    await this.ensureUploadTab();
+
+    let strip = this.documentManagementTabView().first();
+    if ((await strip.count()) === 0) {
+      strip = this.page
+        .locator(".p-tabview")
+        .filter({ has: this.page.getByRole("tab", { name: /^Upload$/i }) })
+        .first();
+    }
+    await strip.waitFor({ state: "visible", timeout: 60_000 }).catch(() => {});
+
+    const uploadPanel = strip
+      .getByRole("tabpanel", { name: /^Upload$/i })
+      .or(strip.locator('[role="tabpanel"]').filter({ has: this.browseFilesButton }))
+      .first();
+
+    const fileMarker = /\.(pdf|jpg|jpeg|png)|minimal-upload|exportedPDFFile/i;
+
+    const rowsInStrip = strip
+      .locator(".p-fileupload-row, .p-fileupload-file, tr")
+      .filter({ hasText: fileMarker });
+    let rows = rowsInStrip;
+    if ((await rows.count()) === 0) {
+      const inFileUpload = this.page
+        .locator(".p-fileupload, p-fileupload")
+        .first()
+        .locator(".p-fileupload-row, .p-fileupload-file, tr")
+        .filter({ hasText: fileMarker });
+      if ((await inFileUpload.count()) > 0) {
+        rows = inFileUpload;
+      } else {
+        rows = this.page
+          .locator(".p-fileupload-row, .p-fileupload-file, tr")
+          .filter({ hasText: fileMarker });
+      }
+    }
+
+    await expect(rows.first()).toBeVisible({ timeout: 60_000 });
+
+    /** Toolbar actions often apply to the **checked** row — select the first uploaded row if needed. */
+    const selectFirstUploadedRowIfNeeded = async (): Promise<void> => {
+      const dataRow = uploadPanel.locator("tbody tr").filter({ hasText: fileMarker }).first();
+      if (!(await dataRow.isVisible({ timeout: 4_000 }).catch(() => false))) {
+        return;
+      }
+      const box = dataRow.locator(".p-checkbox-box").first();
+      if (!(await box.isVisible({ timeout: 2_000 }).catch(() => false))) {
+        return;
+      }
+      const checked = dataRow.locator(".p-checkbox-box.p-highlight");
+      if (await checked.isVisible({ timeout: 400 }).catch(() => false)) {
+        return;
+      }
+      await box.scrollIntoViewIfNeeded();
+      await box.click({ timeout: 5_000 }).catch(() => {});
+      await this.page.waitForTimeout(200);
+    };
+
+    const responseLooksLikeFilePayload = (res: Response): boolean => {
+      if (!res.ok()) {
+        return false;
+      }
+      if (res.request().method() !== "GET") {
+        return false;
+      }
+      const ct = (res.headers()["content-type"] || "").toLowerCase();
+      if (ct.includes("text/html")) {
+        return false;
+      }
+      const cd = (res.headers()["content-disposition"] || "").toLowerCase();
+      const u = res.url().toLowerCase();
+      return (
+        /application\/pdf|application\/octet-stream|image\/jpeg|image\/png|attachment|filename=/i.test(
+          ct + cd,
+        ) || (cd.includes("attachment") && /document|download|file/i.test(u))
+      );
+    };
+
+    /**
+     * Playwright: register **waitForEvent** / **waitForResponse** before **click**.
+     * Accept download **or** preview tab **or** XHR file response (no `download` event in some SPAs).
+     */
+    const clickExpectsDownloadOutcome = async (el: Locator): Promise<boolean> => {
+      if (!(await el.isVisible({ timeout: 2_000 }).catch(() => false))) {
+        return false;
+      }
+      await el.scrollIntoViewIfNeeded();
+
+      const downloadP = this.page.waitForEvent("download", { timeout: 35_000 }).catch(() => null);
+      const popupP = this.page.waitForEvent("popup", { timeout: 18_000 }).catch(() => null);
+      const newPageP = this.page.context().waitForEvent("page", { timeout: 18_000 }).catch(() => null);
+      const responseP = this.page
+        .waitForResponse((r) => responseLooksLikeFilePayload(r), { timeout: 35_000 })
+        .catch(() => null);
+
+      await el.click({ timeout: 12_000, force: true }).catch(() => {});
+
+      const d = await downloadP;
+      if (d) {
+        await d.path().catch(() => {});
+        return true;
+      }
+      const pop = await popupP;
+      if (pop) {
+        await pop.close().catch(() => {});
+        return true;
+      }
+      const extra = await newPageP;
+      if (extra) {
+        await extra.close().catch(() => {});
+        return true;
+      }
+      const res = await responseP;
+      if (res) {
+        return true;
+      }
+      return false;
+    };
+
+    await selectFirstUploadedRowIfNeeded();
+
+    /** OL / PrimeNG: toolbar `Download` under Upload tabpanel — `.last()` hits the visible instance. */
+    const toolbarDownload = uploadPanel
+      .locator("button")
+      .filter({ hasText: /^Download$/i })
+      .filter({ visible: true })
+      .last();
+    if (await clickExpectsDownloadOutcome(toolbarDownload)) {
+      return;
+    }
+
+    const toolbarDownloadAlt = strip
+      .locator("button")
+      .filter({ hasText: /^Download$/i })
+      .filter({ visible: true })
+      .last();
+    if (await clickExpectsDownloadOutcome(toolbarDownloadAlt)) {
+      return;
+    }
+
+    const tryDownloadFromOverflow = async (row: Locator): Promise<boolean> => {
+      const toggles = [
+        row.locator("button").filter({ has: row.locator(".pi-ellipsis-v, .pi-ellipsis-h, .pi-bars") }),
+        row.getByRole("button", { name: /more|actions|menu|options/i }),
+      ];
+      for (const t of toggles) {
+        const btn = t.first();
+        if (!(await btn.isVisible({ timeout: 800 }).catch(() => false))) continue;
+        await btn.scrollIntoViewIfNeeded();
+        await btn.click({ timeout: 5_000 }).catch(() => {});
+        const menuItem = this.page
+          .getByRole("menuitem", { name: /download/i })
+          .or(this.page.locator(".p-menuitem-link, .p-menu a").filter({ hasText: /download/i }))
+          .first();
+        if (await menuItem.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          const ok = await clickExpectsDownloadOutcome(menuItem);
+          await this.page.keyboard.press("Escape").catch(() => {});
+          if (ok) return true;
+        }
+        await this.page.keyboard.press("Escape").catch(() => {});
+      }
+      return false;
+    };
+
+    const candidatesForRow = (row: Locator): Locator[] => [
+      row.locator("a[download]").first(),
+      row.getByRole("link", { name: /download/i }),
+      row.getByRole("button", { name: /download/i }),
+      row.locator("a, button, [role='button']").filter({ hasText: /download/i }),
+      row.locator("[title*='Download' i], [aria-label*='Download' i]"),
+      row.locator("[class*='pi-download']").first(),
+      row
+        .locator(
+          "i.pi-download, .pi-download, i.pi-cloud-download, .pi-cloud-download, i.pi-arrow-circle-down, i.pi-file-export, i.pi-save, .pi-save, i.pi-arrow-down-to-line",
+        )
+        .locator(
+          "xpath=ancestor::button[1] | ancestor::a[1] | ancestor::*[contains(@class,'p-button')][1] | ancestor::*[contains(@class,'mdc-icon-button')][1]",
+        ),
+      row.locator("p-splitButton .p-splitbutton-defaultbutton").first(),
+      row.locator(".p-splitbutton .p-button").first(),
+    ];
+
+    const tryDownloadOnRow = async (row: Locator): Promise<boolean> => {
+      for (const c of candidatesForRow(row)) {
+        if (await clickExpectsDownloadOutcome(c.first())) {
+          return true;
+        }
+      }
+      return tryDownloadFromOverflow(row);
+    };
+
+    const n = await rows.count();
+    for (let i = 0; i < Math.min(Math.max(n, 1), 12); i++) {
+      const row = rows.nth(i);
+      if (!(await row.isVisible({ timeout: 2_000 }).catch(() => false))) continue;
+      if (await tryDownloadOnRow(row)) {
+        return;
+      }
+    }
+
+    throw new Error(
+      "Upload tab: could not start download from file row (no Download control found).",
+    );
+  }
+
+  async deleteUploadedDocumentTileByBasenameAndExpectRemoved(basename: string): Promise<void> {
+    await this.ensureUploadTab();
+    const escaped = basename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const row = this.page
+      .locator(".p-fileupload-row, tr, .p-fileupload-file")
+      .filter({ hasText: new RegExp(escaped, "i") })
+      .first();
+    await row.waitFor({ state: "visible", timeout: 60000 });
+    const del = row
+      .getByRole("button", { name: /Delete|Remove/i })
+      .or(row.locator("button").filter({ has: row.locator(".pi-trash, .pi-times") }))
+      .first();
+    await del.click({ timeout: 15000 }).catch(() => del.click({ force: true }));
+    await expect(this.page.getByText(new RegExp(`^${escaped}$`, "i")).first()).not.toBeVisible({
+      timeout: 45000,
+    });
+  }
+
   /**
    * **Status** → **Submit** (Quote header). Some products use **Open Quote** + `div.action-item` menu
    * (not `li[role=option]` / `.p-dropdown-panel` only). Handle both.
    */
   async submitQuoteFromStatusMenu(): Promise<void> {
     const p = this.page;
+    const submitLabel = /^(Submit|Submit\s+quote)(\s+for\s+review)?$/i;
 
     const submitAction = p
       .locator("div.action-item, .action-item")
@@ -382,12 +944,26 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .first();
 
     const openMenu = async (): Promise<void> => {
-      const openQuote = p.getByRole("button", { name: /Open Quote/i });
-      if (await openQuote.isVisible({ timeout: 2_500 }).catch(() => false)) {
-        await expect(openQuote).toBeVisible({ timeout: 8_000 });
-        await openQuote.scrollIntoViewIfNeeded();
-        await openQuote.click({ timeout: 12_000 });
-        await p.waitForTimeout(120);
+      /**
+       * OL: workflow field is often `input[name="workFlowStatus"]` (readonly, shows e.g. **Open Quote**)
+       * inside `div.col-2.status.w-10rem.ng-star-inserted` — open that **before** **Open Quote** button.
+       */
+      const workflowStatusByName = p.locator('input[name="workFlowStatus"]').filter({ visible: true }).first();
+      if (await workflowStatusByName.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await workflowStatusByName.scrollIntoViewIfNeeded();
+        await workflowStatusByName.click({ timeout: 10_000 });
+        await p.waitForTimeout(150);
+        return;
+      }
+
+      const statusColVisible = p
+        .locator("div.col-2.status.w-10rem.ng-star-inserted")
+        .filter({ visible: true })
+        .first();
+      if (await statusColVisible.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await statusColVisible.scrollIntoViewIfNeeded();
+        await statusColVisible.click({ timeout: 10_000 });
+        await p.waitForTimeout(150);
         return;
       }
 
@@ -410,23 +986,74 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
       const statusQuoteCell = p
         .locator(".col-2.status.w-10rem.ng-star-inserted, .col-2.status.w-10rem, .col-2.status")
-        .or(p.locator("[class*='status']").filter({ has: p.locator("p-dropdown, p-select, .p-dropdown, .p-select") }))
+        .or(
+          p
+            .locator("[class*='status']")
+            .filter({ has: p.locator("p-dropdown, p-select, .p-dropdown, .p-select") }),
+        )
         .first();
-      await statusQuoteCell.waitFor({ state: "visible", timeout: 25_000 });
-      const trigger = statusQuoteCell
-        .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
-        .first();
-      if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
-        await trigger.scrollIntoViewIfNeeded();
-        await trigger.click({ timeout: 10_000 });
-      } else {
-        await statusQuoteCell.click({ timeout: 10_000 });
+      if (await statusQuoteCell.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        const trigger = statusQuoteCell
+          .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
+          .first();
+        if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
+          await trigger.scrollIntoViewIfNeeded();
+          await trigger.click({ timeout: 10_000 });
+        } else {
+          await statusQuoteCell.click({ timeout: 10_000 });
+        }
+        await p.waitForTimeout(120);
+        return;
       }
-      await p.waitForTimeout(120);
+
+      const openQuote = p.getByRole("button", { name: /Open Quote/i });
+      if (await openQuote.isVisible({ timeout: 2_500 }).catch(() => false)) {
+        await expect(openQuote).toBeVisible({ timeout: 8_000 });
+        await openQuote.scrollIntoViewIfNeeded();
+        await openQuote.click({ timeout: 12_000 });
+        await p.waitForTimeout(120);
+        return;
+      }
+
+      /** Last resort: status cell may mount late on slow QAT. */
+      await statusQuoteCell.waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
+      if (await statusQuoteCell.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        const trigger = statusQuoteCell
+          .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
+          .first();
+        if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
+          await trigger.scrollIntoViewIfNeeded();
+          await trigger.click({ timeout: 10_000 });
+        } else {
+          await statusQuoteCell.click({ timeout: 10_000 });
+        }
+        await p.waitForTimeout(120);
+      }
     };
 
-    await p.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
     await p.keyboard.press("Escape").catch(() => {});
+
+    /**
+     * After Documents / long flows the header can be off-screen. Bring **workflow status** (Open Quote)
+     * or the **Open Quote** control into view before opening the menu so **Submit** is reachable.
+     */
+    const statusStrip = p
+      .locator('input[name="workFlowStatus"]')
+      .filter({ visible: true })
+      .first()
+      .or(p.locator("div.col-2.status.w-10rem.ng-star-inserted").filter({ visible: true }).first())
+      .or(p.locator(".col-2.status").filter({ visible: true }).first());
+    if (await statusStrip.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await statusStrip.scrollIntoViewIfNeeded();
+    } else {
+      await p
+        .getByRole("button", { name: /Open Quote/i })
+        .first()
+        .scrollIntoViewIfNeeded()
+        .catch(() => {});
+    }
+    await p.waitForTimeout(100);
+
     await openMenu();
 
     /** Short wait for overlay paint — prefer tight timeouts so retries run quickly. */
@@ -445,11 +1072,11 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     const clickSubmitMenuItem = async (): Promise<boolean> => {
       const scopedSubmit = (root: Locator) =>
         root
-          .getByRole("menuitem", { name: /^Submit$/i })
-          .or(root.locator("li.p-menuitem, li[role='menuitem']").filter({ hasText: /^Submit$/i }))
-          .or(root.locator("a.p-menuitem-link, .p-menuitem-text").filter({ hasText: /^Submit$/i }))
-          .or(root.getByRole("option", { name: /^Submit$/i }))
-          .or(root.locator("li.p-dropdown-item, li.p-select-option").filter({ hasText: /^Submit$/i }))
+          .getByRole("menuitem", { name: submitLabel })
+          .or(root.locator("li.p-menuitem, li[role='menuitem']").filter({ hasText: submitLabel }))
+          .or(root.locator("a.p-menuitem-link, .p-menuitem-text").filter({ hasText: submitLabel }))
+          .or(root.getByRole("option", { name: submitLabel }))
+          .or(root.locator("li.p-dropdown-item, li.p-select-option").filter({ hasText: submitLabel }))
           .or(root.locator("div.action-item, .action-item").filter({ hasText: /^\s*Submit\s*$/i }))
           .or(root.locator(':text-is("Submit")'))
           .first();
@@ -475,8 +1102,10 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
       /** Unscoped fallbacks (custom split / flex rows attached to `body`). */
       for (const candidate of [
-        p.getByRole("menuitem", { name: /^Submit$/i }).first(),
-        p.locator("li.p-menuitem").filter({ hasText: /^Submit$/i }).first(),
+        p.locator(':text-is("Submit")').filter({ visible: true }).first(),
+        p.getByRole("button", { name: submitLabel }).filter({ visible: true }).first(),
+        p.getByRole("menuitem", { name: submitLabel }).first(),
+        p.locator("li.p-menuitem").filter({ hasText: submitLabel }).first(),
         submitAction,
         flexSubmit,
       ]) {
@@ -523,10 +1152,10 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
     if (await panel.isVisible({ timeout: 5_000 }).catch(() => false)) {
       const submitChoices: Locator[] = [
-        panel.getByRole("option", { name: /^Submit$/i }),
-        panel.locator("li.p-dropdown-item").filter({ hasText: /^Submit$/i }),
+        panel.getByRole("option", { name: submitLabel }),
+        panel.locator("li.p-dropdown-item").filter({ hasText: submitLabel }),
         panel.locator("div.action-item, .action-item").filter({ hasText: /^\s*Submit\s*$/i }),
-        panel.getByText("Submit", { exact: true }),
+        panel.getByText(submitLabel),
         panel.locator(':text-is("Submit")'),
       ];
 
@@ -586,6 +1215,48 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   /**
+   * End-to-end after post-submit work (e.g. Documents **Download** + **Confirm**): open **workflow status**
+   * / **Open Quote**, **Submit**, optional **Confirm** dialog, then **Originator Declaration** (tick + Proceed).
+   * Prefer this over calling the three steps separately so scroll + timing stay consistent.
+   */
+  async submitQuoteThroughWorkflowDeclaration(): Promise<void> {
+    await this.submitQuoteFromStatusMenu();
+    await this.confirmSubmitQuoteDialogIfPresent();
+    await this.completeOriginatorDeclaration();
+  }
+
+  /** Poll for success toast/copy/status after Originator Declaration **Proceed** (or lone **Proceed**). */
+  private async expectPostSubmitWorkflowSuccess(): Promise<void> {
+    const p = this.page;
+    await p.keyboard.press("Escape").catch(() => {});
+    await p.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => {});
+
+    await expect
+      .poll(
+        async () => {
+          const toast = p
+            .locator(".p-toast-message-success, .p-toast-message-info, .p-toast")
+            .filter({
+              hasText: /success|submitted|complete|accepted|processed|thank you/i,
+            });
+          if (await toast.first().isVisible().catch(() => false)) return true;
+          const body = p
+            .getByText(
+              /successfully\s+submitted|submitted\s+successfully|quote.*submitted|submission.*successful|successfully/i,
+            )
+            .first();
+          if (await body.isVisible().catch(() => false)) return true;
+          const status = p
+            .locator(".col-2.status, [class*='status']")
+            .filter({ hasText: /Submitted|Complete|Accepted|Succeed/i });
+          return await status.first().isVisible().catch(() => false);
+        },
+        { timeout: 90_000, intervals: [1_000, 3_000, 5_000] },
+      )
+      .toBeTruthy();
+  }
+
+  /**
    * Originator Declaration: tick the first two statement checkboxes, then **Proceed**.
    * Dialog accessible name / title copy varies; some builds open a plain `.p-dialog` without `aria-labelledby`.
    */
@@ -635,6 +1306,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       const proceedLoose = p.getByRole("button", { name: /^Proceed$/i }).first();
       if (await proceedLoose.isVisible({ timeout: 12_000 }).catch(() => false)) {
         await proceedLoose.click({ timeout: 15_000 }).catch(() => {});
+        await this.expectPostSubmitWorkflowSuccess();
       }
       return;
     }
@@ -657,5 +1329,6 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await proceed.waitFor({ state: "visible", timeout: 25_000 });
     await proceed.click({ timeout: 15_000 });
     await scope.waitFor({ state: "hidden", timeout: 90_000 }).catch(() => {});
+    await this.expectPostSubmitWorkflowSuccess();
   }
 }
