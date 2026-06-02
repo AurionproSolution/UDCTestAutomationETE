@@ -194,6 +194,16 @@ export class DODashboardPage extends BasePage {
     await option.click({ force: false });
   }
 
+  /** Select Assured Future Value from the Create Standard Quote product dialog. */
+  async selectAssuredFutureValueProduct(): Promise<void> {
+    this.logStep("Select Assured Future Value product");
+    const dialog = this.page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    const option = dialog.getByText(/Assured\s*Future\s*Value/i).first();
+    await option.waitFor({ state: "attached" });
+    await option.click({ force: false });
+  }
+
   /**
    * Verify dashboard is loaded
    */
