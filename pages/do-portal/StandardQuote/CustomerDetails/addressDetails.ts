@@ -2635,6 +2635,14 @@ export class DOAddressDetailsPage extends BasePage {
       await expect(el).toBeVisible({ timeout: 20_000 });
     };
 
+    /** Some shells append a full stop to street-line validation (e.g. `Street Number is required.`). */
+    const assertMsgVisibleAllowTrailingPeriod = async (messageWithoutPeriod: string): Promise<void> => {
+      const escaped = messageWithoutPeriod.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const el = root.getByText(new RegExp(`^${escaped}\\.?$`)).first();
+      await el.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+      await expect(el).toBeVisible({ timeout: 20_000 });
+    };
+
     const { expectResidenceType } = options;
     if (expectResidenceType) {
       await assertMsgVisible("Residence Type is required");
@@ -2661,8 +2669,8 @@ export class DOAddressDetailsPage extends BasePage {
     } catch {
       await assertMsgVisible("Time at Address is required");
     }
-    await assertMsgVisible("Street Number is required");
-    await assertMsgVisible("Street Name is required");
+    await assertMsgVisibleAllowTrailingPeriod("Street Number is required");
+    await assertMsgVisibleAllowTrailingPeriod("Street Name is required");
     await assertMsgVisible("City is required");
   }
 
@@ -2786,8 +2794,12 @@ export class DOAddressDetailsPage extends BasePage {
     await this.scrollPhysicalAddressSectionIntoViewForValidation();
     const host = await this.activePhysicalHost();
     const root = this.physicalAddressBlock.or(host);
+    /** Match previous-physical behaviour: some shells (e.g. business physical) omit Residence Type / its copy. */
+    const hasResidence = await this.residenceTypeTrigger(host)
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
     await this.assertPhysicalAddressCardRequiredErrors(root, {
-      expectResidenceType: true,
+      expectResidenceType: hasResidence,
     });
   }
 

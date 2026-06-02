@@ -110,29 +110,28 @@ export class DOAssetDetailsPage extends BasePage {
     // Match visible Standard Quote shell (same as tests: `app-quote-details, app-standard-quote`).first()
     const quoteShell = page.locator("app-quote-details, app-standard-quote").first();
     /**
-     * **Lease Date** / loan calendar: must be scoped to **Payment Summary** + `visible:true`.
-     * Do **not** chain `.or()` to unscoped `loanDate` / `Loan Date` — a hidden disabled template in
-     * `app-quote-details` matches first and breaks `toBeVisible()`.
+     * **Lease Date** (Finance Lease) or **Loan Date** (e.g. AFV / CSA Payment Summary): scoped to `app-payment-summary` + `visible:true`.
+     * Do **not** chain `.or()` to unscoped comboboxes — hidden templates in `app-quote-details` match first and break `toBeVisible()`.
      */
     const paymentSummaryPanel = page
       .locator("app-payment-summary")
       .filter({ hasText: "Payment Summary" })
       .first();
-    const leaseDateInPaymentSummary = paymentSummaryPanel
-      .getByRole("combobox", { name: /Lease Date/i })
+    const leaseOrLoanDateInPaymentSummary = paymentSummaryPanel
+      .getByRole("combobox", { name: /Lease Date|Loan Date/i })
       .filter({ visible: true })
       .first()
       .or(
         paymentSummaryPanel
-          .locator('input[name="leaseDate"]')
+          .locator('input[name="leaseDate"], input[name="loanDate"]')
           .filter({ visible: true })
           .first(),
       );
-    const leaseDateFallback = quoteShell
-      .getByRole("combobox", { name: /Lease Date/i })
+    const leaseOrLoanDateFallback = quoteShell
+      .getByRole("combobox", { name: /Lease Date|Loan Date/i })
       .filter({ visible: true })
       .first();
-    this.loanDate = leaseDateInPaymentSummary.or(leaseDateFallback).first();
+    this.loanDate = leaseOrLoanDateInPaymentSummary.or(leaseOrLoanDateFallback).first();
     // `p-calendar` often exposes the visible field as `role=combobox` (not `textbox`) in a11y snapshots.
     this.firstPaymentDate = paymentSummaryPanel
       .getByRole("combobox", { name: /First Payment/i })
@@ -1397,6 +1396,133 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.getByRole("option", { name: condition }).click();
   }
 
+  /**
+   * **Condition** on Standard Quote / Asset Details.
+   * - If the Prime **Option List** is already open, click the option.
+   * - Else dismiss overlays, anchor on **Condition *** caption, then open the nearest **following** `p-dropdown`
+   *   (`following-sibling` breaks when the label sits inside a wrapper that is not the dropdown’s direct sibling).
+   * - Root: quote shell that actually contains **Asset Type** (avoid `\\b` / strict filters that can drop the host).
+   */
+  async selectConditionInStandardQuote(condition: string): Promise<void> {
+    this.logStep(`Selected condition (standard quote): ${this.stepValueDisplay(condition)}`);
+
+    const root = this.page
+      .locator("app-quote-details, app-standard-quote")
+      .filter({ hasText: /Asset Type/i })
+      .last();
+    await root.waitFor({ state: "visible", timeout: 45_000 });
+
+    const optionWhenOpen = this.page
+      .getByRole("listbox", { name: /Option List/i })
+      .getByRole("option", { name: condition, exact: true })
+      .first();
+    if (await optionWhenOpen.isVisible({ timeout: 2_500 }).catch(() => false)) {
+      await optionWhenOpen.click({ timeout: 15_000 });
+      await this.page.keyboard.press("Escape").catch(() => {});
+      return;
+    }
+
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.page.waitForTimeout(200);
+
+    const caption = root
+      .getByText("Condition *", { exact: true })
+      .or(root.getByText(/^Condition\s*\*?\s*$/i))
+      .first();
+    await caption.waitFor({ state: "visible", timeout: 20_000 });
+    await caption.scrollIntoViewIfNeeded();
+
+    const dropdownAfterCaption = caption
+      .locator("xpath=following::div[contains(@class,'p-dropdown')][1]")
+      .first();
+    const trigger = dropdownAfterCaption
+      .locator(".p-dropdown-trigger")
+      .or(dropdownAfterCaption.getByRole("button", { name: /dropdown trigger/i }))
+      .first();
+
+    await expect(trigger).toBeAttached({ timeout: 20_000 });
+    try {
+      await trigger.click({ timeout: 12_000 });
+    } catch {
+      await trigger.click({ force: true, timeout: 12_000 });
+    }
+
+    await this.page.getByRole("option", { name: condition, exact: true }).first().click({ timeout: 15_000 });
+    await this.page.keyboard.press("Escape").catch(() => {});
+  }
+
+  /**
+   * **Asset Type** pop-out → **Asset Type** dialog: Make / Model / Variant / Year (PrimeNG), then **Select**.
+   * Uses SelectorHub ids `#pn_id_428_0` (Model) and `#pn_id_434_0` (Year) when visible; otherwise falls back to dropdown order in the dialog.
+   */
+  async selectVehicleFromAssetTypeModal(params: {
+    make: string;
+    model: string;
+    variant: string;
+    year: string;
+  }): Promise<void> {
+    this.logStep(
+      `Asset Type modal: ${params.make}, ${params.model}, ${params.variant}, ${params.year}`,
+    );
+    const root = this.standardQuoteRoot();
+    await root.waitFor({ state: "visible", timeout: 90_000 });
+
+    const openBtn = root
+      .locator(
+        "xpath=.//*[contains(normalize-space(.),'Asset Type')]/ancestor::*[contains(@class,'row') or contains(@class,'grid') or contains(@class,'p-fluid')][1]//div[contains(@class,'col-4') and contains(@class,'ng-star-inserted')]//button[@type='button']",
+      )
+      .or(root.locator("div.col-4.ng-star-inserted").getByRole("button").first())
+      .first();
+    await openBtn.scrollIntoViewIfNeeded();
+    await openBtn.click({ timeout: 20_000 });
+
+    const dlg = this.page.getByRole("dialog").last();
+    await expect(dlg.getByText(/Make/i).first()).toBeVisible({ timeout: 20_000 });
+
+    const pickFromOpenPanel = async (name: string, exact: boolean) => {
+      const opt = this.page.getByRole("option", { name, exact }).first();
+      await opt.waitFor({ state: "visible", timeout: 20_000 });
+      await opt.click();
+      await this.page.keyboard.press("Escape").catch(() => {});
+      await this.page.waitForTimeout(250);
+    };
+
+    await dlg.locator(".p-dropdown").first().locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    await pickFromOpenPanel(params.make, true);
+
+    const modelHost = this.page.locator("#pn_id_428_0");
+    if (await modelHost.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await modelHost.click();
+    } else {
+      await dlg.locator(".p-dropdown").nth(1).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    }
+    await pickFromOpenPanel(params.model, true);
+
+    await dlg.locator(".p-dropdown").nth(2).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    await pickFromOpenPanel(params.variant, true);
+
+    const yearHost = this.page.locator("#pn_id_434_0");
+    if (await yearHost.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await yearHost.click();
+    } else {
+      await dlg.locator(".p-dropdown").nth(3).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    }
+    await pickFromOpenPanel(params.year, true);
+
+    const selectByRole = dlg.getByRole("button", { name: /^Select$/i }).first();
+    if (await selectByRole.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await selectByRole.click({ timeout: 15_000 });
+    } else {
+      await dlg
+        .locator("p-button.p-element.pointer.text-semi-bold")
+        .filter({ has: dlg.locator("span.p-button-label").filter({ hasText: /^Select$/ }) })
+        .first()
+        .click({ timeout: 15_000 });
+    }
+
+    await expect(dlg).toBeHidden({ timeout: 45_000 });
+  }
+
   async scrollRecommendedRetailPriceIntoView(): Promise<void> {
     this.logStep("Scroll Recommended Retail Price Into View");
     await this.scrollIfNeeded(this.recommendedRetailPriceInput);
@@ -1838,7 +1964,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
   async cashPriceOfAsset(cashprice: string): Promise<void> {
     this.logStep(`Entered cash price of asset as ${this.stepValueDisplay(cashprice)}`);
-    await this.cashPriceOfAssetInputField.fill(cashprice);
+    await this.fillLoanDetailsCurrencyAmount(this.cashPriceOfAssetInputField, cashprice);
   }
   async ppsrCount(count: string): Promise<void> {
     this.logStep(`Entered PPSR count as ${this.stepValueDisplay(count)}`);
