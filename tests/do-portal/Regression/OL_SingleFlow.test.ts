@@ -101,7 +101,7 @@ test(
     await assetDetailsPage.enterOriginationReferenceFinanceLease("Test Orig Ref 123", true);
     await assetDetailsPage.clickCalculateButton();
 
-    await assetDetailsPage.enterOriginationReferenceFinanceLeaseStable("Test Orig Ref 123");
+    await assetDetailsPage.enterOriginationReferenceFinanceLease("Test Orig Ref 123", true);
     await assetDetailsPage.clickNextButtonFinanceLease("Test Orig Ref 123");
     await assetDetailsPage.waitForAddBorrowerButton();
     await assetDetailsPage.clickAddBorrowerorGuarantorButton();
@@ -237,11 +237,13 @@ test(
 
     await customerQuotePostSubmitPage.waitForUploadStep();
 
+    // Same post-submit checks as `CSA_QuickQuote_SingleFlow.test.ts` (notes → upload tab → Documents → submit).
     await customerQuotePostSubmitPage.expectExistingNoteCardsShowAuthorAndTimestamp();
     await customerQuotePostSubmitPage.expectOversizedNoteRejectedOnSubmit();
     await customerQuotePostSubmitPage.submitNoteOfExactLengthFromDialog(1000);
     await customerQuotePostSubmitPage.expectNoteListShowsMoreForLongSavedNote();
 
+    // Upload tab: .jpg + .pdf succeed; >20 MB rejected; Preview (new tab); Download; Delete removes tile.
     await customerQuotePostSubmitPage.uploadJpgThenPdfExpectBothVisible();
     await customerQuotePostSubmitPage.expectOversizeBinaryUploadRejected();
     await customerQuotePostSubmitPage.expectUploadTabPreviewOpensNewTab();
@@ -261,8 +263,6 @@ test(
     await customerQuotePostSubmitPage.addNoteAndSubmit(
       "Automated sanity note — Operating Lease Standard Quote.",
     );
-    await customerQuotePostSubmitPage.submitQuoteFromStatusMenu();
-    await customerQuotePostSubmitPage.confirmSubmitQuoteDialogIfPresent();
-    await customerQuotePostSubmitPage.completeOriginatorDeclaration();
+    await customerQuotePostSubmitPage.submitQuoteThroughWorkflowDeclaration();
   },
 );

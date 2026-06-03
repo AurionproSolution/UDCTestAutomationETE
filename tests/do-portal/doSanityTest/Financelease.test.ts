@@ -196,8 +196,7 @@ test.describe("DO Portal - Finance Lease - Sanity @do @smoke", () => {
     await customerQuotePostSubmitPage.addNoteAndSubmit(
       "Automated sanity note — CSAC Assigned quote.",
     );
-    await customerQuotePostSubmitPage.submitQuoteFromStatusMenu();
-    await customerQuotePostSubmitPage.completeOriginatorDeclaration();
+    await customerQuotePostSubmitPage.submitQuoteThroughWorkflowDeclaration();
      });
 });
 
