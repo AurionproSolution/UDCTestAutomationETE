@@ -58,13 +58,14 @@ export class DOAssetDetailsPage extends BasePage {
     this.conditionDropdown = page.locator(
       `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[6]`,
     );
-    /** Label varies: legacy `Asset & Insurance Summary`; current `Asset, Insurance & Trade-in Summary` (often with trailing `>`). */
-    this.assetInsuranceTradeInSummaryHyperlink = page
-      .locator("button")
-      .filter({
-        hasText:
-          /Asset\s*(?:,\s*Insurance\s*&\s*Trade[-‑]?\s*in\s*|\s*&\s*Insurance\s*)Summary\s*>?/i,
-      })
+    /** OL / FL / CSA-B: label varies (`Asset & Insurance Summary`, `Asset, Insurance & Trade-in`, etc.). */
+    const quoteHost = page.locator("app-quote-details, app-standard-quote").first();
+    const assetInsuranceSummaryName =
+      /Asset\s*(?:,\s*|\s*&\s*)Insurance(?:\s*&\s*Trade-?\s*in|\s*Summary)?/i;
+    this.assetInsuranceTradeInSummaryHyperlink = quoteHost
+      .getByRole("button", { name: assetInsuranceSummaryName })
+      .or(quoteHost.getByRole("link", { name: assetInsuranceSummaryName }))
+      .or(quoteHost.locator("button, a, [role='button']").filter({ hasText: assetInsuranceSummaryName }))
       .first();
     this.assetyEditButton = page.locator(".cursor-pointer.fa-pen-to-square");
     this.assetSummaryCancelButton = page.locator(
@@ -301,9 +302,16 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** After navigation to Asset Details: network settle + cash price field visible. */
   async waitForAssetDetailsStepReady(): Promise<void> {
-    this.logStep("Wait For Asset Details Step Ready");
-    await this.page.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => {});
-    await expect(this.cashPriceOfAssetInputField).toBeVisible({ timeout: 90_000 });
+    await this.standardQuoteRoot().waitFor({
+      state: "visible",
+      timeout: 60_000,
+    });
+  
+    await expect(
+      this.cashPriceOfAssetInputField
+    ).toBeVisible({
+      timeout: 60_000,
+    });
   }
 
   /**
@@ -312,10 +320,12 @@ export class DOAssetDetailsPage extends BasePage {
   async expectProductProgramCarriedFromQuickQuote(
     productName: string,
     programName: string,
+    opts?: { requireLockedDropdowns?: boolean },
   ): Promise<void> {
     this.logStep(
       `Expect product/program from Quick Quote visible: ${this.stepValueDisplay(productName)} / ${this.stepValueDisplay(programName)}`,
     );
+    const requireLocked = opts?.requireLockedDropdowns !== false;
     const root = this.standardQuoteRoot();
     await expect(root.getByText(productName).first()).toBeVisible({ timeout: 30_000 });
     await expect(root.getByText(programName).first()).toBeVisible({ timeout: 30_000 });
@@ -327,17 +337,19 @@ export class DOAssetDetailsPage extends BasePage {
       .locator("p-dropdown")
       .filter({ has: root.locator("label").filter({ hasText: /^Program/i }) })
       .first();
-    if (await productDd.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      const locked =
-        (await productDd.getAttribute("class"))?.includes("p-disabled") ||
-        (await productDd.getAttribute("ng-reflect-disabled")) === "true";
-      expect(locked).toBeTruthy();
-    }
-    if (await programDd.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      const locked =
-        (await programDd.getAttribute("class"))?.includes("p-disabled") ||
-        (await programDd.getAttribute("ng-reflect-disabled")) === "true";
-      expect(locked).toBeTruthy();
+    if (requireLocked) {
+      if (await productDd.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        const locked =
+          (await productDd.getAttribute("class"))?.includes("p-disabled") ||
+          (await productDd.getAttribute("ng-reflect-disabled")) === "true";
+        expect(locked).toBeTruthy();
+      }
+      if (await programDd.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        const locked =
+          (await programDd.getAttribute("class"))?.includes("p-disabled") ||
+          (await programDd.getAttribute("ng-reflect-disabled")) === "true";
+        expect(locked).toBeTruthy();
+      }
     }
   }
 
@@ -1116,6 +1128,19 @@ export class DOAssetDetailsPage extends BasePage {
       return (await t.inputValue().catch(() => "")).trim().length > 0;
     };
 
+    const originatorRoot = this.page.locator("app-quote-originator").first();
+    if (await originatorRoot.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      const originInput = originatorRoot.locator(
+        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/following::input[1]",
+      );
+      if (await tryFill(originInput.first())) {
+        if (!skipOverlayDismiss) {
+          await this.page.keyboard.press("Escape").catch(() => {});
+        }
+        return;
+      }
+    }
+
     // 1) ARIA: label (Prime float-label / p-field)
     if (
       await tryFill(
@@ -1321,68 +1346,6 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Fill Origination Reference after **Calculate**: no Esc; best-effort fill + native value patch
-   * so Angular binds. Does **not** throw on read-back mismatch (DOM read is often flaky; **Next**
-   * uses the real form state — use {@link clickNextButtonFinanceLease} with `origRef` to retry fill
-   * while waiting for Next to enable).
-   */
-  async enterOriginationReferenceFinanceLeaseStable(
-    origRef: string,
-  ): Promise<void> {
-    this.logStep(`Entered origination reference (finance lease, stable) as ${this.stepValueDisplay(origRef)}`);
-    await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(
-      () => {},
-    );
-    await this.page.waitForTimeout(1_000);
-
-    const root = this.page
-      .locator("app-quote-details, app-standard-quote")
-      .last();
-    await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
-
-    const wanted = this.normOriginationText(origRef);
-    const matches = (read: string): boolean => {
-      const v = this.normOriginationText(read);
-      if (!v || !wanted) return false;
-      if (v === wanted) return true;
-      if (v.includes(wanted) || wanted.includes(v)) return true;
-      const prefix = wanted.slice(0, Math.min(12, wanted.length));
-      return prefix.length >= 4 && v.includes(prefix);
-    };
-
-    for (let attempt = 0; attempt < 6; attempt++) {
-      try {
-        await this.enterOriginationReferenceFinanceLease(origRef, true);
-      } catch {
-        // Continue: field may still be patchable via native value.
-      }
-      await this.page.waitForTimeout(350);
-
-      const inp = await this.findVisibleFinanceLeaseOriginationInput(root);
-      if (inp) {
-        await inp.click({ force: true }).catch(() => {});
-        try {
-          await inp.fill(origRef, { timeout: 10_000 });
-        } catch {
-          await inp.press("ControlOrMeta+a");
-          await this.page.keyboard.type(origRef, { delay: 12 });
-        }
-        await this.patchOriginationInputNativeValue(inp, origRef);
-        await inp.press("Tab").catch(() => {});
-        await this.page.waitForTimeout(400);
-
-        const v = await this.readOriginationLocatorValue(inp);
-        if (matches(v)) return;
-      }
-
-      await this.page.waitForLoadState("networkidle", { timeout: 12_000 }).catch(
-        () => {},
-      );
-      await this.page.waitForTimeout(450);
-    }
-  }
-
-  /**
    * Enter text into the Asset input field
    */
   async enterAsset(asset: string): Promise<void> {
@@ -1394,12 +1357,27 @@ export class DOAssetDetailsPage extends BasePage {
   /**
    * Select a condition from the Condition dropdown
    */
-  async selectCondition(condition: string): Promise<void> {
-    this.logStep(`Selected condition: ${this.stepValueDisplay(condition)}`);
+  async selectCondition(condition: string) {
+    const current = await this.page
+      .getByRole("combobox")
+      .first()
+      .inputValue()
+      .catch(() => "");
+  
+    if (current.includes(condition)) {
+      return;
+    }
+  
     await this.conditionDropdown.click();
-    await this.page.getByRole("option", { name: condition }).click();
+  
+    await expect(
+      this.page.getByRole("option", { name: condition })
+    ).toBeVisible({ timeout: 10000 });
+  
+    await this.page
+      .getByRole("option", { name: condition })
+      .click();
   }
-
   /**
    * **Condition** on Standard Quote / Asset Details.
    * - If the Prime **Option List** is already open, click the option.
@@ -1540,12 +1518,39 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Click on Asset, Insurance & Trade-in Summary hyperlink to open the summary dialog
+   * Opens **Asset / Insurance / Trade-in** summary (label varies: `Asset & Insurance Summary`,
+   * `Asset, Insurance & Trade-in`, etc.; control may be `button` or `link`).
    */
   async openAssetInsuranceTradeInSummary(): Promise<void> {
     this.logStep("Open Asset Insurance Trade In Summary");
-    await this.scrollIfNeeded(this.assetInsuranceTradeInSummaryHyperlink);
-    await this.assetInsuranceTradeInSummaryHyperlink.click();
+    const quote = this.page.locator("app-quote-details, app-standard-quote").first();
+    await quote.waitFor({ state: "visible", timeout: 60_000 });
+    await quote.scrollIntoViewIfNeeded().catch(() => {});
+
+    const assetInsuranceSummaryName =
+      /Asset\s*(?:,\s*|\s*&\s*)Insurance(?:\s*&\s*Trade-?\s*in|\s*Summary)?/i;
+    const primary = this.assetInsuranceTradeInSummaryHyperlink;
+    try {
+      await primary.waitFor({ state: "visible", timeout: 45_000 });
+    } catch {
+      const fallback = quote
+        .getByRole("button", { name: assetInsuranceSummaryName })
+        .or(quote.getByRole("link", { name: assetInsuranceSummaryName }))
+        .or(quote.locator("button, a, [role='button']").filter({ hasText: assetInsuranceSummaryName }))
+        .first();
+      await fallback.waitFor({ state: "visible", timeout: 30_000 });
+      await fallback.scrollIntoViewIfNeeded();
+      await fallback.click({ timeout: 15_000 });
+      await this.page
+        .getByRole("dialog")
+        .last()
+        .waitFor({ state: "visible", timeout: 45_000 });
+      await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+      return;
+    }
+
+    await this.scrollIfNeeded(primary);
+    await primary.click();
     await this.page
       .getByRole("dialog")
       .last()

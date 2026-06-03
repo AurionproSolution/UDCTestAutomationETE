@@ -1146,9 +1146,17 @@ export class DOQuickQuotePage extends BasePage {
     await expect.soft(this.mailButton).toBeEnabled();
   }
 
-  async expectCreateQuoteVisible(): Promise<void> {
+  /**
+   * After **Calculate**, **Create Quote** should appear on the active panel.
+   * @param quoteIndex Panel index when multi-comparison Quick Quote is shown (defaults to primary panel).
+   */
+  async expectCreateQuoteVisible(quoteIndex?: number): Promise<void> {
     this.logStep("Expect Create Quote Visible");
-    await expect.soft(this.createQuoteButton).toBeVisible({ timeout: 30_000 });
+    const btn =
+      quoteIndex === undefined
+        ? this.createQuoteButton
+        : this.createQuoteButtonOnPanel(quoteIndex);
+    await expect.soft(btn).toBeVisible({ timeout: 30_000 });
   }
 
   async enterDepositDollars(amount: string): Promise<void> {

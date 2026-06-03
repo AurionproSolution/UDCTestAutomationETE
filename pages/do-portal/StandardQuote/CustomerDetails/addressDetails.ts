@@ -534,6 +534,20 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   /**
+   * Select **Residence Type** when the control exists. No-op when there is no residence trigger
+   * on the active physical host (some products / flows omit it).
+   */
+  async selectResidenceTypeIfPresent(residenceType: string): Promise<void> {
+    const root = await this.activePhysicalHost();
+    await root.waitFor({ state: "visible", timeout: 60_000 }).catch(() => {});
+    const trig = this.residenceTypeTrigger(root);
+    if (!(await trig.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      return;
+    }
+    await this.selectResidenceType(residenceType);
+  }
+
+  /**
    * Physical address search: optionContains is a substring or regex-safe fragment
    * (full label text often differs by environment).
    */
