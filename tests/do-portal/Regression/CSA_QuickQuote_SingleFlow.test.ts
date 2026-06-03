@@ -496,6 +496,7 @@ test(
 
     // Reuse for Postal Addresss → Yes (click once if toggle starts on No)
     await addressDetailsPage.clickReuseForPostalAddressToggle();
+    await addressDetailsPage.clickSaveAddressDetails();
 
     // Previous Physical Address — explicit empty required fields when section exists, then **Save** / assert.
     if (await addressDetailsPage.isPreviousPhysicalAddressVisible(5_000)) {

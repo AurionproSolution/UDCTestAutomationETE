@@ -58,9 +58,13 @@ export class DOAssetDetailsPage extends BasePage {
     this.conditionDropdown = page.locator(
       `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[6]`,
     );
+    /** Label varies: legacy `Asset & Insurance Summary`; current `Asset, Insurance & Trade-in Summary` (often with trailing `>`). */
     this.assetInsuranceTradeInSummaryHyperlink = page
       .locator("button")
-      .filter({ hasText: /Asset\s*&\s*Insurance\s*Summary/i })
+      .filter({
+        hasText:
+          /Asset\s*(?:,\s*Insurance\s*&\s*Trade[-‑]?\s*in\s*|\s*&\s*Insurance\s*)Summary\s*>?/i,
+      })
       .first();
     this.assetyEditButton = page.locator(".cursor-pointer.fa-pen-to-square");
     this.assetSummaryCancelButton = page.locator(
