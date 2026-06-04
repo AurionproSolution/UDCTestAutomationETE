@@ -198,33 +198,33 @@ test(
         const customerQuotePostSubmitPage = new DOCustomerQuotePostSubmitPage(page);
     
         await customerQuotePostSubmitPage.waitForUploadStep();
-    
-        await customerQuotePostSubmitPage.expectExistingNoteCardsShowAuthorAndTimestamp();
-        await customerQuotePostSubmitPage.expectOversizedNoteRejectedOnSubmit();
-        await customerQuotePostSubmitPage.submitNoteOfExactLengthFromDialog(1000);
-        await customerQuotePostSubmitPage.expectNoteListShowsMoreForLongSavedNote();
-    
-        await customerQuotePostSubmitPage.uploadJpgThenPdfExpectBothVisible();
-        await customerQuotePostSubmitPage.expectOversizeBinaryUploadRejected();
-        await customerQuotePostSubmitPage.expectUploadTabPreviewOpensNewTab();
-        await customerQuotePostSubmitPage.expectUploadTabDownloadStarts();
-        await customerQuotePostSubmitPage.deleteUploadedDocumentTileByBasenameAndExpectRemoved(
-          "minimal-upload.jpg",
-        );
-    
-        await customerQuotePostSubmitPage.openDocumentsTab();
-        await customerQuotePostSubmitPage.selectCustomerQuoteBasicRow();
-        await customerQuotePostSubmitPage.clickDownload();
-        await customerQuotePostSubmitPage.confirmDocumentParameters();
-    
-        await customerQuotePostSubmitPage.ensureUploadTab();
-        await page.keyboard.press("Escape").catch(() => {});
-    
-        await customerQuotePostSubmitPage.addNoteAndSubmit(
-          "Automated sanity note — Operating Lease Standard Quote.",
-        );
-        await customerQuotePostSubmitPage.submitQuoteFromStatusMenu();
-        await customerQuotePostSubmitPage.confirmSubmitQuoteDialogIfPresent();
-        await customerQuotePostSubmitPage.completeOriginatorDeclaration();
+
+    // Same post-submit checks as `CSA_QuickQuote_SingleFlow.test.ts` (notes → upload tab → Documents → submit).
+    await customerQuotePostSubmitPage.expectExistingNoteCardsShowAuthorAndTimestamp();
+    await customerQuotePostSubmitPage.expectOversizedNoteRejectedOnSubmit();
+    await customerQuotePostSubmitPage.submitNoteOfExactLengthFromDialog(1000);
+    await customerQuotePostSubmitPage.expectNoteListShowsMoreForLongSavedNote();
+
+    // Upload tab: .jpg + .pdf succeed; >20 MB rejected; Preview (new tab); Download; Delete removes tile.
+    await customerQuotePostSubmitPage.uploadJpgThenPdfExpectBothVisible();
+    await customerQuotePostSubmitPage.expectOversizeBinaryUploadRejected();
+    await customerQuotePostSubmitPage.expectUploadTabPreviewOpensNewTab();
+    await customerQuotePostSubmitPage.expectUploadTabDownloadStarts();
+    await customerQuotePostSubmitPage.deleteUploadedDocumentTileByBasenameAndExpectRemoved(
+      "minimal-upload.jpg",
+    );
+
+    await customerQuotePostSubmitPage.openDocumentsTab();
+    await customerQuotePostSubmitPage.selectCustomerQuoteBasicRow();
+    await customerQuotePostSubmitPage.clickDownload();
+    await customerQuotePostSubmitPage.confirmDocumentParameters();
+
+    await customerQuotePostSubmitPage.ensureUploadTab();
+    await page.keyboard.press("Escape").catch(() => {});
+
+    await customerQuotePostSubmitPage.addNoteAndSubmit(
+      "Automated sanity note — Operating Lease Standard Quote.",
+    );
+    await customerQuotePostSubmitPage.submitQuoteThroughWorkflowDeclaration();
   },
 );

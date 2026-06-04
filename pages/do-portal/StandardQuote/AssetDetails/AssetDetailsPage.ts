@@ -363,24 +363,51 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Expect finance carried from Quick Quote");
     const root = this.standardQuoteRoot();
     await expect(this.cashPriceOfAssetInputField).toHaveValue(opts.cashPrice, { timeout: 30_000 });
-    // Term: CSA uses PrimeNG dropdown (often not `label`→`following-sibling::p-dropdown`); TLC uses spinbutton.
-    // Scope to the Term field row — same variance as {@link termsOfFinance}.
+    // Term: CSA often uses "Terms of Finance" / PrimeNG dropdown; TLC may use spinbutton. Do not use
+    // /^Term\s*\*?$/ only — that misses "Terms of Finance" and forces a page-global fallback that can
+    // resolve to an empty spinbutton inside Asset/Insurance summary while the real Term is a combobox.
+    const termRowLabel = /^\s*Terms?\s*(of\s+Finance)?\s*\*?\s*$/i;
     const termRow = root
       .locator(".p-field, [class*='p-field']")
-      .filter({ has: root.locator("label").filter({ hasText: /^Term\s*\*?$/i }) })
+      .filter({ has: root.locator("label").filter({ hasText: termRowLabel }) })
       .first();
     const termCombo = termRow.getByRole("combobox").first();
     const termSpin = termRow.getByRole("spinbutton").first();
-    if (await termCombo.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    const termRowVisibleMs = 15_000;
+    if (await termCombo.isVisible({ timeout: termRowVisibleMs }).catch(() => false)) {
       await expect(termCombo).toContainText(opts.term, { timeout: 25_000 });
-    } else if (await termSpin.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    } else if (await termSpin.isVisible({ timeout: termRowVisibleMs }).catch(() => false)) {
       await expect
         .poll(async () => termSpin.inputValue(), { timeout: 25_000 })
         .toMatch(opts.term);
     } else {
-      await expect
-        .poll(async () => this.termsOfFinanceInputField.inputValue(), { timeout: 25_000 })
-        .toMatch(opts.term);
+      const termNumberSpin = root
+        .locator("number")
+        .filter({ hasText: /Term/i })
+        .getByRole("spinbutton")
+        .first();
+      const termNumberInput = root
+        .locator("number")
+        .filter({ hasText: /Term/i })
+        .locator("input[type='number'], input.p-inputtext, input")
+        .first();
+      const termAriaCombo = root.getByRole("combobox", { name: /Term|Terms\s+of\s+Finance/i }).first();
+
+      if (await termAriaCombo.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await expect(termAriaCombo).toContainText(opts.term, { timeout: 25_000 });
+      } else if (await termNumberSpin.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await expect
+          .poll(async () => termNumberSpin.inputValue(), { timeout: 25_000 })
+          .toMatch(opts.term);
+      } else if (await termNumberInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await expect
+          .poll(async () => termNumberInput.inputValue(), { timeout: 25_000 })
+          .toMatch(opts.term);
+      } else {
+        await expect
+          .poll(async () => this.termsOfFinanceInputField.inputValue(), { timeout: 25_000 })
+          .toMatch(opts.term);
+      }
     }
     const freqDropdown = root.locator(
       "xpath=.//label[contains(normalize-space(.),'Frequency')]/following::p-dropdown[1]",
