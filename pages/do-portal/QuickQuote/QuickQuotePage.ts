@@ -44,6 +44,8 @@ export class DOQuickQuotePage extends BasePage {
   readonly productDropdownTrigger: Locator;
   readonly programDropdownTrigger: Locator;
   readonly dealerDropdownTrigger: Locator;
+  /** PrimeNG `p-dropdown` host for **Calculate For** (label-scoped; stable vs SelectorHub `p-dropdown.p-element.p-inputwrapper…`). */
+  readonly calculateForDropdownHost: Locator;
   readonly calculateForDropdownTrigger: Locator;
   readonly frequencyDropdownTrigger: Locator;
   readonly kmAllowanceDropdownTrigger: Locator;
@@ -115,9 +117,12 @@ export class DOQuickQuotePage extends BasePage {
         "xpath=.//label[contains(normalize-space(.), 'Dealer') or contains(normalize-space(.), 'Originator')]/following::p-dropdown[1]",
       )
       .getByRole("button", { name: /dropdown trigger/i });
-    this.calculateForDropdownTrigger = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]"
-    ).getByRole("button", { name: /dropdown trigger/i });
+    this.calculateForDropdownHost = this.quickQuoteForm.locator(
+      "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]",
+    );
+    this.calculateForDropdownTrigger = this.calculateForDropdownHost.getByRole("button", {
+      name: /dropdown trigger/i,
+    });
     this.frequencyDropdownTrigger = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Frequency')]/following::p-dropdown[1]"
     ).getByRole("button", { name: /dropdown trigger/i });
