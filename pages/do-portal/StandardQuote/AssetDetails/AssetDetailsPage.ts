@@ -271,10 +271,11 @@ export class DOAssetDetailsPage extends BasePage {
 
   /**
    * Choose an item from the program dropdown list
+   * (`getByText` is unsafe here — e.g. **CSA Personal - MV Dealer** is a substring of **Webform - CSA Personal - MV Dealer**.)
    */
   async selectProgram(programName: string): Promise<void> {
     this.logStep(`Selected program: ${this.stepValueDisplay(programName)}`);
-    await this.page.getByText(programName).click();
+    await this.page.getByRole("option", { name: programName, exact: true }).click();
   }
 
   /**
