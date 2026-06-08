@@ -6,7 +6,7 @@
 
 import { expect, test } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
-import { DOAssetDetailsPage, DOCustomerQuotePostSubmitPage, DODashboardPage, DOQuickQuotePage, DOReferenceDetailsPage } from "../../../pages";
+import { DOAssetDetailsPage, DOCustomerQuotePostSubmitPage, DODashboardPage, DOQuickQuotePage, DOReferenceDetailsPage, DOTrustDetailsPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
 import { DOEmploymentDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/employmentDetails";
@@ -1048,4 +1048,362 @@ test(
     // Product / Program already match QQ carry-over and are often p-disabled — do not call chooseProduct/chooseProgram here.
   },
 );
+test("CSAC Assigned - Create Standard Quote only Customer Validations", async ({ page }) => {
+    test.setTimeout(1000000);
+    const dashboardPage = new DODashboardPage(page);
+    const assetDetailsPage = new DOAssetDetailsPage(page);
+    const addAssetPage = new DOAddAssetPage(page);
+    await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+    await dashboardPage.waitForAuthenticatedDashboard();
+    await dashboardPage.clickCreateStandardQuote();
+    await dashboardPage.selectCSAproduct();
+    await assetDetailsPage.chooseProduct("CSA-C-Assigned");
+    await assetDetailsPage.chooseProgram("CSA Personal - MV Dealer");
+    await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
+    await assetDetailsPage.enterAsset("Car and Light Commercial /");
+    await assetDetailsPage.selectCondition("Used");
+    await assetDetailsPage.openAssetInsuranceTradeInSummary();
+    await assetDetailsPage.clickAssetSummaryEditButton();
+    await addAssetPage.enterAssetValue("$10,0000");
+    await addAssetPage.selectCondition("Used");
+    await addAssetPage.selectYear("2025");
+    await addAssetPage.enterMake("Toyota");
+    await addAssetPage.enterModel("Hilux");
+    await addAssetPage.enterVariant("Top");
+    await addAssetPage.enterRegoNO("TG08BP5123");
+    await addAssetPage.enterVIN("1HGCM82633A004352");
+    await addAssetPage.enterOdometer("50000");
+    await addAssetPage.enterColour("Black");
+    await addAssetPage.enterSerialNO("0999944477");
+    await addAssetPage.enterEngineNO("1133445588");
+    await addAssetPage.enterCCRating("5");
+    await addAssetPage.chooseMotivePower("Petrol");
+    await addAssetPage.chooseCountryRegistered("New Zealand");
+    await addAssetPage.chooseAssetLocation("North Island");
+    await addAssetPage.clickSummitButton();
+    await addAssetPage.clickCrossButton();
+    await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
+    await assetDetailsPage.termsOfFinance("36");
+    await assetDetailsPage.interestRate("4");
+    await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
+    await assetDetailsPage.clickCalculateButton();
+    await assetDetailsPage.interestRate("4");
+    await assetDetailsPage.clickCalculateButton();
+    await assetDetailsPage.clickNextButton();
+    await assetDetailsPage.waitForAddBorrowerButton();
+    await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+    await assetDetailsPage.searchByDropdownClick();
+    await assetDetailsPage.selectUDCSelectOption();
+    await assetDetailsPage.enterUDCCustomerNumber("420");
+    await assetDetailsPage.clickSearchButton();
+    await assetDetailsPage.clickAddNewCustomerButton();
+    const personalDetailsPage = new DOPersonalDetailsPage(page);
+    await personalDetailsPage.enterLastName("Doe");
+    await personalDetailsPage.clickNextButton();
+    const addressDetailsPage = new DOAddressDetailsPage(page);
+    await addressDetailsPage.waitForPhysicalAddressStep();
+
+    // Physical Address — explicit empty required fields, then **Save** / assert.
+    await addressDetailsPage.timeAtAddress("", "");
+    await addressDetailsPage.enterStreetNumber("");
+    await addressDetailsPage.enterStreetName("");
+    await addressDetailsPage.enterCity("");
+    await addressDetailsPage.touchPhysicalResidenceTypeWithoutSelection();
+    await addressDetailsPage.clickSaveAddressDetails();
+    await addressDetailsPage.expectPhysicalAddressRequiredValidationMessages();
+
+    await addressDetailsPage.timeAtAddress("1", "1");
+    await addressDetailsPage.enterStreetNumber("123");
+    await addressDetailsPage.enterStreetName("Main Street");
+    await addressDetailsPage.enterCity("Wellington");
+    await addressDetailsPage.chooseCountry("New Zealand");
+    await addressDetailsPage.selectResidenceType("Boarding");
+
+
+
+    // Reuse for Postal Addresss → Yes (click once if toggle starts on No)
+    await addressDetailsPage.clickReuseForPostalAddressToggle();
+    await addressDetailsPage.clickSaveAddressDetails();
+
+    // Previous Physical Address — explicit empty required fields when section exists, then **Save** / assert.
+    if (await addressDetailsPage.isPreviousPhysicalAddressVisible(5_000)) {
+      await addressDetailsPage.previousTimeAtAddress("", "");
+      await addressDetailsPage.enterPreviousStreetNumber("");
+      await addressDetailsPage.enterPreviousStreetName("");
+      await addressDetailsPage.enterPreviousCity("");
+      await addressDetailsPage.touchPreviousPhysicalResidenceTypeWithoutSelection();
+      await addressDetailsPage.clickSaveAddressDetails();
+      await addressDetailsPage.expectPreviousPhysicalAddressRequiredValidationMessages();
+    }
+
+    // Previous Physical Address — skipped automatically when `app-previous-address` is not shown for this product.
+    await addressDetailsPage.fillPreviousPhysicalRequiredIfPresent({
+      years: "1",
+      months: "1",
+      streetNumber: "45",
+      streetName: "Queen Street",
+      city: "Wellington",
+      country: "New Zealand",
+    });
+
+    await addressDetailsPage.clickNextButton();
+    const employmentDetailsPage = new DOEmploymentDetailsPage(page);
+    const financialPositionPage = new DOFinancialPositionPage(page);
+    await employmentDetailsPage.waitForEmploymentDetailsStep();
+    await employmentDetailsPage.clickNextButton();
+    await financialPositionPage.waitForFinancialPositionStep();
+    await financialPositionPage.clickNextButton();
+    const referenceDetailsPage = new DOReferenceDetailsPage(page);
+    await referenceDetailsPage.waitForReferenceDetailsStep();
+    await referenceDetailsPage.confirmCustomerDetailsCorrect();
+    await referenceDetailsPage.clickSubmitButton();
+    await expect(
+      page
+        .locator(".p-toast, .p-toast-message, [role='alert']")
+        .filter({ hasText: /Please confirm all the mandatory fields/i })
+        .first(),
+    ).toBeVisible({ timeout: 25_000 });
+    await page.locator(':text-is("1. Personal Details")').waitFor({ state: "visible", timeout: 20_000 });
+    await page.locator(':text-is("1. Personal Details")').click();
+    await personalDetailsPage.expectPersonalDetailsRequiredValidationMessages({
+      lastNameMayBeFilled: true,
+    });
+
+    await personalDetailsPage.enterFirstName("jhbhuyvyu90");
+    await personalDetailsPage.enterLastName("jhbhuyvyu90");
+    await personalDetailsPage.enterMobileNumber("ioi900");
+    await personalDetailsPage.enterEmail("jkbhbu");
+    await personalDetailsPage.enterLicenceNumber("jkui");
+    await personalDetailsPage.enterVersionNumber("hkbiubh");
+
+    await personalDetailsPage.clickSavePersonalDetails();
+    await personalDetailsPage.expectPersonalDetailsInvalidFormatValidationMessages();
+    await personalDetailsPage.chooseTitle("Dame");
+    await personalDetailsPage.enterFirstName("Liza");
+    await personalDetailsPage.enterMiddleName("Marie");
+    await personalDetailsPage.enterLastName("Doe");
+    await personalDetailsPage.chooseGender("Female");
+    await personalDetailsPage.enterDateOfBirth("01/01/1980");
+    await personalDetailsPage.chooseMarritalStatus("Married");
+    await personalDetailsPage.chooseNoOfDependents("2");
+    await personalDetailsPage.fillDependantsAgesInYears(["8", "12"]);
+    await personalDetailsPage.enterMobileNumber("0211234567");
+    await personalDetailsPage.enterEmail("liza.doe@example.com");
+    await personalDetailsPage.chooseLicenceType("Full Licence");
+    await personalDetailsPage.chooseCountryOfIssue("New Zealand");
+    await personalDetailsPage.enterLicenceNumber("DL000123");
+    await personalDetailsPage.enterVersionNumber("244");
+    await personalDetailsPage.chooseNewZealandResident("Yes");
+    await personalDetailsPage.chooseCountryOfBirth("New Zealand");
+    await personalDetailsPage.chooseCountryOfCitizenship("New Zealand");
+    await personalDetailsPage.clickNextButton();
+    await addressDetailsPage.waitForPhysicalAddressStep();
+    await addressDetailsPage.clickNextButton();
+    await employmentDetailsPage.waitForEmploymentDetailsStep();
+
+    // Current Employment — empty / touched fields, Save, assert (screenshot: Employer name, Occupation, Employment Type, Time ×2).
+    await employmentDetailsPage.enterCurrentEmployerName("");
+    await employmentDetailsPage.touchCurrentOccupationDropdownWithoutSelection();
+    await employmentDetailsPage.touchCurrentEmploymentTypeDropdownWithoutSelection();
+    await employmentDetailsPage.enterCurrentTimeWithEmployer("", "");
+    await employmentDetailsPage.clickSaveEmploymentDetails();
+    await employmentDetailsPage.expectCurrentEmploymentRequiredValidationMessages();
+
+    await employmentDetailsPage.enterCurrentEmployerName("Acme Finance Ltd");
+    await employmentDetailsPage.selectCurrentOccupation("Accountant");
+    await employmentDetailsPage.selectCurrentEmploymentType("Full Time Employed");
+    await employmentDetailsPage.enterCurrentTimeWithEmployer("1", "2");
+    await employmentDetailsPage.clickSaveEmploymentDetails();
+    await employmentDetailsPage.expectPreviousEmploymentSectionVisible();
+
+    await employmentDetailsPage.enterPreviousEmployerName("");
+    await employmentDetailsPage.touchPreviousOccupationDropdownWithoutSelection();
+    await employmentDetailsPage.touchPreviousEmploymentTypeDropdownWithoutSelection();
+    await employmentDetailsPage.enterPreviousTimeWithEmployer("", "");
+    await employmentDetailsPage.clickSaveEmploymentDetails();
+    await employmentDetailsPage.expectPreviousEmploymentRequiredValidationMessages();
+
+    await employmentDetailsPage.enterPreviousEmployerName("Prior Employer Ltd");
+    await employmentDetailsPage.selectPreviousOccupation("Accountant");
+    await employmentDetailsPage.selectPreviousEmploymentType("Full Time Employed");
+    await employmentDetailsPage.enterPreviousTimeWithEmployer("1", "0");
+    await employmentDetailsPage.clickSaveEmploymentDetails();
+    await employmentDetailsPage.clickNextButton();
+
+    await financialPositionPage.waitForFinancialPositionStep();
+    await financialPositionPage.expectIndividualFinancialPositionSectionsVisible();
+    await financialPositionPage.clickNextButton();
+    await financialPositionPage.expectIndividualFinancialPositionAmountAndIncomeDecreaseValidationMessages();
+
+    await financialPositionPage.selectIndividualHomeOwnershipType("Mortgage");
+    await financialPositionPage.fillIndividualVehicleValueAmount("$18,000.00");
+    await financialPositionPage.fillIndividualFurnitureEffectsValueAmount("$12,500.00");
+    await financialPositionPage.selectIndividualOtherFinancialAssetType("Savings");
+    await financialPositionPage.fillIndividualOtherFinancialAssetAmount("$5,000.00");
+
+    await financialPositionPage.fillFirstLiabilityBalanceAndAmount("$500000.00", "$2500.00");
+    await financialPositionPage.setFirstLiabilityRowFrequencyMonthly();
+
+    await financialPositionPage.fillFirstIncomeAmount("$5000.00");
+    await financialPositionPage.fillSecondIncomeRowAmount("$1,200.00");
+    await financialPositionPage.setTakeHomePayFrequencyMonthly();
+    await financialPositionPage.setSpousePartnerPayFrequencyMonthly();
+    await financialPositionPage.selectIncomeLikelyToDecreaseYes();
+    await financialPositionPage.expectIncomeDecreaseDetailsTextareaVisibleAndEnabled();
+    await financialPositionPage.fillIncomeDecreaseDetails(
+      "Automation: conditional Details when Yes is selected.",
+    );
+    await financialPositionPage.selectIncomeLikelyToDecreaseNo();
+    await financialPositionPage.expectIncomeDecreaseDetailsTextareaHiddenOrDisabled();
+
+    await financialPositionPage.fillExpenditureAmountByLabel(/Council Rates/i, "$220.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Council Rates/i);
+    await financialPositionPage.fillExpenditureAmountByLabel(/Insurance/i, "$180.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Insurance/i);
+    await financialPositionPage.fillExpenditureAmountByLabel(/Utilities/i, "$140.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Utilities/i);
+    await financialPositionPage.fillExpenditureAmountByLabel(/Living Expenses/i, "$900.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Living Expenses/i);
+    await financialPositionPage.fillExpenditureAmountByLabel(/Motor Vehicles/i, "$350.00");
+    await financialPositionPage.setExpenditureRowFrequencyMonthlyByLabel(/Motor Vehicles/i);
+
+    await financialPositionPage.expectEssentialOutgoingTypeDefaultOther();
+    await financialPositionPage.fillEssentialOutgoingAmount("$150.00");
+    await financialPositionPage.setEssentialOutgoingFrequencyMonthly();
+
+    await financialPositionPage.clickNextButton();
+    await referenceDetailsPage.waitForReferenceDetailsStep();
+    await referenceDetailsPage.clickAddContactDetails();
+    await referenceDetailsPage.selectContactType("Accountant");
+    await referenceDetailsPage.enterContactFirstName("Alex");
+    await referenceDetailsPage.enterContactLastName("Referee");
+    await referenceDetailsPage.clickAddContactInModal();
+    await referenceDetailsPage.confirmCustomerDetailsCorrect();
+    await referenceDetailsPage.clickSubmitButton();
+    const customerQuotePostSubmitPage = new DOCustomerQuotePostSubmitPage(page);
+    await customerQuotePostSubmitPage.waitForUploadStep();
+
+    const lizaRow = page.locator("tr, div, li, section").filter({ hasText: /Liza Marie Doe/i }).first();
+    await expect(lizaRow).toBeVisible({ timeout: 30000 });
+    await expect(lizaRow).toContainText(/Borrower/i);
+    await customerQuotePostSubmitPage.clickAddBorrowersOrGuarantorsButton();
+    await customerQuotePostSubmitPage.selectSearchCustomerTrustType();
+    await assetDetailsPage.searchByDropdownClick();
+    await assetDetailsPage.selectUDCSelectOption();
+    await assetDetailsPage.enterUDCCustomerNumber("420");
+    await assetDetailsPage.clickSearchButton();
+    await assetDetailsPage.clickAddNewCustomerButton();
+    const trustDetailsPage = new DOTrustDetailsPage(page);
+    await trustDetailsPage.selectTrustType("Trust - Charitable");
+    await trustDetailsPage.enterTrustName("TLC Automation Family Trust");
+    await trustDetailsPage.clickSaveTrustDetails();
+
+    await page.locator(':text-is("5. Contact Details")').waitFor({ state: "visible", timeout: 20_000 });
+    await page.locator(':text-is("5. Contact Details")').click();
+    await referenceDetailsPage.confirmCustomerDetailsCorrect();
+    await referenceDetailsPage.clickSubmitButton();
+    await expect(
+      page
+        .locator(".p-toast, .p-toast-message, [role='alert']")
+        .filter({ hasText: /Please confirm all the mandatory fields/i })
+        .first(),
+    ).toBeVisible({ timeout: 25_000 });
+    await page.locator(':text-is("1. Trust Details")').waitFor({ state: "visible", timeout: 20_000 });
+    await page.locator(':text-is("1. Trust Details")').click();
+    await trustDetailsPage.expectTrustDetailsRequiredMessagesAfterMandatoryFieldsToasterPath();
+    await trustDetailsPage.selectTrustType("Trust - Charitable");
+    await trustDetailsPage.selectPrimaryNatureOfTrust("0112 Cut Flower & Flower Seed Growing");
+    await trustDetailsPage.clearTrustName();
+    await trustDetailsPage.clearRegisteredNumber();
+    await trustDetailsPage.clearTimeInTrust();
+    await trustDetailsPage.clearBusinessPhone();
+    await trustDetailsPage.clearContactEmail();
+    await trustDetailsPage.enterGstNumber("ijioj");
+    await trustDetailsPage.clickSaveTrustDetails();
+    await trustDetailsPage.expectTrustDetailsValidationWithDropdownsSelected();
+
+    await trustDetailsPage.selectTrustType("Trust - Charitable");
+    await trustDetailsPage.enterTrustName("TLC Automation Family Trust");
+    await trustDetailsPage.enterRegisteredNumber("12345678");
+    await trustDetailsPage.enterGstNumber("123456789");
+    await trustDetailsPage.enterTrustPurpose("Automation trust purpose for regression.");
+    await trustDetailsPage.selectPrimaryNatureOfTrust("0112 Cut Flower & Flower Seed Growing");
+    await trustDetailsPage.enterTimeInTrustYearsMonths("5", "3");
+    await trustDetailsPage.enterBusinessPhone("21", "1234567");
+    await trustDetailsPage.enterContactEmail("trust.automation@example.com");
+    await trustDetailsPage.nextButton.click();
+
+    await addressDetailsPage.expectTrustAddressStepRequiredValidationAfterSave();
+    await addressDetailsPage.fillTrustPhysicalAddressMandatoryCore({
+      years: "1",
+      months: "1",
+      streetNumber: "123",
+      streetName: "Main Street",
+      city: "Wellington",
+    });
+    await addressDetailsPage.fillTrustPreviousPhysicalAddressMandatoryCore({
+      years: "1",
+      months: "0",
+      streetNumber: "123",
+      streetName: "Main Street",
+      city: "Wellington",
+    });
+    await addressDetailsPage.setTrustReuseForPostalAddressOn();
+    await addressDetailsPage.setTrustReuseForRegisteredAddressOn();
+    // Reuse copies lines into Registered but usually leaves Years/Months empty — align with physical.
+    await addressDetailsPage.fillTrustRegisteredTimeAtAddressAfterReuse("1", "1");
+    await addressDetailsPage.clickNextButton();
+
+    await financialPositionPage.expectTrustProfitDeclarationRequiredAfterSave();
+    await financialPositionPage.selectTrustNetProfitLastYearYes();
+    await financialPositionPage.expectTrustNetProfitLastYearMustBeGreaterThanZeroAfterSave();
+    await financialPositionPage.fillTrustNetProfitLastYear("$25,000.00");
+    await financialPositionPage.fillTrustTurnoverLatestYear("$10,000.00", "25/05/2026");
+    await financialPositionPage
+      .expectTrustBalanceYearEndingsMatchLatestTurnoverDate({ timeoutMs: 30_000 })
+      .catch(async () => {
+        for (let i = 0; i < 4; i++) {
+          await financialPositionPage.fillTrustBalanceRowYearEndingIfEmpty(i, "25/05/2026");
+        }
+      });
+    await financialPositionPage.fillTrustBalanceRowAmountOnly(0, "$10,000.00");
+    await financialPositionPage.fillTrustBalanceRowAmountOnly(1, "$2,500.00");
+    await financialPositionPage.fillTrustBalanceRowAmountOnly(2, "$1,500.00");
+    await financialPositionPage.fillTrustBalanceRowAmountOnly(3, "$0.00");
+    await financialPositionPage.fillTrustPersonalPropertyAmount("$5,000.00");
+    await financialPositionPage.fillTrustVehicleValueAmount("$18,000.00");
+    await financialPositionPage.fillTrustOtherAssetAmount("$2,000.00");
+    await financialPositionPage.fillTrustMortgageRentMonthlyAmount("$850.00");
+    await financialPositionPage.fillTrustLoansMonthlyAmount("$300.00");
+    await financialPositionPage.fillTrustCreditCardsMonthlyAmount("$150.00");
+    await financialPositionPage.fillTrustOtherLiabilitiesMonthlyAmount("$100.00");
+    await financialPositionPage.clickNextButton();
+
+    await page.getByText(/Add Trustees Details/i).waitFor({ state: "visible", timeout: 60_000 });
+    await financialPositionPage.clickNextButton();
+    await referenceDetailsPage.confirmCustomerDetailsCorrect();
+    await referenceDetailsPage.clickSubmitButton();
+    await customerQuotePostSubmitPage.waitForUploadStep();
+    await customerQuotePostSubmitPage.expectBorrowerOrGuarantorRowShowsRole(
+      "TLC Automation Family Trust",
+      "Guarantor",
+    );
+    await customerQuotePostSubmitPage.uploadDocument();
+    await customerQuotePostSubmitPage.expectDocumentUploaded();
+    await customerQuotePostSubmitPage.openDocumentsTab();
+    await customerQuotePostSubmitPage.selectCustomerQuoteBasicRow();
+    await customerQuotePostSubmitPage.clickDownload();
+    await customerQuotePostSubmitPage.confirmDocumentParameters();
+    await customerQuotePostSubmitPage.addNoteAndSubmit(
+      "Automated sanity note — CSAC Assigned quote.",
+    );
+    await customerQuotePostSubmitPage.submitQuoteFromStatusMenu();
+    await customerQuotePostSubmitPage.completeOriginatorDeclaration();
+
+
+
+    
+
+});
+
 

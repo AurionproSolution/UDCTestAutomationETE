@@ -489,8 +489,11 @@ export class DOPersonalDetailsPage extends BasePage {
    * - **Gender** (and other touched Prime dropdowns) should surface **… is required** after open → Escape + Save.
    * - Messages often end with **`.`** — patterns allow an optional full stop.
    * - Scroll each line into view: long forms hide top errors when the viewport is on Contact / Licence.
+   * @param options.lastNameMayBeFilled — when `true`, **Last name is required** is optional (e.g. stepper submit with only last name filled).
    */
-  async expectPersonalDetailsRequiredValidationMessages(): Promise<void> {
+  async expectPersonalDetailsRequiredValidationMessages(
+    options?: { lastNameMayBeFilled?: boolean },
+  ): Promise<void> {
     this.logStep("Expect Personal Details required validation messages");
     const root = this.personalDetailsRoot;
     await root.waitFor({ state: "visible", timeout: 60_000 });
@@ -517,7 +520,11 @@ export class DOPersonalDetailsPage extends BasePage {
     await expectMsgIfPresent(/Title is required\.?|Please select.*[Tt]itle\.?/i);
 
     await expectMsg(/First name is required\.?/i);
-    await expectMsg(/Last name is required\.?/i);
+    if (options?.lastNameMayBeFilled) {
+      await expectMsgIfPresent(/Last name is required\.?/i);
+    } else {
+      await expectMsg(/Last name is required\.?/i);
+    }
     await expectMsg(/Date of [Bb]irth is required\.?/i);
     await expectMsg(/Gender is required\.?/i);
     await expectMsg(/Marital [Ss]tatus is required\.?/i);
@@ -563,6 +570,8 @@ export class DOPersonalDetailsPage extends BasePage {
       }
     };
 
+    await assertFormatIfShown(/First [Nn]ame.{0,40}incorrect format/i);
+    await assertFormatIfShown(/Last [Nn]ame.{0,40}incorrect format/i);
     await assertFormatIfShown(/Licence Number.{0,60}(incorrect|invalid|format)/i);
     await assertFormatIfShown(/Version Number.{0,60}(incorrect|invalid|format)/i);
   }

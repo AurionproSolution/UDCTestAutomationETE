@@ -668,6 +668,21 @@ export class DOAddressDetailsPage extends BasePage {
       return true;
     };
 
+    /**
+     * Trust `app-trust-*` cards: Years/Months live in `.yearmonthClass` columns. A generic “strip” that
+     * contains both **Years** and **Months** labels often matches the whole grid and pairs the Search /
+     * aggregate **Time at Address** inputs first — leaving real year/month empty and “Time at Address is required”.
+     */
+    if (isTrustAddressHost) {
+      const ymInputs = block
+        .locator("div.yearmonthClass")
+        .locator("input.p-inputtext, input:not([type='hidden'])")
+        .filter({ visible: true });
+      if ((await ymInputs.count()) >= 2) {
+        if (await fillPair(ymInputs.nth(0), ymInputs.nth(1))) return;
+      }
+    }
+
     // PrimeNG time row: physical + CSA-B + trust address hosts use the same widgets.
     if (isPreviousCard || isPhysicalHost || isBusinessPhysicalHost || isTrustAddressHost) {
       const timeRow = block
@@ -3059,6 +3074,7 @@ export class DOAddressDetailsPage extends BasePage {
 
   async setTrustReuseForPostalAddressOn(): Promise<void> {
     this.logStep("Set Trust Reuse For Postal Address On");
+    await this.waitForTrustAddressUiSettled();
     await this.ensureTrustSwitchOnNearLabel(
       this.trustPhysicalAddressRoot,
       REUSE_FOR_POSTAL_ADDRESS_LABEL_RX,
@@ -3067,10 +3083,29 @@ export class DOAddressDetailsPage extends BasePage {
 
   async setTrustReuseForRegisteredAddressOn(): Promise<void> {
     this.logStep("Set Trust Reuse For Registered Address On");
+    await this.waitForTrustAddressUiSettled();
     await this.ensureTrustSwitchOnNearLabel(
       this.trustPhysicalAddressRoot,
       /Reuse for Registered Address/i,
     );
+  }
+
+  /**
+   * After **Reuse for Registered Address** = Yes, the UI often copies street/city/country but **not**
+   * registered “Time at Address” (Years/Months). Fill them to match physical (typical regression expectation).
+   */
+  async fillTrustRegisteredTimeAtAddressAfterReuse(
+    years: string,
+    months: string,
+  ): Promise<void> {
+    this.logStep(
+      `Fill trust registered time at address after reuse: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
+    await this.waitForTrustAddressUiSettled();
+    const reg = this.trustRegisteredAddressRoot;
+    await reg.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    await reg.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+    await this.fillTrustTimeAtAddressInSection(reg, years, months);
   }
 
   /**
@@ -3158,5 +3193,111 @@ export class DOAddressDetailsPage extends BasePage {
       `Entered trust registered time at address: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
     );
     await this.fillTrustTimeAtAddressInSection(this.trustRegisteredAddressRoot, years, months);
+  }
+
+  /**
+   * Trust-only: PrimeNG city autocomplete inside a trust address host (`physicalCity` / `previousCity` / …).
+   */
+  private async fillTrustCityAutocompleteInHost(
+    host: Locator,
+    inputName: "physicalCity" | "previousCity" | "postalCity" | "registerCity",
+    city: string,
+  ): Promise<void> {
+    const cityInput = host.locator(`input[name="${inputName}"]`).first();
+    await cityInput.waitFor({ state: "visible", timeout: 20_000 });
+    await cityInput.scrollIntoViewIfNeeded();
+    const rx = new RegExp(city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    await cityInput.click();
+    await cityInput.fill("");
+    await cityInput.type(city, { delay: 30 });
+    const fromPanel = this.page
+      .locator(".p-autocomplete-panel")
+      .getByRole("option", { name: rx })
+      .first();
+    try {
+      await fromPanel.waitFor({ state: "visible", timeout: 8_000 });
+      await fromPanel.click();
+    } catch {
+      await this.page.getByRole("option", { name: rx }).first().click({ timeout: 8_000 });
+    }
+    await this.page.keyboard.press("Escape").catch(() => {});
+  }
+
+  /**
+   * Trust Address Details — after **Save** with empty / incomplete sections, assert inline required copy
+   * scoped to `app-trust-*` hosts only (does not touch individual / business address assertions).
+   */
+  async expectTrustAddressStepRequiredValidationAfterSave(): Promise<void> {
+    this.logStep("Expect Trust Address Step Required Validation After Save");
+    await this.waitForTrustAddressStep();
+    await this.clickSaveAddressDetails();
+
+    const expectStreetLineErrors = async (host: Locator): Promise<void> => {
+      await expect(host.getByText(/^Street Number is required\.?$/i).first()).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(host.getByText(/^Street Name is required\.?$/i).first()).toBeVisible();
+      await expect(host.getByText(/^City is required\.?$/i).first()).toBeVisible();
+    };
+
+    const expectTimeAtAddressErrors = async (host: Locator): Promise<void> => {
+      const timeErr = host.getByText(/^Time at Address is required\.?$/i);
+      await expect(timeErr.first()).toBeVisible({ timeout: 20_000 });
+    };
+
+    await expectTimeAtAddressErrors(this.trustPhysicalAddressRoot);
+    await expectStreetLineErrors(this.trustPhysicalAddressRoot);
+
+    if (await this.trustPreviousPhysicalRoot.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expectTimeAtAddressErrors(this.trustPreviousPhysicalRoot);
+      await expectStreetLineErrors(this.trustPreviousPhysicalRoot);
+    }
+
+    const postal = this.trustPostalAddressRoot;
+    await expect(postal.getByText(/^Address is required\.?$/i).first()).toBeVisible({ timeout: 20_000 });
+    await expect(postal.getByText(/^City is required\.?$/i).first()).toBeVisible();
+    await expect(postal.getByText(/^Country is required\.?$/i).first()).toBeVisible();
+
+    const registered = this.trustRegisteredAddressRoot;
+    await expectTimeAtAddressErrors(registered);
+    await expectStreetLineErrors(registered);
+  }
+
+  /**
+   * Trust **Physical Address** — time at address + street number / name + city (no reuse toggles).
+   */
+  async fillTrustPhysicalAddressMandatoryCore(opts: {
+    years: string;
+    months: string;
+    streetNumber: string;
+    streetName: string;
+    city: string;
+  }): Promise<void> {
+    this.logStep("Fill Trust Physical Address Mandatory Core");
+    await this.waitForTrustAddressStep();
+    await this.enterTrustPhysicalTimeAtAddress(opts.years, opts.months);
+    await this.trustInputAfterLabel(this.trustPhysicalAddressRoot, "Street Number").fill(opts.streetNumber);
+    await this.trustInputAfterLabel(this.trustPhysicalAddressRoot, "Street Name").fill(opts.streetName);
+    await this.fillTrustCityAutocompleteInHost(this.trustPhysicalAddressRoot, "physicalCity", opts.city);
+  }
+
+  /**
+   * Trust **Previous Physical Address** — same core fields when that card is shown.
+   */
+  async fillTrustPreviousPhysicalAddressMandatoryCore(opts: {
+    years: string;
+    months: string;
+    streetNumber: string;
+    streetName: string;
+    city: string;
+  }): Promise<void> {
+    this.logStep("Fill Trust Previous Physical Address Mandatory Core");
+    if (!(await this.trustPreviousPhysicalRoot.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    await this.enterTrustPreviousPhysicalTimeAtAddress(opts.years, opts.months);
+    await this.trustInputAfterLabel(this.trustPreviousPhysicalRoot, "Street Number").fill(opts.streetNumber);
+    await this.trustInputAfterLabel(this.trustPreviousPhysicalRoot, "Street Name").fill(opts.streetName);
+    await this.fillTrustCityAutocompleteInHost(this.trustPreviousPhysicalRoot, "previousCity", opts.city);
   }
 }

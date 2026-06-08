@@ -114,6 +114,72 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await this.page.waitForTimeout(300);
   }
 
+  async expectBorrowerOrGuarantorRowShowsRole(
+    customerName: string,
+    role: "Borrower" | "Guarantor",
+  ): Promise<void> {
+    const customer = this.page.getByText(customerName, { exact: true }).first();
+    await expect(customer).toBeVisible({ timeout: 60_000 });
+
+    await expect(async () => {
+      const roleVisibleInSameRow = await customer.evaluate(
+        (node, expectedRole) => {
+          const rolePattern = new RegExp(`\\b${expectedRole}\\b`, "i");
+          let current: HTMLElement | null =
+            node instanceof HTMLElement ? node : node.parentElement;
+
+          for (let depth = 0; current && depth < 8; depth += 1) {
+            const text = (current.innerText || current.textContent || "").replace(/\s+/g, " ");
+            if (rolePattern.test(text)) {
+              return true;
+            }
+            current = current.parentElement;
+          }
+
+          return false;
+        },
+        role,
+      );
+
+      expect(
+        roleVisibleInSameRow,
+        `${customerName} should be visible in Borrowers & Guarantors with role ${role}`,
+      ).toBeTruthy();
+    }).toPass({ timeout: 30_000 });
+  }
+
+  /**
+   * In **Search Customer**, set search type to **Trust** (third radio: Individual | Business | Trust).
+   * Prefers accessible name; falls back to PrimeNG box or Selector Hub xpath on third `p-radiobutton`.
+   */
+  async selectSearchCustomerTrustType(): Promise<void> {
+    const dialog = this.searchCustomerDialog();
+    await dialog.waitFor({ state: "visible", timeout: 60000 });
+
+    const byRole = dialog.getByRole("radio", { name: /^Trust$/i });
+    if (await byRole.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await byRole.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(300);
+      return;
+    }
+
+    const box = dialog
+      .locator("p-radiobutton")
+      .filter({ hasText: /^Trust$/i })
+      .locator(".p-radiobutton-box")
+      .first();
+    if (await box.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await box.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(300);
+      return;
+    }
+
+    await dialog
+      .locator("xpath=.//p-radiobutton[3]//div[1]//div[1]")
+      .click({ timeout: 15000, force: true });
+    await this.page.waitForTimeout(300);
+  }
+
   /**
    * The Upload / Documents / Signing strip lives inside one PrimeNG `p-tabview`.
    * Resolving tabs from the whole page hits the wrong tab or misses role/name quirks.

@@ -5,6 +5,7 @@
 
 import { expect, Locator, Page } from "@playwright/test";
 import { DO_BASE_URL } from "../../../config/env";
+import { CommonUtils } from "../../../utils/commonUtils";
 import { BasePage } from "../../common/BasePage";
 
 export class DOLoginPage extends BasePage {
@@ -28,8 +29,12 @@ export class DOLoginPage extends BasePage {
     super(page);
     this.url = DO_BASE_URL();
 
-    // DO Portal specific selectors
-    this.usernameInput = page.getByRole("searchbox", { name: "Username" });
+    // IdP step: FIS Aurionpro often uses textbox/combobox, not searchbox — {@link login} resolves at runtime.
+    this.usernameInput = page
+      .getByRole("searchbox", { name: /Username/i })
+      .or(page.getByRole("textbox", { name: /Username/i }))
+      .or(page.getByRole("combobox", { name: /Username/i }))
+      .or(page.getByLabel(/^Username/i));
     this.proceedButton = page.getByRole("button", { name: "Proceed" });
     this.passwordInput = page.getByRole("textbox", { name: "Password" });
     this.yesThisIsMyComputerRadio = page.getByRole("radio", {
@@ -58,6 +63,76 @@ export class DOLoginPage extends BasePage {
     return "DO Portal — Login";
   }
 
+  /** FIS / IdP cookie strip — can block typing into Username until dismissed. */
+  private async dismissCookieConsentIfPresent(p: Page): Promise<void> {
+    const accept = p.getByRole("button", { name: /^Accept$/i }).first();
+    if (await accept.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await accept.click({ timeout: 10_000 }).catch(() => {});
+      await p.waitForTimeout(400);
+      return;
+    }
+    const decline = p.getByRole("button", { name: /^Decline$/i }).first();
+    if (await decline.isVisible({ timeout: 500 }).catch(() => false)) {
+      await decline.click({ timeout: 10_000 }).catch(() => {});
+      return;
+    }
+    const close = p
+      .getByRole("button", { name: /^Close$/i })
+      .or(p.locator('[aria-label="Close"], [aria-label="close"]'))
+      .first();
+    if (await close.isVisible({ timeout: 500 }).catch(() => false)) {
+      await close.click({ timeout: 5_000 }).catch(() => {});
+    }
+  }
+
+  /** First matching IdP username control (FIS Aurionpro / PrimeNG variants). */
+  private async resolveIdpUsernameField(p: Page): Promise<Locator | null> {
+    const candidates: Locator[] = [
+      p.getByRole("searchbox", { name: /Username/i }),
+      p.getByRole("textbox", { name: /Username/i }),
+      p.getByRole("combobox", { name: /Username/i }),
+      p.getByLabel(/^Username/i),
+      p.locator('input[name="username"]').first(),
+      p.locator("#username").first(),
+    ];
+    for (const loc of candidates) {
+      const target = loc.first();
+      if (await target.isVisible({ timeout: 900 }).catch(() => false)) {
+        return target;
+      }
+    }
+    return null;
+  }
+
+  private async isCredentialSurfaceReady(p: Page): Promise<boolean> {
+    await p.waitForLoadState("domcontentloaded").catch(() => {});
+    return (await this.resolveIdpUsernameField(p)) !== null;
+  }
+
+  /**
+   * After **Login with FIS**, the IdP form may be on this tab or a new one; the opener can close.
+   */
+  private async openFisLoginSurface(totalTimeoutMs = 45_000): Promise<Page> {
+    try {
+      await this.waitForLoadingComplete(15_000);
+    } catch {
+      // Spinner may be on a closing tab; continue.
+    }
+
+    const deadline = Date.now() + totalTimeoutMs;
+    while (Date.now() < deadline) {
+      const pages = this.page.context().pages().filter((pg) => !pg.isClosed());
+      for (const pg of pages) {
+        if (await this.isCredentialSurfaceReady(pg)) return pg;
+      }
+      await this.page.waitForTimeout(300);
+    }
+
+    throw new Error(
+      "Timed out waiting for IdP username field after Login with FIS (popup blocked, wrong tab, or UI change).",
+    );
+  }
+
   /**
    * Navigate to DO Portal login page
    */
@@ -79,35 +154,66 @@ export class DOLoginPage extends BasePage {
     this.log("Clicking Login with FIS button");
     await this.clickElement(this.loginWithFisButton, 90_000);
 
+    const surface = await this.openFisLoginSurface(45_000);
+    const utils = new CommonUtils(surface);
+
+    await this.dismissCookieConsentIfPresent(surface);
+
     this.log(`Entering username: ${username}`);
-    await this.fillElement(this.usernameInput, username);
+    const idpUsername = await this.resolveIdpUsernameField(surface);
+    if (!idpUsername) {
+      throw new Error(
+        "IdP username field not found after Login with FIS (check FIS Aurionpro markup / overlays).",
+      );
+    }
+    await idpUsername.click({ timeout: 10_000 }).catch(() => {});
+    await utils.fill(idpUsername, username);
 
     this.log("Clicking Proceed");
-    await this.clickElement(this.proceedButton);
+    const proceed = surface.getByRole("button", { name: "Proceed" });
+    await proceed.waitFor({ state: "visible", timeout: 20_000 });
+    await utils.click(proceed);
 
-    await this.fillElement(this.passwordInput, password);
+    const passwordInput = surface.getByRole("textbox", { name: "Password" });
+    await passwordInput.waitFor({ state: "visible", timeout: 30_000 });
+    await utils.fill(passwordInput, password);
     this.log("Entered password (value not logged).");
 
     // Blur so Angular/async validators can run and enable Sign in
-    await this.passwordInput.press("Tab");
+    await passwordInput.press("Tab");
     this.log("Selecting 'Yes, this is my computer'");
-    await this.clickElement(this.yesThisIsMyComputerRadio);
-    await expect(this.yesThisIsMyComputerRadio).toBeChecked({ timeout: 15_000 });
+    const yesThisIsMyComputerRadio = surface.getByRole("radio", {
+      name: "Yes, this is my computer",
+    });
+    await utils.click(yesThisIsMyComputerRadio);
+    await expect(yesThisIsMyComputerRadio).toBeChecked({ timeout: 15_000 });
 
-    this.log('Waiting for Sign in button to become enabled');
-    await expect(this.signinButton).toBeEnabled({ timeout: 90_000 });
+    this.log("Waiting for Sign in button to become enabled");
+    const signinButton = surface.getByRole("button", { name: "Sign in" });
+    await expect(signinButton).toBeEnabled({ timeout: 90_000 });
 
-    this.log('Clicking Sign in');
-    await this.clickElement(this.signinButton);
+    this.log("Clicking Sign in");
+    await utils.click(signinButton);
 
-    await this.waitForLoadingComplete();
-    this.log('Verified dashboard is loaded or navigation completed');
+    await surface
+      .locator(".loading, .spinner, [data-testid='loading']")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+    this.log("Verified dashboard is loaded or navigation completed");
 
-    this.log('Clicking Quotes & Applications from dashboard');
-    await expect(this.quoteAndAppButton).toBeVisible({ timeout: 90_000 });
-    await this.clickElement(this.quoteAndAppButton);
-    await this.waitForLoadingComplete();
-    this.log('Opened Quotes & Applications');
+    this.log("Clicking Quotes & Applications from dashboard");
+    const quoteAndApp = surface.getByRole("link", {
+      name: /Quotes & Applications/i,
+    });
+    await expect(quoteAndApp).toBeVisible({ timeout: 90_000 });
+    await utils.click(quoteAndApp);
+    await surface
+      .locator(".loading, .spinner, [data-testid='loading']")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+    this.log("Opened Quotes & Applications");
   }
 
   /**

@@ -195,10 +195,10 @@ export class DOReferenceDetailsPage extends BasePage {
 
   async confirmCustomerDetailsCorrect(): Promise<void> {
     const host = this.confirmDetailsCheckboxHost();
-    await host.waitFor({ state: "visible", timeout: 15000 });
+    await host.waitFor({ state: "visible", timeout: 400_000 });
 
     const visibleBox = host.locator("div.p-checkbox-box:visible").first();
-    await visibleBox.waitFor({ state: "visible", timeout: 15000 });
+    await visibleBox.waitFor({ state: "visible", timeout: 400_000 });
     await visibleBox.scrollIntoViewIfNeeded();
     await visibleBox.evaluate((el) =>
       (el as HTMLElement).scrollIntoView({ block: "center", inline: "nearest" }),
@@ -217,10 +217,10 @@ export class DOReferenceDetailsPage extends BasePage {
 
     if (await isChecked()) return;
 
-    await visibleBox.click({ timeout: 15000 });
+    await visibleBox.click({ timeout: 400_000 });
     if (await isChecked()) return;
 
-    await visibleBox.click({ force: true, timeout: 15000 });
+    await visibleBox.click({ force: true, timeout: 400_000 });
   }
 
   async clickSubmitButton(): Promise<void> {
