@@ -232,4 +232,19 @@ export class DOTrustDetailsPage extends BasePage {
     await expect(this.page.getByText(/Email is required/i).first()).toBeVisible();
   }
 
+  /**
+   * After **5. Contact Details** — tick **I confirm…** and **Submit** with mandatory trust/contact
+   * fields still incomplete, then open **1. Trust Details**: inline required copy (QAT trust validation screenshot).
+   */
+  async expectTrustDetailsRequiredMessagesAfterMandatoryFieldsToasterPath(): Promise<void> {
+    this.logStep("Expect Trust Details Required Messages After Mandatory Fields Toaster Path");
+    await expect(this.page.getByText(/Registered Number is required/i).first()).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(this.page.getByText(/Primary Nature of Trust is required/i).first()).toBeVisible();
+    await expect(this.page.getByText(/Time in Trust is required/i).first()).toBeVisible();
+    await expect(this.page.getByText(/Mobile Number is required/i).first()).toBeVisible();
+    await expect(this.page.getByText(/Email is required/i).first()).toBeVisible();
+  }
+
 }

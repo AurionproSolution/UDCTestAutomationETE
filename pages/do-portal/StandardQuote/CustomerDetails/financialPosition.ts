@@ -71,6 +71,48 @@ export class DOFinancialPositionPage extends BasePage {
     return "Standard quote — Financial position";
   }
 
+  /**
+   * Visible **.app-loader-overlay** (often with `p-progressspinner`) blocks pointer events on the step.
+   * Same pattern as Asset Details — wait before dropdown/primary clicks.
+   */
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const overlays = this.page.locator(".app-loader-overlay");
+      const count = await overlays.count();
+      let anyVisible = false;
+      for (let i = 0; i < count; i++) {
+        if (await overlays.nth(i).isVisible().catch(() => false)) {
+          anyVisible = true;
+          break;
+        }
+      }
+      if (!anyVisible) return;
+      await this.page.waitForTimeout(200);
+    }
+  }
+
+  /**
+   * PrimeNG dropdown trigger click while `.app-loader-overlay` can reappear between
+   * “ready” checks and the click (validation / step paint). Retries with fresh loader waits.
+   */
+  private async clickPrimeDropdownTriggerAfterLoaderGone(trigger: Locator): Promise<void> {
+    const waitSlices = [12_000, 15_000, 20_000, 30_000, 45_000];
+    for (let i = 0; i < waitSlices.length; i++) {
+      await this.waitUntilNoVisibleAppLoaderOverlays(waitSlices[i]);
+      await trigger.scrollIntoViewIfNeeded().catch(() => {});
+      try {
+        await trigger.click({ timeout: 5_000 });
+        return;
+      } catch {
+        await this.page.waitForTimeout(400);
+      }
+    }
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await trigger.scrollIntoViewIfNeeded().catch(() => {});
+    await trigger.click({ timeout: 20_000 });
+  }
+
   async waitForFinancialPositionStep(): Promise<void> {
     this.logStep("Wait For Financial Position Step");
     await this.financialRoot
@@ -108,6 +150,60 @@ export class DOFinancialPositionPage extends BasePage {
 
   private trustLiabilitiesHost(): Locator {
     return this.trustFinancialRoot.locator("app-trust-liabilities").first();
+  }
+
+  /** Outlined **Save** in the Standard Quote footer (same shell as Trust / Address steps). */
+  private async clickTrustFinancialStepSave(): Promise<void> {
+    const save = this.page
+      .locator("button.p-ripple.p-element.p-button.p-component.p-button-outlined")
+      .filter({ hasText: /^Save$/i })
+      .first();
+    await save.waitFor({ state: "visible", timeout: 30_000 });
+    await save.scrollIntoViewIfNeeded();
+    await save.click({ timeout: 15_000 });
+  }
+
+  /**
+   * Trust-only: with **Did you make a Net Profit last year?** unanswered, **Save** surfaces
+   * **Profit Declaration is required** (scoped to `app-trust-profit-declaration`).
+   */
+  async expectTrustProfitDeclarationRequiredAfterSave(): Promise<void> {
+    this.logStep("Expect Trust Profit Declaration Required After Save");
+    await this.waitForTrustFinancialPositionStep();
+    await this.clickTrustFinancialStepSave();
+    const host = this.trustProfitDeclarationHost();
+    await expect(host.getByText(/Profit Declaration is required\.?/i).first()).toBeVisible({
+      timeout: 20_000,
+    });
+  }
+
+  /**
+   * Trust-only: select **Yes** on `isNetProfitLastYear` so **Net Profit last year** amount is shown.
+   */
+  async selectTrustNetProfitLastYearYes(): Promise<void> {
+    this.logStep("Select Trust Net Profit Last Year Yes");
+    const host = this.trustProfitDeclarationHost();
+    await host.waitFor({ state: "visible", timeout: 60_000 });
+    await host.scrollIntoViewIfNeeded().catch(() => {});
+    const yesInput = host.locator('input[type="radio"][name="isNetProfitLastYear"][value="true"]');
+    await yesInput.waitFor({ state: "attached", timeout: 15_000 });
+    await yesInput.click({ force: true });
+    await this.page.waitForTimeout(400);
+    await host.locator("amount").locator("#amount").first().waitFor({ state: "visible", timeout: 20_000 });
+  }
+
+  /**
+   * Trust-only: **Yes** selected with **Net Profit last year** still **$0.00**, **Save** shows
+   * **Net Profit Last Year must be greater than 0** (scoped to profit declaration card).
+   */
+  async expectTrustNetProfitLastYearMustBeGreaterThanZeroAfterSave(): Promise<void> {
+    this.logStep("Expect Trust Net Profit Last Year Must Be Greater Than Zero After Save");
+    await this.waitForTrustFinancialPositionStep();
+    await this.clickTrustFinancialStepSave();
+    const host = this.trustProfitDeclarationHost();
+    await expect(host.getByText(/Net Profit Last Year must be greater than 0/i).first()).toBeVisible({
+      timeout: 20_000,
+    });
   }
 
   /**
@@ -617,6 +713,28 @@ export class DOFinancialPositionPage extends BasePage {
     ).toBeVisible({ timeout: 15_000 });
   }
 
+  /**
+   * After **Next** without completing Individual Financial Position (zero amounts, income-decrease radios untouched),
+   * expect QAT inline copy: at least two **Amount should be greater than 0** (e.g. Mortgage/Rent + Take Home Pay)
+   * and **Household income decrease option is required**.
+   */
+  async expectIndividualFinancialPositionAmountAndIncomeDecreaseValidationMessages(): Promise<void> {
+    this.logStep(
+      "Expect Individual Financial Position amount and income-decrease validation messages",
+    );
+    const root = this.financialRoot;
+    await root.waitFor({ state: "visible", timeout: 60_000 });
+    const amountMsgs = root.getByText(/Amount should be greater than 0/i);
+    await expect.poll(async () => amountMsgs.count()).toBeGreaterThanOrEqual(2);
+    await expect(amountMsgs.nth(0)).toBeVisible({ timeout: 15_000 });
+    await expect(amountMsgs.nth(1)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      root
+        .getByText(/Household income decrease option is required/i)
+        .first(),
+    ).toBeVisible({ timeout: 20_000 });
+  }
+
   /** `app-individual-asset-details` — row that contains `labelRx` and an `<amount>` control. */
   private amountInputInIndividualCardRow(card: Locator, labelRx: RegExp): Locator {
     return card
@@ -640,7 +758,7 @@ export class DOFinancialPositionPage extends BasePage {
       : card.getByText(/Home Ownership Type/i).first().locator("xpath=ancestor::div[.//p-dropdown][1]").locator("p-dropdown").first();
     const trigger = dd.locator(".p-dropdown-trigger, [aria-label='dropdown trigger']").first();
     await trigger.waitFor({ state: "visible", timeout: 20_000 });
-    await trigger.click({ timeout: 15_000 });
+    await this.clickPrimeDropdownTriggerAfterLoaderGone(trigger);
     await this.pickDropdownOption(optionLabel);
   }
 
@@ -670,7 +788,7 @@ export class DOFinancialPositionPage extends BasePage {
     const dd = card.locator(`p-dropdown[formcontrolname="financialAssetType"]`).first();
     const trigger = dd.locator(".p-dropdown-trigger, [aria-label='dropdown trigger']").first();
     await trigger.waitFor({ state: "visible", timeout: 20_000 });
-    await trigger.click({ timeout: 15_000 });
+    await this.clickPrimeDropdownTriggerAfterLoaderGone(trigger);
     await this.pickDropdownOption(optionLabel);
   }
 
@@ -697,8 +815,7 @@ export class DOFinancialPositionPage extends BasePage {
       .locator("xpath=ancestor::div[.//p-dropdown][1]");
     const trigger = row.locator(".p-dropdown-trigger, [aria-label='dropdown trigger']").first();
     await trigger.waitFor({ state: "visible", timeout: 20_000 });
-    await trigger.scrollIntoViewIfNeeded();
-    await trigger.click({ timeout: 15_000 });
+    await this.clickPrimeDropdownTriggerAfterLoaderGone(trigger);
     await this.pickDropdownOption("Monthly");
   }
 
@@ -978,104 +1095,6 @@ export class DOFinancialPositionPage extends BasePage {
     return this.profitDeclarationCardForBusiness();
   }
 
-   /** CSA-B **Financial Accounts** or **Sole Trader** — “Did you make a Net Profit last year?” → **No**. */
-   async selectBusinessNetProfitLastYearNo(): Promise<void> {
-    try {
-      await Promise.any([
-        this.businessFinancialRoot.waitFor({ state: "visible", timeout: 120000 }),
-        this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 120000 }),
-      ]);
-    } catch {
-      throw new Error(
-        "Financial Position: neither app-business-financial nor app-sole-trade-financial became visible.",
-      );
-    }
-    const card = await this.resolveProfitDeclarationScope();
-    await card.waitFor({ state: "visible", timeout: 20000 });
-    await card.evaluate((el: Element) => {
-      (el as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });
-    });
-    await this.page.waitForTimeout(200);
-
-    const noAlready = card.locator("p-radiobutton.p-radiobutton-checked").filter({
-      hasText: "No",
-    });
-    if (await noAlready.isVisible({ timeout: 800 }).catch(() => false)) {
-      return;
-    }
-
-    const profitLead = card
-      .getByText(/Did you make a Net Profit|Net Profit last year|Profit Declaration/i)
-      .first();
-    if (await profitLead.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      const fieldset = profitLead.locator(
-        "xpath=ancestor::*[self::fieldset or self::p-card or self::gen-card][1]",
-      );
-      const scopedNo = fieldset.getByText("No", { exact: true }).first();
-      if (await scopedNo.isVisible({ timeout: 2_500 }).catch(() => false)) {
-        await scopedNo.scrollIntoViewIfNeeded();
-        await scopedNo.click({ timeout: 15_000, force: true });
-        await this.page.waitForTimeout(450);
-        const nowChecked = card.locator("p-radiobutton.p-radiobutton-checked").filter({
-          hasText: "No",
-        });
-        if (await nowChecked.isVisible({ timeout: 1_500 }).catch(() => false)) {
-          return;
-        }
-      }
-    }
-
-    const noLabel = card.getByText("No", { exact: true }).first();
-    if (await noLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await noLabel.scrollIntoViewIfNeeded();
-      await noLabel.click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(400);
-      return;
-    }
-
-    const byRole = card.getByRole("radio", { name: /^no$/i });
-    if (await byRole.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await byRole.click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(400);
-      return;
-    }
-
-    const noBox = card.locator("p-radiobutton").filter({ hasText: "No" }).locator(".p-radiobutton-box").first();
-    if (await noBox.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await noBox.scrollIntoViewIfNeeded();
-      await noBox.click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(400);
-      return;
-    }
-
-    const radios = card.locator("p-radiobutton");
-    const count = await radios.count();
-    if (count >= 2) {
-      await radios.nth(0).locator(".p-radiobutton-box").click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(400);
-      return;
-    }
-
-    const noRb = card.locator("p-radiobutton").filter({ hasText: "No" }).first();
-    if (await noRb.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await noRb.scrollIntoViewIfNeeded();
-      await noRb.click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(400);
-      return;
-    }
-
-    const nativeRadios = card.locator("input[type='radio']");
-    if ((await nativeRadios.count()) >= 2) {
-      await nativeRadios.nth(0).click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(400);
-      return;
-    }
-
-    throw new Error(
-      "Profit declaration: could not select No for “Did you make a Net Profit last year?”",
-    );
-  }
-
   /** CSA-B **Financial Accounts** or **Sole Trader** — “Did you make a Net Profit last year?” → **Yes**. */
   async selectBusinessNetProfitLastYearYes(): Promise<void> {
     this.logStep("Select Business Net Profit Last Year Yes");
@@ -1172,6 +1191,91 @@ export class DOFinancialPositionPage extends BasePage {
 
     throw new Error(
       "Profit declaration: could not select Yes for “Did you make a Net Profit last year?”",
+    );
+  }
+
+  /** CSA-B / Sole Trader — “Did you make a Net Profit last year?” → **No** (native `value="false"` when present, else label / box). */
+  async selectBusinessNetProfitLastYearNo(): Promise<void> {
+    this.logStep("Select Business Net Profit Last Year No");
+    try {
+      await Promise.any([
+        this.businessFinancialRoot.waitFor({ state: "visible", timeout: 120000 }),
+        this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 120000 }),
+      ]);
+    } catch {
+      throw new Error(
+        "Financial Position: neither app-business-financial nor app-sole-trade-financial became visible.",
+      );
+    }
+    const card = await this.resolveProfitDeclarationScope();
+    await card.waitFor({ state: "visible", timeout: 20000 });
+
+    const noInput = card.locator('input[type="radio"][name="isNetProfitLastYear"][value="false"]');
+    if ((await noInput.count()) > 0) {
+      const first = noInput.first();
+      await first.waitFor({ state: "attached", timeout: 10_000 });
+      await first.scrollIntoViewIfNeeded().catch(() => {});
+      await first.click({ force: true, timeout: 15_000 });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const noAlready = card.locator("p-radiobutton.p-radiobutton-checked").filter({
+      hasText: "No",
+    });
+    if (await noAlready.isVisible({ timeout: 800 }).catch(() => false)) {
+      return;
+    }
+
+    const noLabel = card.getByText("No", { exact: true }).first();
+    if (await noLabel.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await noLabel.scrollIntoViewIfNeeded();
+      await noLabel.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const byRole = card.getByRole("radio", { name: /^no$/i });
+    if (await byRole.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await byRole.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const noBoxes = card.locator("p-radiobutton").filter({ hasText: "No" });
+    const noBox = noBoxes.locator(".p-radiobutton-box").first();
+    if (await noBox.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await noBox.scrollIntoViewIfNeeded();
+      await noBox.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const radios = card.locator("p-radiobutton");
+    const count = await radios.count();
+    if (count >= 2) {
+      await radios.nth(0).locator(".p-radiobutton-box").click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const noRb = card.locator("p-radiobutton").filter({ hasText: "No" }).first();
+    if (await noRb.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await noRb.scrollIntoViewIfNeeded();
+      await noRb.click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const nativeRadios = card.locator("input[type='radio']");
+    if ((await nativeRadios.count()) >= 1) {
+      await nativeRadios.nth(0).click({ timeout: 15000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    throw new Error(
+      "Profit declaration: could not select No for “Did you make a Net Profit last year?”",
     );
   }
 

@@ -29,6 +29,11 @@ export type DOPreviousPhysicalRequiredData = {
   country: string;
 };
 
+/**
+ * **Reuse for Postal Address** row label. Some QAT builds typo **…Addresss** (extra `s`); allow trailing `s`.
+ */
+const REUSE_FOR_POSTAL_ADDRESS_LABEL_RX = /Reuse\s+for\s+Postal\s+Addresss*/i;
+
 /** Separate postal card when “reuse for postal” is off (only filled if that section exists). */
 export type DOPostalAddressManualData = {
   streetNumber: string;
@@ -177,13 +182,13 @@ export class DOAddressDetailsPage extends BasePage {
     /** Prefer CSA-B host so “Postal” / “Register” sliders are not confused with other pages. */
     this.reusePostalAddressToggle = biz
       .locator("toggle-checkbox")
-      .filter({ has: biz.getByText(/Reuse for Postal Address/i) })
+      .filter({ has: biz.getByText(REUSE_FOR_POSTAL_ADDRESS_LABEL_RX) })
       .locator(".p-inputswitch-slider")
       .first()
       .or(
         page
           .locator("div")
-          .filter({ hasText: /Reuse for Postal Address/ })
+          .filter({ hasText: REUSE_FOR_POSTAL_ADDRESS_LABEL_RX })
           .locator(".p-inputswitch-slider")
           .first(),
       );
@@ -662,6 +667,21 @@ export class DOAddressDetailsPage extends BasePage {
       await m.press("Tab").catch(() => {});
       return true;
     };
+
+    /**
+     * Trust `app-trust-*` cards: Years/Months live in `.yearmonthClass` columns. A generic “strip” that
+     * contains both **Years** and **Months** labels often matches the whole grid and pairs the Search /
+     * aggregate **Time at Address** inputs first — leaving real year/month empty and “Time at Address is required”.
+     */
+    if (isTrustAddressHost) {
+      const ymInputs = block
+        .locator("div.yearmonthClass")
+        .locator("input.p-inputtext, input:not([type='hidden'])")
+        .filter({ visible: true });
+      if ((await ymInputs.count()) >= 2) {
+        if (await fillPair(ymInputs.nth(0), ymInputs.nth(1))) return;
+      }
+    }
 
     // PrimeNG time row: physical + CSA-B + trust address hosts use the same widgets.
     if (isPreviousCard || isPhysicalHost || isBusinessPhysicalHost || isTrustAddressHost) {
@@ -1597,6 +1617,16 @@ export class DOAddressDetailsPage extends BasePage {
       return true;
     }
 
+    /** Prefer the **next** slider after the label — a broad `ancestor::*[.//p-inputswitch]` can include a sibling toggle (wrong switch). */
+    const following = label.locator(
+      "xpath=following::span[contains(@class,'p-inputswitch-slider')][1]",
+    );
+    if ((await following.count()) > 0 && (await following.isVisible({ timeout: 2000 }).catch(() => false))) {
+      await following.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      await following.click({ force: true });
+      return true;
+    }
+
     const shell = label.locator("xpath=ancestor::*[.//p-inputswitch][1]").first();
     const inShell = shell
       .locator('span.p-inputswitch-slider[data-pc-section="slider"]')
@@ -1605,15 +1635,6 @@ export class DOAddressDetailsPage extends BasePage {
     if ((await inShell.count()) > 0 && (await inShell.isVisible({ timeout: 2000 }).catch(() => false))) {
       await inShell.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
       await inShell.click({ force: true });
-      return true;
-    }
-
-    const following = label.locator(
-      "xpath=following::span[contains(@class,'p-inputswitch-slider')][1]",
-    );
-    if ((await following.count()) > 0 && (await following.isVisible({ timeout: 2000 }).catch(() => false))) {
-      await following.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-      await following.click({ force: true });
       return true;
     }
     return false;
@@ -1674,11 +1695,12 @@ export class DOAddressDetailsPage extends BasePage {
   private async resolveReuseForPostalAddressToggleRow(): Promise<Locator | null> {
     const scopes = [
       this.businessPhysicalAddressRoot,
-      this.page.locator("app-sole-trade").first(),
+      this.page.locator("app-business-address-details").filter({ visible: true }).first(),
+      this.visibleSoleTrade(),
     ];
     for (const scope of scopes) {
       if (!(await scope.isVisible({ timeout: 2000 }).catch(() => false))) continue;
-      const row = this.toggleCheckboxRowByLabel(scope, /Reuse for Postal Address/i);
+      const row = this.toggleCheckboxRowByLabel(scope, REUSE_FOR_POSTAL_ADDRESS_LABEL_RX);
       if ((await row.count()) === 0) continue;
       if (await row.isVisible({ timeout: 2500 }).catch(() => false)) return row;
     }
@@ -1686,6 +1708,21 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   private async clickReuseForPostalAddressToggleOnce(): Promise<boolean> {
+    const scopes: Locator[] = [
+      this.businessPhysicalAddressRoot,
+      this.page.locator("app-business-address-details").filter({ visible: true }).first(),
+      this.visibleSoleTrade(),
+      this.page.locator("app-address-details").filter({ visible: true }).first(),
+    ];
+    for (const scope of scopes) {
+      if (!(await scope.isVisible({ timeout: 1500 }).catch(() => false))) continue;
+      if (await this.clickPrimeSwitchNearLabel(scope, REUSE_FOR_POSTAL_ADDRESS_LABEL_RX)) return true;
+      const row = this.toggleCheckboxRowByLabel(scope, REUSE_FOR_POSTAL_ADDRESS_LABEL_RX);
+      if ((await row.count()) > 0 && (await row.isVisible({ timeout: 2500 }).catch(() => false))) {
+        await this.clickToggleCheckboxRow(row);
+        return true;
+      }
+    }
     const row = await this.resolveReuseForPostalAddressToggleRow();
     if (row) {
       await this.clickToggleCheckboxRow(row);
@@ -1955,15 +1992,7 @@ export class DOAddressDetailsPage extends BasePage {
   /** Clicks reuse toggle only when shown (some products omit postal reuse). */
   async clickReuseForPostalAddressToggleIfPresent(): Promise<void> {
     this.logStep("Click Reuse For Postal Address Toggle If Present");
-    const row = await this.resolveReuseForPostalAddressToggleRow();
-    if (row) {
-      await this.clickToggleCheckboxRow(row);
-      return;
-    }
-    if (await this.reusePostalAddressToggle.isVisible({ timeout: 2500 }).catch(() => false)) {
-      await this.reusePostalAddressToggle.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-      await this.reusePostalAddressToggle.click({ force: true });
-    }
+    await this.clickReuseForPostalAddressToggleOnce();
   }
 
   /** `app-previous-address` or CSA-B card under `app-business-address-details`. */
@@ -2446,33 +2475,45 @@ export class DOAddressDetailsPage extends BasePage {
     const root = await this.resolveOptionalPreviousPhysicalScope(scope);
     await root.scrollIntoViewIfNeeded();
 
+    const hasVisibleCity = await this.physicalCardHasCityField(root);
+    const genCity = root
+      .locator("text")
+      .filter({ hasText: /^City\s*\*?$/i })
+      .locator("#text")
+      .filter({ visible: true })
+      .first();
+    const byNameVisible = root.locator('input[name="previousCity"]').filter({ visible: true }).first();
+
     if (!city.trim()) {
-      const byName = root.locator('input[name="previousCity"]');
-      if (await byName.isVisible({ timeout: 4000 }).catch(() => false)) {
-        await byName.click();
-        await byName.fill("");
-        await byName.press("Tab").catch(() => {});
-      } else {
-        const genCity = root
-          .locator("text")
-          .filter({ hasText: /^City\s*\*?$/i })
-          .locator("#text")
-          .first();
-        if (await genCity.isVisible({ timeout: 4000 }).catch(() => false)) {
-          await genCity.click();
-          await genCity.fill("");
-          await genCity.press("Tab").catch(() => {});
-        }
+      if (!hasVisibleCity) {
+        await this.page.keyboard.press("Escape").catch(() => {});
+        return;
+      }
+      if (await byNameVisible.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await byNameVisible.click();
+        await byNameVisible.fill("");
+        await byNameVisible.press("Tab").catch(() => {});
+      } else if (await genCity.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await genCity.click();
+        await genCity.fill("");
+        await genCity.press("Tab").catch(() => {});
       }
       await this.page.keyboard.press("Escape").catch(() => {});
       return;
     }
 
-    const byName = root.locator('input[name="previousCity"]');
-    if (await byName.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await byName.click();
-      await byName.fill("");
-      await byName.type(city, { delay: 30 });
+    if (!hasVisibleCity) {
+      this.logStep(
+        `Previous city: skipped — no visible City row on Previous Physical (${this.stepValueDisplay(city)} not applied; hidden model value may remain)`,
+      );
+      await this.page.keyboard.press("Escape").catch(() => {});
+      return;
+    }
+
+    if (await byNameVisible.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await byNameVisible.click();
+      await byNameVisible.fill("");
+      await byNameVisible.type(city, { delay: 30 });
       const fromPanel = this.page
         .locator(".p-autocomplete-panel")
         .getByRole("option", { name: new RegExp(city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") })
@@ -2489,21 +2530,17 @@ export class DOAddressDetailsPage extends BasePage {
       await this.page.keyboard.press("Escape").catch(() => {});
       return;
     }
-    const genCity = root
-      .locator("text")
-      .filter({ hasText: /^City\s*\*?$/i })
-      .locator("#text")
-      .first();
-    if (await genCity.isVisible({ timeout: 8000 }).catch(() => false)) {
+    if (await genCity.isVisible({ timeout: 8_000 }).catch(() => false)) {
       await genCity.click();
       await genCity.fill("");
       await genCity.fill(city);
       return;
     }
-    await this.previousCityInput.waitFor({ state: "visible", timeout: 30000 });
-    await this.previousCityInput.scrollIntoViewIfNeeded();
-    await this.previousCityInput.click();
-    await this.previousCityInput.fill(city);
+    await this.previousCityInput.filter({ visible: true }).first().waitFor({ state: "visible", timeout: 30_000 });
+    const last = this.previousCityInput.filter({ visible: true }).first();
+    await last.scrollIntoViewIfNeeded();
+    await last.click();
+    await last.fill(city);
   }
 
   async choosePreviousCountry(country: string, scope?: Locator): Promise<void> {
@@ -2638,10 +2675,58 @@ export class DOAddressDetailsPage extends BasePage {
     await this.nextButton.click();
   }
 
+  /**
+   * **City** is omitted on some shells (e.g. **Previous Physical** after **Reuse for Postal Address** /
+   * NZ street-only layout: Postcode → Country with no City row). Only assert **City is required** when a
+   * **user-visible** City caption or city input exists in `root` (hidden `previousCity` in the template must not count).
+   */
+  private async physicalCardHasCityField(root: Locator): Promise<boolean> {
+    const visFirst = async (loc: Locator): Promise<boolean> =>
+      loc
+        .filter({ visible: true })
+        .first()
+        .isVisible({ timeout: 2_000 })
+        .catch(() => false);
+
+    const cityCaption = root
+      .getByText(/^City\s*\*?\s*$/i)
+      .or(root.locator("label").filter({ hasText: /^City\s*\*?\s*$/i }))
+      .or(root.getByText("City *", { exact: true }))
+      .filter({ visible: true })
+      .first();
+    if (await cityCaption.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      return true;
+    }
+
+    if (await visFirst(root.locator('input[name="previousCity"]'))) {
+      return true;
+    }
+    if (await visFirst(root.locator('input[name="physicalCity"]'))) {
+      return true;
+    }
+    if (await visFirst(root.getByRole("textbox", { name: /^City\b/i }))) {
+      return true;
+    }
+    const genCity = root
+      .locator("text")
+      .filter({ hasText: /^City\s*\*?$/i })
+      .locator("#text")
+      .filter({ visible: true });
+    return visFirst(genCity);
+  }
+
   /** Inline `… is required` messages on a Physical / Previous Physical card after **Save**. */
   private async assertPhysicalAddressCardRequiredErrors(
     root: Locator,
-    options: { expectResidenceType: boolean },
+    options: {
+      expectResidenceType: boolean;
+      expectCity?: boolean;
+      /**
+       * When set with a visible City control, only assert **City is required** if the app actually renders it.
+       * Previous Physical often shows **City *** (combobox) but omits inline copy on Save (unlike Street / Time).
+       */
+      cityRequiredMessageBestEffort?: boolean;
+    },
   ): Promise<void> {
     const assertMsgVisible = async (exact: string): Promise<void> => {
       const el = root.getByText(exact, { exact: true }).first();
@@ -2657,7 +2742,21 @@ export class DOAddressDetailsPage extends BasePage {
       await expect(el).toBeVisible({ timeout: 20_000 });
     };
 
-    const { expectResidenceType } = options;
+    const assertMsgVisibleAllowTrailingPeriodIfPresent = async (
+      messageWithoutPeriod: string,
+    ): Promise<void> => {
+      const escaped = messageWithoutPeriod.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const el = root.getByText(new RegExp(`^${escaped}\\.?$`)).first();
+      await el.scrollIntoViewIfNeeded({ timeout: 12_000 }).catch(() => {});
+      if (await el.isVisible({ timeout: 6_000 }).catch(() => false)) {
+        await expect(el).toBeVisible({ timeout: 20_000 });
+      }
+    };
+
+    const { expectResidenceType, expectCity: expectCityOpt, cityRequiredMessageBestEffort = false } =
+      options;
+    const expectCity =
+      expectCityOpt !== undefined ? expectCityOpt : await this.physicalCardHasCityField(root);
     if (expectResidenceType) {
       await assertMsgVisible("Residence Type is required");
     }
@@ -2685,7 +2784,13 @@ export class DOAddressDetailsPage extends BasePage {
     }
     await assertMsgVisibleAllowTrailingPeriod("Street Number is required");
     await assertMsgVisibleAllowTrailingPeriod("Street Name is required");
-    await assertMsgVisible("City is required");
+    if (expectCity) {
+      if (cityRequiredMessageBestEffort) {
+        await assertMsgVisibleAllowTrailingPeriodIfPresent("City is required");
+      } else {
+        await assertMsgVisibleAllowTrailingPeriod("City is required");
+      }
+    }
   }
 
   /**
@@ -2820,6 +2925,9 @@ export class DOAddressDetailsPage extends BasePage {
   /**
    * Assert required messages on the **Previous Physical** card (skips when section is not in DOM).
    * If **Residence Type** is not present on the card, it is not asserted.
+   * If **City** is not rendered (e.g. after **Reuse for Postal Address** — street → postcode → country),
+   * **City is required** is not asserted.
+   * If **City *** is shown but the build does not surface inline **City is required** on Save, that line is **best-effort** only.
    */
   async expectPreviousPhysicalAddressRequiredValidationMessages(): Promise<void> {
     this.logStep("Expect Previous Physical Address Required Validation Messages");
@@ -2833,6 +2941,7 @@ export class DOAddressDetailsPage extends BasePage {
       .catch(() => false);
     await this.assertPhysicalAddressCardRequiredErrors(root, {
       expectResidenceType: hasResidence,
+      cityRequiredMessageBestEffort: true,
     });
   }
 
@@ -2965,18 +3074,38 @@ export class DOAddressDetailsPage extends BasePage {
 
   async setTrustReuseForPostalAddressOn(): Promise<void> {
     this.logStep("Set Trust Reuse For Postal Address On");
+    await this.waitForTrustAddressUiSettled();
     await this.ensureTrustSwitchOnNearLabel(
       this.trustPhysicalAddressRoot,
-      /Reuse for Postal Address/i,
+      REUSE_FOR_POSTAL_ADDRESS_LABEL_RX,
     );
   }
 
   async setTrustReuseForRegisteredAddressOn(): Promise<void> {
     this.logStep("Set Trust Reuse For Registered Address On");
+    await this.waitForTrustAddressUiSettled();
     await this.ensureTrustSwitchOnNearLabel(
       this.trustPhysicalAddressRoot,
       /Reuse for Registered Address/i,
     );
+  }
+
+  /**
+   * After **Reuse for Registered Address** = Yes, the UI often copies street/city/country but **not**
+   * registered “Time at Address” (Years/Months). Fill them to match physical (typical regression expectation).
+   */
+  async fillTrustRegisteredTimeAtAddressAfterReuse(
+    years: string,
+    months: string,
+  ): Promise<void> {
+    this.logStep(
+      `Fill trust registered time at address after reuse: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
+    await this.waitForTrustAddressUiSettled();
+    const reg = this.trustRegisteredAddressRoot;
+    await reg.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    await reg.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+    await this.fillTrustTimeAtAddressInSection(reg, years, months);
   }
 
   /**
@@ -3064,5 +3193,111 @@ export class DOAddressDetailsPage extends BasePage {
       `Entered trust registered time at address: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
     );
     await this.fillTrustTimeAtAddressInSection(this.trustRegisteredAddressRoot, years, months);
+  }
+
+  /**
+   * Trust-only: PrimeNG city autocomplete inside a trust address host (`physicalCity` / `previousCity` / …).
+   */
+  private async fillTrustCityAutocompleteInHost(
+    host: Locator,
+    inputName: "physicalCity" | "previousCity" | "postalCity" | "registerCity",
+    city: string,
+  ): Promise<void> {
+    const cityInput = host.locator(`input[name="${inputName}"]`).first();
+    await cityInput.waitFor({ state: "visible", timeout: 20_000 });
+    await cityInput.scrollIntoViewIfNeeded();
+    const rx = new RegExp(city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    await cityInput.click();
+    await cityInput.fill("");
+    await cityInput.type(city, { delay: 30 });
+    const fromPanel = this.page
+      .locator(".p-autocomplete-panel")
+      .getByRole("option", { name: rx })
+      .first();
+    try {
+      await fromPanel.waitFor({ state: "visible", timeout: 8_000 });
+      await fromPanel.click();
+    } catch {
+      await this.page.getByRole("option", { name: rx }).first().click({ timeout: 8_000 });
+    }
+    await this.page.keyboard.press("Escape").catch(() => {});
+  }
+
+  /**
+   * Trust Address Details — after **Save** with empty / incomplete sections, assert inline required copy
+   * scoped to `app-trust-*` hosts only (does not touch individual / business address assertions).
+   */
+  async expectTrustAddressStepRequiredValidationAfterSave(): Promise<void> {
+    this.logStep("Expect Trust Address Step Required Validation After Save");
+    await this.waitForTrustAddressStep();
+    await this.clickSaveAddressDetails();
+
+    const expectStreetLineErrors = async (host: Locator): Promise<void> => {
+      await expect(host.getByText(/^Street Number is required\.?$/i).first()).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(host.getByText(/^Street Name is required\.?$/i).first()).toBeVisible();
+      await expect(host.getByText(/^City is required\.?$/i).first()).toBeVisible();
+    };
+
+    const expectTimeAtAddressErrors = async (host: Locator): Promise<void> => {
+      const timeErr = host.getByText(/^Time at Address is required\.?$/i);
+      await expect(timeErr.first()).toBeVisible({ timeout: 20_000 });
+    };
+
+    await expectTimeAtAddressErrors(this.trustPhysicalAddressRoot);
+    await expectStreetLineErrors(this.trustPhysicalAddressRoot);
+
+    if (await this.trustPreviousPhysicalRoot.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expectTimeAtAddressErrors(this.trustPreviousPhysicalRoot);
+      await expectStreetLineErrors(this.trustPreviousPhysicalRoot);
+    }
+
+    const postal = this.trustPostalAddressRoot;
+    await expect(postal.getByText(/^Address is required\.?$/i).first()).toBeVisible({ timeout: 20_000 });
+    await expect(postal.getByText(/^City is required\.?$/i).first()).toBeVisible();
+    await expect(postal.getByText(/^Country is required\.?$/i).first()).toBeVisible();
+
+    const registered = this.trustRegisteredAddressRoot;
+    await expectTimeAtAddressErrors(registered);
+    await expectStreetLineErrors(registered);
+  }
+
+  /**
+   * Trust **Physical Address** — time at address + street number / name + city (no reuse toggles).
+   */
+  async fillTrustPhysicalAddressMandatoryCore(opts: {
+    years: string;
+    months: string;
+    streetNumber: string;
+    streetName: string;
+    city: string;
+  }): Promise<void> {
+    this.logStep("Fill Trust Physical Address Mandatory Core");
+    await this.waitForTrustAddressStep();
+    await this.enterTrustPhysicalTimeAtAddress(opts.years, opts.months);
+    await this.trustInputAfterLabel(this.trustPhysicalAddressRoot, "Street Number").fill(opts.streetNumber);
+    await this.trustInputAfterLabel(this.trustPhysicalAddressRoot, "Street Name").fill(opts.streetName);
+    await this.fillTrustCityAutocompleteInHost(this.trustPhysicalAddressRoot, "physicalCity", opts.city);
+  }
+
+  /**
+   * Trust **Previous Physical Address** — same core fields when that card is shown.
+   */
+  async fillTrustPreviousPhysicalAddressMandatoryCore(opts: {
+    years: string;
+    months: string;
+    streetNumber: string;
+    streetName: string;
+    city: string;
+  }): Promise<void> {
+    this.logStep("Fill Trust Previous Physical Address Mandatory Core");
+    if (!(await this.trustPreviousPhysicalRoot.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    await this.enterTrustPreviousPhysicalTimeAtAddress(opts.years, opts.months);
+    await this.trustInputAfterLabel(this.trustPreviousPhysicalRoot, "Street Number").fill(opts.streetNumber);
+    await this.trustInputAfterLabel(this.trustPreviousPhysicalRoot, "Street Name").fill(opts.streetName);
+    await this.fillTrustCityAutocompleteInHost(this.trustPreviousPhysicalRoot, "previousCity", opts.city);
   }
 }

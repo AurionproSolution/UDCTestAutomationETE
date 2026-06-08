@@ -622,15 +622,22 @@ export class DOEmploymentDetailsPage extends BasePage {
     await this.scrollPreviousEmploymentSectionIntoViewForValidation();
     const root = await this.resolvePreviousEmploymentFormRoot();
 
-    const assertMsg = async (exact: string): Promise<void> => {
+    const assertMsgExact = async (exact: string): Promise<void> => {
       const el = root.getByText(exact, { exact: true }).first();
       await el.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
       await expect(el).toBeVisible({ timeout: 20_000 });
     };
 
-    await assertMsg("Employer Name is required");
-    await assertMsg("Occupation is required");
-    await assertMsg("Employment Type Required");
+    /** QAT / Angular templates vary title case (e.g. **Employer name** vs **Employer Name**). */
+    const assertMsgRx = async (pattern: RegExp): Promise<void> => {
+      const el = root.getByText(pattern).first();
+      await el.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+      await expect(el).toBeVisible({ timeout: 20_000 });
+    };
+
+    await assertMsgRx(/Employer name is required/i);
+    await assertMsgExact("Occupation is required");
+    await assertMsgRx(/Employment Type\s+is\s+required|Employment Type Required/i);
 
     const typo = root.getByText("Time with Employeer is required", { exact: true });
     const correct = root.getByText("Time with Employer is required", { exact: true });
@@ -664,15 +671,22 @@ export class DOEmploymentDetailsPage extends BasePage {
     await this.scrollCurrentEmploymentSectionIntoViewForValidation();
     const root = await this.resolveEmploymentFormRoot();
 
-    const assertMsg = async (exact: string): Promise<void> => {
+    const assertMsgExact = async (exact: string): Promise<void> => {
       const el = root.getByText(exact, { exact: true }).first();
       await el.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
       await expect(el).toBeVisible({ timeout: 20_000 });
     };
 
-    await assertMsg("Employer Name is required");
-    await assertMsg("Occupation is required");
-    await assertMsg("Employment Type Required");
+    /** QAT / Angular templates vary title case (e.g. **Employer name** vs **Employer Name**). */
+    const assertMsgRx = async (pattern: RegExp): Promise<void> => {
+      const el = root.getByText(pattern).first();
+      await el.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+      await expect(el).toBeVisible({ timeout: 20_000 });
+    };
+
+    await assertMsgRx(/Employer name is required/i);
+    await assertMsgExact("Occupation is required");
+    await assertMsgRx(/Employment Type\s+is\s+required|Employment Type Required/i);
 
     const timeMsg = root.getByText("Time with Employer is required", {
       exact: true,
@@ -684,7 +698,7 @@ export class DOEmploymentDetailsPage extends BasePage {
       await expect(timeMsg.nth(0)).toBeVisible({ timeout: 15_000 });
       await expect(timeMsg.nth(1)).toBeVisible({ timeout: 15_000 });
     } catch {
-      await assertMsg("Time with Employer is required");
+      await assertMsgRx(/Time with Employer is required/i);
     }
   }
 

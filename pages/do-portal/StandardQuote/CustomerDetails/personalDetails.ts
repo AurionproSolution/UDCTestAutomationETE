@@ -1,4 +1,4 @@
-import { Locator, Page } from "@playwright/test";
+import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../..";
 
 export class DOPersonalDetailsPage extends BasePage {
@@ -20,6 +20,8 @@ export class DOPersonalDetailsPage extends BasePage {
   readonly countryOfBirthDropdown: Locator;
   readonly countryOfCitizenshipDropdown: Locator;
   readonly nextButton: Locator;
+  /** Outlined **Save** on Personal Details (same Prime pattern as Address / Employment). */
+  readonly savePersonalDetailsButton: Locator;
 
   constructor(page: Page) {
     super(page);
@@ -78,6 +80,84 @@ export class DOPersonalDetailsPage extends BasePage {
       `//label[text()='Country of Citizenship']/following-sibling::div//div[@aria-label='dropdown trigger']`,
     );
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
+    /**
+     * **Save** is a Prime outlined button (`p-button-outlined` + label `Save`) in the quote **footer** —
+     * it is **not** a descendant of `app-personal-details`, so scope to the quote shell then fall back to page.
+     */
+    const outlinedSaveSel =
+      "button.p-ripple.p-element.p-button.p-component.p-button-outlined";
+    this.savePersonalDetailsButton = page
+      .locator("app-quote-details, app-standard-quote")
+      .first()
+      .locator(outlinedSaveSel)
+      .filter({ hasText: /^Save$/i })
+      .or(page.locator(outlinedSaveSel).filter({ hasText: /^Save$/i }))
+      .first();
+  }
+
+  protected stepLogPrefix(): string {
+    return "Standard quote — Personal details";
+  }
+
+  /**
+   * **.app-loader-overlay** + `p-progressspinner` sits above the stepper footer and intercepts clicks on **Next**.
+   * Poll every overlay until none are visible (same pattern as {@link DOAssetDetailsPage}).
+   */
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const overlays = this.page.locator(".app-loader-overlay");
+      const count = await overlays.count();
+      let anyVisible = false;
+      for (let i = 0; i < count; i++) {
+        if (await overlays.nth(i).isVisible().catch(() => false)) {
+          anyVisible = true;
+          break;
+        }
+      }
+      if (!anyVisible) {
+        return;
+      }
+      await this.page.waitForTimeout(200);
+    }
+  }
+
+  /**
+   * PrimeNG dropdowns have **no** blank list row. For an **empty** value in validation flows: open the
+   * **trigger**, wait briefly for the panel (if any), then **Escape** — same “touch without selection”
+   * pattern as Address **Residence Type** so Save surfaces **… is required** where the app validates touched fields.
+   */
+  private async leaveDropdownUnsetIfEmpty(
+    fieldLabel: string,
+    value: string,
+    trigger: Locator,
+  ): Promise<boolean> {
+    if (value.trim()) {
+      return false;
+    }
+    this.logStep(`${fieldLabel}: touch dropdown without selection (empty required path)`);
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await trigger.scrollIntoViewIfNeeded({ timeout: 12_000 }).catch(() => {});
+    if (await trigger.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      try {
+        await trigger.click({ timeout: 12_000 });
+      } catch {
+        await trigger.click({ force: true, timeout: 12_000 });
+      }
+      await this.page
+        .getByRole("listbox")
+        .first()
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .catch(() => {});
+      await this.page.keyboard.press("Escape").catch(() => {});
+      await this.page
+        .getByRole("listbox")
+        .first()
+        .waitFor({ state: "hidden", timeout: 8_000 })
+        .catch(() => {});
+    }
+    await this.page.waitForTimeout(150);
+    return true;
   }
 
   async selectTitle(): Promise<void> {
@@ -87,6 +167,9 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.page.getByRole("option", { name: title, exact: true }).click();
   }
   async chooseTitle(title: string): Promise<void> {
+    if (await this.leaveDropdownUnsetIfEmpty("Title", title, this.titleDropdown)) {
+      return;
+    }
     await this.selectTitle();
     await this.selectTitleOption(title);
   }
@@ -109,6 +192,9 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.page.getByRole("option", { name: gender, exact: true }).click();
   }
   async chooseGender(gender: string): Promise<void> {
+    if (await this.leaveDropdownUnsetIfEmpty("Gender", gender, this.genderDropdown)) {
+      return;
+    }
     await this.selectGender(gender);
     await this.selectGenderOption(gender);
   }
@@ -192,6 +278,9 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseMarritalStatus(maritalStatus: string): Promise<void> {
+    if (await this.leaveDropdownUnsetIfEmpty("Marital Status", maritalStatus, this.maritalStatusDropdown)) {
+      return;
+    }
     await this.selectMarritalStatus(maritalStatus);
     await this.selectMarritalStatusOption(maritalStatus);
   }
@@ -204,6 +293,9 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseNoOfDependents(noOfDependents: string): Promise<void> {
+    if (await this.leaveDropdownUnsetIfEmpty("No. of Dependants", noOfDependents, this.noOfDependentsDropdown)) {
+      return;
+    }
     await this.selectNoOfDependents(noOfDependents);
     await this.selectNoOfDependentsOption(noOfDependents);
     await this.page
@@ -296,6 +388,9 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseLicenceType(licenceType: string): Promise<void> {
+    if (await this.leaveDropdownUnsetIfEmpty("Licence Type", licenceType, this.licenceTypeDropdown)) {
+      return;
+    }
     await this.selectLicenceTypeDropdown();
     await this.selectLicenceTypeOption(licenceType);
   }
@@ -308,6 +403,9 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseCountryOfIssue(countryOfIssue: string): Promise<void> {
+    if (await this.leaveDropdownUnsetIfEmpty("Country of Issue", countryOfIssue, this.CountryOfIssueDropDown)) {
+      return;
+    }
     await this.selectCountryOfIssue();
     await this.selectCountryOfIssueOption(countryOfIssue);
   }
@@ -327,6 +425,9 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseNewZealandResident(residentStatus: string): Promise<void> {
+    if (await this.leaveDropdownUnsetIfEmpty("New Zealand Resident", residentStatus, this.newZealandResidentDropdown)) {
+      return;
+    }
     await this.selectNewZealandResident();
     await this.selectNewZealandResidentOption(residentStatus);
   }
@@ -339,6 +440,9 @@ export class DOPersonalDetailsPage extends BasePage {
       .click();
   }
   async chooseCountryOfBirth(countryOfBirth: string): Promise<void> {
+    if (await this.leaveDropdownUnsetIfEmpty("Country of Birth", countryOfBirth, this.countryOfBirthDropdown)) {
+      return;
+    }
     await this.selectCountryOfBirth();
     await this.selectCountryOfBirthOption(countryOfBirth);
   }
@@ -355,42 +459,158 @@ export class DOPersonalDetailsPage extends BasePage {
   async chooseCountryOfCitizenship(
     countryOfCitizenship: string,
   ): Promise<void> {
+    if (
+      await this.leaveDropdownUnsetIfEmpty(
+        "Country of Citizenship",
+        countryOfCitizenship,
+        this.countryOfCitizenshipDropdown,
+      )
+    ) {
+      return;
+    }
     await this.selectCountryOfCitizenship();
     await this.selectCountryOfCitizenshipOption(countryOfCitizenship);
   }
+
+  async clickSavePersonalDetails(): Promise<void> {
+    this.logStep("Click Save Personal Details");
+    await this.personalDetailsRoot.waitFor({ state: "visible", timeout: 60_000 });
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.savePersonalDetailsButton
+      .scrollIntoViewIfNeeded({ timeout: 20_000 })
+      .catch(() => {});
+    await this.savePersonalDetailsButton.waitFor({ state: "visible", timeout: 60_000 });
+    await this.savePersonalDetailsButton.click({ timeout: 15_000 });
+  }
+
+  /**
+   * After **Save** with required Personal Details left unset, expect inline validation under `app-personal-details`.
+   * - **Title** and **No. of Dependants/Dependents** may not show inline copy on every Save/build — **best-effort**.
+   * - **Gender** (and other touched Prime dropdowns) should surface **… is required** after open → Escape + Save.
+   * - Messages often end with **`.`** — patterns allow an optional full stop.
+   * - Scroll each line into view: long forms hide top errors when the viewport is on Contact / Licence.
+   * @param options.lastNameMayBeFilled — when `true`, **Last name is required** is optional (e.g. stepper submit with only last name filled).
+   */
+  async expectPersonalDetailsRequiredValidationMessages(
+    options?: { lastNameMayBeFilled?: boolean },
+  ): Promise<void> {
+    this.logStep("Expect Personal Details required validation messages");
+    const root = this.personalDetailsRoot;
+    await root.waitFor({ state: "visible", timeout: 60_000 });
+    await root
+      .evaluate((el: Element) => {
+        (el as HTMLElement).scrollIntoView({ block: "start", behavior: "instant" });
+      })
+      .catch(() => {});
+
+    const expectMsgIfPresent = async (pattern: RegExp): Promise<void> => {
+      const el = root.getByText(pattern).first();
+      await el.scrollIntoViewIfNeeded({ timeout: 12_000 }).catch(() => {});
+      if (await el.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await expect(el).toBeVisible({ timeout: 12_000 });
+      }
+    };
+
+    const expectMsg = async (pattern: RegExp): Promise<void> => {
+      const el = root.getByText(pattern).first();
+      await el.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+      await expect(el).toBeVisible({ timeout: 20_000 });
+    };
+
+    await expectMsgIfPresent(/Title is required\.?|Please select.*[Tt]itle\.?/i);
+
+    await expectMsg(/First name is required\.?/i);
+    if (options?.lastNameMayBeFilled) {
+      await expectMsgIfPresent(/Last name is required\.?/i);
+    } else {
+      await expectMsg(/Last name is required\.?/i);
+    }
+    await expectMsg(/Date of [Bb]irth is required\.?/i);
+    await expectMsg(/Gender is required\.?/i);
+    await expectMsg(/Marital [Ss]tatus is required\.?/i);
+    await expectMsgIfPresent(
+      /No\.\s*of\s*Depend(?:ants|ents) is required\.?|Number of Depend(?:ants|ents) is required\.?/i,
+    );
+
+    await expectMsg(/Email is required\.?/i);
+    await expectMsg(
+      /Mobile\s+[Nn]umber is required\.?|Phone\s+[Nn]umber is required\.?|Area code is required\.?/i,
+    );
+
+    await expectMsgIfPresent(/Licence [Tt]ype is required\.?/i);
+    await expectMsgIfPresent(/New Zealand Resident\??\s+is required\.?/i);
+    await expectMsgIfPresent(/Country of [Bb]irth is required\.?/i);
+    await expectMsgIfPresent(/Country of [Cc]itizenship is required\.?/i);
+  }
+
+  /**
+   * After **Save** with invalid phone / email / licence identifiers, expect format messages where the app shows them.
+   */
+  async expectPersonalDetailsInvalidFormatValidationMessages(): Promise<void> {
+    this.logStep("Expect Personal Details invalid format validation messages");
+    const root = this.personalDetailsRoot;
+    await root.waitFor({ state: "visible", timeout: 60_000 });
+
+    await expect(
+      root
+        .getByText("Phone Number is in an incorrect format", { exact: true })
+        .or(root.getByText("Phone number is in an incorrect format", { exact: true }))
+        .or(root.getByText(/Phone.{0,40}incorrect format/i))
+        .first(),
+    ).toBeVisible({ timeout: 20_000 });
+
+    await expect(
+      root.getByText("Email is in an incorrect format", { exact: true }).first(),
+    ).toBeVisible({ timeout: 20_000 });
+
+    const assertFormatIfShown = async (pattern: RegExp): Promise<void> => {
+      const el = root.getByText(pattern).first();
+      if (await el.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await expect(el).toBeVisible({ timeout: 5_000 });
+      }
+    };
+
+    await assertFormatIfShown(/First [Nn]ame.{0,40}incorrect format/i);
+    await assertFormatIfShown(/Last [Nn]ame.{0,40}incorrect format/i);
+    await assertFormatIfShown(/Licence Number.{0,60}(incorrect|invalid|format)/i);
+    await assertFormatIfShown(/Version Number.{0,60}(incorrect|invalid|format)/i);
+  }
+
   async clickNextButton(): Promise<void> {
-    const startTime = Date.now();
-    try {
-      await this.nextButton.waitFor({ state: "visible", timeout: 120000 });
-      console.log(`⏱️ clickNextButton: button visible after ${Date.now() - startTime}ms`);
-     
-      for (let i = 0; i < 120; i++) {
-        if (await this.nextButton.isEnabled().catch(() => false)) break;
-        await this.page.waitForTimeout(500);
+    this.logStep("Click Next (Personal Details)");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.nextButton.waitFor({ state: "visible", timeout: 120_000 });
+    for (let i = 0; i < 120; i++) {
+      if (await this.nextButton.isEnabled().catch(() => false)) {
+        break;
       }
-      console.log(`⏱️ clickNextButton: button enabled after ${Date.now() - startTime}ms`);
-     
-      await this.nextButton.scrollIntoViewIfNeeded();
-      await this.clickElement(this.nextButton);
-      console.log(`⏱️ clickNextButton: click done after ${Date.now() - startTime}ms`);
-     
-      // Guard against page closure and reduce blocking waits
-      if (!this.page.isClosed()) {
-        await this.page.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
-        console.log(`⏱️ clickNextButton: domcontentloaded done after ${Date.now() - startTime}ms`);
-      }
-      if (!this.page.isClosed()) {
-        await this.page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
-        console.log(`⏱️ clickNextButton: networkidle done after ${Date.now() - startTime}ms`);
-      }
-    } catch (err) {
-      console.error(`❌ clickNextButton failed after ${Date.now() - startTime}ms:`, err);
-      throw err;
+      await this.page.waitForTimeout(500);
     }
     await this.nextButton.scrollIntoViewIfNeeded();
-    await this.clickElement(this.nextButton);
-    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
-    await this.page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+      }
+      try {
+        if (attempt === 0) {
+          await this.clickElement(this.nextButton, 60_000);
+        } else {
+          await this.nextButton.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => {});
+          await this.nextButton.click({ force: true, timeout: 30_000 });
+        }
+        break;
+      } catch (err) {
+        if (attempt === 2) {
+          throw err;
+        }
+        await this.page.waitForTimeout(500);
+      }
+    }
+    if (!this.page.isClosed()) {
+      await this.page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
+      await this.page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
+    }
   }
 }
  
