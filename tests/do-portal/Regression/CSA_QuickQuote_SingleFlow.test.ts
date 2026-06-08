@@ -1334,20 +1334,20 @@ test("CSAC Assigned - Create Standard Quote only Customer Validations", async ({
     await trustDetailsPage.nextButton.click();
 
     await addressDetailsPage.expectTrustAddressStepRequiredValidationAfterSave();
-    // await addressDetailsPage.fillTrustPhysicalAddressMandatoryCore({
-    //   years: "1",
-    //   months: "1",
-    //   streetNumber: "123",
-    //   streetName: "Main Street",
-    //   city: "Wellington",
-    // });
-    // await addressDetailsPage.fillTrustPreviousPhysicalAddressMandatoryCore({
-    //   years: "1",
-    //   months: "0",
-    //   streetNumber: "123",
-    //   streetName: "Main Street",
-    //   city: "Wellington",
-    // });
+    await addressDetailsPage.fillTrustPhysicalAddressMandatoryCore({
+      years: "1",
+      months: "1",
+      streetNumber: "123",
+      streetName: "Main Street",
+      city: "Wellington",
+    });
+    await addressDetailsPage.fillTrustPreviousPhysicalAddressMandatoryCore({
+      years: "1",
+      months: "0",
+      streetNumber: "123",
+      streetName: "Main Street",
+      city: "Wellington",
+    });
     await addressDetailsPage.setTrustReuseForPostalAddressOn();
     await addressDetailsPage.setTrustReuseForRegisteredAddressOn();
     // Reuse copies lines into Registered but usually leaves Years/Months empty — align with physical.
