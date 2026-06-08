@@ -123,6 +123,8 @@ Start: <URL or menu path to first screen>
 
 When scoring a row, search the **full requirements corpus** (Description + comment bodies + AC field), not Description alone.
 
+**Gate rule (aligned with the team template):** The ticket is **ready** only when **every** row in the table passes on that corpus; each block must be **non-empty and specific** (no “TBD”, no single vague line for Steps or AC). If **Screenshot / reference** is missing only for **non-UI** work, or **Steps** and **Acceptance criteria** together fully describe every visible outcome, apply the waiver below.
+
 **Screenshot / reference waiver:** If the work is **non-UI** (no browser assertions) **or** **Steps** and **Acceptance criteria** together fully describe every visible outcome, treat this block as satisfied without an attachment. Otherwise require a screenshot, recording, or link.
 
 **Fail examples:** “TBD”, empty **and** no comment supplies the block, AC that does not state what appears on screen anywhere in corpus, missing portal or start path in **Description and all scanned comments**, only title with no steps anywhere in corpus.

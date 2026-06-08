@@ -330,6 +330,7 @@ const environments = {
 
 ## 📚 Documentation
 
+- **[Beginner guide — Playwright in VS Code, Test Explorer, packages, MCP (Jira), and Cursor agents](docs/BEGINNER-GUIDE-PLAYWRIGHT-CURSOR-JIRA.md)** ([DOCX](docs/BEGINNER-GUIDE-PLAYWRIGHT-CURSOR-JIRA.docx)) — product-agnostic onboarding (install, extension, libraries, Testing sidebar); optional appendix for this repo
 - [Playwright Documentation](https://playwright.dev/docs/intro)
 - [TypeScript Documentation](https://www.typescriptlang.org/docs/)
 - [Ortoni Report](https://www.npmjs.com/package/ortoni-report)
