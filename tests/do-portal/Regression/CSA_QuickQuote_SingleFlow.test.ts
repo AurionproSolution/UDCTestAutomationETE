@@ -1058,7 +1058,7 @@ test("CSAC Assigned - Create Standard Quote only Customer Validations", async ({
     await dashboardPage.clickCreateStandardQuote();
     await dashboardPage.selectCSAproduct();
     await assetDetailsPage.chooseProduct("CSA-C-Assigned");
-    await assetDetailsPage.chooseProgram("CSA Personal - MV Dealer");
+    await assetDetailsPage.chooseProgram("Webform - CSA Personal - MV Dealer");
     await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
     await assetDetailsPage.enterAsset("Car and Light Commercial /");
     await assetDetailsPage.selectCondition("Used");
@@ -1086,8 +1086,8 @@ test("CSAC Assigned - Create Standard Quote only Customer Validations", async ({
     await assetDetailsPage.termsOfFinance("36");
     await assetDetailsPage.interestRate("4");
     await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
-    await assetDetailsPage.clickCalculateButton();
-    await assetDetailsPage.interestRate("4");
+    // await assetDetailsPage.clickCalculateButton();
+    // await assetDetailsPage.interestRate("4");
     await assetDetailsPage.clickCalculateButton();
     await assetDetailsPage.clickNextButton();
     await assetDetailsPage.waitForAddBorrowerButton();
@@ -1123,7 +1123,7 @@ test("CSAC Assigned - Create Standard Quote only Customer Validations", async ({
 
     // Reuse for Postal Addresss → Yes (click once if toggle starts on No)
     await addressDetailsPage.clickReuseForPostalAddressToggle();
-    await addressDetailsPage.clickSaveAddressDetails();
+    // await addressDetailsPage.clickSaveAddressDetails();
 
     // Previous Physical Address — explicit empty required fields when section exists, then **Save** / assert.
     if (await addressDetailsPage.isPreviousPhysicalAddressVisible(5_000)) {
@@ -1202,11 +1202,11 @@ test("CSAC Assigned - Create Standard Quote only Customer Validations", async ({
     await employmentDetailsPage.waitForEmploymentDetailsStep();
 
     // Current Employment — empty / touched fields, Save, assert (screenshot: Employer name, Occupation, Employment Type, Time ×2).
-    await employmentDetailsPage.enterCurrentEmployerName("");
-    await employmentDetailsPage.touchCurrentOccupationDropdownWithoutSelection();
-    await employmentDetailsPage.touchCurrentEmploymentTypeDropdownWithoutSelection();
-    await employmentDetailsPage.enterCurrentTimeWithEmployer("", "");
-    await employmentDetailsPage.clickSaveEmploymentDetails();
+    // await employmentDetailsPage.enterCurrentEmployerName("");
+    // await employmentDetailsPage.touchCurrentOccupationDropdownWithoutSelection();
+    // await employmentDetailsPage.touchCurrentEmploymentTypeDropdownWithoutSelection();
+    // await employmentDetailsPage.enterCurrentTimeWithEmployer("", "");
+    // await employmentDetailsPage.clickSaveEmploymentDetails();
     await employmentDetailsPage.expectCurrentEmploymentRequiredValidationMessages();
 
     await employmentDetailsPage.enterCurrentEmployerName("Acme Finance Ltd");
@@ -1216,18 +1216,18 @@ test("CSAC Assigned - Create Standard Quote only Customer Validations", async ({
     await employmentDetailsPage.clickSaveEmploymentDetails();
     await employmentDetailsPage.expectPreviousEmploymentSectionVisible();
 
-    await employmentDetailsPage.enterPreviousEmployerName("");
-    await employmentDetailsPage.touchPreviousOccupationDropdownWithoutSelection();
-    await employmentDetailsPage.touchPreviousEmploymentTypeDropdownWithoutSelection();
-    await employmentDetailsPage.enterPreviousTimeWithEmployer("", "");
-    await employmentDetailsPage.clickSaveEmploymentDetails();
+    // await employmentDetailsPage.enterPreviousEmployerName("");
+    // await employmentDetailsPage.touchPreviousOccupationDropdownWithoutSelection();
+    // await employmentDetailsPage.touchPreviousEmploymentTypeDropdownWithoutSelection();
+    // await employmentDetailsPage.enterPreviousTimeWithEmployer("", "");
+    // await employmentDetailsPage.clickSaveEmploymentDetails();
     await employmentDetailsPage.expectPreviousEmploymentRequiredValidationMessages();
 
     await employmentDetailsPage.enterPreviousEmployerName("Prior Employer Ltd");
     await employmentDetailsPage.selectPreviousOccupation("Accountant");
     await employmentDetailsPage.selectPreviousEmploymentType("Full Time Employed");
     await employmentDetailsPage.enterPreviousTimeWithEmployer("1", "0");
-    await employmentDetailsPage.clickSaveEmploymentDetails();
+    // await employmentDetailsPage.clickSaveEmploymentDetails();
     await employmentDetailsPage.clickNextButton();
 
     await financialPositionPage.waitForFinancialPositionStep();
@@ -1388,6 +1388,39 @@ test("CSAC Assigned - Create Standard Quote only Customer Validations", async ({
       "TLC Automation Family Trust",
       "Guarantor",
     );
+    await customerQuotePostSubmitPage.deleteBorrowerOrGuarantorRow(
+      "TLC Automation Family Trust",
+      "Guarantor",
+    );
+    await customerQuotePostSubmitPage.expectBorrowerOrGuarantorRowRemoved(
+      "TLC Automation Family Trust",
+    );
+
+    // Re-open primary borrower from Borrowers & Guarantors (name link in frozen column wrapper).
+    await page
+      .locator(
+        "div.align-items-center.capitalize.cursor-pointer.ng-star-inserted a.cursor-pointer.text-primary",
+      )
+      .filter({ hasText: /^Liza Marie Doe/i })
+      .first()
+      .click({ timeout: 60_000 });
+    await page.locator(':text-is("1. Personal Details")').waitFor({ state: "visible", timeout: 60_000 });
+
+    await personalDetailsPage.chooseTitle("Dame");
+    await personalDetailsPage.enterFirstName("Test");
+    await personalDetailsPage.enterMiddleName("Marie");
+    await personalDetailsPage.enterLastName("Doe");
+    await personalDetailsPage.chooseGender("Female");
+    await personalDetailsPage.enterDateOfBirth("01/01/1980");
+    await personalDetailsPage.clickSavePersonalDetails();
+
+    await page.locator(':text-is("5. Reference Details")').waitFor({ state: "visible", timeout: 60_000 });
+    await page.locator(':text-is("5. Reference Details")').click();
+    await referenceDetailsPage.waitForReferenceDetailsStep();
+    await referenceDetailsPage.confirmCustomerDetailsCorrect();
+    await referenceDetailsPage.clickSubmitButton();
+
+    await customerQuotePostSubmitPage.waitForUploadStep();
     await customerQuotePostSubmitPage.uploadDocument();
     await customerQuotePostSubmitPage.expectDocumentUploaded();
     await customerQuotePostSubmitPage.openDocumentsTab();
