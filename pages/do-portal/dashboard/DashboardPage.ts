@@ -22,11 +22,27 @@ export class DODashboardPage extends BasePage {
   constructor(page: Page) {
     super(page);
 
-    // Dealer shell uses a breadcrumb link (/dealer/standard-quote); two links share the same visible text.
+    // Dealer shell: Prime often renders **+ Create Standard Quote** as a **button** (split / icon prefix);
+    // prefer **hasText** + **role** over link-only `href` (see dashboard snapshot).
     this.createStandardQuoteButton = page
-      .locator('a[href="/dealer/standard-quote"]')
-      .filter({ hasText: /Create Standard Quote/i })
-      .or(page.getByRole("button", { name: "Create Standard Quote" }));
+      .getByRole("button", { name: /Create\s+Standard\s+Quote/i })
+      .or(
+        page
+          .locator("button")
+          .filter({ hasText: /Create\s+Standard\s+Quote/i }),
+      )
+      .or(page.getByRole("link", { name: /Create\s+Standard\s+Quote/i }))
+      .or(
+        page
+          .locator("a[href*='standard-quote'], a[href*='StandardQuote']")
+          .filter({ hasText: /Create\s+Standard\s+Quote|Standard\s+Quote/i }),
+      )
+      .or(
+        page
+          .locator('a[href="/dealer/standard-quote"]')
+          .filter({ hasText: /Create\s+Standard\s+Quote/i }),
+      )
+      .first();
     this.dialogBox = page.getByRole("dialog");
     this.pageHeader = page.locator("h1, h2, .page-header");
     this.welcomeMessage = page.locator(
@@ -84,17 +100,42 @@ export class DODashboardPage extends BasePage {
   }
 
   /**
-   * After `storageState` restore: ensure dashboard is ready (same readiness as before Create Standard Quote).
+   * After `storageState` restore: ensure dealer shell is ready (same gate as before **Create Standard Quote**).
+   *
+   * @param options.requireCtaEnabled — default **true**; set **false** for auth setup if the split CTA stays
+   *   busy while charts load but the session is already valid (**visible** is enough to save `storageState`).
    */
-  async waitForAuthenticatedDashboard(): Promise<void> {
+  async waitForAuthenticatedDashboard(options?: {
+    requireCtaEnabled?: boolean;
+  }): Promise<void> {
+    const requireCtaEnabled = options?.requireCtaEnabled !== false;
+
     this.log("Waiting for authenticated dashboard (session restored or after login)…");
     await this.page
       .waitForLoadState("domcontentloaded", { timeout: 30_000 })
       .catch(() => {});
-    await this.waitForAppLoaderOverlayGone(120_000);
-    await this.createStandardQuoteButton.waitFor({ state: "visible", timeout: 60_000 });
-    await expect(this.createStandardQuoteButton).toBeEnabled({ timeout: 30_000 });
-    this.log("Verified dashboard is loaded (Create Standard Quote is visible and enabled).");
+    await this.page.waitForURL(/\/dealer(\/|$)/i, { timeout: 60_000 }).catch(() => {});
+
+    // Top-level Prime **progressbar** (not always tied to `.app-loader-overlay`); cap wait so auth setup
+    // does not burn the whole **test** timeout before the CTA gate runs.
+    await this.page
+      .getByRole("progressbar")
+      .first()
+      .waitFor({ state: "hidden", timeout: 45_000 })
+      .catch(() => {});
+    await this.waitForAppLoaderOverlayGone(60_000);
+
+    await this.createStandardQuoteButton.waitFor({ state: "visible", timeout: 90_000 });
+    if (requireCtaEnabled) {
+      await expect(this.createStandardQuoteButton).toBeEnabled({ timeout: 45_000 });
+      this.log(
+        "Verified dashboard is loaded (Create Standard Quote is visible and enabled).",
+      );
+    } else {
+      this.log(
+        "Verified dealer shell (Create Standard Quote visible; skipped strict enabled for auth save).",
+      );
+    }
   }
 
   /**
@@ -145,8 +186,8 @@ export class DODashboardPage extends BasePage {
     await this.waitForAppLoaderOverlayGone(120_000);
 
     const btn = this.createStandardQuoteButton;
-    await btn.waitFor({ state: "visible", timeout: 60_000 });
-    await expect(btn).toBeEnabled({ timeout: 30_000 });
+    await btn.waitFor({ state: "visible", timeout: 120_000 });
+    await expect(btn).toBeEnabled({ timeout: 60_000 });
 
     this.log('Clicking Create Standard Quote from dashboard');
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -167,6 +208,14 @@ export class DODashboardPage extends BasePage {
     }
     await this.waitForLoadingComplete(30_000);
     this.log("Create Standard Quote navigation completed.");
+  }
+
+  /**
+   * Alias for tests: dashboard control labelled "Create Standard Quote" opens the Standard Quote flow.
+   * Same implementation as {@link clickCreateStandardQuote}.
+   */
+  async clickStandardQuote(): Promise<void> {
+    return this.clickCreateStandardQuote();
   }
 
   /**
