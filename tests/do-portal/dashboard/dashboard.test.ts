@@ -3,7 +3,7 @@
  * E2E tests for DO Portal main dashboard
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from '../../../config/env';
 import { DODashboardPage } from '../../../pages';
 

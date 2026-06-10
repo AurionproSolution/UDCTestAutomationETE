@@ -3,14 +3,14 @@
     {
       "id": "test-automation-architect",
       "name": "Test Automation Architect",
-      "description": "Use this agent for UDC Test Automation ETE workflow orchestration, framework architecture, and step-by-step guidance on which specialist subagent to run next (JIRA vs plan-driven vs healing).",
+      "description": "Use this agent for UDC Test Automation ETE workflow orchestration, framework architecture, and step-by-step guidance on which specialist subagent to run next (JIRA vs plan-driven vs healing vs TCC test catalog). Routes to test-case-catalog skill for naming and Excel documentation.",
       "model": "inherit",
       "file": ".cursor/agents/test-automation-architect.md"
     },
     {
       "id": "test-case-writer",
       "name": "Test Case Writer",
-      "description": "Use this agent when you need to create Playwright test scripts from JIRA requirements. Fetches JIRA, runs the six-block requirements gate (posts a comment to the reporter via MCP if anything is missing—no test Write until the gate passes unless you explicitly override), then analyzes project patterns and generates Playwright tests per UDC conventions.",
+      "description": "Use this agent when you need to create Playwright test scripts from JIRA requirements. Fetches JIRA, runs the six-block requirements gate (posts a comment to the reporter via MCP if anything is missing—no test Write until the gate passes unless you explicitly override), then analyzes project patterns and generates Playwright tests per UDC conventions. Optional Step 8: apply test-case-catalog skill for TCC naming and Excel docs.",
       "model": "inherit",
       "file": ".cursor/agents/test-case-writer.md"
     },

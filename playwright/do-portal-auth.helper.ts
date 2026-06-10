@@ -1,6 +1,7 @@
 /**
  * Shared DO portal login → playwright/.auth/do-portal.json
  * Used by globalSetup (IDE) and do-portal-auth.setup.ts (CI dependency project).
+ * MFA/TOTP happens here only — runtime refresh uses refresh_token (see do-portal-session.helper).
  */
 
 import { chromium, type Page } from "@playwright/test";
@@ -10,6 +11,14 @@ import { DO_BASE_URL, DO_DEALER_STANDARD_QUOTE_URL } from "../config/env";
 import { DOLoginPage } from "../pages";
 import doLoginData from "../testData/do-portal/loginData.json";
 import { logTestStep } from "../utils/testStepLog";
+import {
+  discoverAndSaveAuthMeta,
+  discoverTokensFromStorageState,
+  isAccessTokenExpiringSoon,
+  readStorageStateFile,
+  recordTokenEndpointFromUrl,
+  refreshAccessTokenFromFile,
+} from "./do-portal-session.helper";
 
 export const doPortalAuthFile = path.join(
   process.cwd(),
@@ -18,8 +27,18 @@ export const doPortalAuthFile = path.join(
   "do-portal.json",
 );
 
+function attachTokenDiscoveryListeners(page: Page): void {
+  page.on("response", (response) => {
+    if (response.request().method() === "POST") {
+      recordTokenEndpointFromUrl(response.url());
+    }
+  });
+}
+
 export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
   fs.mkdirSync(path.dirname(doPortalAuthFile), { recursive: true });
+  attachTokenDiscoveryListeners(page);
+
   const loginPage = new DOLoginPage(page);
   await loginPage.navigate(DO_BASE_URL());
   await loginPage.loginWithTestData(doLoginData.validUsers[0]);
@@ -27,12 +46,50 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
   await page.waitForLoadState("domcontentloaded");
   logTestStep(`Saving DO portal storage state to ${doPortalAuthFile}`);
   await page.context().storageState({ path: doPortalAuthFile });
+
+  const state = readStorageStateFile();
+  if (state) discoverAndSaveAuthMeta(state);
 }
 
-/** Creates auth storage when missing. No-op when the file already exists. */
+/**
+ * Ensures auth storage exists and access token is usable.
+ * - Missing file → full MFA login.
+ * - Expired access + valid refresh → silent file refresh (no MFA).
+ * - Expired access + no refresh → full MFA login.
+ */
 export async function ensureDoPortalAuthStorage(): Promise<void> {
-  if (fs.existsSync(doPortalAuthFile)) return;
+  if (!fs.existsSync(doPortalAuthFile)) {
+    await runHeadedLoginAndSave();
+    return;
+  }
 
+  const state = readStorageStateFile();
+  const tokens = state ? discoverTokensFromStorageState(state) : undefined;
+
+  if (!tokens) {
+    logTestStep("DO auth file has no discoverable tokens — running MFA login.");
+    await runHeadedLoginAndSave();
+    return;
+  }
+
+  if (!isAccessTokenExpiringSoon(tokens.accessToken)) {
+    return;
+  }
+
+  if (tokens.refreshToken) {
+    const refreshed = await refreshAccessTokenFromFile();
+    if (refreshed.ok) {
+      logTestStep("DO auth storage refreshed silently from refresh_token.");
+      return;
+    }
+    logTestStep(`DO silent file refresh failed: ${refreshed.message}`);
+  }
+
+  logTestStep("DO auth tokens expired — running MFA login.");
+  await runHeadedLoginAndSave();
+}
+
+async function runHeadedLoginAndSave(): Promise<void> {
   const browser = await chromium.launch({
     headless: false,
     args: ["--start-maximized"],

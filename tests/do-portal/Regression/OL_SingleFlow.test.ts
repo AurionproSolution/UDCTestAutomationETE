@@ -4,7 +4,7 @@
  * Auth: `do-regression-chromium` depends on `doSanity.auth.setup.ts` (storageState).
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
@@ -237,7 +237,7 @@ test(
 
     await customerQuotePostSubmitPage.waitForUploadStep();
 
-    // Same post-submit checks as `CSA_QuickQuote_SingleFlow.test.ts` (notes → upload tab → Documents → submit).
+    // Same post-submit checks as `CSA-C-Assigned_Regression.test.ts` (notes → upload tab → Documents → submit).
     await customerQuotePostSubmitPage.expectExistingNoteCardsShowAuthorAndTimestamp();
     await customerQuotePostSubmitPage.expectOversizedNoteRejectedOnSubmit();
     await customerQuotePostSubmitPage.submitNoteOfExactLengthFromDialog(1000);

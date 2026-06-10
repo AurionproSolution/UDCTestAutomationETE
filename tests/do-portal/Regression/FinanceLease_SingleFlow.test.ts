@@ -1,11 +1,11 @@
 /**
  * DO Portal — Finance Lease Quick Quote + Standard Quote regression (single Playwright test, single run).
- * Quick Quote / validation sequence follows `CSA_QuickQuote_SingleFlow.test.ts`; FL-specific UI and carry-over differ.
+ * Quick Quote / validation sequence follows `CSA-C-Assigned_Regression.test.ts`; FL-specific UI and carry-over differ.
  * Auth: `do-regression-chromium` depends on `doSanity.auth.setup.ts` (storageState). Login
  * flakiness from slow SPA/SSO paint is handled in `DOLoginPage.navigate` / `login`, not here.
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
@@ -25,7 +25,7 @@ const FL_QQ_PROGRAM = "Finance Lease Business - MV Dealer";
 
 /**
  * Cost of Asset (add-asset wizard) — plain digits for `currencymask` (same pattern as
- * `CSA_STANDARD_QUOTE_ASSET_VALUE` in `CSA_QuickQuote_SingleFlow.test.ts`); avoids overlap with QQ cash like `30000`.
+ * `CSA_STANDARD_QUOTE_ASSET_VALUE` in `CSA-C-Assigned_Regression.test.ts`); avoids overlap with QQ cash like `30000`.
  */
 // const FL_STANDARD_QUOTE_ASSET_VALUE = "5000";
 
@@ -572,7 +572,7 @@ test(
     await addressDetailsPage.clickSaveAddressDetails();
     await addressDetailsPage.expectPhysicalAddressRequiredValidationMessages();
 
-    // Physical Address — valid data (same sequence as CSA_QuickQuote_SingleFlow.test.ts § Physical Address).
+    // Physical Address — valid data (same sequence as CSA-C-Assigned_Regression.test.ts § Physical Address).
     await addressDetailsPage.timeAtAddress("1", "1");
     await addressDetailsPage.enterStreetNumber("123");
     await addressDetailsPage.enterStreetName("Main Street");
@@ -679,7 +679,7 @@ test(
     await customerQuotePostSubmitPage.ensureUploadTab();
     await page.keyboard.press("Escape").catch(() => {});
 
-    // Same sequence as `CSA_QuickQuote_SingleFlow.test.ts` (notes → Open Quote / status → Submit → declaration).
+    // Same sequence as `CSA-C-Assigned_Regression.test.ts` (notes → Open Quote / status → Submit → declaration).
     await customerQuotePostSubmitPage.addNoteAndSubmit(
       "Automated sanity note — Finance Lease Standard Quote.",
     );

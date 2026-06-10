@@ -4,7 +4,7 @@
  * Auth: `do-regression-chromium` + `doSanity.auth.setup.ts` (storageState).
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DOCustomerQuotePostSubmitPage, DODashboardPage, DOQuickQuotePage, DOReferenceDetailsPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";

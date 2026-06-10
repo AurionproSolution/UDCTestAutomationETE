@@ -1,0 +1,31 @@
+---
+description: 
+globs: tests/**/*.test.ts
+alwaysApply: false
+---
+
+# Test case catalog naming and flow documentation
+
+When naming a test, documenting its flow, or creating Excel catalog output for a Playwright spec:
+
+1. **Read** [`.cursor/skills/test-case-catalog/SKILL.md`](../skills/test-case-catalog/SKILL.md) and follow it end-to-end.
+
+2. **Title format** (required when a TCC catalog ID exists):
+
+   ```
+   TCC00x - {Portal} Portal - {product} - {entry path} {scope} - {customer scope} - {primary focus}
+   ```
+
+   Add `{ tag: ["@{portal}", "@regression", "@TCC00x"] }` (adjust portal/type tags as needed).
+
+3. **Before naming**, analyze the spec for: entry path (QQ vs SQ), subset vs full E2E, customer types/roles, where the test ends, and assertion style.
+
+4. **Flow steps** — numbered, one logical phase per step; include assert points and conditionals `(if visible)`.
+
+5. **Validation points** — `{Area} — {description}`; map to real `expect` / POM `expect*` calls in the spec.
+
+6. **Excel** — add data to `scripts/generate-test-case-excel.mjs`, run `node scripts/generate-test-case-excel.mjs TCC00x`, output under `docs/`. Close open `.xlsx` files before regenerating on Windows.
+
+7. **Spec file names** — use `{Product}_Regression.test.ts`; avoid `SingleFlow` when multiple tests or mixed paths exist.
+
+Reference implementation: `tests/do-portal/Regression/CSA-C-Assigned_Regression.test.ts` (TCC001–TCC003).
