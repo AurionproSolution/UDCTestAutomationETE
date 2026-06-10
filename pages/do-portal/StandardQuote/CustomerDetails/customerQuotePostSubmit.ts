@@ -149,6 +149,54 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   /**
+   * **Borrowers & Guarantors** table row: frozen name column (Selector Hub
+   * `td.p-element.ellipsis.p-frozen-column.ng-star-inserted`) plus role text on the same row
+   * so only that party is targeted (e.g. Guarantor, not the primary Borrower).
+   */
+  private borrowerGuarantorRowByFrozenNameAndRole(
+    customerName: string,
+    role: "Borrower" | "Guarantor",
+  ): Locator {
+    const roleRx = new RegExp(`\\b${role}\\b`, "i");
+    return this.page
+      .locator("tr")
+      .filter({
+        has: this.page
+          .locator("td.p-element.ellipsis.p-frozen-column.ng-star-inserted")
+          .getByText(customerName, { exact: true }),
+      })
+      .filter({ hasText: roleRx });
+  }
+
+  /**
+   * Deletes the **Borrowers & Guarantors** row for `customerName` with the given `role`
+   * by clicking that row's trash control (not other rows).
+   */
+  async deleteBorrowerOrGuarantorRow(
+    customerName: string,
+    role: "Borrower" | "Guarantor",
+  ): Promise<void> {
+    const row = this.borrowerGuarantorRowByFrozenNameAndRole(customerName, role);
+    await row.first().waitFor({ state: "visible", timeout: 60_000 });
+    const r = row.first();
+    const del = r
+      .getByRole("button", { name: /delete|remove/i })
+      .or(r.locator("button").filter({ has: r.locator(".pi-trash, .pi-trash-alt, .pi-times") }))
+      .first();
+    await del.click({ timeout: 15_000 }).catch(() => del.click({ force: true }));
+  }
+
+  /** Asserts no table row remains with this customer in the frozen name column. */
+  async expectBorrowerOrGuarantorRowRemoved(customerName: string): Promise<void> {
+    const row = this.page.locator("tr").filter({
+      has: this.page
+        .locator("td.p-element.ellipsis.p-frozen-column.ng-star-inserted")
+        .getByText(customerName, { exact: true }),
+    });
+    await expect(row).toHaveCount(0, { timeout: 45_000 });
+  }
+
+  /**
    * In **Search Customer**, set search type to **Trust** (third radio: Individual | Business | Trust).
    * Prefers accessible name; falls back to PrimeNG box or Selector Hub xpath on third `p-radiobutton`.
    */

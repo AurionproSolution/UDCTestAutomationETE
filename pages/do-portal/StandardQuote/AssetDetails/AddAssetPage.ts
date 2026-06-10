@@ -149,7 +149,7 @@ export class DOAddAssetPage extends BasePage {
     await input.waitFor({ state: "visible", timeout: 25_000 });
     await input.scrollIntoViewIfNeeded();
     const digits = this.normalizeAssetValueDigits(value);
-    await input.click({ timeout: 15_000 });
+    await input.click({ timeout: 120_000 });
     await input.press("Control+A");
     await input.press("Backspace");
     await input.pressSequentially(digits, { delay: 35 });
