@@ -5,7 +5,7 @@
  * Auth: shared DO `storageState` from `playwright/do-portal-auth.setup.ts` when running under `do-portal-chromium`.
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
@@ -199,7 +199,7 @@ test(
     
         await customerQuotePostSubmitPage.waitForUploadStep();
 
-    // Same post-submit checks as `CSA_QuickQuote_SingleFlow.test.ts` (notes → upload tab → Documents → submit).
+    // Same post-submit checks as `CSA-C-Assigned_Regression.test.ts` (notes → upload tab → Documents → submit).
     await customerQuotePostSubmitPage.expectExistingNoteCardsShowAuthorAndTimestamp();
     await customerQuotePostSubmitPage.expectOversizedNoteRejectedOnSubmit();
     await customerQuotePostSubmitPage.submitNoteOfExactLengthFromDialog(1000);

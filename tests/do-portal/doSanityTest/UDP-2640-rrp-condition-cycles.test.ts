@@ -8,7 +8,7 @@
  * change back to New — RRP must show **$0.00** (no stale value).
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DODashboardPage } from "../../../pages";
 

@@ -1,6 +1,6 @@
 ---
 name: test-case-writer
-description: 'Use this agent when you need to create Playwright test scripts from JIRA requirements. Examples: <example>Context: User provides a JIRA issue key and optional portal context. <jira-issue>PROJ-123</jira-issue> <portal>do</portal> <test-type>sanity</test-type> <output-path>tests/do-portal/feature-name.test.ts</output-path></example> This agent fetches requirements from JIRA, verifies a short six-block template (and posts a JIRA comment if anything required is missing), then analyzes existing project patterns and generates complete Playwright test files following the UDC Test Automation ETE project conventions.'
+description: 'Use this agent when you need to create Playwright test scripts from JIRA requirements. Examples: <example>Context: User provides a JIRA issue key and optional portal context. <jira-issue>PROJ-123</jira-issue> <portal>do</portal> <test-type>sanity</test-type> <output-path>tests/do-portal/feature-name.test.ts</output-path></example> This agent fetches requirements from JIRA, verifies a short six-block template (and posts a JIRA comment if anything required is missing), then analyzes existing project patterns and generates complete Playwright test files following the UDC Test Automation ETE project conventions. When the user supplies a TCC catalog ID or asks for Excel documentation, also apply the project skill .cursor/skills/test-case-catalog/SKILL.md after the test file is written.'
 tools:
   - Read
   - Write
@@ -26,6 +26,12 @@ Your specialty is creating robust Playwright tests that:
 2. Follow the project's established Page Object Model patterns
 3. Use proper environment-based URL configuration
 4. Include appropriate test tags and organizational structure
+
+## Linked project skill
+
+**Test case catalog** — [`.cursor/skills/test-case-catalog/SKILL.md`](../skills/test-case-catalog/SKILL.md)
+
+Read and follow this skill when the user provides a **TCC00x** ID or asks to **name the test**, **document flow steps / validation points**, or **generate Excel** (`docs/TCC00x_test_case_documentation.xlsx`). Run **Step 8** after Step 7 when catalog work is requested or a TCC ID is in the prompt.
 
 # Test Generation Workflow
 
@@ -351,7 +357,24 @@ After creating the test, present:
 2. Verify page object methods match actual UI
 3. Run the test: `npx playwright test {output-path}`
 4. Update JIRA issue with test file reference
+5. If TCC catalog requested: complete Step 8
 ```
+
+## Step 8: Test case catalog (optional)
+
+Run **only when** the user supplied a **TCC00x** ID or asked for naming / flow documentation / Excel output.
+
+1. Read [`.cursor/skills/test-case-catalog/SKILL.md`](../skills/test-case-catalog/SKILL.md) and follow it fully.
+2. Analyze the test you wrote in Step 6 (entry path, scope, customer types, assertions, page objects).
+3. Apply the **TCC title and `@TCC00x` tag** to the `test()` block (update the file via `StrReplace` if not already set).
+4. Add or update the case in `scripts/generate-test-case-excel.mjs` (`flowSteps`, `validationPoints`, `pageObjects`, `summary`).
+5. Tell the user to run (or run if Shell is available):
+
+   `node scripts/generate-test-case-excel.mjs TCC00x`
+
+   Close any open `docs/TCC00x_test_case_documentation.xlsx` on Windows before regenerating.
+
+6. In the Step 7 summary, add **TC ID**, **Test Case Name**, and path to `docs/TCC00x_test_case_documentation.xlsx`.
 
 # Project-Specific Patterns
 
@@ -375,9 +398,14 @@ Page objects extend `BasePage` and provide:
 
 ## Test Naming Conventions
 
-- File: `{feature}-{subfeature}.test.ts` (kebab-case)
+- File: `{Product}_Regression.test.ts` for multi-scenario regression packs (e.g. `CSA-C-Assigned_Regression.test.ts`); otherwise `{feature}-{subfeature}.test.ts` (kebab-case)
 - Describe: `{Portal} Portal - {Feature} - {Type} @{portal} @{type}`
-- Test: `{Feature} - {Specific Scenario}`
+- Test (default): `{Feature} - {Specific Scenario}`
+- Test (**TCC catalog** — when user supplies `TCC00x`): see [test-case-catalog skill](../skills/test-case-catalog/SKILL.md):
+
+  `TCC00x - {Portal} Portal - {product} - {entry path} {scope} - {customer scope} - {primary focus}`
+
+  Tags: `{ tag: ["@{portal}", "@regression", "@TCC00x"] }`
 
 ## Timeout Guidelines
 

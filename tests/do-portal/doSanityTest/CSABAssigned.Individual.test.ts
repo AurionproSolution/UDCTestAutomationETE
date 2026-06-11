@@ -3,7 +3,7 @@
  * E2E tests for verifying CSAB(Individual-SOLE trade customer) assigned functionality
  */
 
-import { test } from "@playwright/test";
+import { test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,

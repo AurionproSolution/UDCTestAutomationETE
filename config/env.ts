@@ -91,8 +91,7 @@ const environments: Record<Environment, EnvironmentConfig> = {
 };
 
 // Get current environment from env variable or default to 'qat'
-export const CURRENT_ENV: Environment =
-  (process.env.TEST_ENV as Environment) || "qat";
+export const CURRENT_ENV: Environment = (process.env.TEST_ENV as Environment) || "qat";
 
 // Get portal config for current environment
 export function getPortalConfig(portal: Portal): PortalConfig {
@@ -120,4 +119,3 @@ export const RSS_BASE_URL = () => RSS_CONFIG().baseUrl;
 export const CSS_BASE_URL = () => CSS_CONFIG().baseUrl;
 
 export { environments };
-

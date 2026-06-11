@@ -2,7 +2,7 @@
  * DO Portal — Finance Lease sanity (mirrors CSA flow: origination, terms, two Calculates, Next).
  */
 
-import { test } from "@playwright/test";
+import { test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
