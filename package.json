@@ -10,6 +10,7 @@
     "test:debug": "npx playwright test --debug",
     "test:do": "npx playwright test --project=do-portal-chromium",
     "test:do:auth": "npx playwright test --project=do-portal-auth-setup",
+    "test:do:session-unit": "npx playwright test --project=do-portal-unit",
     "test:do:sanity": "npx playwright test tests/do-portal/doSanityTest --project=do-portal-chromium",
     "test:do:perf": "npx playwright test --project=do-portal-perf-data",
     "test:rss": "npx playwright test --project=rss-portal-chromium",

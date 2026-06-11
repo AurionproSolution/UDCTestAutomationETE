@@ -9,7 +9,7 @@
  * remain disabled until Quick Quote 2 is calculated.
  */
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../../config/env";
 import { DODashboardPage, DOQuickQuotePage } from "../../../../pages";
 

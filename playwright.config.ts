@@ -93,7 +93,7 @@ const doPortalAuthSetupProject = {
 const doPortalChromiumProject = {
   name: "do-portal-chromium",
   testDir: "./tests/do-portal",
-  testIgnore: [ignoreDoPerfInPortalOnly],
+  testIgnore: [ignoreDoPerfInPortalOnly, "**/do-portal-session.helper.test.ts"],
   ...(useGlobalDoAuth
     ? { dependencies: ["do-portal-auth-setup"] as const, use: doPortalResolvedUse() }
     : { use: maximizedChrome }),
@@ -150,6 +150,13 @@ const ciProjects = [
   {
     name: "samples",
     testDir: "./tests/samples",
+    use: maximizedChrome,
+  },
+
+  {
+    name: "do-portal-unit",
+    testDir: "./tests/do-portal",
+    testMatch: "**/do-portal-session.helper.test.ts",
     use: maximizedChrome,
   },
 

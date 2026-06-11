@@ -5,6 +5,10 @@
 
 import { test as base, Page } from '@playwright/test';
 import { DO_DEALER_STANDARD_QUOTE_URL } from '../config/env';
+import {
+  refreshAccessToken,
+  ensureFreshDoPortalStorageFile,
+} from '../playwright/do-portal-session.helper';
 import { DOLoginPage, DODashboardPage } from '../pages/do-portal';
 import { RSSLoginPage, RSSDashboardPage } from '../pages/rss-portal';
 import { CSSLoginPage, CSSDashboardPage } from '../pages/css-portal';
@@ -68,18 +72,29 @@ export const test = base.extend<PortalFixtures>({
     await use(dashboardPage);
   },
 
-  // Pre-authenticated DO dealer shell (uses project storageState when present; else full login)
+  // Pre-authenticated DO dealer shell (silent refresh; MFA re-login only when ALLOW_DO_MFA_RELOGIN=1)
   doAuthenticatedPage: async ({ page }, use) => {
+    await ensureFreshDoPortalStorageFile();
     await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
     const dashboardPage = new DODashboardPage(page);
     try {
       await dashboardPage.waitForAuthenticatedDashboard();
     } catch {
-      const loginPage = new DOLoginPage(page);
-      await loginPage.navigate();
-      await loginPage.loginWithTestData(doLoginData.validUsers[0]);
-      await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
-      await dashboardPage.waitForAuthenticatedDashboard();
+      const refreshed = await refreshAccessToken(page);
+      if (refreshed.ok) {
+        await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+        await dashboardPage.waitForAuthenticatedDashboard();
+      } else if (process.env.ALLOW_DO_MFA_RELOGIN === '1') {
+        const loginPage = new DOLoginPage(page);
+        await loginPage.navigate();
+        await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+        await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+        await dashboardPage.waitForAuthenticatedDashboard();
+      } else {
+        throw new Error(
+          `DO session invalid and silent refresh failed: ${refreshed.message}`,
+        );
+      }
     }
     await use(page);
   },
@@ -138,16 +153,27 @@ export { expect } from '@playwright/test';
 export async function getAuthenticatedPage(page: Page, portal: PortalType): Promise<Page> {
   switch (portal) {
     case 'do': {
+      await ensureFreshDoPortalStorageFile();
       await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
       const dashboardPage = new DODashboardPage(page);
       try {
         await dashboardPage.waitForAuthenticatedDashboard();
       } catch {
-        const loginPage = new DOLoginPage(page);
-        await loginPage.navigate();
-        await loginPage.loginWithTestData(doLoginData.validUsers[0]);
-        await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
-        await dashboardPage.waitForAuthenticatedDashboard();
+        const refreshed = await refreshAccessToken(page);
+        if (refreshed.ok) {
+          await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+          await dashboardPage.waitForAuthenticatedDashboard();
+        } else if (process.env.ALLOW_DO_MFA_RELOGIN === '1') {
+          const loginPage = new DOLoginPage(page);
+          await loginPage.navigate();
+          await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+          await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+          await dashboardPage.waitForAuthenticatedDashboard();
+        } else {
+          throw new Error(
+            `DO session invalid and silent refresh failed: ${refreshed.message}`,
+          );
+        }
       }
       break;
     }

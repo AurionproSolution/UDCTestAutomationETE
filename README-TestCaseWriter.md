@@ -4,9 +4,10 @@ A Cursor subagent that automatically generates Playwright test scripts from JIRA
 
 ## Overview
 
-The Test Case Writer agent fetches requirements from JIRA issues, analyzes your project's existing test patterns, and generates complete, ready-to-run Playwright test files. It handles:
+The Test Case Writer agent fetches requirements from JIRA issues, runs a **requirements gate** (six-block template on **Description + issue comments** + attachments), posts a **JIRA comment to the reporter** if the gate fails, then analyzes your project's existing test patterns and generates complete Playwright test files. It handles:
 
-- Fetching JIRA issue details (description, acceptance criteria, labels)
+- Fetching JIRA issue details (summary, description, **comments**, attachments, labels, reporter)
+- **Step 2.5 gate** — no test file is written until the template is satisfied (unless you explicitly override in chat)
 - Analyzing existing test file patterns in your project
 - Identifying relevant Page Objects for the feature
 - Generating properly structured test files with correct imports
@@ -67,10 +68,16 @@ Create a test for:
 ### 1. Fetches JIRA Requirements
 
 The agent connects to JIRA via MCP and retrieves:
+
 - Issue summary (used for test naming)
-- Description (for context)
-- Acceptance criteria (converted to test steps)
+- Description and **issue comments** (merged for the Step 2.5 gate and for context)
+- Acceptance criteria (from description, comments, or AC fields when present)
 - Labels and components (for tagging)
+- Attachments and **reporter** (for screenshot/reference checks and gate-failure comments)
+
+### 1.5 Requirements gate (Step 2.5)
+
+Before any file is written, the agent checks the **six-block** template against **Description + issue comments** (+ AC fields, attachments). If anything required is missing, it posts a JIRA comment for the **reporter** and stops. See [`.cursor/agents/test-case-writer.md`](.cursor/agents/test-case-writer.md).
 
 ### 2. Analyzes Project Patterns
 
@@ -90,7 +97,7 @@ Based on the feature area from JIRA, the agent searches for:
 
 ### 4. Generates the Test File
 
-Creates a complete test file including:
+**After Step 2.5 passes** (or you explicitly override in chat), creates a complete test file including:
 - File header comment with JIRA reference
 - Proper imports (Playwright, URLs, Page Objects)
 - Page object declarations and beforeEach setup
@@ -167,16 +174,21 @@ Create a smoke test for CSS-456 - Login page load verification
 
 ## Best Practices
 
+### JIRA issue template (required for automation)
+
+Tickets used with this agent must satisfy the **six-block** checklist (non-empty, specific — no “TBD”). Canonical instructions live in **[`.cursor/agents/test-case-writer.md`](.cursor/agents/test-case-writer.md)** (Step 2.5). Put content in the **Description** (preferred) or in **issue comments**; the agent merges **Description + returned comments** when running the gate.
+
+**Blocks:** Summary · Where dealer goes (portal + start path) · Preconditions · Steps to reproduce · Screenshot/reference (or waiver) · Acceptance criteria (observable UI).
+
+If the gate fails, the agent posts a **[Test automation]** comment on the issue for the **reporter** with what is missing and a filled example.
+
 ### JIRA Issue Preparation
 
-For best results, ensure your JIRA issues include:
-1. Clear summary describing the feature
-2. Detailed description with user flows
-3. Numbered acceptance criteria (these become test assertions)
-4. Labels indicating the portal (e.g., `do-portal`, `rss-portal`)
-5. Component assignment for feature area
+For best results, also include:
+1. Labels indicating the portal (e.g., `do-portal`, `rss-portal`) when helpful
+2. Component assignment for feature area
 
-Example well-structured JIRA issue:
+Example well-structured JIRA issue (still valid; align section headings with the six-block template where possible):
 ```markdown
 **Summary:** Dealer Document Upload Feature
 
@@ -209,8 +221,14 @@ As a dealer, I want to upload customer documents so that...
 **Cause:** JIRA issue key is invalid or you don't have access
 **Solution:** 
 - Verify the issue key format (e.g., `DO-123`)
-- Check JIRA permissions
+- Check JIRA permissions and **Atlassian MCP** authentication in Cursor
 - Try accessing the issue directly in JIRA
+
+### Gate failed / agent posted "[Test automation] Blocked"
+
+**Cause:** Description + scanned comments do not yet cover all six blocks (or only automation boilerplate comments exist).
+
+**Solution:** Update the **Description** (preferred) or add a comment with numbered steps, portal/start path, preconditions, and AC. Re-run the agent. Avoid deleting the only comment that contained the repro details.
 
 ### "No relevant page objects found"
 
@@ -272,12 +290,14 @@ npx playwright test tests/do-portal/your-feature.test.ts
 
 To improve the Test Case Writer agent:
 
-1. Update the agent definition: `.github/agents/test-case-writer.agent.md`
-2. Add new patterns as the project evolves
-3. Update this documentation with new examples
+1. Update the agent definition: [`.cursor/agents/test-case-writer.md`](.cursor/agents/test-case-writer.md)
+2. Optional workspace rule: [`.cursor/rules/jira-issue-test-gate.mdc`](.cursor/rules/jira-issue-test-gate.mdc) (main chat follows the same gate when a Jira key is used)
+3. Add new patterns as the project evolves
+4. Update this documentation with new examples
 
 ## See Also
 
-- [Playwright Test Generator](.github/agents/playwright-test-generator.agent.md) - For generating tests by recording browser actions
-- [Playwright Test Planner](.github/agents/playwright-test-planner.agent.md) - For creating comprehensive test plans
-- [Project README](README.md) - General project documentation
+- [Playwright Test Generator](.cursor/agents/playwright-test-generator.md) — generating tests by driving the browser from a plan
+- [Playwright Test Planner](.cursor/agents/playwright-test-planner.md) — exploratory plans and saved test plans
+- [Beginner guide — Playwright in VS Code, Test Explorer, packages, MCP, agents](docs/BEGINNER-GUIDE-PLAYWRIGHT-CURSOR-JIRA.md) — product-agnostic onboarding for any team
+- [Project README](README.md) — general project documentation
