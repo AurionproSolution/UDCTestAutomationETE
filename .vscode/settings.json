@@ -17,8 +17,8 @@
     "ortoni-report": true,
     "test-results": true
   },
-  "playwright.reuseBrowser": true,
-  "playwright.showTrace": true,
+  "playwright.reuseBrowser": false,
+  "playwright.showTrace": false,
   "playwright.env": {
     "PLAYWRIGHT_IDE": "1",
     "PLAYWRIGHT_USE_DO_GLOBAL_AUTH": "1",

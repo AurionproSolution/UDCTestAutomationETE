@@ -22,6 +22,11 @@ export const DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS = Number(
   process.env.DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS ?? 2 * 60 * 1000,
 );
 
+/** Max age of a saved MFA session before forcing re-login (Test Explorer / CLI reuse gate). */
+export const DO_PORTAL_MAX_SESSION_REUSE_AGE_MS = Number(
+  process.env.DO_PORTAL_MAX_SESSION_REUSE_AGE_MS ?? 15 * 60 * 1000,
+);
+
 /** Auto-start keepalive when test timeout exceeds this (15 min). */
 export const DO_PORTAL_LONG_TEST_TIMEOUT_MS = Number(
   process.env.DO_PORTAL_LONG_TEST_TIMEOUT_MS ?? 900_000,
@@ -43,6 +48,22 @@ export const DO_PORTAL_REFRESH_TOKEN_KEYS = [
   "refresh_token",
   "refreshToken",
 ];
+
+/** HTTP cookies that hold the portal JWT (DO stores access token in mfe_access_token). */
+export const DO_PORTAL_ACCESS_TOKEN_COOKIE_NAMES = [
+  "mfe_access_token",
+  "access_token",
+  "accessToken",
+];
+
+export const DO_PORTAL_REFRESH_TOKEN_COOKIE_NAMES = [
+  "refresh_token",
+  "refreshToken",
+  "mfe_refresh_token",
+];
+
+/** Prefix for cookie-backed keys in auth meta and {@link DiscoveredTokens}. */
+export const DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX = "cookie:";
 
 export const OIDC_USER_KEY_PATTERN = /^oidc\.user:/i;
 export const OIDC_METADATA_KEY_PATTERN = /^oidc\./i;
@@ -73,6 +94,12 @@ export function doPortalAuthOrigins(): string[] {
 
 export interface DoPortalAuthMeta {
   discoveredAt: string;
+  /** ISO timestamp when MFA login last saved do-portal.json. */
+  sessionSavedAt?: string;
+  /** ISO timestamp from JWT iat. */
+  accessTokenIssuedAt?: string;
+  /** ISO timestamp from JWT exp. */
+  accessTokenExpiresAt?: string;
   tokenEndpointUrl?: string;
   clientId?: string;
   accessTokenKeys: string[];

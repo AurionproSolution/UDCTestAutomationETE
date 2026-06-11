@@ -13,8 +13,7 @@ import doLoginData from "../testData/do-portal/loginData.json";
 import { logTestStep } from "../utils/testStepLog";
 import {
   discoverAndSaveAuthMeta,
-  discoverTokensFromStorageState,
-  isAccessTokenExpiringSoon,
+  evaluateDoPortalSession,
   readStorageStateFile,
   recordTokenEndpointFromUrl,
   refreshAccessTokenFromFile,
@@ -48,7 +47,7 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
   await page.context().storageState({ path: doPortalAuthFile });
 
   const state = readStorageStateFile();
-  if (state) discoverAndSaveAuthMeta(state);
+  if (state) discoverAndSaveAuthMeta(state, { stampSessionSavedAt: true });
 }
 
 /**
@@ -58,34 +57,26 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
  * - Expired access + no refresh → full MFA login.
  */
 export async function ensureDoPortalAuthStorage(): Promise<void> {
-  if (!fs.existsSync(doPortalAuthFile)) {
-    await runHeadedLoginAndSave();
+  const evaluation = evaluateDoPortalSession();
+
+  if (evaluation.action === "reuse") {
+    logTestStep(`DO auth: reusing session (${evaluation.reason})`);
     return;
   }
 
-  const state = readStorageStateFile();
-  const tokens = state ? discoverTokensFromStorageState(state) : undefined;
-
-  if (!tokens) {
-    logTestStep("DO auth file has no discoverable tokens — running MFA login.");
-    await runHeadedLoginAndSave();
-    return;
-  }
-
-  if (!isAccessTokenExpiringSoon(tokens.accessToken)) {
-    return;
-  }
-
-  if (tokens.refreshToken) {
+  if (evaluation.tokens?.refreshToken) {
     const refreshed = await refreshAccessTokenFromFile();
     if (refreshed.ok) {
-      logTestStep("DO auth storage refreshed silently from refresh_token.");
-      return;
+      const afterRefresh = evaluateDoPortalSession();
+      if (afterRefresh.action === "reuse") {
+        logTestStep(`DO auth: silently refreshed session (${afterRefresh.reason})`);
+        return;
+      }
     }
     logTestStep(`DO silent file refresh failed: ${refreshed.message}`);
   }
 
-  logTestStep("DO auth tokens expired — running MFA login.");
+  logTestStep(`DO auth: ${evaluation.reason} — running MFA login.`);
   await runHeadedLoginAndSave();
 }
 

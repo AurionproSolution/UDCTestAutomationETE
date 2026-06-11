@@ -12,10 +12,14 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import {
+  DO_PORTAL_ACCESS_TOKEN_COOKIE_NAMES,
   DO_PORTAL_ACCESS_TOKEN_KEYS,
   DO_PORTAL_AUTH_META_FILE_REL,
+  DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX,
   DO_PORTAL_KEEPALIVE_INTERVAL_MS,
   DO_PORTAL_LONG_TEST_TIMEOUT_MS,
+  DO_PORTAL_MAX_SESSION_REUSE_AGE_MS,
+  DO_PORTAL_REFRESH_TOKEN_COOKIE_NAMES,
   DO_PORTAL_REFRESH_TOKEN_KEYS,
   DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS,
   type DoPortalAuthMeta,
@@ -50,6 +54,17 @@ export interface DiscoveredTokens {
   refreshTokenKey?: string;
   expiresAtMs?: number;
   oidcUserKey?: string;
+  /** Set when the access token lives in an HTTP cookie (not localStorage). */
+  cookieDomain?: string;
+  cookiePath?: string;
+}
+
+export function isCookieTokenKey(key: string): boolean {
+  return key.startsWith(DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX);
+}
+
+export function cookieNameFromTokenKey(key: string): string {
+  return isCookieTokenKey(key) ? key.slice(DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX.length) : key;
 }
 
 export interface TokenRefreshResult {
@@ -67,6 +82,19 @@ export interface KeepaliveOptions {
   expiryBufferMs?: number;
 }
 
+export interface DoPortalSessionEvaluation {
+  action: "reuse" | "mfa";
+  reason: string;
+  ageMinutes?: number;
+  expiresAt?: string;
+  tokens?: DiscoveredTokens;
+}
+
+export interface DiscoverAuthMetaOptions {
+  /** Set sessionSavedAt to now (MFA login only — not keepalive saves). */
+  stampSessionSavedAt?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // JWT utilities
 // ---------------------------------------------------------------------------
@@ -76,30 +104,42 @@ export function looksLikeJwt(value: string): boolean {
   return parts.length === 3 && parts[0].startsWith("eyJ");
 }
 
-export function parseJwtExpiryMs(token: string): number | undefined {
+function decodeJwtPayload(token: string): { exp?: number; iat?: number } | undefined {
   try {
     const payload = token.trim().split(".")[1];
     if (!payload) return undefined;
     const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
     const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
-    const json = JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as {
+    return JSON.parse(Buffer.from(padded, "base64").toString("utf8")) as {
       exp?: number;
+      iat?: number;
     };
-    if (typeof json.exp === "number") return json.exp * 1000;
   } catch {
-    // not a decodable JWT
+    return undefined;
   }
+}
+
+export function parseJwtExpiryMs(token: string): number | undefined {
+  const json = decodeJwtPayload(token);
+  if (typeof json?.exp === "number") return json.exp * 1000;
+  return undefined;
+}
+
+export function parseJwtIssuedMs(token: string): number | undefined {
+  const json = decodeJwtPayload(token);
+  if (typeof json?.iat === "number") return json.iat * 1000;
   return undefined;
 }
 
 export function isAccessTokenExpiringSoon(
   token: string | undefined,
   bufferMs = DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS,
+  nowMs = Date.now(),
 ): boolean {
   if (!token) return true;
   const expMs = parseJwtExpiryMs(token);
   if (!expMs) return false;
-  return expMs - Date.now() <= bufferMs;
+  return expMs - nowMs <= bufferMs;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +292,101 @@ function discoverTokensInOrigin(
   return undefined;
 }
 
+function portalHostnames(): string[] {
+  return doPortalAuthOrigins().map((o) => {
+    try {
+      return new URL(o).hostname;
+    } catch {
+      return o;
+    }
+  });
+}
+
+function cookieOrigin(domain: string): string {
+  const hosts = portalHostnames();
+  const match = hosts.find((h) => domain === h || domain.endsWith(`.${h}`) || h.endsWith(domain));
+  if (match) {
+    return `https://${match}`;
+  }
+  return `https://${domain.replace(/^\./, "")}`;
+}
+
+function discoverTokensFromCookies(
+  state: PlaywrightStorageState,
+  meta?: DoPortalAuthMeta,
+): DiscoveredTokens | undefined {
+  const cookies = state.cookies ?? [];
+  if (!cookies.length) return undefined;
+
+  const accessNames = new Set<string>([
+    ...DO_PORTAL_ACCESS_TOKEN_COOKIE_NAMES,
+    ...(meta?.accessTokenKeys ?? [])
+      .filter(isCookieTokenKey)
+      .map(cookieNameFromTokenKey),
+  ]);
+  const refreshNames = new Set<string>([
+    ...DO_PORTAL_REFRESH_TOKEN_COOKIE_NAMES,
+    ...(meta?.refreshTokenKeys ?? [])
+      .filter(isCookieTokenKey)
+      .map(cookieNameFromTokenKey),
+  ]);
+  const preferredHosts = portalHostnames();
+
+  const scoreCookie = (domain: unknown): number => {
+    const d = String(domain ?? "");
+    const idx = preferredHosts.findIndex((h) => d === h || d.endsWith(`.${h}`) || h.endsWith(d));
+    return idx === -1 ? 99 : idx;
+  };
+
+  const sorted = [...cookies].sort(
+    (a, b) => scoreCookie(a.domain) - scoreCookie(b.domain),
+  );
+
+  for (const name of accessNames) {
+    const cookie = sorted.find((c) => c.name === name && typeof c.value === "string");
+    if (!cookie || !looksLikeJwt(String(cookie.value))) continue;
+
+    let refreshToken: string | undefined;
+    let refreshTokenKey: string | undefined;
+    for (const refreshName of refreshNames) {
+      const rt = sorted.find((c) => c.name === refreshName && typeof c.value === "string");
+      if (rt?.value) {
+        refreshToken = String(rt.value);
+        refreshTokenKey = `${DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX}${refreshName}`;
+        break;
+      }
+    }
+
+    const domain = String(cookie.domain ?? preferredHosts[0] ?? "");
+    return {
+      origin: cookieOrigin(domain),
+      accessToken: String(cookie.value),
+      accessTokenKey: `${DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX}${name}`,
+      refreshToken,
+      refreshTokenKey,
+      expiresAtMs: parseJwtExpiryMs(String(cookie.value)),
+      cookieDomain: domain,
+      cookiePath: String(cookie.path ?? "/"),
+    };
+  }
+
+  for (const cookie of sorted) {
+    const value = cookie.value;
+    if (typeof value !== "string" || !looksLikeJwt(value)) continue;
+    const domain = String(cookie.domain ?? preferredHosts[0] ?? "");
+    return {
+      origin: cookieOrigin(domain),
+      accessToken: value,
+      accessTokenKey: `${DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX}${String(cookie.name)}`,
+      expiresAtMs: parseJwtExpiryMs(value),
+      cookieDomain: domain,
+      cookiePath: String(cookie.path ?? "/"),
+    };
+  }
+
+  return undefined;
+}
+
 export function discoverTokensFromStorageState(
   state: PlaywrightStorageState,
   meta?: DoPortalAuthMeta,
@@ -267,7 +402,107 @@ export function discoverTokensFromStorageState(
     const found = discoverTokensInOrigin(origin.origin, origin.localStorage, meta);
     if (found) return found;
   }
+
+  return discoverTokensFromCookies(state, meta);
+}
+
+function resolveSessionSavedAtMs(
+  meta: DoPortalAuthMeta | undefined,
+  tokens: DiscoveredTokens | undefined,
+  filePath = doPortalAuthFile,
+): number | undefined {
+  if (meta?.sessionSavedAt) {
+    const parsed = Date.parse(meta.sessionSavedAt);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  if (tokens?.accessToken) {
+    const iatMs = parseJwtIssuedMs(tokens.accessToken);
+    if (iatMs) return iatMs;
+  }
+  if (fs.existsSync(filePath)) {
+    return fs.statSync(filePath).mtimeMs;
+  }
   return undefined;
+}
+
+export function evaluateDoPortalSessionFromState(
+  state: PlaywrightStorageState | undefined,
+  meta: DoPortalAuthMeta | undefined,
+  options: { filePath?: string; nowMs?: number } = {},
+): DoPortalSessionEvaluation {
+  const filePath = options.filePath ?? doPortalAuthFile;
+  const nowMs = options.nowMs ?? Date.now();
+
+  if (!state) {
+    return { action: "mfa", reason: "Auth storage file does not exist." };
+  }
+
+  const tokens = discoverTokensFromStorageState(state, meta);
+
+  if (!tokens) {
+    return { action: "mfa", reason: "No discoverable access token in saved session." };
+  }
+
+  const expMs = parseJwtExpiryMs(tokens.accessToken);
+  const expiresAt = expMs ? new Date(expMs).toISOString() : undefined;
+
+  if (isAccessTokenExpiringSoon(tokens.accessToken, DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS, nowMs)) {
+    const expired = expMs !== undefined && expMs <= nowMs;
+    return {
+      action: "mfa",
+      reason: expired ? "JWT expired." : "JWT expiring soon.",
+      expiresAt,
+      tokens,
+    };
+  }
+
+  const savedAtMs = resolveSessionSavedAtMs(meta, tokens, filePath);
+  if (savedAtMs === undefined) {
+    return {
+      action: "mfa",
+      reason: "Session save time unknown — MFA login required.",
+      expiresAt,
+      tokens,
+    };
+  }
+
+  const ageMs = nowMs - savedAtMs;
+  const ageMinutes = Math.round(ageMs / 60_000);
+  const maxAgeMinutes = Math.round(DO_PORTAL_MAX_SESSION_REUSE_AGE_MS / 60_000);
+
+  if (ageMs > DO_PORTAL_MAX_SESSION_REUSE_AGE_MS) {
+    return {
+      action: "mfa",
+      reason: `Session saved ${ageMinutes} min ago (max ${maxAgeMinutes} min).`,
+      ageMinutes,
+      expiresAt,
+      tokens,
+    };
+  }
+
+  return {
+    action: "reuse",
+    reason: `Session saved ${ageMinutes} min ago, JWT valid until ${expiresAt ?? "unknown"}.`,
+    ageMinutes,
+    expiresAt,
+    tokens,
+  };
+}
+
+export function evaluateDoPortalSession(
+  filePath = doPortalAuthFile,
+): DoPortalSessionEvaluation {
+  if (!fs.existsSync(filePath)) {
+    return { action: "mfa", reason: "Auth storage file does not exist." };
+  }
+
+  return evaluateDoPortalSessionFromState(readStorageStateFile(filePath), readAuthMeta(), {
+    filePath,
+  });
+}
+
+export function hasReusableDoPortalSession(filePath = doPortalAuthFile): boolean {
+  return evaluateDoPortalSession(filePath).action === "reuse";
 }
 
 export async function getTokensFromPage(page: Page): Promise<DiscoveredTokens | undefined> {
@@ -298,10 +533,27 @@ export async function getTokensFromPage(page: Page): Promise<DiscoveredTokens | 
     return result;
   }).catch(() => []);
 
+  const fromCookies = await getTokensFromContextCookies(page, meta);
+  if (fromCookies) return fromCookies;
+
   return discoverTokensInOrigin(currentOrigin, entries, meta);
 }
 
-export function discoverAndSaveAuthMeta(state: PlaywrightStorageState): DoPortalAuthMeta {
+async function getTokensFromContextCookies(
+  page: Page,
+  meta?: DoPortalAuthMeta,
+): Promise<DiscoveredTokens | undefined> {
+  const cookies = await page.context().cookies();
+  return discoverTokensFromCookies(
+    { cookies: cookies as unknown as Array<Record<string, unknown>>, origins: [] },
+    meta,
+  );
+}
+
+export function discoverAndSaveAuthMeta(
+  state: PlaywrightStorageState,
+  options: DiscoverAuthMetaOptions = {},
+): DoPortalAuthMeta {
   const accessTokenKeys = new Set<string>();
   const refreshTokenKeys = new Set<string>();
   const oidcUserKeys = new Set<string>();
@@ -325,10 +577,35 @@ export function discoverAndSaveAuthMeta(state: PlaywrightStorageState): DoPortal
     }
   }
 
+  for (const cookie of state.cookies ?? []) {
+    const name = String(cookie.name ?? "");
+    const value = cookie.value;
+    if (!name || typeof value !== "string") continue;
+    const domain = String(cookie.domain ?? "");
+    if (domain) origins.add(cookieOrigin(domain));
+    if (DO_PORTAL_ACCESS_TOKEN_COOKIE_NAMES.includes(name) || looksLikeJwt(value)) {
+      accessTokenKeys.add(`${DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX}${name}`);
+    }
+    if (DO_PORTAL_REFRESH_TOKEN_COOKIE_NAMES.includes(name)) {
+      refreshTokenKeys.add(`${DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX}${name}`);
+    }
+  }
+
+  const previousMeta = readAuthMeta();
+  const tokens = discoverTokensFromStorageState(state, previousMeta);
+  const iatMs = tokens ? parseJwtIssuedMs(tokens.accessToken) : undefined;
+  const expMs = tokens ? parseJwtExpiryMs(tokens.accessToken) : undefined;
+  const nowIso = new Date().toISOString();
+
   const meta: DoPortalAuthMeta = {
-    discoveredAt: new Date().toISOString(),
-    tokenEndpointUrl: doPortalTokenEndpointUrl() ?? readAuthMeta()?.tokenEndpointUrl,
-    clientId: doPortalOAuthClientId() ?? readAuthMeta()?.clientId,
+    discoveredAt: nowIso,
+    sessionSavedAt: options.stampSessionSavedAt
+      ? nowIso
+      : previousMeta?.sessionSavedAt,
+    accessTokenIssuedAt: iatMs ? new Date(iatMs).toISOString() : previousMeta?.accessTokenIssuedAt,
+    accessTokenExpiresAt: expMs ? new Date(expMs).toISOString() : previousMeta?.accessTokenExpiresAt,
+    tokenEndpointUrl: doPortalTokenEndpointUrl() ?? previousMeta?.tokenEndpointUrl,
+    clientId: doPortalOAuthClientId() ?? previousMeta?.clientId,
     accessTokenKeys: [...accessTokenKeys],
     refreshTokenKeys: [...refreshTokenKeys],
     oidcUserKeys: [...oidcUserKeys],
@@ -371,6 +648,46 @@ function applyTokensToStorageState(
   newAccess: string,
   newRefresh?: string,
 ): void {
+  if (isCookieTokenKey(tokens.accessTokenKey)) {
+    const accessName = cookieNameFromTokenKey(tokens.accessTokenKey);
+    const existing = state.cookies.find((c) => c.name === accessName);
+    if (existing) {
+      existing.value = newAccess;
+      const expMs = parseJwtExpiryMs(newAccess);
+      if (expMs) existing.expires = expMs / 1000;
+    } else {
+      state.cookies.push({
+        name: accessName,
+        value: newAccess,
+        domain: tokens.cookieDomain ?? portalHostnames()[0],
+        path: tokens.cookiePath ?? "/",
+        expires: (parseJwtExpiryMs(newAccess) ?? Date.now() + 20 * 60_000) / 1000,
+        httpOnly: false,
+        secure: false,
+        sameSite: "Lax",
+      });
+    }
+
+    if (newRefresh && tokens.refreshTokenKey && isCookieTokenKey(tokens.refreshTokenKey)) {
+      const refreshName = cookieNameFromTokenKey(tokens.refreshTokenKey);
+      const refreshCookie = state.cookies.find((c) => c.name === refreshName);
+      if (refreshCookie) refreshCookie.value = newRefresh;
+      else {
+        state.cookies.push({
+          name: refreshName,
+          value: newRefresh,
+          domain: tokens.cookieDomain ?? portalHostnames()[0],
+          path: tokens.cookiePath ?? "/",
+          expires: -1,
+          httpOnly: false,
+          secure: false,
+          sameSite: "Lax",
+        });
+      }
+    }
+    return;
+  }
+
   const origin = state.origins.find((o) => o.origin === tokens.origin);
   if (!origin) {
     state.origins.push({
@@ -472,7 +789,7 @@ export async function refreshAccessToken(page: Page): Promise<TokenRefreshResult
   }
 
   if (!tokens) {
-    return { ok: false, message: "No access token found in browser storage." };
+    return { ok: false, message: "No access token found in browser cookies or localStorage." };
   }
 
   if (!isAccessTokenExpiringSoon(tokens.accessToken)) {
@@ -547,6 +864,33 @@ async function applyTokensToPage(
   newAccess: string,
   newRefresh?: string,
 ): Promise<void> {
+  if (isCookieTokenKey(tokens.accessTokenKey)) {
+    const accessName = cookieNameFromTokenKey(tokens.accessTokenKey);
+    const domain = tokens.cookieDomain ?? portalHostnames()[0];
+    const path = tokens.cookiePath ?? "/";
+    const expMs = parseJwtExpiryMs(newAccess);
+    await page.context().addCookies([
+      {
+        name: accessName,
+        value: newAccess,
+        domain,
+        path,
+        expires: expMs ? Math.floor(expMs / 1000) : undefined,
+      },
+      ...(newRefresh && tokens.refreshTokenKey && isCookieTokenKey(tokens.refreshTokenKey)
+        ? [
+            {
+              name: cookieNameFromTokenKey(tokens.refreshTokenKey),
+              value: newRefresh,
+              domain,
+              path,
+            },
+          ]
+        : []),
+    ]);
+    return;
+  }
+
   await page.evaluate(
     ({ origin, accessKey, refreshKey, oidcKey, access, refresh }) => {
       if (window.location.origin !== origin) return;
@@ -652,19 +996,61 @@ export async function refreshAccessTokenFromFile(
 }
 
 export async function ensureFreshDoPortalStorageFile(): Promise<TokenRefreshResult> {
-  if (!fs.existsSync(doPortalAuthFile)) {
-    return { ok: false, message: "Auth storage file does not exist yet." };
+  const evaluation = evaluateDoPortalSession();
+  if (evaluation.action === "reuse" && evaluation.tokens) {
+    return {
+      ok: true,
+      message: `Saved session still valid — ${evaluation.reason}`,
+      tokens: evaluation.tokens,
+    };
   }
+
+  if (!fs.existsSync(doPortalAuthFile)) {
+    return { ok: false, message: evaluation.reason };
+  }
+
   return refreshAccessTokenFromFile();
 }
 
-export async function saveDoPortalStorageState(context: BrowserContext): Promise<void> {
+export async function saveDoPortalStorageState(
+  context: BrowserContext,
+  options: DiscoverAuthMetaOptions = {},
+): Promise<void> {
   await withStorageFileLock(async () => {
     fs.mkdirSync(path.dirname(doPortalAuthFile), { recursive: true });
     await context.storageState({ path: doPortalAuthFile });
     const state = readStorageStateFile();
-    if (state) discoverAndSaveAuthMeta(state);
+    if (state) discoverAndSaveAuthMeta(state, options);
   });
+}
+
+/** Load saved cookies into an existing context (after MFA in fixture / stale reuseBrowser). */
+export async function applyDoPortalAuthToContext(
+  context: BrowserContext,
+  filePath = doPortalAuthFile,
+): Promise<void> {
+  const state = readStorageStateFile(filePath);
+  if (!state?.cookies?.length) return;
+
+  await context.clearCookies();
+  const cookies = state.cookies
+    .filter((c) => c.name && c.domain)
+    .map((c) => ({
+      name: String(c.name),
+      value: String(c.value ?? ""),
+      domain: String(c.domain),
+      path: String(c.path ?? "/"),
+      expires:
+        typeof c.expires === "number" && c.expires > 0
+          ? c.expires
+          : undefined,
+      httpOnly: Boolean(c.httpOnly),
+      secure: Boolean(c.secure),
+      sameSite: (c.sameSite as "Strict" | "Lax" | "None") ?? "Lax",
+    }));
+  if (cookies.length) {
+    await context.addCookies(cookies);
+  }
 }
 
 // ---------------------------------------------------------------------------
