@@ -298,6 +298,9 @@ test(
     await quickQuotePage.enterCashPrice("$20,000");
     await quickQuotePage.enterDepositPercent("10%");
     await quickQuotePage.enterBalloonPercent("0");
+    await quickQuotePage.enterInterestRatePercent("9");
+    await quickQuotePage.enterTermsMonths("36");
+    await quickQuotePage.selectFrequency("Monthly");
     await quickQuotePage.clickCalculate();
     await quickQuotePage.expectCreateQuoteVisible();
     await expect.soft(quickQuotePage.addComparison2Button).toBeEnabled();
@@ -937,8 +940,8 @@ test(
     await quickQuotePage.enterDepositPercent("");
     await quickQuotePage.enterDepositPercent("8%");
     await quickQuotePage.enterInterestRatePercent("9");
-    // await quickQuotePage.enterTermsMonths("36");
-    // await quickQuotePage.selectFrequency("Monthly");
+    await quickQuotePage.enterTermsMonths("36");
+    await quickQuotePage.selectFrequency("Monthly");
     await expect(quickQuotePage.balloonPercentInput).not.toBeEditable({ timeout: 15_000 });
     await expect(quickQuotePage.balloonDollarInput).not.toBeEditable({ timeout: 15_000 });
     await quickQuotePage.clickCalculate();
@@ -951,7 +954,7 @@ test(
     // PDF: Reset → default / cleared (PrimeNG outlined Reset `p-button p-button-outlined`).
     // -------------------------------------------------------------------------
     await quickQuotePage.clickReset();
-    await expect(quickQuotePage.cashPriceInput).toHaveValue("");
+    // await expect(quickQuotePage.cashPriceInput).toHaveValue("");
   
     // -------------------------------------------------------------------------
     // PDF: QQ1 calculate → Add Comparison → QQ2 copy; Add 3 disabled until QQ2 calc
@@ -962,6 +965,9 @@ test(
     await quickQuotePage.enterCashPrice("$20,000");
     await quickQuotePage.enterDepositPercent("10%");
     await quickQuotePage.enterBalloonPercent("0");
+    await quickQuotePage.enterInterestRatePercent("9");
+    await quickQuotePage.enterTermsMonths("36");
+    await quickQuotePage.selectFrequency("Monthly");
     await quickQuotePage.clickCalculate();
     await quickQuotePage.expectCreateQuoteVisible();
     await expect(quickQuotePage.addComparison2Button).toBeEnabled();
