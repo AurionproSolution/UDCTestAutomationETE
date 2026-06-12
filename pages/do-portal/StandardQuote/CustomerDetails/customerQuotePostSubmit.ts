@@ -7,8 +7,8 @@ import { BasePage } from "../../../common";
 /** Default PDF used on Customer Details after Reference submit (Upload tab). */
 export const DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF = path.join(
   process.cwd(),
-  "backup",
   "testData",
+  "do-portal",
   "exportedPDFFile (3) (1).pdf",
 );
 

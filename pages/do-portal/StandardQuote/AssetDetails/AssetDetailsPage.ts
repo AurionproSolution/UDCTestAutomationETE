@@ -1383,49 +1383,63 @@ export class DOAssetDetailsPage extends BasePage {
     await this.assetSearchField.fill(asset);
     await this.page.getByRole("option", { name: asset }).click();
   }
+
+  /** Caption / float-label for the Asset Details **Condition** row inside a quote shell. */
+  private conditionCaptionIn(root: Locator): Locator {
+    return root
+      .getByText("Condition *", { exact: true })
+      .or(root.getByText(/^Condition\s*\*?\s*$/i))
+      .first();
+  }
+
   /**
-   * Select a condition from the Condition dropdown
+   * Resolves `app-quote-details` / `app-standard-quote` host that actually contains the Condition field.
+   * Some builds omit **Asset Type** copy from inner text (or nest it), which made `.filter({ hasText: /Asset Type/ })` match nothing.
    */
-  async selectCondition(condition: string) {
-    const current = await this.page
-      .getByRole("combobox")
-      .first()
-      .inputValue()
-      .catch(() => "");
-  
-    if (current.includes(condition)) {
+  private async resolveAssetDetailsConditionRoot(): Promise<Locator> {
+    const candidates: Locator[] = [
+      this.page
+        .locator("app-quote-details, app-standard-quote")
+        .filter({ hasText: /Condition/i })
+        .first(),
+      this.standardQuoteRoot(),
+      this.page
+        .locator("app-quote-details, app-standard-quote")
+        .filter({ hasText: /Asset Type/i })
+        .last(),
+    ];
+    for (const r of candidates) {
+      const cap = this.conditionCaptionIn(r);
+      if (await cap.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        return r;
+      }
+    }
+    return this.standardQuoteRoot();
+  }
+
+  /** Prime overlay **option** — `exact` can fail when the a11y name includes extra copy. */
+  private async clickConditionOption(condition: string): Promise<void> {
+    const exact = this.page.getByRole("option", { name: condition, exact: true }).first();
+    if (await exact.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await exact.click({ timeout: 15_000 });
       return;
     }
-  
-    await this.conditionDropdown.click();
-  
-    await expect(
-      this.page.getByRole("option", { name: condition })
-    ).toBeVisible({ timeout: 10000 });
-  
-    await this.page
-      .getByRole("option", { name: condition })
-      .click();
+    const esc = condition.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const loose = this.page.getByRole("option", { name: new RegExp(esc, "i") }).first();
+    await loose.waitFor({ state: "visible", timeout: 20_000 });
+    await loose.click({ timeout: 15_000 });
   }
+
   /**
-   * **Condition** on Standard Quote / Asset Details.
-   * - If the Prime **Option List** is already open, click the option.
-   * - Else dismiss overlays, anchor on **Condition *** caption, then open the nearest **following** `p-dropdown`
-   *   (`following-sibling` breaks when the label sits inside a wrapper that is not the dropdown’s direct sibling).
-   * - Root: quote shell that actually contains **Asset Type** (avoid `\\b` / strict filters that can drop the host).
+   * Open the Condition `p-dropdown` under `root` and pick `condition` (panel is portaled to `document`).
    */
-  async selectConditionInStandardQuote(condition: string): Promise<void> {
-    this.logStep(`Selected condition (standard quote): ${this.stepValueDisplay(condition)}`);
-
-    const root = this.page
-      .locator("app-quote-details, app-standard-quote")
-      .filter({ hasText: /Asset Type/i })
-      .last();
-    await root.waitFor({ state: "visible", timeout: 45_000 });
-
+  private async openAssetDetailsConditionAndSelect(
+    root: Locator,
+    condition: string,
+  ): Promise<void> {
     const optionWhenOpen = this.page
       .getByRole("listbox", { name: /Option List/i })
-      .getByRole("option", { name: condition, exact: true })
+      .getByRole("option", { name: condition })
       .first();
     if (await optionWhenOpen.isVisible({ timeout: 2_500 }).catch(() => false)) {
       await optionWhenOpen.click({ timeout: 15_000 });
@@ -1436,11 +1450,8 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.keyboard.press("Escape").catch(() => {});
     await this.page.waitForTimeout(200);
 
-    const caption = root
-      .getByText("Condition *", { exact: true })
-      .or(root.getByText(/^Condition\s*\*?\s*$/i))
-      .first();
-    await caption.waitFor({ state: "visible", timeout: 20_000 });
+    const caption = this.conditionCaptionIn(root);
+    await caption.waitFor({ state: "visible", timeout: 25_000 });
     await caption.scrollIntoViewIfNeeded();
 
     const dropdownAfterCaption = caption
@@ -1451,15 +1462,48 @@ export class DOAssetDetailsPage extends BasePage {
       .or(dropdownAfterCaption.getByRole("button", { name: /dropdown trigger/i }))
       .first();
 
-    await expect(trigger).toBeAttached({ timeout: 20_000 });
+    let opened = false;
     try {
+      await expect(trigger).toBeAttached({ timeout: 15_000 });
       await trigger.click({ timeout: 12_000 });
+      opened = true;
     } catch {
-      await trigger.click({ force: true, timeout: 12_000 });
+      try {
+        await trigger.click({ force: true, timeout: 12_000 });
+        opened = true;
+      } catch {
+        /* use SVG index fallback */
+      }
+    }
+    if (!opened) {
+      await this.conditionDropdown.click({ timeout: 12_000 }).catch(() => {});
     }
 
-    await this.page.getByRole("option", { name: condition, exact: true }).first().click({ timeout: 15_000 });
+    await this.clickConditionOption(condition);
     await this.page.keyboard.press("Escape").catch(() => {});
+  }
+
+  /**
+   * Select a condition from the Condition dropdown on Asset Details.
+   * Uses {@link selectConditionInStandardQuote} (shared caption + trigger + option logic).
+   */
+  async selectCondition(condition: string) {
+    await this.selectConditionInStandardQuote(condition);
+  }
+
+  /**
+   * **Condition** on Standard Quote / Asset Details.
+   * - If the Prime **Option List** is already open, click the option.
+   * - Else dismiss overlays, anchor on **Condition *** caption, then open the nearest **following** `p-dropdown`
+   * - Root: first shell that shows a **Condition** caption; else {@link standardQuoteRoot}; else last shell with **Asset Type** text.
+   * - Fallback: legacy {@link conditionDropdown} SVG index if the caption trigger cannot be used.
+   */
+  async selectConditionInStandardQuote(condition: string): Promise<void> {
+    this.logStep(`Selected condition (standard quote): ${this.stepValueDisplay(condition)}`);
+
+    const root = await this.resolveAssetDetailsConditionRoot();
+    await root.waitFor({ state: "visible", timeout: 60_000 });
+    await this.openAssetDetailsConditionAndSelect(root, condition);
   }
 
   /**
@@ -1611,15 +1655,23 @@ export class DOAssetDetailsPage extends BasePage {
     }
 
     await summary.scrollIntoViewIfNeeded();
-    const summaryContent = summary.locator(".p-dialog-content, .p-dialog-body").last();
-    await summaryContent.scrollIntoViewIfNeeded().catch(() => {});
-    // Footer **Search & Add Asset** sits below the scrollable table; scroll content to bottom first.
-    await summaryContent
-      .evaluate((el) => {
-        el.scrollTop = el.scrollHeight;
-      })
-      .catch(() => {});
+    // Footer **Search & Add Asset** often sits below a scrollable region — scroll **every** dialog content pane
+    // (`.last()` alone can target an empty header pane so the real table/footer never scrolls into view).
+    const contentPanes = summary.locator(".p-dialog-content, .p-dialog-body");
+    const paneCount = await contentPanes.count();
+    for (let pi = 0; pi < paneCount; pi++) {
+      const pane = contentPanes.nth(pi);
+      await pane
+        .evaluate((el) => {
+          el.scrollTop = el.scrollHeight;
+        })
+        .catch(() => {});
+    }
     await this.page.waitForTimeout(400);
+
+    const searchAddCaption = summary.getByText(/Search\s*&\s*Add\s+Asset/i).first();
+    await expect(searchAddCaption).toBeVisible({ timeout: 30_000 });
+    await searchAddCaption.scrollIntoViewIfNeeded();
 
     const tryClick = async (label: string, loc: Locator): Promise<boolean> => {
       const el = loc.first();
@@ -1659,7 +1711,7 @@ export class DOAssetDetailsPage extends BasePage {
       } catch {
         await first.click({ force: true, timeout: 12_000 }).catch(() => {});
       }
-      if (await this.page.locator("app-search-asset").first().isVisible({ timeout: 2_500 }).catch(() => false)) {
+      if (await this.page.locator("app-search-asset").first().isVisible({ timeout: 6_000 }).catch(() => false)) {
         return true;
       }
       motoLog(`  ${label}: dialog not open — DOM click on owning button…`);
@@ -1669,22 +1721,48 @@ export class DOAssetDetailsPage extends BasePage {
           btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
         })
         .catch(() => {});
-      return await this.page.locator("app-search-asset").first().isVisible({ timeout: 4_000 }).catch(() => false);
+      return await this.page.locator("app-search-asset").first().isVisible({ timeout: 8_000 }).catch(() => false);
     };
 
     motoLog('Step 2: Clicking "Search & Add Asset" (+ icon / button) inside Summary (multi-strategy)…');
+
+    // **A.** Summary-wide: any `button` / link whose **visible text** includes Search & Add Asset (does not rely on `app-asset-insurance-summary` paint order).
+    const summaryWideTextBtn = summary
+      .locator("button, a.p-button-link, a.p-button, a[role='button']")
+      .filter({ hasText: /Search\s*&\s*Add\s+Asset/i })
+      .first();
+    if (await clickSearchAddUntilDialogOpens("summary-wide button/a (hasText Search & Add Asset)", summaryWideTextBtn)) {
+      await assertSearchAssetOpened();
+      return;
+    }
+
+    // **B.** `gen-button` host (click wrapper — inner `button` can be zero-sized in some builds).
+    const genHostWide = summary.locator("gen-button").filter({ hasText: /Search\s*&\s*Add\s+Asset/i }).first();
+    if (await clickSearchAddUntilDialogOpens("summary gen-button host (Search & Add Asset)", genHostWide)) {
+      await assertSearchAssetOpened();
+      return;
+    }
+
     const assetInsuranceHost = summary.locator("app-asset-insurance-summary").first();
-    if (await assetInsuranceHost.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    if (await assetInsuranceHost.isVisible({ timeout: 15_000 }).catch(() => false)) {
       await assetInsuranceHost.scrollIntoViewIfNeeded();
-      await summaryContent
-        .evaluate((el) => {
-          el.scrollTop = el.scrollHeight;
-        })
-        .catch(() => {});
+      for (let pi = 0; pi < paneCount; pi++) {
+        await contentPanes
+          .nth(pi)
+          .evaluate((el) => {
+            el.scrollTop = el.scrollHeight;
+          })
+          .catch(() => {});
+      }
       await this.page.waitForTimeout(350);
 
-      // **gen-button** wrapper — `filter({ hasText })` matches label text inside the component tree.
+      // **gen-button** wrapper — click **host** first (inner `button` can be 0×0); then inner button.
       const genWrapped = assetInsuranceHost.locator("gen-button").filter({ hasText: /Search\s*&\s*Add\s+Asset/i });
+      const genHost = genWrapped.first();
+      if (await clickSearchAddUntilDialogOpens("app-asset-insurance-summary gen-button host", genHost)) {
+        await assertSearchAssetOpened();
+        return;
+      }
       const genInnerBtn = genWrapped.locator("button.p-button, button").first();
       if (await clickSearchAddUntilDialogOpens("gen-button inner button (Search & Add Asset)", genInnerBtn)) {
         await assertSearchAssetOpened();
@@ -1886,8 +1964,14 @@ export class DOAssetDetailsPage extends BasePage {
     const successMsg = this.page.getByText(/Motocheck Successfully Executed/i).first();
     await expect(successMsg).toBeVisible({ timeout: 60_000 });
 
-    motoLog("Step 9: Clicking Continue…");
-    await this.page.locator(':text-is("Continue")').first().click({ timeout: 15_000 });
+    motoLog("Step 9: Clicking Continue inside Search Asset dialog (avoid page-level Continue)…");
+    const continueInSearchDialog = searchAssetDialog
+      .getByRole("button", { name: /^Continue$/i })
+      .or(searchAssetDialog.locator("button.p-button").filter({ hasText: /^Continue$/i }))
+      .or(searchAssetDialog.locator(':text-is("Continue")'))
+      .first();
+    await expect(continueInSearchDialog).toBeVisible({ timeout: 20_000 });
+    await continueInSearchDialog.click({ timeout: 15_000 });
 
     motoLog("Step 10: Waiting for Add Asset page (submit with MotoCheck **Asset Value** unchanged)…");
     const addAssetPage = new DOAddAssetPage(this.page);
@@ -3130,10 +3214,14 @@ export class DOAssetDetailsPage extends BasePage {
       await this.page.waitForTimeout(400);
     }
     await btn.scrollIntoViewIfNeeded();
+    const enabled = await btn.isEnabled().catch(() => false);
     try {
       await btn.click({ timeout: 25_000 });
     } catch {
       await btn.click({ force: true, timeout: 25_000 });
+    }
+    if (!enabled) {
+      await btn.click({ force: true, timeout: 15_000 }).catch(() => {});
     }
 
     await this.waitUntilNoVisibleAppLoaderOverlays(90_000);

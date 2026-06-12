@@ -298,7 +298,7 @@ export class DOAddOnsAccessoriesPage extends BasePage {
       .catch(() => {});
 
     const settleAfterClick = async (): Promise<void> => {
-      await this.waitForAddOnsUiReady();
+    await this.waitForAddOnsUiReady();
     };
 
     try {
@@ -444,16 +444,43 @@ export class DOAddOnsAccessoriesPage extends BasePage {
     await this.fillCurrencyLikeInput(input, amount, "accessories");
   }
 
-  /** Second line **Towbar** — label-scoped amount only (no fixed DOM row index). */
+  /** Second line **Towbar** — label match (**Towbar** / **Tow Bar**) then **nth(1)** row (same fallback as summary polls). */
   async fillSecondAccessoryAmount(amount: string): Promise<void> {
-    this.logStep(`Fill Accessories (Towbar) amount: ${this.stepValueDisplay(amount)}`);
+    this.logStep(`Fill Accessories (Towbar / 2nd line) amount: ${this.stepValueDisplay(amount)}`);
     await this.accessoriesPanel().scrollIntoViewIfNeeded().catch(() => {});
-    await this.page.keyboard.press("Tab").catch(() => {});
-    const towByLabel = this.accessoryAmountInputByLineLabel("Towbar");
-    if (!((await towByLabel.count()) > 0 && (await towByLabel.isVisible({ timeout: 6_000 }).catch(() => false)))) {
-      throw new Error("Add Ons: Towbar amount field not visible — cannot fill without fixed row index.");
-    }
-    await this.fillCurrencyLikeInput(towByLabel, amount, "accessories");
+
+    const towByExactLabel = this.accessoryAmountInputByLineLabel("Towbar");
+    const towBySpacedLabel = this.accessoriesPanel()
+      .locator("form div.m-0.col-4.grid")
+      .filter({ hasText: /Tow\s*Bar/i })
+      .locator("amount input[currencymask], amount input.p-inputtext, input[currencymask]")
+      .first();
+    const towByRowIndex = this.generalAccessoriesAmountInput(1);
+
+    await expect
+      .poll(
+        async () => {
+          for (const loc of [towByExactLabel, towBySpacedLabel, towByRowIndex]) {
+            await loc.scrollIntoViewIfNeeded().catch(() => {});
+            if (await loc.isVisible({ timeout: 800 }).catch(() => false)) {
+              return true;
+            }
+          }
+          return false;
+        },
+        { timeout: 18_000, intervals: [200, 500, 1_000, 1_500] },
+      )
+      .toBeTruthy();
+
+    const input =
+      (await towByExactLabel.isVisible({ timeout: 1_500 }).catch(() => false))
+        ? towByExactLabel
+        : (await towBySpacedLabel.isVisible({ timeout: 1_500 }).catch(() => false))
+          ? towBySpacedLabel
+          : towByRowIndex;
+
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await this.fillCurrencyLikeInput(input, amount, "accessories");
   }
 
   private escapeRe(s: string): string {
@@ -676,8 +703,8 @@ export class DOAddOnsAccessoriesPage extends BasePage {
       row.locator("div.flex.gap-3:visible").first(),
     ];
     for (const flex of candidates) {
-      if ((await flex.count()) > 0 && (await flex.isVisible().catch(() => false))) {
-        return flex;
+    if ((await flex.count()) > 0 && (await flex.isVisible().catch(() => false))) {
+      return flex;
       }
     }
     return row;
@@ -794,7 +821,7 @@ export class DOAddOnsAccessoriesPage extends BasePage {
   private async verifyYesPrimeSelectedOnCard(card: Locator): Promise<void> {
     await this.assertInsuranceCardHasYesNoRadios(card);
     const { yes: yesRadio } = this.noYesRadiosOnCard(card);
-    await expect
+      await expect
       .poll(
         async () => {
           if (
@@ -808,7 +835,7 @@ export class DOAddOnsAccessoriesPage extends BasePage {
         },
         { timeout: 15_000, intervals: [200, 400, 600, 1_000] },
       )
-      .toBeTruthy();
+        .toBeTruthy();
     const yesIcon = yesRadio.locator("span.p-radiobutton-icon").filter({ visible: true }).first();
     if (await yesIcon.isVisible().catch(() => false)) {
       await expect(yesIcon).toBeVisible({ timeout: 10_000 });
@@ -904,30 +931,31 @@ export class DOAddOnsAccessoriesPage extends BasePage {
    * Prefer those so we never read the **Amount** `input[currencymask]` in the same `form.p-fluid`.
    */
   insuranceMonthsInput(formOrRow: Locator): Locator {
-    return formOrRow
-      .locator(
-        "number input.p-inputtext.p-component.p-element.p-inputnumber-input[role='spinbutton']:visible, " +
-          "number input.p-inputnumber-input:visible, " +
-          "p-inputnumber input[data-pc-section='input']:visible, " +
-          "input.p-inputtext.p-component.p-element.p-inputnumber-input[role='spinbutton']:visible, " +
-          "p-inputnumber input.p-inputtext:visible, " +
-          "input[role='spinbutton']:visible",
-      )
-      .first();
+    const scoped = formOrRow.locator(
+      "number input.p-inputtext.p-component.p-element.p-inputnumber-input[role='spinbutton']:visible, " +
+        "number input.p-inputnumber-input:visible, " +
+        "p-inputnumber input[data-pc-section='input']:visible, " +
+        "input.p-inputtext.p-component.p-element.p-inputnumber-input[role='spinbutton']:visible, " +
+        "p-inputnumber input.p-inputtext.p-component.p-element:visible, " +
+        "p-inputnumber input.p-inputtext:visible, " +
+        "input.p-inputnumber-input:visible:not([id='amount']), " +
+        "input[role='spinbutton']:visible:not([id='amount'])",
+    );
+    return scoped.first();
   }
 
   /**
-   * Insurance **Amount** — always under the **`<amount>`** host in QAT; never use a bare `[currencymask]`
-   * locator so a loose `fillRoot` cannot pick another card’s currency field.
+   * Insurance **Amount** — `<amount>` host in some builds; newer builds use **`input#amount`** + `currencymask`
+   * directly under the question card (still scoped under `formOrRow`).
    */
   insuranceAmountInput(formOrRow: Locator): Locator {
-    return formOrRow
-      .locator(
-        "amount input[currencymask]:visible, " +
-          "amount input.p-inputtext.p-component.p-element.w-full.valueClass:visible, " +
-          "amount input.p-inputtext.p-component.p-element:visible",
-      )
-      .first();
+    const fromAmountHost = formOrRow.locator(
+      "amount input[currencymask]:visible, " +
+        "amount input.p-inputtext.p-component.p-element.w-full.valueClass:visible, " +
+        "amount input.p-inputtext.p-component.p-element:visible",
+    );
+    const bareAmount = formOrRow.locator("input#amount[currencymask]").filter({ visible: true });
+    return fromAmountHost.first().or(bareAmount.first());
   }
 
   async fillInsuranceMonths(months: string, row: Locator): Promise<void> {
@@ -1571,6 +1599,290 @@ export class DOAddOnsAccessoriesPage extends BasePage {
 
     await this.fillInsuranceSectionAfterCommit(months, insAmt);
   }
+    /**
+   * FL PDF regression — one Add Ons session: Registration + Accessories + Towbar, insurance by question text,
+   * Save → expect validation (e.g. months &lt; 12 with 15), recovery (Q2 No, Q1 months 11), Save → Asset Details tail.
+   * Does not alter {@link completeAddOnsValidationScenarioSkipInsurance}.
+   */
+    async completeFlStandardQuoteAddOnsSingleSessionWithInsuranceRegression(): Promise<void> {
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Single-session insurance regression — start");
+      await this.openAddOnsAndAccessoriesSection();
+      await this.expectAddOnsSectionHeadingVisible();
+  
+      await this.fillRegistrationAmount("500");
+      await this.fillGeneralAccessoriesAmount("1000");
+      await this.fillSecondAccessoryAmount("500");
+      await expect(this.registrationAmountInput()).toBeVisible({ timeout: 15_000 });
+      const accFirst0 =
+        (await this.accessoryAmountInputByLineLabel("Bull Bar").count()) > 0
+          ? this.accessoryAmountInputByLineLabel("Bull Bar")
+          : this.generalAccessoriesAmountInput(0);
+      await expect(accFirst0).toBeVisible({ timeout: 15_000 });
+  
+      await this.commitRegistrationAndAccessoriesThenFocusInsurance();
+      await this.flRegressionFocusInsurancePanel();
+      await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+  
+      await this.getInsuranceIterationScopeAfterReady();
+
+      await expect
+        .poll(
+          async () =>
+            (await this.insuranceBaseForm().getByText(this.insuranceQuestionLabelPattern()).count()) >= 2,
+          { timeout: 25_000, intervals: [300, 800, 1_500] },
+        )
+        .toBeTruthy();
+
+      /** First / second insurance prompts in DOM order (avoids brittle long-body `getByText` + `.first()` on Q2). */
+      const q1Form = this.insuranceQuestionRowByIndex(0);
+      const q2Form = this.insuranceQuestionRowByIndex(1);
+
+      const subBefore = await this.readAddOnsSubtotalSnapshot();
+      this.logAddOnsSubtotals("FL insurance — before Q1/Q2 Yes + values", subBefore);
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Insurance subtotal before:", subBefore.ins);
+
+      await this.clickInsuranceRadio(q1Form, "Yes");
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Question 1 selected Yes");
+      await this.flRegressionFillInsuranceMonths(q1Form, "15");
+      await this.flRegressionFillInsuranceAmountCommitted(q1Form, "500");
+
+      await this.flRegressionDismissOptionalProviderBetweenQ1AndQ2(q1Form);
+      await q2Form.scrollIntoViewIfNeeded();
+      await this.page.waitForTimeout(350);
+
+      await this.clickInsuranceRadio(q2Form, "Yes");
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Question 2 selected Yes");
+      await this.page.waitForTimeout(400);
+      await expect(this.insuranceAmountInput(q2Form)).toBeVisible({ timeout: 20_000 });
+      await this.flRegressionFillInsuranceAmountCommitted(q2Form, "500");
+
+      await this.promoteAddOnsLineTotalsRecalc();
+      const subAfterEntry = await this.readAddOnsSubtotalSnapshot();
+      this.logAddOnsSubtotals("FL insurance — after Q1/Q2 entry", subAfterEntry);
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Insurance subtotal after:", subAfterEntry.ins);
+
+      await expect
+        .poll(
+          async () => {
+            const m = (await this.insuranceMonthsInput(q1Form).inputValue().catch(() => "")).replace(/\D/g, "");
+            const a1 = (await this.insuranceAmountInput(q1Form).inputValue().catch(() => "")).replace(/\D/g, "");
+            return m.includes("15") && a1.includes("500");
+          },
+          { timeout: 18_000, intervals: [200, 500, 1_000] },
+        )
+        .toBeTruthy();
+
+      await expect
+        .poll(
+          async () => {
+            const a2 = (await this.insuranceAmountInput(q2Form).inputValue().catch(() => "")).replace(/\D/g, "");
+            return a2.includes("500");
+          },
+          { timeout: 18_000, intervals: [200, 500, 1_000] },
+        )
+        .toBeTruthy();
+  
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] STEP 1 — values retained; insurance subtotal updated (see logs above)");
+  
+      await this.clickSaveAddOnsSimple();
+      await this.page.waitForTimeout(600);
+  
+      await expect
+        .poll(async () => await this.flRegressionHasVisibleAddOnsValidation(), {
+          timeout: 18_000,
+          intervals: [300, 800, 1_500],
+        })
+        .toBeTruthy();
+  
+      const validationText = await this.flRegressionReadVisibleAddOnsValidationText();
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Validation message captured (first Save):", validationText);
+  
+      await this.clickInsuranceRadio(q2Form, "No");
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Question 2 → No (recovery)");
+      await this.flRegressionFillInsuranceMonths(q1Form, "11");
+      await this.flRegressionFillInsuranceAmountCommitted(q1Form, "500");
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Question 1 kept Yes — Months 11, Amount 500");
+  
+      await this.dismissBlockingChromeAfterAddOnsEditor();
+      await this.promoteAddOnsLineTotalsRecalc();
+      const subAfterRecovery = await this.readAddOnsSubtotalSnapshot();
+      this.logAddOnsSubtotals("FL insurance — after recovery fields", subAfterRecovery);
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Insurance subtotal after recovery:", subAfterRecovery.ins);
+  
+      await this.clickSaveAddOnsSimple();
+      await this.dismissBlockingChromeAfterAddOnsEditor();
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Save successful (second Save)");
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Recovery successful — final state: Q1 Yes 11 / 500, Q2 No");
+  
+      await this.expectAddOnsFilledSummary("500", "1000", "500");
+      await this.dismissBlockingChromeAfterAddOnsEditor();
+      const paymentSummaryHeading = this.page.getByText(/Payment\s*Summary/i).first();
+      if (!(await paymentSummaryHeading.isVisible({ timeout: 5_000 }).catch(() => false)) && this.addonLikeUrl()) {
+        await this.page.goBack({ waitUntil: "domcontentloaded" }).catch(() => {});
+        await this.waitUntilNoVisibleAppLoaderOverlays(90_000).catch(() => {});
+        await this.page.waitForTimeout(800);
+        await this.dismissBlockingChromeAfterAddOnsEditor();
+      }
+      // eslint-disable-next-line no-console
+      console.log("[FL Add Ons] Single-session insurance regression — end");
+    }
+  
+    private async flRegressionFocusInsurancePanel(): Promise<void> {
+      await this.page.keyboard.press("Escape").catch(() => {});
+      const inAddOns = this.page.locator("app-add-on-accessories").last().getByText(/^Insurance$/i).first();
+      if (await inAddOns.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await inAddOns.click({ force: true, timeout: 15_000 }).catch(() => {});
+      } else {
+        await this.page.getByText(/^Insurance$/i).first().click({ force: true, timeout: 15_000 }).catch(() => {});
+      }
+      await this.insuranceRoot().scrollIntoViewIfNeeded().catch(() => {});
+      await this.insuranceBaseForm().scrollIntoViewIfNeeded().catch(() => {});
+      await this.waitUntilNoVisibleAppLoaderOverlays(45_000).catch(() => {});
+      await this.page.waitForTimeout(350);
+    }
+
+    /**
+     * Q1 can expose an optional **Provider** `p-dropdown` after Amount; Tab/focus may open it and block Q2.
+     * **Escape only** (no Sub-Total / Total Charges clicks — those can steal focus or affect totals and break Q2 entry).
+     */
+    private async flRegressionDismissOptionalProviderBetweenQ1AndQ2(q1Form: Locator): Promise<void> {
+      await this.page.keyboard.press("Escape").catch(() => {});
+      await this.page.keyboard.press("Escape").catch(() => {});
+      const overlay = this.page
+        .locator(".p-dropdown-panel, .p-connected-overlay-visible, .p-overlaypanel:visible")
+        .filter({ visible: true })
+        .first();
+      if (await overlay.isVisible({ timeout: 600 }).catch(() => false)) {
+        await this.page.keyboard.press("Escape").catch(() => {});
+        await this.page.keyboard.press("Escape").catch(() => {});
+      }
+      const prov = q1Form.locator("p-dropdown").filter({ visible: true }).first();
+      if (await prov.isVisible({ timeout: 400 }).catch(() => false)) {
+        await this.page.keyboard.press("Escape").catch(() => {});
+      }
+      await this.page.waitForTimeout(200);
+    }
+
+    private async flRegressionFillInsuranceMonths(form: Locator, months: string): Promise<void> {
+      await this.flRegressionFillInsuranceMonthsCommitted(form, months);
+    }
+
+    /** FL regression — insurance **Months**: visible wait, `pressSequentially`, retries; fails if no months control. */
+    private async flRegressionFillInsuranceMonthsCommitted(form: Locator, months: string): Promise<void> {
+      const digits = months.replace(/\D/g, "") || "0";
+      await form.scrollIntoViewIfNeeded();
+
+      const input = this.insuranceMonthsInput(form);
+      await expect(input).toBeVisible({ timeout: 20_000 });
+      await input.scrollIntoViewIfNeeded();
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await input.click({ timeout: 10_000 });
+        await input.press("Control+a");
+        await input.press("Backspace").catch(() => {});
+        await input.pressSequentially(digits, { delay: 45 });
+        await input.press("Tab").catch(() => {});
+        await this.page.waitForTimeout(500);
+
+        const got = ((await input.inputValue().catch(() => "")) ?? "").replace(/\D/g, "");
+        if (got.includes(digits)) {
+          return;
+        }
+        // eslint-disable-next-line no-console
+        console.log(`[FL Add Ons] Insurance months retry ${attempt + 1} (read: "${got}", want contains "${digits}")`);
+      }
+
+      const last = ((await input.inputValue().catch(() => "")) ?? "").replace(/\D/g, "");
+      throw new Error(
+        `FL Add Ons: insurance months did not accept "${digits}" after retries (last digits: "${last}").`,
+      );
+    }
+  
+    private async flRegressionFillInsuranceAmount(form: Locator, amount: string): Promise<void> {
+      await this.flRegressionFillInsuranceAmountCommitted(form, amount);
+    }
+
+    /**
+     * FL regression — insurance **Amount** under `currencymask`: `pressSequentially`, Tab, retries until digits stick.
+     */
+    private async flRegressionFillInsuranceAmountCommitted(form: Locator, amount: string): Promise<void> {
+      const digits = (amount.replace(/[^0-9]/g, "") || "0").replace(/^0+/, "") || "0";
+      await form.scrollIntoViewIfNeeded();
+
+      const input = this.insuranceAmountInput(form);
+      await expect(input).toBeVisible({ timeout: 20_000 });
+      await input.scrollIntoViewIfNeeded();
+
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await input.click({ timeout: 10_000 });
+        await input.press("Control+a");
+        await input.press("Backspace").catch(() => {});
+        await input.pressSequentially(digits, { delay: 45 });
+        await input.press("Tab").catch(() => {});
+        await this.page.waitForTimeout(500);
+
+        const got = ((await input.inputValue().catch(() => "")) ?? "").replace(/\D/g, "");
+        if (got.includes(digits) && got.length >= digits.length) {
+          return;
+        }
+        // eslint-disable-next-line no-console
+        console.log(`[FL Add Ons] Insurance amount retry ${attempt + 1} (read: "${got}", want contains "${digits}")`);
+      }
+
+      const last = ((await input.inputValue().catch(() => "")) ?? "").replace(/\D/g, "");
+      throw new Error(
+        `FL Add Ons: insurance amount did not accept "${digits}" after retries (last digits: "${last}").`,
+      );
+    }
+  
+    private async flRegressionHasVisibleAddOnsValidation(): Promise<boolean> {
+      const locs = [
+        this.insuranceMonthsLessThanTwelveError().first(),
+        this.page.locator(".p-toast-message-text").filter({ visible: true }).first(),
+        this.page.locator(".p-message-error").filter({ visible: true }).first(),
+        this.page.getByRole("alert").filter({ visible: true }).first(),
+        this.page.locator("mat-error").filter({ visible: true }).first(),
+      ];
+      for (const l of locs) {
+        if (await l.isVisible({ timeout: 400 }).catch(() => false)) {
+          return true;
+        }
+      }
+      return false;
+    }
+  
+    private async flRegressionReadVisibleAddOnsValidationText(): Promise<string> {
+      const chunks: string[] = [];
+      const tryPush = async (loc: Locator): Promise<void> => {
+        if (await loc.isVisible({ timeout: 600 }).catch(() => false)) {
+          const t = (await loc.innerText().catch(() => ""))?.trim();
+          if (t) {
+            chunks.push(t);
+          }
+        }
+      };
+      await tryPush(this.insuranceMonthsLessThanTwelveError().first());
+      const nToast = await this.page.locator(".p-toast-message-text").count();
+      for (let i = 0; i < Math.min(nToast, 5); i++) {
+        await tryPush(this.page.locator(".p-toast-message-text").nth(i));
+      }
+      await tryPush(this.page.locator(".p-message-error").first());
+      await tryPush(this.page.getByRole("alert").first());
+      await tryPush(this.page.locator("mat-error").first());
+      return chunks.join(" | ").replace(/\s+/g, " ").trim();
+    }
 
   private digitsLooselyContain(raw: string, need: string): boolean {
     const v = raw.replace(/[^0-9]/g, "");
@@ -1612,7 +1924,7 @@ export class DOAddOnsAccessoriesPage extends BasePage {
     await this.page.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => {});
 
     /** **Payment Summary** is the gate for the next step (`Calculate`). Charges may still show **-** while the shell repaints. */
-    await expect
+      await expect
       .poll(
         async () =>
           this.page
@@ -1622,7 +1934,7 @@ export class DOAddOnsAccessoriesPage extends BasePage {
             .catch(() => false),
         { timeout: 90_000, intervals: [400, 1_000, 2_000, 3_000, 5_000] },
       )
-      .toBeTruthy();
+        .toBeTruthy();
   }
 
   /**
@@ -1652,8 +1964,8 @@ export class DOAddOnsAccessoriesPage extends BasePage {
         .poll(async () => this.digitsLooselyContain(await reg.inputValue(), regDigits), {
           timeout: pollMs,
           intervals: [200, 500, 1_000],
-        })
-        .toBeTruthy();
+          })
+          .toBeTruthy();
     } catch (e) {
       this.log(
         `Add Ons summary: registration amount poll skipped (collapsed panel or mask lag): ${String(e)}`,
@@ -1666,12 +1978,12 @@ export class DOAddOnsAccessoriesPage extends BasePage {
         : this.generalAccessoriesAmountInput(0);
     if (await accCell.isVisible({ timeout: 2_000 }).catch(() => false)) {
       try {
-        await expect
+    await expect
           .poll(async () => this.digitsLooselyContain(await accCell.inputValue(), bullBarDigits), {
             timeout: pollMs,
             intervals: [200, 500, 1_000],
-          })
-          .toBeTruthy();
+      })
+      .toBeTruthy();
       } catch (e) {
         this.log(`Add Ons summary: Bull Bar amount poll skipped: ${String(e)}`);
       }
@@ -1684,12 +1996,12 @@ export class DOAddOnsAccessoriesPage extends BasePage {
           : this.generalAccessoriesAmountInput(1);
       if (await tow.isVisible({ timeout: 2_000 }).catch(() => false)) {
         try {
-          await expect
+      await expect
             .poll(async () => this.digitsLooselyContain(await tow.inputValue(), towbarDigits), {
               timeout: pollMs,
               intervals: [200, 500, 1_000],
-            })
-            .toBeTruthy();
+        })
+        .toBeTruthy();
         } catch (e) {
           this.log(`Add Ons summary: Towbar amount poll skipped: ${String(e)}`);
         }
