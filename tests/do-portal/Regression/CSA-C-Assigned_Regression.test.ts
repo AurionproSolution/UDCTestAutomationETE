@@ -475,15 +475,15 @@ test(
     // PDF: product and program empty (initial state) — optional strict empty cash
     // -------------------------------------------------------------------------
     const qq = 0;
-    await expect.soft(quickQuotePage.productDropdownTrigger).toBeVisible();
-    await expect.soft(quickQuotePage.programDropdownTrigger).toBeVisible();
+    await expect(quickQuotePage.productDropdownTrigger).toBeVisible();
+    await expect(quickQuotePage.programDropdownTrigger).toBeVisible();
     // const cashHidden = await quickQuotePage.cashPriceInput.isHidden().catch(() => false);
     // if (cashHidden) {
-    //   await expect.soft(quickQuotePage.cashPriceInput).toBeHidden();
-    //   await expect.soft(quickQuotePage.interestRatePercentInput).toBeHidden();
+    //   await expect(quickQuotePage.cashPriceInput).toBeHidden();
+    //   await expect(quickQuotePage.interestRatePercentInput).toBeHidden();
     // } else {
-    //   await expect.soft(quickQuotePage.cashPriceInput).toHaveValue("");
-    //   await expect.soft(quickQuotePage.interestRatePercentInput).toHaveValue("");
+    //   await expect(quickQuotePage.cashPriceInput).toHaveValue("");
+    //   await expect(quickQuotePage.interestRatePercentInput).toHaveValue("");
     // }
 
     // -------------------------------------------------------------------------
@@ -497,7 +497,7 @@ test(
     await quickQuotePage.selectProduct(CSA_QQ_PRODUCT);
     await quickQuotePage.dismissQuickQuoteDropdownOverlays();
     await quickQuotePage.programDropdownTrigger.click();
-    await expect.soft(page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
     const programs = await page.getByRole("option").allTextContents();
     await page.keyboard.press("Escape");
     await quickQuotePage.dismissQuickQuoteDropdownOverlays();
@@ -527,7 +527,7 @@ test(
     const calculateForHost = quickQuotePage.calculateForDropdownHost;
     const hostCls = (await calculateForHost.getAttribute("class").catch(() => "")) ?? "";
     if (hostCls.includes("p-disabled")) {
-      await expect.soft(quickQuotePage.calculateForDropdownTrigger).toBeDisabled();
+      await expect(quickQuotePage.calculateForDropdownTrigger).toBeDisabled();
     }
 
     // -------------------------------------------------------------------------
@@ -543,7 +543,7 @@ test(
     if (await quickQuotePage.paymentAmountInput.isVisible().catch(() => false)) {
       const locked = await quickQuotePage.paymentAmountInputIsReadOnly();
       const displayOnly = await quickQuotePage.paymentDisplay.isVisible().catch(() => false);
-      expect.soft(locked || displayOnly).toBeTruthy();
+      expect(locked || displayOnly).toBeTruthy();
     }
 
     // -------------------------------------------------------------------------
@@ -555,7 +555,7 @@ test(
     await quickQuotePage.enterCashPrice("");
     // await quickQuotePage.calculateButton.scrollIntoViewIfNeeded().catch(() => {});
     // if (await quickQuotePage.calculateButton.isDisabled().catch(() => false)) {
-    //   await expect.soft(quickQuotePage.calculateButton).toBeDisabled();
+    //   await expect(quickQuotePage.calculateButton).toBeDisabled();
     // }
 
     // -------------------------------------------------------------------------
@@ -572,7 +572,7 @@ test(
     // if (await quickQuotePage.calculateButton.isEnabled().catch(() => false)) {
     //   await quickQuotePage.clickCalculate();
     // }
-    // await expect.soft(quickQuotePage.calculateButton).toBeDisabled();
+    // await expect(quickQuotePage.calculateButton).toBeDisabled();
     // await quickQuotePage.expectBlankTermsValidation(qq);
     await quickQuotePage.enterTermsMonths("36");
 
@@ -648,7 +648,7 @@ test(
       .toHaveValue(/2[, ]?000|2000/, { timeout: 25_000 });
     await quickQuotePage.clearDepositDollarField();
     await quickQuotePage.enterDepositDollars("$4,000.00");
-    await expect.soft(quickQuotePage.depositDollarInput).toHaveValue(/4[, ]?000(?:\.00)?/i, {
+    await expect(quickQuotePage.depositDollarInput).toHaveValue(/4[, ]?000(?:\.00)?/i, {
       timeout: 25_000,
     });
 
@@ -656,10 +656,10 @@ test(
     // PDF: Balloon % / $ sync (uncomment when included in PDF run)
     // -------------------------------------------------------------------------
     // await quickQuotePage.enterBalloonPercent("20%");
-    // await expect.soft(quickQuotePage.balloonDollarInput).toHaveValue(/4[, ]?000|4000/, { timeout: 25_000 });
+    // await expect(quickQuotePage.balloonDollarInput).toHaveValue(/4[, ]?000|4000/, { timeout: 25_000 });
     // await quickQuotePage.clearBalloonDollarField();
     // await quickQuotePage.enterBalloonDollars("$5,000.00");
-    // await expect.soft(quickQuotePage.balloonPercentInput).toHaveValue(/25/);
+    // await expect(quickQuotePage.balloonPercentInput).toHaveValue(/25/);
     // await quickQuotePage.clickCalculate();
     // await quickQuotePage.expectCreateQuoteVisible();
     // await quickQuotePage.enterBalloonDollars("$5,000");
@@ -675,8 +675,8 @@ test(
     // PDF: Calculate For = Cash Price — cash input stays locked; enter rate + term (+ frequency), then expect any cash value after Calculate.
     // -------------------------------------------------------------------------
     await quickQuotePage.selectCalculateFor("Cash Price");
-    await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-    await expect.soft(quickQuotePage.cashPriceInput).not.toBeEditable({ timeout: 15_000 });
+    await quickQuotePage.dismissQuickQuoteDropsdownOverlays();
+    await expect(quickQuotePage.cashPriceInput).not.toBeEditable({ timeout: 15_000 });
     await quickQuotePage.enterInterestRatePercent("9");
     await quickQuotePage.enterTermsMonths("36");
     await quickQuotePage.selectFrequency("Monthly");
@@ -685,16 +685,16 @@ test(
     const cashPriceAfterCashPriceMode = (
       await quickQuotePage.cashPriceInput.inputValue().catch(() => "")
     ).trim();
-    expect.soft(cashPriceAfterCashPriceMode.length).toBeGreaterThan(0);
-    expect.soft(/\d/.test(cashPriceAfterCashPriceMode)).toBeTruthy();
+    expect(cashPriceAfterCashPriceMode.length).toBeGreaterThan(0);
+    expect(/\d/.test(cashPriceAfterCashPriceMode)).toBeTruthy();
 
     // -------------------------------------------------------------------------
     // PDF: Calculate For = Deposit — deposit % / $ read-only until Calculate; then expect either side populated.
     // -------------------------------------------------------------------------
     await quickQuotePage.selectCalculateFor("Deposit");
     await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-    await expect.soft(quickQuotePage.depositPercentInput).not.toBeEditable({ timeout: 15_000 });
-    await expect.soft(quickQuotePage.depositDollarInput).not.toBeEditable({ timeout: 15_000 });
+    await expect(quickQuotePage.depositPercentInput).not.toBeEditable({ timeout: 15_000 });
+    await expect(quickQuotePage.depositDollarInput).not.toBeEditable({ timeout: 15_000 });
     // await quickQuotePage.enterPaymentAmount("500");
     await quickQuotePage.enterCashPrice("$20,000");
     await quickQuotePage.enterInterestRatePercent("9");
@@ -720,10 +720,10 @@ test(
     await quickQuotePage.enterDepositPercent("");
     await quickQuotePage.enterDepositPercent("8%");
     await quickQuotePage.enterInterestRatePercent("9");
-    // await quickQuotePage.enterTermsMonths("36");
-    // await quickQuotePage.selectFrequency("Monthly");
-    await expect.soft(quickQuotePage.balloonPercentInput).not.toBeEditable({ timeout: 15_000 });
-    await expect.soft(quickQuotePage.balloonDollarInput).not.toBeEditable({ timeout: 15_000 });
+    await quickQuotePage.enterTermsMonths("36");
+    await quickQuotePage.selectFrequency("Monthly");
+    await expect(quickQuotePage.balloonPercentInput).not.toBeEditable({ timeout: 15_000 });
+    await expect(quickQuotePage.balloonDollarInput).not.toBeEditable({ timeout: 15_000 });
     await quickQuotePage.clickCalculate();
     await quickQuotePage.expectCreateQuoteVisible();
     const balloonPctAfter = (
@@ -749,9 +749,12 @@ test(
     await quickQuotePage.enterCashPrice("$20,000");
     await quickQuotePage.enterDepositPercent("10%");
     await quickQuotePage.enterBalloonPercent("0");
+    await quickQuotePage.enterInterestRatePercent("9");
+    await quickQuotePage.enterTermsMonths("36");
+    await quickQuotePage.selectFrequency("Monthly");
     await quickQuotePage.clickCalculate();
     await quickQuotePage.expectCreateQuoteVisible();
-    await expect.soft(quickQuotePage.addComparison2Button).toBeEnabled();
+    await expect(quickQuotePage.addComparison2Button).toBeEnabled();
     const qq1Summary = quickQuotePage.calculationSummaryRegion.first();
     await expect.soft(qq1Summary).toBeVisible({ timeout: 30_000 });
     await expect.soft(qq1Summary).toContainText(/Loan Amount/i);
@@ -775,9 +778,9 @@ test(
     // -------------------------------------------------------------------------
     // PDF: max 3 Quick Quotes; no QQ4
     // -------------------------------------------------------------------------
-    await expect.soft(quickQuotePage.addComparison3Button).toBeEnabled();
+    await expect(quickQuotePage.addComparison3Button).toBeEnabled();
     await quickQuotePage.clickElement(quickQuotePage.addComparison3Button);
-    expect.soft(await quickQuotePage.quickQuotePanelCount()).toBe(3);
+    expect(await quickQuotePage.quickQuotePanelCount()).toBe(3);
     await quickQuotePage.enterTermsMonthsOnQuote(2, "36");
     await quickQuotePage.selectFrequencyOnQuote(2, "Monthly");
     await quickQuotePage.clickCalculateOnQuote(2);
@@ -786,8 +789,8 @@ test(
     // -------------------------------------------------------------------------
     // PDF: Print / Download (trial; MAF-6689)
     // -------------------------------------------------------------------------
-    await expect.soft(quickQuotePage.printButton).toBeVisible();
-    await expect.soft(quickQuotePage.downloadButton).toBeVisible();
+    await expect(quickQuotePage.printButton).toBeVisible();
+    await expect(quickQuotePage.downloadButton).toBeVisible();
     await quickQuotePage.printButton.click({ trial: true });
     await quickQuotePage.downloadButton.click({ trial: true });
 

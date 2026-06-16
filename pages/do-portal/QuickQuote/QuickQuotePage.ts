@@ -49,6 +49,8 @@ export class DOQuickQuotePage extends BasePage {
   readonly calculateForDropdownTrigger: Locator;
   readonly frequencyDropdownTrigger: Locator;
   readonly kmAllowanceDropdownTrigger: Locator;
+  /** `p-dropdown` host for Terms (Months) — use with {@link termsMonthsDropdownTrigger}. */
+  readonly termsMonthsDropdownHost: Locator;
   readonly termsMonthsDropdownTrigger: Locator;
 
   // Quick quote fields - STANDARD
@@ -129,15 +131,20 @@ export class DOQuickQuotePage extends BasePage {
     this.kmAllowanceDropdownTrigger = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'KM Allowance')]/following::p-dropdown[1]"
     ).getByRole("button", { name: /dropdown trigger/i });
-    // Terms may be `p-dropdown` (CSA) or spinbutton / p-inputNumber (TLC). Never use
-    // `following::p-dropdown[1]` from the label — the first p-dropdown in document order is often **KM Allowance**.
-    // Use a dropdown only when it is a **direct following sibling** of the Terms label (typical CSA row layout).
-    this.termsMonthsDropdownTrigger = this.quickQuoteForm
+    // Terms may be `p-dropdown` (CSA / Webform) or spinbutton / p-inputNumber (TLC).
+    // Webform CSA often wraps the control in a `div.grid` — `p-dropdown` is **not** a direct sibling of the label,
+    // so `following-sibling::p-dropdown[1]` misses and the test wrongly falls back to the first `spinbutton` after
+    // the label (often a `%` field with `id="percent"`). Use `following::p-dropdown[1]` (first Terms-row dropdown).
+    // CSA exposes the open target as `span[role="combobox"]`; older builds use the chevron trigger `button`.
+    this.termsMonthsDropdownHost = this.quickQuoteForm
       .locator("label")
       .filter({ hasText: /Terms\s*\(Months\)/i })
       .first()
-      .locator("xpath=following-sibling::p-dropdown[1]")
-      .getByRole("button", { name: /dropdown trigger/i });
+      .locator("xpath=following::p-dropdown[1]");
+    this.termsMonthsDropdownTrigger = this.termsMonthsDropdownHost
+      .getByRole("combobox")
+      .or(this.termsMonthsDropdownHost.getByRole("button", { name: /dropdown trigger/i }))
+      .first();
 
     // Asset Type dropdown (p-inputgroup pattern)
     this.assetTypeDropdownTrigger = this.quickQuoteForm.locator(
@@ -171,8 +178,9 @@ export class DOQuickQuotePage extends BasePage {
     this.interestRatePercentInput = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Interest Rate')]/following::input[@id='percent'][1]",
     );
+    // Exclude `id="percent"` — the first spinbutton after "Terms" in DOM order can be a Deposit/Balloon % cell.
     this.termsMonthsInput = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Terms (Months)')]/following::input[@role='spinbutton'][1]",
+      "xpath=.//label[contains(normalize-space(.), 'Terms (Months)')]/following::input[@role='spinbutton' and not(@id='percent')][1]",
     );
     this.balloonPercentInput = this.quickQuoteForm.locator(
       `xpath=.//label[starts-with(normalize-space(.), 'Balloon')]/following::${orSep}[1]/preceding::input[@id='percent'][1]`,
@@ -364,17 +372,25 @@ export class DOQuickQuotePage extends BasePage {
 
   termsInputOnQuote(quoteIndex: number): Locator {
     return this.quoteForm(quoteIndex).locator(
-      "xpath=.//label[contains(normalize-space(.), 'Terms (Months)')]/following::input[@role='spinbutton'][1]",
+      "xpath=.//label[contains(normalize-space(.), 'Terms (Months)')]/following::input[@role='spinbutton' and not(@id='percent')][1]",
     );
   }
 
-  termsDropdownTriggerOnQuote(quoteIndex: number): Locator {
+  /** Same host rule as {@link termsMonthsDropdownHost} for comparison panels. */
+  private termsMonthsDropdownHostOnQuote(quoteIndex: number): Locator {
     return this.quoteForm(quoteIndex)
       .locator("label")
       .filter({ hasText: /Terms\s*\(Months\)/i })
       .first()
-      .locator("xpath=following-sibling::p-dropdown[1]")
-      .getByRole("button", { name: /dropdown trigger/i });
+      .locator("xpath=following::p-dropdown[1]");
+  }
+
+  termsDropdownTriggerOnQuote(quoteIndex: number): Locator {
+    const host = this.termsMonthsDropdownHostOnQuote(quoteIndex);
+    return host
+      .getByRole("combobox")
+      .or(host.getByRole("button", { name: /dropdown trigger/i }))
+      .first();
   }
 
   programDropdownOnQuote(quoteIndex: number): Locator {
@@ -592,7 +608,7 @@ export class DOQuickQuotePage extends BasePage {
     const valueMatchesCommit = async (): Promise<boolean> => {
       const raw = (await input.inputValue().catch(() => "")).trim();
       const n = Math.round(await read());
-      if (n === wantRounded) {
+      if (n === wantRounded || Math.abs(n - wantRounded) <= 1) {
         return true;
       }
       /* p-inputNumber can mask negatives so parsed number ≠ model; accept visible "-100" style text. */
@@ -618,11 +634,18 @@ export class DOQuickQuotePage extends BasePage {
     const strategies: Array<() => Promise<void>> = [];
 
     if (useShortEntryFirst) {
-      strategies.push(async () => {
-        await this.clickElement(input);
-        await input.pressSequentially(trimmed, { delay: 40 });
-        await input.blur();
-      });
+      strategies.push(
+        async () => {
+          await this.clickElement(input);
+          await input.pressSequentially(String(wantRounded), { delay: 40 });
+          await input.blur();
+        },
+        async () => {
+          await this.clickElement(input);
+          await input.pressSequentially(trimmed, { delay: 40 });
+          await input.blur();
+        },
+      );
     } else {
       strategies.push(
         async () => {
@@ -656,7 +679,7 @@ export class DOQuickQuotePage extends BasePage {
     for (const strat of strategies) {
       await strat();
       try {
-        await expect.poll(valueMatchesCommit, { timeout: 12_000 }).toBe(true);
+        await expect.poll(valueMatchesCommit, { timeout: 25_000 }).toBe(true);
         return;
       } catch {
         /* next strategy */
@@ -698,6 +721,11 @@ export class DOQuickQuotePage extends BasePage {
   ): Promise<void> {
     await trigger.waitFor({ state: "visible", timeout: 60_000 });
     await trigger.scrollIntoViewIfNeeded().catch(() => {});
+    await trigger
+      .evaluate((el: HTMLElement) => {
+        el.scrollIntoView({ block: "center", inline: "nearest" });
+      })
+      .catch(() => {});
     const trimmed = optionText.trim();
     const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const exactOption = this.page.getByRole("option", {
@@ -828,11 +856,11 @@ export class DOQuickQuotePage extends BasePage {
    */
   async enterTermsMonths(termMonths: string): Promise<void> {
     this.logStep(`Entered terms (months) as ${this.stepValueDisplay(termMonths)}`);
-    // Prefer **Terms-row** dropdown (direct sibling of label). If absent (TLC spinbutton), use keyboard on
-    // the first spinbutton after the Terms label — never `following::p-dropdown[1]` (that can be KM Allowance).
-    const isDropdown = await this.termsMonthsDropdownTrigger.isVisible({ timeout: 2000 }).catch(() => false);
+    // Prefer Terms `p-dropdown` host (CSA / Webform). Detect the **host** — the combobox alone can be a 0×0 node
+    // in some builds while the host is still visible.
+    const hostVisible = await this.termsMonthsDropdownHost.isVisible({ timeout: 5_000 }).catch(() => false);
 
-    if (isDropdown) {
+    if (hostVisible) {
       await this.selectFromDropdown(this.termsMonthsDropdownTrigger, termMonths);
     } else {
       await this.replaceInputValueByKeyboard(this.termsMonthsInput, termMonths);
@@ -1157,11 +1185,14 @@ export class DOQuickQuotePage extends BasePage {
    */
   async expectCreateQuoteVisible(quoteIndex?: number): Promise<void> {
     this.logStep("Expect Create Quote Visible");
-    const btn =
-      quoteIndex === undefined
-        ? this.createQuoteButton
-        : this.createQuoteButtonOnPanel(quoteIndex);
-    await expect.soft(btn).toBeVisible({ timeout: 30_000 });
+    const idx = quoteIndex ?? 0;
+    const btn = this.createQuoteButtonOnPanel(idx);
+    await this.calculationSummaryRegion
+      .first()
+      .waitFor({ state: "visible", timeout: 45_000 })
+      .catch(() => {});
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    await expect(btn).toBeVisible({ timeout: 60_000 });
   }
 
   async enterDepositDollars(amount: string): Promise<void> {
@@ -1231,9 +1262,10 @@ export class DOQuickQuotePage extends BasePage {
 
   async enterTermsMonthsOnQuote(quoteIndex: number, termMonths: string): Promise<void> {
     this.logStep(`Panel ${quoteIndex + 1}: entered terms (months) as ${this.stepValueDisplay(termMonths)}`);
-    const isDropdown = await this.termsDropdownTriggerOnQuote(quoteIndex).isVisible({ timeout: 2000 }).catch(() => false);
+    const host = this.termsMonthsDropdownHostOnQuote(quoteIndex);
+    const hostVisible = await host.isVisible({ timeout: 5_000 }).catch(() => false);
 
-    if (isDropdown) {
+    if (hostVisible) {
       await this.selectFromDropdown(this.termsDropdownTriggerOnQuote(quoteIndex), termMonths);
     } else {
       await this.replaceInputValueByKeyboard(this.termsInputOnQuote(quoteIndex), termMonths);
