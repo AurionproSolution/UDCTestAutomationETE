@@ -92,6 +92,173 @@ async function prepareCalculableCsaQuote(
   await assetDetailsPage.enterOriginationReference(opts?.origRef ?? "SQ-CSA-Ref-01");
 }
 
+/**
+ * **Add On Accessories** screen (`app-service-plan`, `app-accessories`): fill registration / service /
+ * others row and predefined accessory amounts, then **Save** (PrimeNG `data-pc-name="button"`).
+ */
+async function fillAddOnAccessoriesPageAndSave(page: Page): Promise<void> {
+  const sp = page.locator("app-service-plan");
+  const acc = page.locator("app-accessories");
+  await sp.waitFor({ state: "visible", timeout: 45_000 });
+  await acc.waitFor({ state: "visible", timeout: 45_000 }).catch(() => {});
+ 
+  const fillRowAmountAndMonths = async (scope: Locator, label: RegExp, amount: string, months: string) => {
+    const labelEl = scope.getByText(label);
+    await labelEl.first().scrollIntoViewIfNeeded().catch(() => {});
+    const rowGrid = labelEl.first().locator("xpath=ancestor::div[contains(@class,'grid')][1]");
+    const amt = rowGrid.locator("input[currencymask]").first();
+    if (await amt.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await amt.click();
+      await amt.fill(amount);
+      await amt.press("Tab").catch(() => {});
+    }
+    const mos = rowGrid.locator('input[formcontrolname="months"]').first();
+    if (await mos.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await mos.click();
+      await mos.fill(months);
+      await mos.press("Tab").catch(() => {});
+    }
+  };
+ 
+  await fillRowAmountAndMonths(sp, /^Registration$/, "100", "12");
+  await fillRowAmountAndMonths(sp, /^Service Plan$/, "50", "24");
+ 
+  const othersCombo = sp.getByRole("combobox", { name: /^Others$/i });
+  if (await othersCombo.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const rowGrid = othersCombo.locator("xpath=ancestor::div[contains(@class,'grid')][1]");
+    const amt = rowGrid.locator("input[currencymask]").first();
+    if (await amt.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await amt.click();
+      await amt.fill("75");
+      await amt.press("Tab").catch(() => {});
+    }
+    const mos = rowGrid.locator('input[formcontrolname="months"]').first();
+    if (await mos.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await mos.click();
+      await mos.fill("6");
+    }
+    const desc = rowGrid.locator("input#text").first();
+    if (await desc.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await desc.fill("Automation row");
+    }
+  }
+ 
+  const accessoryNames = [
+    "Bull Bar",
+    "Towbar",
+    "Tints",
+    "Canopy",
+    "Tonneau Soft",
+    "Side Steps",
+    "Hard Lid",
+    "Mats",
+    "Nudge Bar",
+  ] as const;
+  for (const name of accessoryNames) {
+    const row = acc.locator("div.m-0.col-4.grid").filter({ has: acc.getByText(name, { exact: true }) });
+    const inp = row.locator("input[currencymask]").first();
+    if (await inp.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await inp.scrollIntoViewIfNeeded().catch(() => {});
+      await inp.click();
+      await inp.fill("10");
+      await inp.press("Tab").catch(() => {});
+    }
+  }
+ 
+  const saveBtn = page
+    .locator('button[type="button"][data-pc-name="button"]')
+    .filter({ has: page.locator('span[data-pc-section="label"]').filter({ hasText: /^Save$/ }) })
+    .last();
+  await saveBtn.waitFor({ state: "visible", timeout: 20_000 });
+  await saveBtn.scrollIntoViewIfNeeded();
+  await saveBtn.click({ timeout: 20_000 });
+}
+ 
+/**
+ * From **Asset Details**, open **Add On Accessories** (`app-service-plan` route).
+ * Waits for loaders, scrolls the charges block, tries link / button / text + ancestor clicks.
+ */
+async function openAddOnAccessoriesPageFromStandardQuote(
+  page: Page,
+  root: Locator,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+ 
+  if (await root.getByText(/Condition|Asset Type/i).first().isVisible({ timeout: 8_000 }).catch(() => false)) {
+    try {
+      await assetDetailsPage.selectConditionInStandardQuote("New");
+    } catch {
+      // Some builds hide condition until asset is set — non-fatal for add-ons entry.
+    }
+    await assetDetailsPage.waitForQuoteLoadersToFinish();
+  }
+ 
+  const labelRx =
+    /Add\s*Ons\s*&\s*Accessories|Add\s+Ons\s+and\s+Accessories|Add[-\s]?Ons?\s*[&+]\s*Accessories/i;
+ 
+  for (const anchor of [
+    root.getByText(/Additional\s+Charges/i),
+    root.getByText(/Charges\s*\+\s*Add/i),
+    root.getByText(/^Charges$/i),
+    root.getByText(/Less\s+Deposit/i),
+  ]) {
+    if (await anchor.first().isVisible({ timeout: 2_500 }).catch(() => false)) {
+      await anchor.first().scrollIntoViewIfNeeded();
+      break;
+    }
+  }
+  await page.mouse.wheel(0, 500).catch(() => {});
+  await page.waitForTimeout(400);
+  await root.getByText(labelRx).first().scrollIntoViewIfNeeded().catch(() => {});
+ 
+  const tryOpen = async (loc: Locator): Promise<boolean> => {
+    const el = loc.first();
+    if (!(await el.isVisible({ timeout: 6_000 }).catch(() => false))) return false;
+    await el.scrollIntoViewIfNeeded();
+    await el.click({ timeout: 20_000 }).catch(() => {});
+    return await page.locator("app-service-plan").isVisible({ timeout: 18_000 }).catch(() => false);
+  };
+ 
+  const candidates: Locator[] = [
+    root.getByRole("link", { name: labelRx }),
+    root.getByRole("button", { name: labelRx }),
+    page.getByRole("link", { name: labelRx }),
+    page.getByRole("button", { name: labelRx }),
+    root.locator("a").filter({ hasText: labelRx }),
+    page.locator("a").filter({ hasText: labelRx }),
+    root.locator("button, [role='button']").filter({ hasText: labelRx }),
+    root.locator("a, button, [role='link']").filter({ hasText: labelRx }),
+    root.locator('[class*="cursor-pointer"], [class*="pointer"]').filter({ hasText: labelRx }),
+  ];
+ 
+  for (const c of candidates) {
+    if (await tryOpen(c)) return;
+  }
+ 
+  const textHit = root.getByText(labelRx).first();
+  if (await textHit.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await textHit.scrollIntoViewIfNeeded();
+    const asLink = textHit.locator("xpath=ancestor::a[1]");
+    if (await asLink.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      if (await tryOpen(asLink)) return;
+    }
+    const asBtn = textHit.locator("xpath=ancestor::button[1]");
+    if (await asBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      if (await tryOpen(asBtn)) return;
+    }
+    await textHit.click({ force: true, timeout: 15_000 }).catch(() => {});
+    if (await page.locator("app-service-plan").isVisible({ timeout: 18_000 }).catch(() => false)) {
+      return;
+    }
+  }
+ 
+  throw new Error(
+    "Add Ons & Accessories: could not open the add-ons screen (app-service-plan never became visible). " +
+      "Scroll/copy may differ, or this dealer/product does not expose the entry.",
+  );
+}
+
 test.describe("Standard Quote - CSA @do @regression", () => {
   test(
     "UDP-T3646 - Standard Quote Created Directly from Dashboard",
@@ -163,15 +330,25 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       test.setTimeout(300_000);
       await openStandardQuoteFromDashboard(page);
       const root = standardQuoteRoot(page);
-      const promo = root
-        .getByRole("checkbox", { name: /Promotion\s+Quote/i })
-        .or(root.locator("p-checkbox").filter({ hasText: /Promotion\s+Quote/i }))
-        .first();
-      if (await promo.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await expect.soft(promo).not.toBeChecked();
+      // PrimeNG: `<label data-pc-section="label" class="p-checkbox-label"> Promotion Quote</label>` inside `p-checkbox` — state lives on `input[type="checkbox"]`.
+      const promoHost = root.locator("p-checkbox").filter({
+        has: root
+          .locator('label.p-checkbox-label[data-pc-section="label"], label.p-checkbox-label')
+          .filter({ hasText: /Promotion\s+Quote/i }),
+      });
+      const promoHostFirst = promoHost.first();
+      const promoInput = promoHostFirst.locator('input[type="checkbox"]').first();
+      if (await promoHostFirst.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        await expect.soft(promoInput).not.toBeChecked();
+      } else {
+        const byRole = root.getByRole("checkbox", { name: /Promotion\s+Quote/i }).first();
+        if (await byRole.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await expect.soft(byRole).not.toBeChecked();
+        }
       }
     },
   );
+ 
 
   test(
     "UDP-T3650 - Quote ID Assigned on First Save",
@@ -323,7 +500,7 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await assetDetailsPage.scrollRecommendedRetailPriceIntoView();
       await expect.soft(assetDetailsPage.recommendedRetailPriceInput).toBeVisible({ timeout: 20_000 });
       await assetDetailsPage.selectCondition("Used");
-      await expect.soft(assetDetailsPage.recommendedRetailPriceInput).toBeHidden({ timeout: 15_000 });
+      await assetDetailsPage.expectRecommendedRetailPriceHiddenAfterUsedCondition();
     },
   );
 
@@ -375,16 +552,39 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     "UDP-T3661 - Charges + Add Ons Field Sums Add-On Items",
     { tag: ["@do", "@regression", "@UDP-T3661"] },
     async ({ page }) => {
-      test.setTimeout(300_000);
-      await openStandardQuoteFromDashboard(page);
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      await selectCsaProductAndProgram(assetDetailsPage);
       const root = standardQuoteRoot(page);
-      const charges = root.getByText(/Charges\s*\+\s*Add\s*Ons|Add\s*Ons\s*&\s*Accessories/i).first();
-      if (await charges.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await expect.soft(charges).toBeVisible();
-      }
+ 
+      await test.step("Open Add Ons & Accessories (expect app-service-plan)", async () => {
+        await openAddOnAccessoriesPageFromStandardQuote(page, root, assetDetailsPage);
+        await expect(page.locator("app-service-plan")).toBeVisible({ timeout: 45_000 });
+      });
+ 
+      await test.step("Fill registration / service / accessories and Save", async () => {
+        await fillAddOnAccessoriesPageAndSave(page);
+      });
+ 
+      await test.step("Return to quote and assert Charges reflects add-ons", async () => {
+        await expect(page.locator("app-service-plan")).toBeHidden({ timeout: 60_000 });
+        const rootAfter = standardQuoteRoot(page);
+        await expect.soft(rootAfter).toBeVisible({ timeout: 60_000 });
+        const chargesBlock = rootAfter
+          .locator(".p-field, [class*='p-field'], amount, .grid")
+          .filter({ has: rootAfter.getByText(/^Charges$/i) })
+          .first();
+        if (await chargesBlock.isVisible({ timeout: 15_000 }).catch(() => false)) {
+          await expect
+            .poll(async () => (await chargesBlock.textContent())?.replace(/\s/g, " ") ?? "", {
+              timeout: 30_000,
+            })
+            .toMatch(/[1-9]\d{0,3}|[1-9][\d,]*\.\d{2}/);
+        }
+      });
     },
   );
-
+ 
   test(
     "UDP-T3662 - Net Trade Amount Display Only",
     { tag: ["@do", "@regression", "@UDP-T3662"] },

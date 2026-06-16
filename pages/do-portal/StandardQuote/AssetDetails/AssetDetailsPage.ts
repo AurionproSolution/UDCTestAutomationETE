@@ -597,6 +597,8 @@ export class DOAssetDetailsPage extends BasePage {
     }
   }
 
+  
+
   /**
    * After **Save** with Additional Funds set but **Purpose** left blank, expect inline validation
    * on or near the purpose field (copy varies by build).
@@ -698,6 +700,38 @@ export class DOAssetDetailsPage extends BasePage {
     );
   }
 
+
+  
+  async waitForQuoteLoadersToFinish(timeoutMs = 120_000): Promise<void> {
+    this.logStep("Wait For Quote Loaders To Finish");
+    await this.waitUntilNoVisibleAppLoaderOverlays(timeoutMs);
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+    await this.page.waitForLoadState("networkidle", { timeout: 55_000 }).catch(() => {});
+  }
+ 
+
+  async expectRecommendedRetailPriceHiddenAfterUsedCondition(): Promise<void> {
+    this.logStep("Expect Recommended Retail Price Hidden After Used Condition");
+    await this.waitForQuoteLoadersToFinish();
+    await this.page.waitForTimeout(2_000);
+ 
+    await this.dealerOriginationFeeInputField.scrollIntoViewIfNeeded();
+    await this.page.mouse.wheel(0, 700);
+    await this.page.waitForTimeout(1_000);
+ 
+    // Match UDP-T3657 / `recommendedRetailPriceInput` only. A broad `getByText(RRP)` stays visible
+    // (e.g. label in layout/summary) while the amount field is hidden for Used — that caused visibleCount 1.
+    await expect
+      .poll(
+        async () => {
+          const n = await this.recommendedRetailPriceInput.count();
+          if (n === 0) return true;
+          return !(await this.recommendedRetailPriceInput.first().isVisible().catch(() => false));
+        },
+        { timeout: 20_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(true);
+  }
   /**
    * Wait until **Loan Date** and **First Payment** both have values and stop changing
    * (pricing recalculation). Skips cheaply when values are already steady.
