@@ -10,6 +10,17 @@ That is almost always the **Playwright project toggle** and/or stale **workspace
 
 DO login in IDE mode uses **`globalSetup`** (invisible in the tree), not the separate **`do-portal-auth-setup`** project.
 
+### DO session reuse (15-minute gate)
+
+Saved auth lives in **`playwright/.auth/do-portal.json`** with timestamps in **`do-portal-auth-meta.json`**.
+
+Before each DO test run, the framework checks:
+
+- **Reuse** saved cookies when the session was saved **≤ 15 minutes ago** and the JWT is still valid.
+- **Run MFA login** when the session is **older than 15 minutes**, the JWT is **expired**, or the JWT expires within **2 minutes**.
+
+`playwright.reuseBrowser` is **`false`** in workspace settings so a fresh browser context always loads the latest saved cookies after MFA.
+
 After pulling this change:
 
 1. **Developer: Reload Window**

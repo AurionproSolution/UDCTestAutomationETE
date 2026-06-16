@@ -2,8 +2,10 @@
  * Unit checks for DO portal JWT/session helpers (no browser / MFA required).
  */
 import { test, expect } from "@playwright/test";
+import type { DoPortalAuthMeta } from "../../config/do-portal-auth.config";
 import {
   discoverTokensFromStorageState,
+  evaluateDoPortalSessionFromState,
   isAccessTokenExpiringSoon,
   looksLikeJwt,
   parseJwtExpiryMs,
@@ -16,6 +18,29 @@ const FAR_FUTURE_JWT =
 /** Sample JWT: exp = 1000000000 (year 2001). */
 const EXPIRED_JWT =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0IiwiZXhwIjoxMDAwMDAwMDAwfQ.x";
+
+function makeTestJwt(iatSec: number, expSec: number): string {
+  const payload = Buffer.from(
+    JSON.stringify({ sub: "test", iat: iatSec, exp: expSec }),
+  ).toString("base64url");
+  return `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.${payload}.x`;
+}
+
+function cookieState(jwt: string) {
+  return {
+    cookies: [
+      {
+        name: "mfe_access_token",
+        value: jwt,
+        domain: "testportaludc.aurionpro.com",
+        path: "/",
+      },
+    ],
+    origins: [],
+  };
+}
+
+const BASE_NOW_MS = Date.UTC(2026, 5, 11, 12, 0, 0);
 
 test.describe("do-portal-session.helper", () => {
   test("looksLikeJwt identifies JWT shape", () => {
@@ -57,6 +82,85 @@ test.describe("do-portal-session.helper", () => {
     expect(tokens?.accessToken).toBe(FAR_FUTURE_JWT);
     expect(tokens?.refreshToken).toBe("rt-abc");
     expect(tokens?.oidcUserKey).toContain("oidc.user:");
+  });
+
+  test("discoverTokensFromStorageState finds mfe_access_token cookie", () => {
+    const state = {
+      cookies: [
+        {
+          name: "mfe_access_token",
+          value: FAR_FUTURE_JWT,
+          domain: "testportaludc.aurionpro.com",
+          path: "/",
+        },
+      ],
+      origins: [],
+    };
+    const tokens = discoverTokensFromStorageState(state);
+    expect(tokens?.accessToken).toBe(FAR_FUTURE_JWT);
+    expect(tokens?.accessTokenKey).toBe("cookie:mfe_access_token");
+    expect(tokens?.cookieDomain).toBe("testportaludc.aurionpro.com");
+  });
+
+  test("evaluateDoPortalSessionFromState reuses session saved 10 min ago", () => {
+    const nowMs = BASE_NOW_MS;
+    const savedAt = new Date(nowMs - 10 * 60_000).toISOString();
+    const jwt = makeTestJwt(
+      Math.floor((nowMs - 10 * 60_000) / 1000),
+      Math.floor((nowMs + 10 * 60_000) / 1000),
+    );
+    const meta: DoPortalAuthMeta = {
+      discoveredAt: savedAt,
+      sessionSavedAt: savedAt,
+      accessTokenKeys: ["cookie:mfe_access_token"],
+      refreshTokenKeys: [],
+      oidcUserKeys: [],
+      origins: [],
+    };
+
+    const result = evaluateDoPortalSessionFromState(cookieState(jwt), meta, { nowMs });
+    expect(result.action).toBe("reuse");
+    expect(result.ageMinutes).toBe(10);
+  });
+
+  test("evaluateDoPortalSessionFromState requires MFA when session saved 16 min ago", () => {
+    const nowMs = BASE_NOW_MS;
+    const savedAt = new Date(nowMs - 16 * 60_000).toISOString();
+    const jwt = makeTestJwt(
+      Math.floor((nowMs - 16 * 60_000) / 1000),
+      Math.floor((nowMs + 4 * 60_000) / 1000),
+    );
+    const meta: DoPortalAuthMeta = {
+      discoveredAt: savedAt,
+      sessionSavedAt: savedAt,
+      accessTokenKeys: ["cookie:mfe_access_token"],
+      refreshTokenKeys: [],
+      oidcUserKeys: [],
+      origins: [],
+    };
+
+    const result = evaluateDoPortalSessionFromState(cookieState(jwt), meta, { nowMs });
+    expect(result.action).toBe("mfa");
+    expect(result.reason).toContain("16 min ago");
+  });
+
+  test("evaluateDoPortalSessionFromState requires MFA when JWT expired", () => {
+    const nowMs = BASE_NOW_MS;
+    const savedAt = new Date(nowMs - 5 * 60_000).toISOString();
+    const meta: DoPortalAuthMeta = {
+      discoveredAt: savedAt,
+      sessionSavedAt: savedAt,
+      accessTokenKeys: ["cookie:mfe_access_token"],
+      refreshTokenKeys: [],
+      oidcUserKeys: [],
+      origins: [],
+    };
+
+    const result = evaluateDoPortalSessionFromState(cookieState(EXPIRED_JWT), meta, {
+      nowMs,
+    });
+    expect(result.action).toBe("mfa");
+    expect(result.reason).toBe("JWT expired.");
   });
 
   test("discoverTokensFromStorageState finds flat access_token keys", () => {
