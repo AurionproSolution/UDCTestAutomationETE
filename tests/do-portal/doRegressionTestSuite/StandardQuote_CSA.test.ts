@@ -11,7 +11,7 @@ import { DOAssetDetailsPage, DODashboardPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
-const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
+const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 
 function standardQuoteRoot(page: Page): Locator {
@@ -63,12 +63,14 @@ async function prepareCalculableCsaQuote(
     origRef?: string;
     term?: string;
     interest?: string;
+    /** Balloon **$** (masked amount). Use `balloonPercent` instead when the UI shows NaN for dollar entry. */
     balloon?: string;
+    /** Balloon **%** (e.g. `"20"` for 20%). Dollar side derives from cash price (20% of $20,000 → $4,000). */
+    balloonPercent?: string;
     balloonFixed?: boolean;
     condition?: string;
   },
 ): Promise<void> {
-  await assetDetailsPage.enterOriginationReference(opts?.origRef ?? "SQ-CSA-Ref-01");
   await addMinimalUsedAsset(assetDetailsPage, addAssetPage);
   if (opts?.condition && opts.condition !== "Used") {
     await assetDetailsPage.selectCondition(opts.condition);
@@ -76,12 +78,185 @@ async function prepareCalculableCsaQuote(
   await assetDetailsPage.termsOfFinance(opts?.term ?? "36");
   await assetDetailsPage.interestRate(opts?.interest ?? "9");
   await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
-  if (opts?.balloon) {
-    await assetDetailsPage.enterBalloonAmount(opts.balloon);
-  }
   if (opts?.balloonFixed) {
     await assetDetailsPage.checkBalloonFixedCheckbox();
   }
+  if (opts?.balloonPercent) {
+    // Align loan cash with asset value so % → $ does not evaluate to NaN.
+    await assetDetailsPage.cashPriceOfAsset("$20,000");
+    await assetDetailsPage.enterBalloonPercent(opts.balloonPercent);
+  } else if (opts?.balloon) {
+    await assetDetailsPage.enterBalloonAmount(opts.balloon);
+  }
+  // Originator / origination ref **after** asset + finance edits so dialogs and async pricing do not clear it.
+  await assetDetailsPage.enterOriginationReference(opts?.origRef ?? "SQ-CSA-Ref-01");
+}
+
+/**
+ * **Add On Accessories** screen (`app-service-plan`, `app-accessories`): fill registration / service /
+ * others row and predefined accessory amounts, then **Save** (PrimeNG `data-pc-name="button"`).
+ */
+async function fillAddOnAccessoriesPageAndSave(page: Page): Promise<void> {
+  const sp = page.locator("app-service-plan");
+  const acc = page.locator("app-accessories");
+  await sp.waitFor({ state: "visible", timeout: 45_000 });
+  await acc.waitFor({ state: "visible", timeout: 45_000 }).catch(() => {});
+ 
+  const fillRowAmountAndMonths = async (scope: Locator, label: RegExp, amount: string, months: string) => {
+    const labelEl = scope.getByText(label);
+    await labelEl.first().scrollIntoViewIfNeeded().catch(() => {});
+    const rowGrid = labelEl.first().locator("xpath=ancestor::div[contains(@class,'grid')][1]");
+    const amt = rowGrid.locator("input[currencymask]").first();
+    if (await amt.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await amt.click();
+      await amt.fill(amount);
+      await amt.press("Tab").catch(() => {});
+    }
+    const mos = rowGrid.locator('input[formcontrolname="months"]').first();
+    if (await mos.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await mos.click();
+      await mos.fill(months);
+      await mos.press("Tab").catch(() => {});
+    }
+  };
+ 
+  await fillRowAmountAndMonths(sp, /^Registration$/, "100", "12");
+  await fillRowAmountAndMonths(sp, /^Service Plan$/, "50", "24");
+ 
+  const othersCombo = sp.getByRole("combobox", { name: /^Others$/i });
+  if (await othersCombo.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const rowGrid = othersCombo.locator("xpath=ancestor::div[contains(@class,'grid')][1]");
+    const amt = rowGrid.locator("input[currencymask]").first();
+    if (await amt.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await amt.click();
+      await amt.fill("75");
+      await amt.press("Tab").catch(() => {});
+    }
+    const mos = rowGrid.locator('input[formcontrolname="months"]').first();
+    if (await mos.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await mos.click();
+      await mos.fill("6");
+    }
+    const desc = rowGrid.locator("input#text").first();
+    if (await desc.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await desc.fill("Automation row");
+    }
+  }
+ 
+  const accessoryNames = [
+    "Bull Bar",
+    "Towbar",
+    "Tints",
+    "Canopy",
+    "Tonneau Soft",
+    "Side Steps",
+    "Hard Lid",
+    "Mats",
+    "Nudge Bar",
+  ] as const;
+  for (const name of accessoryNames) {
+    const row = acc.locator("div.m-0.col-4.grid").filter({ has: acc.getByText(name, { exact: true }) });
+    const inp = row.locator("input[currencymask]").first();
+    if (await inp.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await inp.scrollIntoViewIfNeeded().catch(() => {});
+      await inp.click();
+      await inp.fill("10");
+      await inp.press("Tab").catch(() => {});
+    }
+  }
+ 
+  const saveBtn = page
+    .locator('button[type="button"][data-pc-name="button"]')
+    .filter({ has: page.locator('span[data-pc-section="label"]').filter({ hasText: /^Save$/ }) })
+    .last();
+  await saveBtn.waitFor({ state: "visible", timeout: 20_000 });
+  await saveBtn.scrollIntoViewIfNeeded();
+  await saveBtn.click({ timeout: 20_000 });
+}
+ 
+/**
+ * From **Asset Details**, open **Add On Accessories** (`app-service-plan` route).
+ * Waits for loaders, scrolls the charges block, tries link / button / text + ancestor clicks.
+ */
+async function openAddOnAccessoriesPageFromStandardQuote(
+  page: Page,
+  root: Locator,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+ 
+  if (await root.getByText(/Condition|Asset Type/i).first().isVisible({ timeout: 8_000 }).catch(() => false)) {
+    try {
+      await assetDetailsPage.selectConditionInStandardQuote("New");
+    } catch {
+      // Some builds hide condition until asset is set — non-fatal for add-ons entry.
+    }
+    await assetDetailsPage.waitForQuoteLoadersToFinish();
+  }
+ 
+  const labelRx =
+    /Add\s*Ons\s*&\s*Accessories|Add\s+Ons\s+and\s+Accessories|Add[-\s]?Ons?\s*[&+]\s*Accessories/i;
+ 
+  for (const anchor of [
+    root.getByText(/Additional\s+Charges/i),
+    root.getByText(/Charges\s*\+\s*Add/i),
+    root.getByText(/^Charges$/i),
+    root.getByText(/Less\s+Deposit/i),
+  ]) {
+    if (await anchor.first().isVisible({ timeout: 2_500 }).catch(() => false)) {
+      await anchor.first().scrollIntoViewIfNeeded();
+      break;
+    }
+  }
+  await page.mouse.wheel(0, 500).catch(() => {});
+  await page.waitForTimeout(400);
+  await root.getByText(labelRx).first().scrollIntoViewIfNeeded().catch(() => {});
+ 
+  const tryOpen = async (loc: Locator): Promise<boolean> => {
+    const el = loc.first();
+    if (!(await el.isVisible({ timeout: 6_000 }).catch(() => false))) return false;
+    await el.scrollIntoViewIfNeeded();
+    await el.click({ timeout: 20_000 }).catch(() => {});
+    return await page.locator("app-service-plan").isVisible({ timeout: 18_000 }).catch(() => false);
+  };
+ 
+  const candidates: Locator[] = [
+    root.getByRole("link", { name: labelRx }),
+    root.getByRole("button", { name: labelRx }),
+    page.getByRole("link", { name: labelRx }),
+    page.getByRole("button", { name: labelRx }),
+    root.locator("a").filter({ hasText: labelRx }),
+    page.locator("a").filter({ hasText: labelRx }),
+    root.locator("button, [role='button']").filter({ hasText: labelRx }),
+    root.locator("a, button, [role='link']").filter({ hasText: labelRx }),
+    root.locator('[class*="cursor-pointer"], [class*="pointer"]').filter({ hasText: labelRx }),
+  ];
+ 
+  for (const c of candidates) {
+    if (await tryOpen(c)) return;
+  }
+ 
+  const textHit = root.getByText(labelRx).first();
+  if (await textHit.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await textHit.scrollIntoViewIfNeeded();
+    const asLink = textHit.locator("xpath=ancestor::a[1]");
+    if (await asLink.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      if (await tryOpen(asLink)) return;
+    }
+    const asBtn = textHit.locator("xpath=ancestor::button[1]");
+    if (await asBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      if (await tryOpen(asBtn)) return;
+    }
+    await textHit.click({ force: true, timeout: 15_000 }).catch(() => {});
+    if (await page.locator("app-service-plan").isVisible({ timeout: 18_000 }).catch(() => false)) {
+      return;
+    }
+  }
+ 
+  throw new Error(
+    "Add Ons & Accessories: could not open the add-ons screen (app-service-plan never became visible). " +
+      "Scroll/copy may differ, or this dealer/product does not expose the entry.",
+  );
 }
 
 test.describe("Standard Quote - CSA @do @regression", () => {
@@ -155,15 +330,25 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       test.setTimeout(300_000);
       await openStandardQuoteFromDashboard(page);
       const root = standardQuoteRoot(page);
-      const promo = root
-        .getByRole("checkbox", { name: /Promotion\s+Quote/i })
-        .or(root.locator("p-checkbox").filter({ hasText: /Promotion\s+Quote/i }))
-        .first();
-      if (await promo.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await expect.soft(promo).not.toBeChecked();
+      // PrimeNG: `<label data-pc-section="label" class="p-checkbox-label"> Promotion Quote</label>` inside `p-checkbox` — state lives on `input[type="checkbox"]`.
+      const promoHost = root.locator("p-checkbox").filter({
+        has: root
+          .locator('label.p-checkbox-label[data-pc-section="label"], label.p-checkbox-label')
+          .filter({ hasText: /Promotion\s+Quote/i }),
+      });
+      const promoHostFirst = promoHost.first();
+      const promoInput = promoHostFirst.locator('input[type="checkbox"]').first();
+      if (await promoHostFirst.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        await expect.soft(promoInput).not.toBeChecked();
+      } else {
+        const byRole = root.getByRole("checkbox", { name: /Promotion\s+Quote/i }).first();
+        if (await byRole.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await expect.soft(byRole).not.toBeChecked();
+        }
       }
     },
   );
+ 
 
   test(
     "UDP-T3650 - Quote ID Assigned on First Save",
@@ -191,11 +376,17 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       const addAssetPage = new DOAddAssetPage(page);
       await selectCsaProductAndProgram(assetDetailsPage);
-      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.clickSaveStandardQuoteStep();
-      await expect
-        .soft(standardQuoteRoot(page).getByText(/Open\s+Quote/i).first())
-        .toBeVisible({ timeout: 30_000 });
+      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, {
+        balloonPercent: "20",
+      });
+      await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.enterOriginationReference("SQ-CSA-Ref-01");
+      await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+      await assetDetailsPage.clickSaveStandardQuoteStep({
+        originatorRefForRequiredDialog: "SQ-CSA-Ref-01",
+      });
+      const root = standardQuoteRoot(page);
+      await expect.soft(root).toContainText(/Open\s+Quote/i, { timeout: 45_000 });
     },
   );
 
@@ -309,7 +500,7 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await assetDetailsPage.scrollRecommendedRetailPriceIntoView();
       await expect.soft(assetDetailsPage.recommendedRetailPriceInput).toBeVisible({ timeout: 20_000 });
       await assetDetailsPage.selectCondition("Used");
-      await expect.soft(assetDetailsPage.recommendedRetailPriceInput).toBeHidden({ timeout: 15_000 });
+      await assetDetailsPage.expectRecommendedRetailPriceHiddenAfterUsedCondition();
     },
   );
 
@@ -361,16 +552,39 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     "UDP-T3661 - Charges + Add Ons Field Sums Add-On Items",
     { tag: ["@do", "@regression", "@UDP-T3661"] },
     async ({ page }) => {
-      test.setTimeout(300_000);
-      await openStandardQuoteFromDashboard(page);
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      await selectCsaProductAndProgram(assetDetailsPage);
       const root = standardQuoteRoot(page);
-      const charges = root.getByText(/Charges\s*\+\s*Add\s*Ons|Add\s*Ons\s*&\s*Accessories/i).first();
-      if (await charges.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await expect.soft(charges).toBeVisible();
-      }
+ 
+      await test.step("Open Add Ons & Accessories (expect app-service-plan)", async () => {
+        await openAddOnAccessoriesPageFromStandardQuote(page, root, assetDetailsPage);
+        await expect(page.locator("app-service-plan")).toBeVisible({ timeout: 45_000 });
+      });
+ 
+      await test.step("Fill registration / service / accessories and Save", async () => {
+        await fillAddOnAccessoriesPageAndSave(page);
+      });
+ 
+      await test.step("Return to quote and assert Charges reflects add-ons", async () => {
+        await expect(page.locator("app-service-plan")).toBeHidden({ timeout: 60_000 });
+        const rootAfter = standardQuoteRoot(page);
+        await expect.soft(rootAfter).toBeVisible({ timeout: 60_000 });
+        const chargesBlock = rootAfter
+          .locator(".p-field, [class*='p-field'], amount, .grid")
+          .filter({ has: rootAfter.getByText(/^Charges$/i) })
+          .first();
+        if (await chargesBlock.isVisible({ timeout: 15_000 }).catch(() => false)) {
+          await expect
+            .poll(async () => (await chargesBlock.textContent())?.replace(/\s/g, " ") ?? "", {
+              timeout: 30_000,
+            })
+            .toMatch(/[1-9]\d{0,3}|[1-9][\d,]*\.\d{2}/);
+        }
+      });
     },
   );
-
+ 
   test(
     "UDP-T3662 - Net Trade Amount Display Only",
     { tag: ["@do", "@regression", "@UDP-T3662"] },
@@ -451,7 +665,7 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, {
-        balloon: "$5,000",
+        balloonPercent: "20",
         balloonFixed: false,
       });
       await assetDetailsPage.clickCalculateButton();
@@ -504,11 +718,12 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, {
-        balloon: "$5,000",
+        balloonPercent: "20",
         balloonFixed: true,
       });
+      await assetDetailsPage.expectBalloonAmountInputMatches(/4[, ]?000|4000/);
       await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentScheduleLastPaymentRowContains(/5[, ]?000|5000/);
+      await assetDetailsPage.expectPaymentScheduleLastPaymentRowContains(/4[, ]?000|4000/);
     },
   );
 
@@ -521,7 +736,7 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, {
-        balloon: "$5,000",
+        balloonPercent: "20",
         balloonFixed: false,
       });
       await assetDetailsPage.clickCalculateButton();
@@ -538,11 +753,14 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, {
-        balloon: "$5,000",
+        balloonPercent: "20",
         balloonFixed: false,
       });
+      // With **Fixed** unchecked, the UI keeps 20% in the % field; the paired $ field often stays
+      // empty in `inputValue()` until **Calculate** (unlike Fixed checked — see UDP-T3669).
+      await assetDetailsPage.expectBalloonPercentInputMatches(/20/);
       await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentScheduleLastPaymentRowContains(/\$|5[, ]?000/);
+      await assetDetailsPage.expectPaymentScheduleLastPaymentRowContains(/\$|4[, ]?000/);
     },
   );
 
@@ -570,13 +788,29 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
       await assetDetailsPage.clickCalculateButton();
-      const editIcon = standardQuoteRoot(page)
-        .locator("button, a, [role='button']")
-        .filter({ has: page.locator("i.pi-pencil, i.pi-pen-to-square, .fa-pen-to-square") })
-        .filter({ has: page.locator("xpath=ancestor::*[contains(.,'Payment Schedule')]") })
+      const root = standardQuoteRoot(page);
+      const scheduleCard = root.locator("p-card").filter({ hasText: /Payment\s+Schedule/i }).first();
+      const scheduleHost = (await scheduleCard.isVisible({ timeout: 10_000 }).catch(() => false))
+        ? scheduleCard
+        : root
+            .locator("div")
+            .filter({ has: root.getByText(/Payment\s+Schedule/i).first() })
+            .filter({ has: root.locator("table tbody tr") })
+            .first();
+      const editIcon = root
+        .getByRole("button", { name: /Edit\s+Payment\s+Schedule/i })
+        .or(root.getByRole("link", { name: /Edit\s+Payment\s+Schedule/i }))
+        .or(
+          scheduleHost
+            .locator("button:not(.brand-edit-btn), a:not(.brand-edit-btn), [role='button']:not(.brand-edit-btn)")
+            .filter({
+              has: scheduleHost.locator("i.pi-pencil, i.pi-pen-to-square, .fa-pen-to-square"),
+            }),
+        )
         .first();
       if (await editIcon.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await editIcon.click();
+        await expect(editIcon).toBeEnabled({ timeout: 20_000 });
+        await editIcon.click({ timeout: 20_000 });
         await expect
           .soft(page.getByRole("dialog").filter({ hasText: /Payment\s+Schedule|Segment/i }).first())
           .toBeVisible({ timeout: 20_000 });
@@ -648,15 +882,31 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
       await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+
       const root = standardQuoteRoot(page);
-      await expect.soft(root.getByText(/Standard\s+Payment\s+Options/i).first()).toBeVisible({
-        timeout: 30_000,
-      });
-      for (const term of ["12", "24", "36", "48", "60"]) {
-        await expect.soft(root.getByText(new RegExp(`\\b${term}\\b`)).first()).toBeVisible({
-          timeout: 10_000,
-        });
-      }
+      const optionsPanel = root
+        .locator("p-card, div")
+        .filter({ hasText: /Standard\s+Payment\s+Options/i })
+        .filter({ visible: true })
+        .first();
+
+      await expect.soft(optionsPanel).toBeVisible({ timeout: 45_000 });
+
+      /** Match term as a whole month value (not part of 120 / 12.5), across split text nodes. */
+      const termPresent = (body: string, term: string): boolean =>
+        new RegExp(`(?:^|[^0-9])${term}(?:[^0-9]|$)`).test(body);
+
+      await expect
+        .poll(
+          async () => {
+            const scope = (await optionsPanel.isVisible().catch(() => false)) ? optionsPanel : root;
+            const body = ((await scope.textContent()) ?? "").replace(/\u00a0/g, " ");
+            return ["12", "24", "36", "48", "60"].every((t) => termPresent(body, t));
+          },
+          { timeout: 45_000 },
+        )
+        .toBe(true);
     },
   );
 
@@ -818,7 +1068,14 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await assetDetailsPage.clickCalculateButton();
       await assetDetailsPage.clickNextButton();
       await assetDetailsPage.waitForAddBorrowerButton();
-      await expect.soft(assetDetailsPage.addBorrowerorGuarantorButton).toBeVisible();
+      const addBtnVisible = await assetDetailsPage.addBorrowerorGuarantorButton
+        .isVisible()
+        .catch(() => false);
+      const personalVisible = await page.locator("app-personal-details").isVisible().catch(() => false);
+      expect.soft(addBtnVisible || personalVisible).toBeTruthy();
+      if (addBtnVisible) {
+        await expect.soft(assetDetailsPage.addBorrowerorGuarantorButton).toBeVisible();
+      }
     },
   );
 

@@ -1,5 +1,5 @@
 import { expect, Locator, Page } from "@playwright/test";
-import { BasePage } from "../../..";
+import { BasePage } from "../../../common/BasePage";
 
 export class DOAssetDetailsPage extends BasePage {
   readonly dialogBox: Locator;
@@ -156,9 +156,42 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
     this.calculateButton = page.getByRole("button", { name: /^Calculate$/i });
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
-    this.addBorrowerorGuarantorButton = page.getByRole("button", {
-      name: /Add Borrowers(\s*\/\s*Guarantors)?/i,
-    });
+    /** Customer Details: CTA label varies (`/`, `&`, `and`), may live on `p-button` or `span.p-button-label` (not always in a11y name). */
+    const quoteCustomerShell = page.locator("app-standard-quote, app-quote-details").first();
+    const addBorrowerLabel = /Add\s+Borrowers?\s*(\/|&|and)\s*Guarantors?/i;
+    const addBorrowerClickableFromText = (root: Locator): Locator =>
+      root
+        .getByText(addBorrowerLabel)
+        .first()
+        .locator("xpath=ancestor::button[1] | ancestor::a[1] | ancestor::p-button[1]");
+    const addBorrowerLooseTextClickable = (root: Locator): Locator =>
+      root
+        .getByText("Add Borrowers / Guarantors", { exact: false })
+        .first()
+        .locator("xpath=ancestor::button[1] | ancestor::a[1] | ancestor::p-button[1]");
+    this.addBorrowerorGuarantorButton = quoteCustomerShell
+      .getByRole("button", { name: addBorrowerLabel })
+      .or(quoteCustomerShell.getByRole("link", { name: addBorrowerLabel }))
+      .or(page.getByRole("button", { name: addBorrowerLabel }))
+      .or(page.getByRole("link", { name: addBorrowerLabel }))
+      .or(page.locator(':text-is("Add Borrowers / Guarantors")'))
+      .or(addBorrowerClickableFromText(quoteCustomerShell))
+      .or(addBorrowerClickableFromText(page.locator("body")))
+      .or(addBorrowerLooseTextClickable(quoteCustomerShell))
+      .or(addBorrowerLooseTextClickable(page.locator("body")))
+      .or(
+        quoteCustomerShell
+          .locator("button.p-button, button.p-element, p-button")
+          .filter({ hasText: addBorrowerLabel })
+          .first(),
+      )
+      .or(
+        page
+          .locator("button, a")
+          .filter({ hasText: addBorrowerLabel })
+          .first(),
+      )
+      .first();
     this.customerSearchDialog = page
       .getByRole("dialog")
       .filter({ has: page.getByRole("button", { name: /Search/i }) })
@@ -208,20 +241,16 @@ export class DOAssetDetailsPage extends BasePage {
       .filter({ hasText: /Balloon\s+Amount/i })
       .first();
     this.balloonAmountInput = balloonAmountHost.locator("#amount").first();
-    // `percentage` host often has **no** inner text "Balloon" (label sits on sibling `amount`). Resolve % from the same grid row as Balloon Amount.
+    // Balloon **%** uses PrimeNG `id="percent"` on that row. Do not use `//percentage//input[…spinbutton…]` —
+    // the same grid can contain other `p-inputnumber` spinbuttons (e.g. under `<number>`), which breaks strict mode.
     this.balloonPercentInput = balloonAmountHost
       .locator(
-        "xpath=ancestor::div[contains(@class,'grid')][1]//percentage//input[contains(@class,'p-inputnumber-input') or contains(@class,'p-inputtext') or @role='spinbutton']",
+        "xpath=ancestor::div[contains(@class,'grid')][1]//input[@id='percent']",
       )
       .first()
       .or(
-        balloonAmountHost.locator(
-          "xpath=ancestor::div[contains(@class,'grid')][1]//p-inputnumber//input[contains(@class,'p-inputtext') or contains(@class,'p-inputnumber-input') or @role='spinbutton']",
-        ).first(),
-      )
-      .or(
         paymentSummary.locator(
-          "xpath=.//label[contains(normalize-space(.),'Balloon Amount')]/ancestor::div[contains(@class,'grid')][1]//percentage//input",
+          "xpath=.//label[contains(normalize-space(.),'Balloon Amount')]/ancestor::div[contains(@class,'grid')][1]//input[@id='percent']",
         ).first(),
       );
     this.balloonFixedCheckbox = paymentSummary
@@ -516,7 +545,10 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /** Outlined **Save** on the Standard Quote step (inside `lib-stepper` when present). */
-  async clickSaveStandardQuoteStep(): Promise<void> {
+  async clickSaveStandardQuoteStep(opts?: {
+    /** When Save opens the "required to save" dialog, fill **Originator Reference** and confirm. */
+    originatorRefForRequiredDialog?: string;
+  }): Promise<void> {
     this.logStep("Click Save Standard Quote Step");
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
 
@@ -557,7 +589,15 @@ export class DOAssetDetailsPage extends BasePage {
 
     await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
     await this.page.waitForTimeout(600);
+    if (opts?.originatorRefForRequiredDialog) {
+      await this.page.waitForTimeout(500);
+      await this.submitOriginatorReferenceRequiredToSaveDialogIfPresent(
+        opts.originatorRefForRequiredDialog,
+      );
+    }
   }
+
+  
 
   /**
    * After **Save** with Additional Funds set but **Purpose** left blank, expect inline validation
@@ -630,6 +670,107 @@ export class DOAssetDetailsPage extends BasePage {
     }
   }
 
+  /**
+   * After pricing/async refresh, **Loan Date** can flicker. Wait until the displayed value
+   * is unchanged for several consecutive reads (fast when already stable).
+   */
+  private async waitForLoanDateValueStable(
+    loanIn: Locator,
+    opts?: { timeoutMs?: number; intervalMs?: number; stableRounds?: number },
+  ): Promise<void> {
+    const timeoutMs = opts?.timeoutMs ?? 20_000;
+    const intervalMs = opts?.intervalMs ?? 200;
+    const needRounds = opts?.stableRounds ?? 3;
+    const deadline = Date.now() + timeoutMs;
+    let prev = "";
+    let stable = 0;
+    while (Date.now() < deadline) {
+      const loanTrim = (await loanIn.inputValue()).trim();
+      if (loanTrim.length > 4 && loanTrim === prev) {
+        stable += 1;
+        if (stable >= needRounds) return;
+      } else {
+        stable = loanTrim.length > 4 ? 1 : 0;
+        prev = loanTrim;
+      }
+      await this.page.waitForTimeout(intervalMs);
+    }
+    throw new Error(
+      `Loan Date did not stabilize within ${timeoutMs}ms (last read: "${(await loanIn.inputValue()).trim()}").`,
+    );
+  }
+
+
+  
+  async waitForQuoteLoadersToFinish(timeoutMs = 120_000): Promise<void> {
+    this.logStep("Wait For Quote Loaders To Finish");
+    await this.waitUntilNoVisibleAppLoaderOverlays(timeoutMs);
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+    await this.page.waitForLoadState("networkidle", { timeout: 55_000 }).catch(() => {});
+  }
+ 
+
+  async expectRecommendedRetailPriceHiddenAfterUsedCondition(): Promise<void> {
+    this.logStep("Expect Recommended Retail Price Hidden After Used Condition");
+    await this.waitForQuoteLoadersToFinish();
+    await this.page.waitForTimeout(2_000);
+ 
+    await this.dealerOriginationFeeInputField.scrollIntoViewIfNeeded();
+    await this.page.mouse.wheel(0, 700);
+    await this.page.waitForTimeout(1_000);
+ 
+    // Match UDP-T3657 / `recommendedRetailPriceInput` only. A broad `getByText(RRP)` stays visible
+    // (e.g. label in layout/summary) while the amount field is hidden for Used — that caused visibleCount 1.
+    await expect
+      .poll(
+        async () => {
+          const n = await this.recommendedRetailPriceInput.count();
+          if (n === 0) return true;
+          return !(await this.recommendedRetailPriceInput.first().isVisible().catch(() => false));
+        },
+        { timeout: 20_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(true);
+  }
+  /**
+   * Wait until **Loan Date** and **First Payment** both have values and stop changing
+   * (pricing recalculation). Skips cheaply when values are already steady.
+   */
+  private async waitForLoanAndFirstPaymentValuesStable(
+    loanIn: Locator,
+    firstIn: Locator,
+    opts?: { timeoutMs?: number; intervalMs?: number; stableRounds?: number },
+  ): Promise<void> {
+    const timeoutMs = opts?.timeoutMs ?? 20_000;
+    const intervalMs = opts?.intervalMs ?? 200;
+    const needRounds = opts?.stableRounds ?? 3;
+    const deadline = Date.now() + timeoutMs;
+    let prev = "";
+    let stable = 0;
+    while (Date.now() < deadline) {
+      const loanTrim = (await loanIn.inputValue()).trim();
+      const firstTrim = (await firstIn.inputValue()).trim();
+      const snapshot = `${loanTrim}\0${firstTrim}`;
+      const bothOk = loanTrim.length > 4 && firstTrim.length > 4;
+      if (bothOk && snapshot === prev) {
+        stable += 1;
+        if (stable >= needRounds) return;
+      } else if (bothOk) {
+        stable = 1;
+        prev = snapshot;
+      } else {
+        stable = 0;
+        prev = "";
+      }
+      await this.page.waitForTimeout(intervalMs);
+    }
+    const loanTrim = (await loanIn.inputValue()).trim();
+    const firstTrim = (await firstIn.inputValue()).trim();
+    throw new Error(
+      `Loan Date / First Payment did not stabilize within ${timeoutMs}ms (loan="${loanTrim}", first="${firstTrim}").`,
+    );
+  }
+
   /** Loan Date must be set; fill First Payment from loan date when the UI left it empty (required for Calculate). */
   async ensureLoanDateAndFirstPaymentReadyForCalculate(): Promise<void> {
     this.logStep("Ensure Loan Date And First Payment Ready For Calculate");
@@ -639,6 +780,8 @@ export class DOAssetDetailsPage extends BasePage {
     await expect(loanIn).toBeEditable();
     expect((await loanIn.inputValue()).trim().length).toBeGreaterThan(4);
     await expect(firstIn).toBeVisible({ timeout: 15_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    await this.waitForLoanDateValueStable(loanIn);
     if ((await firstIn.inputValue()).trim().length < 5) {
       await expect(firstIn).toBeEditable();
       await this.enterFirstPaymentSuggestedFromLoanDdMmYyyy();
@@ -646,6 +789,8 @@ export class DOAssetDetailsPage extends BasePage {
         .poll(async () => (await firstIn.inputValue()).trim().length, { timeout: 12_000 })
         .toBeGreaterThan(4);
     }
+    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    await this.waitForLoanAndFirstPaymentValuesStable(loanIn, firstIn);
   }
 
   /** Clear origination reference and run **Calculate** (allowed with blank origin on some CSA builds). */
@@ -995,8 +1140,29 @@ export class DOAssetDetailsPage extends BasePage {
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     await expect(this.balloonAmountInput).toBeVisible({ timeout: 20_000 });
     await this.balloonAmountInput.scrollIntoViewIfNeeded();
-    await this.balloonAmountInput.fill(amount, { force: true });
-    await this.balloonAmountInput.press("Tab").catch(() => {});
+    /** Same PrimeNG `<amount>` / `#amount` pattern as {@link fillLoanDetailsCurrencyAmount} — raw `fill` often leaves $0.00. */
+    await this.fillLoanDetailsCurrencyAmount(this.balloonAmountInput, amount);
+    await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
+
+    const balloonAmountNumeric = async (): Promise<number> => {
+      const raw = (await this.balloonAmountInput.inputValue()).trim();
+      const n = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+      return Number.isNaN(n) ? 0 : n;
+    };
+
+    if ((await balloonAmountNumeric()) < 1) {
+      const stripped = amount.replace(/[$\s,]/g, "");
+      const parsed = parseFloat(stripped);
+      if (!Number.isNaN(parsed) && parsed >= 1) {
+        const withCents = `$${parsed.toFixed(2)}`;
+        await this.fillLoanDetailsCurrencyAmount(this.balloonAmountInput, withCents);
+        await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
+      }
+    }
+
+    await expect
+      .poll(async () => balloonAmountNumeric(), { timeout: 12_000 })
+      .toBeGreaterThanOrEqual(1);
   }
 
   async expectBalloonPercentInputMatches(rx: RegExp): Promise<void> {
@@ -1015,10 +1181,15 @@ export class DOAssetDetailsPage extends BasePage {
     await this.balloonPercentInput.scrollIntoViewIfNeeded();
     await this.balloonPercentInput.click({ force: true });
     await this.balloonPercentInput.press("ControlOrMeta+a");
-    await this.balloonPercentInput.fill(percentDigits, { force: true });
+    await this.balloonPercentInput.fill(percentDigits.replace(/%/g, "").trim(), { force: true });
     await this.balloonPercentInput.press("Tab").catch(() => {});
   }
 
+  /**
+   * Asserts the Balloon **$** masked input matches `rx`.
+   * When **Fixed** is unchecked and the value was set via **%** only, the $ control may stay empty
+   * until **Calculate** — use {@link expectBalloonPercentInputMatches} for that phase instead.
+   */
   async expectBalloonAmountInputMatches(rx: RegExp): Promise<void> {
     this.logStep("Expect Balloon Amount Input Matches");
     await expect
@@ -1030,32 +1201,189 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Check Balloon Fixed Checkbox");
     await expect(this.balloonFixedCheckbox).toBeVisible({ timeout: 12_000 });
     await this.balloonFixedCheckbox.scrollIntoViewIfNeeded();
+    await this.balloonFixedCheckbox.click({ force: true }).catch(() => {});
     await this.balloonFixedCheckbox.check({ force: true });
     await expect(this.balloonFixedCheckbox).toBeChecked({ timeout: 8_000 });
   }
 
   /**
    * Last **Payment Schedule** currency row should include `pattern` (e.g. final balloon instalment).
+   * Scoped to the schedule card/panel and **visible** rows only — avoids PrimeNG hidden scroll
+   * clones and `.last()` picking a row from another table under the quote shell.
    */
   async expectPaymentScheduleLastPaymentRowContains(pattern: RegExp): Promise<void> {
     this.logStep("Expect Payment Schedule Last Payment Row Contains");
     const root = this.standardQuoteRoot();
     await expect(root.getByText(/Payment\s+Schedule/i).first()).toBeVisible({ timeout: 45_000 });
-    const row = root
-      .locator("tbody tr, table tbody tr, .p-datatable-tbody > tr")
+
+    const scheduleScope = this.paymentScheduleContentScope();
+
+    const row = scheduleScope
+      .locator("tr")
       .filter({ hasText: /\$\s*[\d,.]+/ })
+      .filter({ visible: true })
       .last();
+
     await expect(row).toBeVisible({ timeout: 25_000 });
     await expect(row).toContainText(pattern);
   }
 
   /**
+   * Fills Origination / Originator Reference on a quote shell (`root`).
+   * Webform / Prime uses a real `input`; legacy CSA may use SVG `text#text` — try inputs first.
+   */
+  private async fillOriginationReferenceOnRoot(
+    origRef: string,
+    root: Locator,
+  ): Promise<boolean> {
+    const tryFill = async (el: Locator): Promise<boolean> => {
+      const t = el.first();
+      if (!(await t.isVisible({ timeout: 8_000 }).catch(() => false))) {
+        return false;
+      }
+      await t.scrollIntoViewIfNeeded();
+      await t.click({ force: true }).catch(() => {});
+      await t.clear().catch(() => {});
+      try {
+        await t.fill(origRef, { timeout: 15_000 });
+      } catch {
+        await t.press("ControlOrMeta+a");
+        await this.page.keyboard.type(origRef, { delay: 20 });
+      }
+      const v = (await t.inputValue().catch(() => "")).trim();
+      if (v.length > 0) {
+        return true;
+      }
+      await t.press("ControlOrMeta+a");
+      await this.page.keyboard.type(origRef, { delay: 20 });
+      return (await t.inputValue().catch(() => "")).trim().length > 0;
+    };
+
+    const originatorRoot = this.page.locator("app-quote-originator").first();
+    if (await originatorRoot.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      const originInput = originatorRoot.locator(
+        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/following::input[1]",
+      );
+      if (await tryFill(originInput.first())) {
+        return true;
+      }
+    }
+
+    if (
+      await tryFill(
+        root.getByLabel(
+          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+        ),
+      )
+    ) {
+      return true;
+    }
+    if (
+      await tryFill(
+        this.page.getByLabel(
+          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+        ),
+      )
+    ) {
+      return true;
+    }
+    if (
+      await tryFill(
+        root.getByRole("textbox", {
+          name: /Origination|Originator|Orig(ination)?\s*Ref/,
+        }),
+      )
+    ) {
+      return true;
+    }
+    if (
+      await tryFill(
+        this.page.getByRole("textbox", {
+          name: /Origination|Originator|Orig(ination)?\s*Ref/,
+        }),
+      )
+    ) {
+      return true;
+    }
+    for (const sel of [
+      'input[formControlName="originationReference"]',
+      'input[formControlName="originatorReference"]',
+      'input[name="originationReference"]',
+      'input[ng-reflect-name*="origination"]',
+      "p-float-label input",
+      ".p-field input.p-inputtext",
+    ]) {
+      if (await tryFill(root.locator(sel).first())) {
+        return true;
+      }
+    }
+    const row = root
+      .locator(".p-field, .p-col, .p-float-label, [class*='p-field']")
+      .filter({
+        hasText: /Origination|Originator\s*Ref|Origination\s*Ref/,
+      })
+      .first();
+    if (await tryFill(row.locator("input, textarea").first())) {
+      return true;
+    }
+    const fromLabel = root
+      .locator("span, label, .p-float-label")
+      .filter({ hasText: /Origination|Originator/i })
+      .first()
+      .locator(
+        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
+      );
+    if (await tryFill(fromLabel)) {
+      return true;
+    }
+    if (await tryFill(this.originationRefInput)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Enter text into the Origination Reference input field
-   * (CSA / legacy: SVG `text#text` under "Originator Reference" label in some builds.)
+   * (CSA: Prime `input` on Webform builds; legacy: SVG `text#text` under "Originator Reference".)
    */
   async enterOriginationReference(origRef: string): Promise<void> {
     this.logStep(`Entered origination reference as ${this.stepValueDisplay(origRef)}`);
-    await this.originationRefInput.fill(origRef);
+    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    const root = this.standardQuoteRoot();
+    await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    if (!(await this.fillOriginationReferenceOnRoot(origRef, root))) {
+      throw new Error(
+        `Could not set Origination / Originator Reference to "${origRef}" (tried inputs on quote shell and legacy SVG).`,
+      );
+    }
+    await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
+  }
+
+  /**
+   * If **Save** opens "The below information is required to save this quote" with **Originator Reference**,
+   * fill it and confirm the dialog **Save** (does nothing when the dialog is absent).
+   */
+  async submitOriginatorReferenceRequiredToSaveDialogIfPresent(origRef: string): Promise<void> {
+    const dlg = this.page
+      .getByRole("dialog")
+      .filter({ hasText: /required to save this quote/i })
+      .first();
+    if (!(await dlg.isVisible({ timeout: 6_000 }).catch(() => false))) {
+      return;
+    }
+    this.logStep(
+      `Submit Originator Reference in required-to-save dialog as ${this.stepValueDisplay(origRef)}`,
+    );
+    const input = dlg
+      .getByRole("textbox", { name: /Originator|Origination/i })
+      .or(dlg.locator("input").filter({ visible: true }).first());
+    const inp = input.first();
+    await inp.scrollIntoViewIfNeeded();
+    await inp.click({ force: true }).catch(() => {});
+    await inp.fill(origRef, { force: true });
+    await dlg.getByRole("button", { name: /^Save$/i }).click();
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    await this.page.waitForTimeout(400);
   }
 
   /**
@@ -1133,120 +1461,14 @@ export class DOAssetDetailsPage extends BasePage {
       .last();
     await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
 
-    const tryFill = async (el: Locator): Promise<boolean> => {
-      const t = el.first();
-      if (!(await t.isVisible({ timeout: 8_000 }).catch(() => false))) {
-        return false;
-      }
-      await t.scrollIntoViewIfNeeded();
-      await t.click({ force: true }).catch(() => {});
-      await t.clear().catch(() => {});
-      try {
-        await t.fill(origRef, { timeout: 15_000 });
-      } catch {
-        await t.press("ControlOrMeta+a");
-        await this.page.keyboard.type(origRef, { delay: 20 });
-      }
-      const v = (await t.inputValue().catch(() => "")).trim();
-      if (v.length > 0) {
-        return true;
-      }
-      await t.press("ControlOrMeta+a");
-      await this.page.keyboard.type(origRef, { delay: 20 });
-      return (await t.inputValue().catch(() => "")).trim().length > 0;
-    };
-
-    const originatorRoot = this.page.locator("app-quote-originator").first();
-    if (await originatorRoot.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      const originInput = originatorRoot.locator(
-        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/following::input[1]",
+    if (!(await this.fillOriginationReferenceOnRoot(origRef, root))) {
+      throw new Error(
+        `Finance Lease: could not set Origination Reference to "${origRef}" (tried getByLabel, getByRole textbox, p-field row, p-float-label).`,
       );
-      if (await tryFill(originInput.first())) {
-        if (!skipOverlayDismiss) {
-          await this.page.keyboard.press("Escape").catch(() => {});
-        }
-        return;
-      }
     }
-
-    // 1) ARIA: label (Prime float-label / p-field)
-    if (
-      await tryFill(
-        root.getByLabel(
-          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
-        ),
-      )
-    ) {
-      return;
+    if (!skipOverlayDismiss) {
+      await this.page.keyboard.press("Escape").catch(() => {});
     }
-    if (
-      await tryFill(
-        this.page.getByLabel(
-          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
-        ),
-      )
-    ) {
-      return;
-    }
-    // 2) textbox by accessible name
-    if (
-      await tryFill(
-        root.getByRole("textbox", {
-          name: /Origination|Originator|Orig(ination)?\s*Ref/,
-        }),
-      )
-    ) {
-      return;
-    }
-    if (
-      await tryFill(
-        this.page.getByRole("textbox", {
-          name: /Origination|Originator|Orig(ination)?\s*Ref/,
-        }),
-      )
-    ) {
-      return;
-    }
-    // 3) Common Angular / Prime `input` bindings
-    for (const sel of [
-      'input[formControlName="originationReference"]',
-      'input[formControlName="originatorReference"]',
-      'input[name="originationReference"]',
-      'input[ng-reflect-name*="origination"]',
-      "p-float-label input",
-      ".p-field input.p-inputtext",
-    ]) {
-      if (await tryFill(root.locator(sel).first())) {
-        return;
-      }
-    }
-    // 4) Label/span then following input
-    const row = root
-      .locator(".p-field, .p-col, .p-float-label, [class*='p-field']")
-      .filter({
-        hasText: /Origination|Originator\s*Ref|Origination\s*Ref/,
-      })
-      .first();
-    if (await tryFill(row.locator("input, textarea").first())) {
-      return;
-    }
-    const fromLabel = root
-      .locator("span, label, .p-float-label")
-      .filter({ hasText: /Origination|Originator/i })
-      .first()
-      .locator(
-        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
-      );
-    if (await tryFill(fromLabel)) {
-      return;
-    }
-    // 5) Last resort: same locator as CSA (if FL build also uses it)
-    if (await tryFill(this.originationRefInput)) {
-      return;
-    }
-    throw new Error(
-      `Finance Lease: could not set Origination Reference to "${origRef}" (tried getByLabel, getByRole textbox, p-field row, p-float-label).`,
-    );
   }
 
   /** Same discovery order as {@link enterOriginationReferenceFinanceLease} so verify reads the field we filled. */
@@ -1844,19 +2066,33 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * **Payment Schedule** view toggles: right control uses PrimeIcons **`i.pi.pi-bars`** (often
-   * `i.pi.pi-bars.ng-star-inserted`). Toggles are resolved on a host that contains both the
-   * **Payment Schedule** title and **`pi-bars`** (avoids the app chrome / sidebar **bars** icon).
+   * Host for **Payment Schedule** table rows (card when present, else a div that contains the title).
+   * Keeps row queries off other grids under {@link standardQuoteRoot} (fees, summary, etc.).
+   */
+  private paymentScheduleContentScope(): Locator {
+    const root = this.standardQuoteRoot();
+    const card = this.paymentScheduleCard();
+    const title = root.getByText(/Payment\s+Schedule/i).first();
+    const withTable = root
+      .locator("div")
+      .filter({ has: title })
+      .filter({
+        has: root.locator("table").filter({ hasText: /Date|Number|Frequency|Payment/i }),
+      })
+      .first();
+    return card.or(withTable).or(root.locator("div").filter({ has: title }).first());
+  }
+
+  /**
+   * **Payment Schedule** view toggles: PrimeNG often uses **`p-selectButton`** (two+ options);
+   * older builds use icon-only **`pi-bars`** / **`pi-table`** / **`pi-th-large`** next to the title.
    * **$** row checks use {@link standardQuoteRoot} — the table is not always a descendant of the
    * narrow `p-card` title ancestor used for header buttons.
    */
   async clickPaymentScheduleViewTogglesAndExpectRowsRemain(): Promise<void> {
     this.logStep("Click Payment Schedule View Toggles And Expect Rows Remain");
     const root = this.standardQuoteRoot();
-    const card = this.paymentScheduleCard();
-    const scope = (await card.isVisible({ timeout: 4_000 }).catch(() => false))
-      ? card
-      : root.locator("div").filter({ has: root.getByText(/Payment\s+Schedule/i) }).first();
+    const scheduleScope = this.paymentScheduleContentScope();
 
     const paymentRow = root
       .locator("tr")
@@ -1870,28 +2106,46 @@ export class DOAssetDetailsPage extends BasePage {
 
     await assertMoneyRowVisible();
 
-    const hostWithBars = root
-      .locator("p-card")
-      .filter({ hasText: /Payment\s+Schedule/i })
-      .filter({ has: root.locator("i.pi.pi-bars") })
+    const selectGroup = scheduleScope
+      .locator("p-selectbutton, p-selectButton, p-togglebutton, .p-selectbutton")
       .first();
+    if (await selectGroup.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      const btns = selectGroup.locator("button, .p-button, [role='button']");
+      const n = await btns.count();
+      if (n >= 2) {
+        await expect(btns.last()).toBeVisible({ timeout: 10_000 });
+        await btns.last().scrollIntoViewIfNeeded();
+        await btns.last().click({ force: true, timeout: 10_000 });
+        await this.page.waitForTimeout(400);
+        await assertMoneyRowVisible();
+        await btns.first().scrollIntoViewIfNeeded();
+        await btns.first().click({ force: true, timeout: 10_000 });
+        await this.page.waitForTimeout(400);
+        await assertMoneyRowVisible();
+        return;
+      }
+    }
 
-    const toggleScope = (await hostWithBars.isVisible({ timeout: 3_000 }).catch(() => false))
-      ? hostWithBars
-      : scope;
+    const card = root.locator("p-card").filter({ hasText: /Payment\s+Schedule/i }).first();
+    const toggleScope = (await card.isVisible({ timeout: 5_000 }).catch(() => false))
+      ? card
+      : scheduleScope;
 
     const rightViewBtn = toggleScope
-      .locator("button:has(i.pi.pi-bars.ng-star-inserted)")
+      .locator("button:has(i.pi.pi-bars)")
       .first()
-      .or(toggleScope.locator("button:has(i.pi.pi-bars)").first())
+      .or(toggleScope.locator("a:has(i.pi.pi-bars)").first())
+      .or(toggleScope.locator("button:has(i.pi.pi-table)").first())
+      .or(toggleScope.locator("button:has(i.pi.pi-th-large)").first())
+      .or(toggleScope.locator("button:has(i.pi.pi-list)").first())
       .or(
         toggleScope
-          .locator("i.pi.pi-bars.ng-star-inserted")
+          .locator("i.pi.pi-bars, i.pi.pi-table, i.pi.pi-th-large")
           .first()
           .locator("xpath=ancestor::button[1] | ancestor::a[1]"),
       );
 
-    await expect(rightViewBtn).toBeVisible({ timeout: 12_000 });
+    await expect(rightViewBtn).toBeVisible({ timeout: 15_000 });
     await rightViewBtn.scrollIntoViewIfNeeded();
     await rightViewBtn.click({ force: true, timeout: 10_000 });
     await this.page.waitForTimeout(400);
@@ -1904,15 +2158,16 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
 
     if (await group.isVisible({ timeout: 2_500 }).catch(() => false)) {
-      const btns = group.getByRole("button");
-      const c = await btns.count();
+      const groupBtns = group.getByRole("button");
+      const c = await groupBtns.count();
       for (let i = 0; i < c; i++) {
-        const b = btns.nth(i);
+        const b = groupBtns.nth(i);
         if (!(await b.isVisible({ timeout: 800 }).catch(() => false))) {
           continue;
         }
-        const hasBars = (await b.locator("i.pi.pi-bars").count()) > 0;
-        if (hasBars) {
+        const hasBarsOrListIcon =
+          (await b.locator("i.pi.pi-bars, i.pi.pi-list").count()) > 0;
+        if (hasBarsOrListIcon) {
           continue;
         }
         await b.scrollIntoViewIfNeeded();
@@ -1925,8 +2180,8 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Assert **Payment Schedule** is populated, then click the **pi-bars** view toggle (right control)
-   * and the sibling mode when the UI exposes a **button group**, asserting **$** rows stay visible.
+   * Assert **Payment Schedule** is populated, then exercise view toggles (`p-selectButton` or
+   * icon buttons), asserting **$** rows stay visible.
    */
   async expectPaymentScheduleViewTogglesWorkAndTablePopulated(): Promise<void> {
     this.logStep("Expect Payment Schedule View Toggles Work And Table Populated");
@@ -2100,11 +2355,8 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   private interestRateAcceptable(n: number, target: number): boolean {
-    return (
-      !Number.isNaN(n) &&
-      n <= 5 &&
-      Math.abs(n - target) < 0.75
-    );
+    if (Number.isNaN(n) || Number.isNaN(target)) return false;
+    return Math.abs(n - target) < 0.75;
   }
 
   private async readInterestRateValue(field: Locator): Promise<number> {
@@ -2113,9 +2365,10 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Interest rate: Calculate / async pricing often overwrites the field (e.g. 12.75%).
-   * Fill, blur, wait for network settle, retry many times, and require a short stability
-   * window so we do not return while a late patch is still about to apply.
+   * Interest rate: async pricing may overwrite the field (e.g. 12.75% vs intended 4%).
+   * Fill, blur, wait for network / loaders, retry, and require a short stability window
+   * so we do not return while a late patch is still about to apply. Works for CSA rates
+   * above single-digit caps (e.g. 9%) and Finance Lease–style low rates.
    */
   async interestRate(rate: string): Promise<void> {
     this.logStep(`Set interest rate as ${this.stepValueDisplay(rate)}`);
@@ -2131,6 +2384,7 @@ export class DOAssetDetailsPage extends BasePage {
       await field.click({ clickCount: 3 });
       await field.fill(rate);
       await field.press("Tab");
+      await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
       await this.page
         .waitForLoadState("networkidle", { timeout: 8000 })
         .catch(() => {});
@@ -2143,6 +2397,7 @@ export class DOAssetDetailsPage extends BasePage {
       await this.page.keyboard.press("Control+A");
       await this.page.keyboard.type(rate, { delay: 40 });
       await field.press("Tab");
+      await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
       await this.page
         .waitForLoadState("networkidle", { timeout: 8000 })
         .catch(() => {});
@@ -2173,8 +2428,8 @@ export class DOAssetDetailsPage extends BasePage {
 
     const final = await this.readInterestRateValue(field);
     throw new Error(
-      `Interest rate did not stay at or below 5% (wanted ${rate}%, last read ${final}). ` +
-        `Calculate/async pricing may still be overwriting the field (e.g. 12.75%).`,
+      `Interest rate did not stabilize at ${rate}% (last read ${final}). ` +
+        `Async pricing may still be overwriting the field (e.g. 12.75%).`,
     );
   }
 
@@ -2549,11 +2804,25 @@ export class DOAssetDetailsPage extends BasePage {
 
   async waitForAddBorrowerButton(): Promise<void> {
     this.logStep("Wait For Add Borrower Button");
-    await this.addBorrowerorGuarantorButton.waitFor({
-      state: "visible",
-      timeout: 120000,
-    });
-    await this.addBorrowerorGuarantorButton.scrollIntoViewIfNeeded();
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    await this.standardQuoteRoot()
+      .getByText(/Customer\s+Details/i)
+      .first()
+      .waitFor({ state: "visible", timeout: 90_000 })
+      .catch(() => {});
+    await expect
+      .poll(
+        async () => {
+          const btn = await this.addBorrowerorGuarantorButton.isVisible().catch(() => false);
+          const personal = await this.page.locator("app-personal-details").isVisible().catch(() => false);
+          return btn || personal;
+        },
+        { timeout: 120_000 },
+      )
+      .toBe(true);
+    if (await this.addBorrowerorGuarantorButton.isVisible().catch(() => false)) {
+      await this.addBorrowerorGuarantorButton.scrollIntoViewIfNeeded();
+    }
   }
 
   async clickAddBorrowerorGuarantorButton(): Promise<void> {

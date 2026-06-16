@@ -41,7 +41,6 @@
     "dist",
     "my-report",
     "ortoni-report",
-    "test-results",
-    "backup"
+    "test-results"
   ]
 }

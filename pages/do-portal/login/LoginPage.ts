@@ -2,16 +2,16 @@
  * DO Portal - Login Page
  * Page Object Model for DO Portal authentication
  */
-
+ 
 import { expect, Locator, Page } from "@playwright/test";
 import { DO_BASE_URL } from "../../../config/env";
 import { CommonUtils } from "../../../utils/commonUtils";
 import { BasePage } from "../../common/BasePage";
-
+ 
 export class DOLoginPage extends BasePage {
   // Page URL
   readonly url: string;
-
+ 
   // Locators
   readonly usernameInput: Locator;
   readonly proceedButton: Locator;
@@ -24,14 +24,18 @@ export class DOLoginPage extends BasePage {
   readonly forgotPasswordLink: Locator;
   readonly errorAlert: Locator;
   readonly rememberMeCheckbox: Locator;
-
+ 
   constructor(page: Page) {
     super(page);
     this.url = DO_BASE_URL();
-
-    // IdP step: FIS Aurionpro often uses textbox/combobox, not searchbox — {@link login} resolves at runtime.
+ 
+    // IdP step: FIS often labels the first step "User ID / Alias" (Material); avoid #mat-input-* (unstable).
     this.usernameInput = page
-      .getByRole("searchbox", { name: /Username/i })
+      .getByRole("searchbox", { name: /User ID\s*\/\s*Alias/i })
+      .or(page.getByRole("textbox", { name: /User ID\s*\/\s*Alias/i }))
+      .or(page.getByRole("combobox", { name: /User ID\s*\/\s*Alias/i }))
+      .or(page.getByLabel(/User ID\s*\/\s*Alias/i))
+      .or(page.getByRole("searchbox", { name: /Username/i }))
       .or(page.getByRole("textbox", { name: /Username/i }))
       .or(page.getByRole("combobox", { name: /Username/i }))
       .or(page.getByLabel(/^Username/i));
@@ -58,11 +62,11 @@ export class DOLoginPage extends BasePage {
       '#rememberMe, [data-testid="remember-me"]',
     );
   }
-
+ 
   protected stepLogPrefix(): string {
     return "DO Portal — Login";
   }
-
+ 
   /** FIS / IdP cookie strip — can block typing into Username until dismissed. */
   private async dismissCookieConsentIfPresent(p: Page): Promise<void> {
     const accept = p.getByRole("button", { name: /^Accept$/i }).first();
@@ -84,10 +88,15 @@ export class DOLoginPage extends BasePage {
       await close.click({ timeout: 5_000 }).catch(() => {});
     }
   }
-
+ 
   /** First matching IdP username control (FIS Aurionpro / PrimeNG variants). */
   private async resolveIdpUsernameField(p: Page): Promise<Locator | null> {
     const candidates: Locator[] = [
+      // FIS / Angular Material "User Login" step (see udc-perf-test-data.test.ts)
+      p.getByRole("searchbox", { name: /User ID\s*\/\s*Alias/i }),
+      p.getByRole("textbox", { name: /User ID\s*\/\s*Alias/i }),
+      p.getByRole("combobox", { name: /User ID\s*\/\s*Alias/i }),
+      p.getByLabel(/User ID\s*\/\s*Alias/i),
       p.getByRole("searchbox", { name: /Username/i }),
       p.getByRole("textbox", { name: /Username/i }),
       p.getByRole("combobox", { name: /Username/i }),
@@ -103,12 +112,12 @@ export class DOLoginPage extends BasePage {
     }
     return null;
   }
-
+ 
   private async isCredentialSurfaceReady(p: Page): Promise<boolean> {
     await p.waitForLoadState("domcontentloaded").catch(() => {});
     return (await this.resolveIdpUsernameField(p)) !== null;
   }
-
+ 
   /**
    * After **Login with FIS**, the IdP form may be on this tab or a new one; the opener can close.
    */
@@ -118,7 +127,7 @@ export class DOLoginPage extends BasePage {
     } catch {
       // Spinner may be on a closing tab; continue.
     }
-
+ 
     const deadline = Date.now() + totalTimeoutMs;
     while (Date.now() < deadline) {
       const pages = this.page.context().pages().filter((pg) => !pg.isClosed());
@@ -127,12 +136,12 @@ export class DOLoginPage extends BasePage {
       }
       await this.page.waitForTimeout(300);
     }
-
+ 
     throw new Error(
       "Timed out waiting for IdP username field after Login with FIS (popup blocked, wrong tab, or UI change).",
     );
   }
-
+ 
   /**
    * Navigate to DO Portal login page
    */
@@ -145,7 +154,7 @@ export class DOLoginPage extends BasePage {
     await this.page.waitForLoadState("load");
     await expect(this.loginWithFisButton).toBeVisible({ timeout: 90_000 });
   }
-
+ 
   /**
    * Login with credentials
    */
@@ -153,12 +162,12 @@ export class DOLoginPage extends BasePage {
     this.log(`Logging in as: ${username}`);
     this.log("Clicking Login with FIS button");
     await this.clickElement(this.loginWithFisButton, 90_000);
-
+ 
     const surface = await this.openFisLoginSurface(45_000);
     const utils = new CommonUtils(surface);
-
+ 
     await this.dismissCookieConsentIfPresent(surface);
-
+ 
     this.log(`Entering username: ${username}`);
     const idpUsername = await this.resolveIdpUsernameField(surface);
     if (!idpUsername) {
@@ -168,17 +177,17 @@ export class DOLoginPage extends BasePage {
     }
     await idpUsername.click({ timeout: 10_000 }).catch(() => {});
     await utils.fill(idpUsername, username);
-
+ 
     this.log("Clicking Proceed");
     const proceed = surface.getByRole("button", { name: "Proceed" });
     await proceed.waitFor({ state: "visible", timeout: 20_000 });
     await utils.click(proceed);
-
+ 
     const passwordInput = surface.getByRole("textbox", { name: "Password" });
     await passwordInput.waitFor({ state: "visible", timeout: 30_000 });
     await utils.fill(passwordInput, password);
     this.log("Entered password (value not logged).");
-
+ 
     // Blur so Angular/async validators can run and enable Sign in
     await passwordInput.press("Tab");
     this.log("Selecting 'Yes, this is my computer'");
@@ -187,21 +196,21 @@ export class DOLoginPage extends BasePage {
     });
     await utils.click(yesThisIsMyComputerRadio);
     await expect(yesThisIsMyComputerRadio).toBeChecked({ timeout: 15_000 });
-
+ 
     this.log("Waiting for Sign in button to become enabled");
     const signinButton = surface.getByRole("button", { name: "Sign in" });
     await expect(signinButton).toBeEnabled({ timeout: 90_000 });
-
+ 
     this.log("Clicking Sign in");
     await utils.click(signinButton);
-
+ 
     await surface
       .locator(".loading, .spinner, [data-testid='loading']")
       .first()
       .waitFor({ state: "hidden", timeout: 30_000 })
       .catch(() => {});
     this.log("Verified dashboard is loaded or navigation completed");
-
+ 
     this.log("Clicking Quotes & Applications from dashboard");
     const quoteAndApp = surface.getByRole("link", {
       name: /Quotes & Applications/i,
@@ -215,7 +224,7 @@ export class DOLoginPage extends BasePage {
       .catch(() => {});
     this.log("Opened Quotes & Applications");
   }
-
+ 
   /**
    * Login with test data from JSON
    */
@@ -226,7 +235,7 @@ export class DOLoginPage extends BasePage {
     this.logStep("Login with test data");
     await this.login(testData.username, testData.password);
   }
-
+ 
   /**
    * Navigate to forgot password
    */
@@ -235,7 +244,7 @@ export class DOLoginPage extends BasePage {
     await this.navigate();
     await this.clickElement(this.forgotPasswordLink);
   }
-
+ 
   /**
    * Get error message
    */
@@ -244,7 +253,7 @@ export class DOLoginPage extends BasePage {
     await this.waitForVisible(this.errorAlert, 10000);
     return await this.getText(this.errorAlert);
   }
-
+ 
   /**
    * Verify logo is visible
    */
@@ -252,7 +261,7 @@ export class DOLoginPage extends BasePage {
     this.logStep("Is Logo Visible");
     return await this.isVisible(this.logo);
   }
-
+ 
   /**
    * Toggle remember me checkbox
    */
@@ -261,3 +270,5 @@ export class DOLoginPage extends BasePage {
     await this.clickElement(this.rememberMeCheckbox);
   }
 }
+ 
+ 

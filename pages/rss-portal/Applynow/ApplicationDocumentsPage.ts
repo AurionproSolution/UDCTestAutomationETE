@@ -1,17 +1,17 @@
 /**
  * RSS Apply Now — Application documents (step 3): optional uploads, APLYiD, acknowledgements, Submit.
- * Aligns with `ion-checkbox[name="startVerification"|"legalConfirmed"]`, `#fileInput` (same backup PDF pattern as DO post-submit).
+ * Aligns with `ion-checkbox[name="startVerification"|"legalConfirmed"]`, `#fileInput` (same default PDF pattern as DO post-submit).
  */
 
 import path from "path";
 import { expect, Page } from "@playwright/test";
 import { BasePage } from "../../common/BasePage";
 
-/** Default PDF under `backup/testData` (shared with DO customer quote upload). */
+/** Default PDF under `testData/rss-portal` (same asset name as DO customer quote upload). */
 export const RSS_DEFAULT_APPLY_NOW_UPLOAD_PDF = path.join(
   process.cwd(),
-  "backup",
   "testData",
+  "rss-portal",
   "exportedPDFFile (3) (1).pdf",
 );
 

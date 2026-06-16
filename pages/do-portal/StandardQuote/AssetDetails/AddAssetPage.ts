@@ -37,9 +37,13 @@ export class DOAddAssetPage extends BasePage {
   constructor(page: Page) {
     super(page);
     this.addAssetButton = page.getByRole("button", { name: "Add Asset" });
-    this.assetValueInputField = page.getByRole("textbox", {
-      name: "Asset Value* Sum Insured Net",
-    });
+    /** Cost of Asset / Sum Insured Net — accessible name varies slightly by build. */
+    this.assetValueInputField = page
+      .getByRole("textbox", { name: "Asset Value* Sum Insured Net" })
+      .or(page.getByRole("textbox", { name: /Asset Value.*Sum Insured Net/i }))
+      .or(page.getByRole("textbox", { name: /Cost of Asset/i }))
+      .or(page.getByLabel(/Asset Value|Cost of Asset|Sum Insured Net/i))
+      .first();
     this.conditionDropdown = page.locator(
       `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[2]`,
     );
@@ -139,17 +143,42 @@ export class DOAddAssetPage extends BasePage {
     return raw.replace(/[$,\s]/g, "").trim() || "0";
   }
 
+  /** Same as other DO quote steps: **.app-loader-overlay** blocks the Cost-of-Asset field after opening the wizard. */
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const overlays = this.page.locator(".app-loader-overlay");
+      const count = await overlays.count();
+      let anyVisible = false;
+      for (let i = 0; i < count; i++) {
+        if (await overlays.nth(i).isVisible().catch(() => false)) {
+          anyVisible = true;
+          break;
+        }
+      }
+      if (!anyVisible) {
+        return;
+      }
+      await this.page.waitForTimeout(200);
+    }
+    throw new Error(
+      `Timed out after ${timeoutMs}ms waiting for .app-loader-overlay to clear (add-asset Cost of Asset).`,
+    );
+  }
+
   /**
    * **Cost of Asset** / Sum Insured Net — clear field then type **digits only** + **Tab** so the model matches
    * the display (avoids overlap with carried numbers like `30000` from Quick Quote).
    */
   async enterAssetValue(value: string): Promise<void> {
     this.logStep(`Entered asset value as ${this.stepValueDisplay(value)}`);
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
     const input = this.assetValueInputField;
-    await input.waitFor({ state: "visible", timeout: 25_000 });
+    await input.waitFor({ state: "visible", timeout: 60_000 });
     await input.scrollIntoViewIfNeeded();
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     const digits = this.normalizeAssetValueDigits(value);
-    await input.click({ timeout: 120_000 });
+    await input.click({ timeout: 30_000 });
     await input.press("Control+A");
     await input.press("Backspace");
     await input.pressSequentially(digits, { delay: 35 });
@@ -307,6 +336,11 @@ export class DOAddAssetPage extends BasePage {
   async clickSummitButton(): Promise<void> {
     this.logStep("Clicked Submit on Add Asset");
     await this.summitButton.click();
+  }
+
+  /** Same control as {@link clickSummitButton} — Submit on Add Asset. */
+  async clickSubmitButton(): Promise<void> {
+    await this.clickSummitButton();
   }
   async clickCrossButton(): Promise<void> {
     this.logStep("Clicked close (cross) on Add Asset");

@@ -1,14 +1,14 @@
+import { expect, type Locator, type Page, type Request, type Response } from "@playwright/test";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { expect, type Locator, type Page, type Request, type Response } from "@playwright/test";
 import path from "path";
 import { BasePage } from "../../../common";
 
 /** Default PDF used on Customer Details after Reference submit (Upload tab). */
 export const DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF = path.join(
   process.cwd(),
-  "backup",
   "testData",
+  "do-portal",
   "exportedPDFFile (3) (1).pdf",
 );
 
@@ -50,6 +50,20 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .getByRole("dialog")
       .filter({ has: this.page.getByRole("button", { name: /^Search$/i }) })
       .last();
+  }
+
+  /** Fail fast with a clear message instead of `waitForTimeout: Target page … has been closed`. */
+  private assertPageOpen(step: string): void {
+    if (this.page.isClosed()) {
+      throw new Error(
+        `Post-submit: browser/page was closed before ${step}. Check download / document dialog, or increase the test timeout.`,
+      );
+    }
+  }
+
+  private async postSubmitMicroDelay(ms: number): Promise<void> {
+    this.assertPageOpen("UI settle delay");
+    await this.page.waitForTimeout(ms).catch(() => {});
   }
 
   /**
@@ -110,120 +124,6 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
     await dialog
       .locator("xpath=.//p-radiobutton[1]//div[1]//div[1]")
-      .click({ timeout: 15000, force: true });
-    await this.page.waitForTimeout(300);
-  }
-
-  async expectBorrowerOrGuarantorRowShowsRole(
-    customerName: string,
-    role: "Borrower" | "Guarantor",
-  ): Promise<void> {
-    const customer = this.page.getByText(customerName, { exact: true }).first();
-    await expect(customer).toBeVisible({ timeout: 60_000 });
-
-    await expect(async () => {
-      const roleVisibleInSameRow = await customer.evaluate(
-        (node, expectedRole) => {
-          const rolePattern = new RegExp(`\\b${expectedRole}\\b`, "i");
-          let current: HTMLElement | null =
-            node instanceof HTMLElement ? node : node.parentElement;
-
-          for (let depth = 0; current && depth < 8; depth += 1) {
-            const text = (current.innerText || current.textContent || "").replace(/\s+/g, " ");
-            if (rolePattern.test(text)) {
-              return true;
-            }
-            current = current.parentElement;
-          }
-
-          return false;
-        },
-        role,
-      );
-
-      expect(
-        roleVisibleInSameRow,
-        `${customerName} should be visible in Borrowers & Guarantors with role ${role}`,
-      ).toBeTruthy();
-    }).toPass({ timeout: 30_000 });
-  }
-
-  /**
-   * **Borrowers & Guarantors** table row: frozen name column (Selector Hub
-   * `td.p-element.ellipsis.p-frozen-column.ng-star-inserted`) plus role text on the same row
-   * so only that party is targeted (e.g. Guarantor, not the primary Borrower).
-   */
-  private borrowerGuarantorRowByFrozenNameAndRole(
-    customerName: string,
-    role: "Borrower" | "Guarantor",
-  ): Locator {
-    const roleRx = new RegExp(`\\b${role}\\b`, "i");
-    return this.page
-      .locator("tr")
-      .filter({
-        has: this.page
-          .locator("td.p-element.ellipsis.p-frozen-column.ng-star-inserted")
-          .getByText(customerName, { exact: true }),
-      })
-      .filter({ hasText: roleRx });
-  }
-
-  /**
-   * Deletes the **Borrowers & Guarantors** row for `customerName` with the given `role`
-   * by clicking that row's trash control (not other rows).
-   */
-  async deleteBorrowerOrGuarantorRow(
-    customerName: string,
-    role: "Borrower" | "Guarantor",
-  ): Promise<void> {
-    const row = this.borrowerGuarantorRowByFrozenNameAndRole(customerName, role);
-    await row.first().waitFor({ state: "visible", timeout: 60_000 });
-    const r = row.first();
-    const del = r
-      .getByRole("button", { name: /delete|remove/i })
-      .or(r.locator("button").filter({ has: r.locator(".pi-trash, .pi-trash-alt, .pi-times") }))
-      .first();
-    await del.click({ timeout: 15_000 }).catch(() => del.click({ force: true }));
-  }
-
-  /** Asserts no table row remains with this customer in the frozen name column. */
-  async expectBorrowerOrGuarantorRowRemoved(customerName: string): Promise<void> {
-    const row = this.page.locator("tr").filter({
-      has: this.page
-        .locator("td.p-element.ellipsis.p-frozen-column.ng-star-inserted")
-        .getByText(customerName, { exact: true }),
-    });
-    await expect(row).toHaveCount(0, { timeout: 45_000 });
-  }
-
-  /**
-   * In **Search Customer**, set search type to **Trust** (third radio: Individual | Business | Trust).
-   * Prefers accessible name; falls back to PrimeNG box or Selector Hub xpath on third `p-radiobutton`.
-   */
-  async selectSearchCustomerTrustType(): Promise<void> {
-    const dialog = this.searchCustomerDialog();
-    await dialog.waitFor({ state: "visible", timeout: 60000 });
-
-    const byRole = dialog.getByRole("radio", { name: /^Trust$/i });
-    if (await byRole.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await byRole.click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(300);
-      return;
-    }
-
-    const box = dialog
-      .locator("p-radiobutton")
-      .filter({ hasText: /^Trust$/i })
-      .locator(".p-radiobutton-box")
-      .first();
-    if (await box.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await box.click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(300);
-      return;
-    }
-
-    await dialog
-      .locator("xpath=.//p-radiobutton[3]//div[1]//div[1]")
       .click({ timeout: 15000, force: true });
     await this.page.waitForTimeout(300);
   }
@@ -443,6 +343,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * prefer **visible** + **`.last()`** like the Upload toolbar. Labels may be **Download** / **Download document**.
    */
   async clickDownload(): Promise<void> {
+    this.assertPageOpen("clickDownload");
     let root = this.documentManagementTabView();
     if ((await root.count()) === 0) {
       root = this.page
@@ -450,7 +351,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         .filter({ has: this.page.getByRole("tab", { name: /^Documents$/i }) })
         .first();
     }
-    await root.waitFor({ state: "visible", timeout: 60_000 });
+    await root.waitFor({ state: "visible", timeout: 30_000 });
 
     /** Prefer panel that actually contains the grid row (scope `tr` under `root`, not the whole page). */
     const documentsPanel = root.locator(".p-tabview-panel").filter({
@@ -475,7 +376,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         .first();
     }
 
-    await expect(panel).toBeVisible({ timeout: 45_000 });
+    await expect(panel).toBeVisible({ timeout: 25_000 });
     await panel.scrollIntoViewIfNeeded().catch(() => {});
 
     const downloadControl = panel
@@ -494,7 +395,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       )
       .first();
 
-    await expect(downloadControl).toBeVisible({ timeout: 30_000 });
+    await expect(downloadControl).toBeVisible({ timeout: 15_000 });
     await downloadControl.scrollIntoViewIfNeeded();
     await downloadControl.click({ timeout: 12_000 }).catch(async () => {
       await downloadControl.click({ timeout: 12_000, force: true });
@@ -502,16 +403,18 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   async confirmDocumentParameters(): Promise<void> {
+    this.assertPageOpen("confirmDocumentParameters");
     await this.page.getByRole("dialog", { name: /Document Parameters/i }).waitFor({
       state: "visible",
-      timeout: 30000,
+      timeout: 30_000,
     });
     await this.confirmButton.click();
     await this.page.getByRole("dialog", { name: /Document Parameters/i }).waitFor({
       state: "hidden",
-      timeout: 30000,
+      timeout: 20_000,
     }).catch(() => {});
 
+    this.assertPageOpen("confirmDocumentParameters (after dialog)");
     await this.page
       .locator('input[name="workFlowStatus"]')
       .filter({ visible: true })
@@ -827,29 +730,38 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     }
     await strip.waitFor({ state: "visible", timeout: 60_000 }).catch(() => {});
 
-    const uploadPanel = strip
+    /** Same panel as {@link expectUploadTabPreviewOpensNewTab} — `role=tabpanel` + `Browse Files` can miss the real upload surface. */
+    const panel = this.uploadTabContentPanel();
+    await panel.waitFor({ state: "visible", timeout: 60_000 });
+    await panel.scrollIntoViewIfNeeded().catch(() => {});
+
+    const uploadPanelByRole = strip
       .getByRole("tabpanel", { name: /^Upload$/i })
       .or(strip.locator('[role="tabpanel"]').filter({ has: this.browseFilesButton }))
       .first();
 
     const fileMarker = /\.(pdf|jpg|jpeg|png)|minimal-upload|exportedPDFFile/i;
 
-    const rowsInStrip = strip
-      .locator(".p-fileupload-row, .p-fileupload-file, tr")
-      .filter({ hasText: fileMarker });
-    let rows = rowsInStrip;
+    const rowSelector =
+      ".p-fileupload-row, .p-fileupload-file, .p-fileupload-files tr, .p-fileupload-files > div, .p-fileupload-content > div, tbody tr";
+
+    let rows = panel.locator(rowSelector).filter({ hasText: fileMarker });
+    if ((await rows.count()) === 0) {
+      const inStrip = strip.locator(rowSelector).filter({ hasText: fileMarker });
+      if ((await inStrip.count()) > 0) {
+        rows = inStrip;
+      }
+    }
     if ((await rows.count()) === 0) {
       const inFileUpload = this.page
         .locator(".p-fileupload, p-fileupload")
         .first()
-        .locator(".p-fileupload-row, .p-fileupload-file, tr")
+        .locator(rowSelector)
         .filter({ hasText: fileMarker });
       if ((await inFileUpload.count()) > 0) {
         rows = inFileUpload;
       } else {
-        rows = this.page
-          .locator(".p-fileupload-row, .p-fileupload-file, tr")
-          .filter({ hasText: fileMarker });
+        rows = this.page.locator(rowSelector).filter({ hasText: fileMarker });
       }
     }
 
@@ -857,21 +769,24 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
     /** Toolbar actions often apply to the **checked** row — select the first uploaded row if needed. */
     const selectFirstUploadedRowIfNeeded = async (): Promise<void> => {
-      const dataRow = uploadPanel.locator("tbody tr").filter({ hasText: fileMarker }).first();
-      if (!(await dataRow.isVisible({ timeout: 4_000 }).catch(() => false))) {
+      for (const root of [panel, strip]) {
+        const dataRow = root.locator("tbody tr").filter({ hasText: fileMarker }).first();
+        if (!(await dataRow.isVisible({ timeout: 3_000 }).catch(() => false))) {
+          continue;
+        }
+        const box = dataRow.locator(".p-checkbox-box").first();
+        if (!(await box.isVisible({ timeout: 2_000 }).catch(() => false))) {
+          return;
+        }
+        const checked = dataRow.locator(".p-checkbox-box.p-highlight");
+        if (await checked.isVisible({ timeout: 400 }).catch(() => false)) {
+          return;
+        }
+        await box.scrollIntoViewIfNeeded();
+        await box.click({ timeout: 5_000 }).catch(() => {});
+        await this.page.waitForTimeout(200);
         return;
       }
-      const box = dataRow.locator(".p-checkbox-box").first();
-      if (!(await box.isVisible({ timeout: 2_000 }).catch(() => false))) {
-        return;
-      }
-      const checked = dataRow.locator(".p-checkbox-box.p-highlight");
-      if (await checked.isVisible({ timeout: 400 }).catch(() => false)) {
-        return;
-      }
-      await box.scrollIntoViewIfNeeded();
-      await box.click({ timeout: 5_000 }).catch(() => {});
-      await this.page.waitForTimeout(200);
     };
 
     const responseLooksLikeFilePayload = (res: Response): boolean => {
@@ -897,21 +812,25 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     /**
      * Playwright: register **waitForEvent** / **waitForResponse** before **click**.
      * Accept download **or** preview tab **or** XHR file response (no `download` event in some SPAs).
+     * Shorter waits per attempt so probing many controls does not burn the suite timeout.
      */
     const clickExpectsDownloadOutcome = async (el: Locator): Promise<boolean> => {
-      if (!(await el.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      const count = await el.count().catch(() => 0);
+      if (count === 0) {
         return false;
       }
-      await el.scrollIntoViewIfNeeded();
+      const target = el.first();
+      await target.isVisible({ timeout: 2_000 }).catch(() => {});
+      await target.scrollIntoViewIfNeeded().catch(() => {});
 
-      const downloadP = this.page.waitForEvent("download", { timeout: 35_000 }).catch(() => null);
-      const popupP = this.page.waitForEvent("popup", { timeout: 18_000 }).catch(() => null);
-      const newPageP = this.page.context().waitForEvent("page", { timeout: 18_000 }).catch(() => null);
+      const downloadP = this.page.waitForEvent("download", { timeout: 22_000 }).catch(() => null);
+      const popupP = this.page.waitForEvent("popup", { timeout: 12_000 }).catch(() => null);
+      const newPageP = this.page.context().waitForEvent("page", { timeout: 12_000 }).catch(() => null);
       const responseP = this.page
-        .waitForResponse((r) => responseLooksLikeFilePayload(r), { timeout: 35_000 })
+        .waitForResponse((r) => responseLooksLikeFilePayload(r), { timeout: 22_000 })
         .catch(() => null);
 
-      await el.click({ timeout: 12_000, force: true }).catch(() => {});
+      await target.click({ timeout: 12_000, force: true }).catch(() => {});
 
       const d = await downloadP;
       if (d) {
@@ -937,28 +856,55 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
     await selectFirstUploadedRowIfNeeded();
 
-    /** OL / PrimeNG: toolbar `Download` under Upload tabpanel — `.last()` hits the visible instance. */
-    const toolbarDownload = uploadPanel
-      .locator("button")
-      .filter({ hasText: /^Download$/i })
-      .filter({ visible: true })
-      .last();
-    if (await clickExpectsDownloadOutcome(toolbarDownload)) {
+    /** Shared toolbar / button bar: text **Download**, links, `p-button`, or icon-only. */
+    const tryToolbarDownloadInRoot = async (root: Locator): Promise<boolean> => {
+      const bases: Locator[] = [
+        root.getByRole("button", { name: /^Download$/i }),
+        root.getByRole("link", { name: /^Download$/i }),
+        root.getByRole("menuitem", { name: /^Download$/i }),
+        root.locator("a.p-menuitem-link").filter({ hasText: /^Download$/i }),
+        root.locator("button, a, .p-button, [role='button']").filter({ hasText: /^Download$/i }),
+        root
+          .locator(".p-toolbar button, .p-toolbar a, .p-fileupload-buttonbar button, .p-fileupload-buttonbar a")
+          .filter({ hasText: /Download/i }),
+      ];
+      for (const b of bases) {
+        for (const pick of [
+          b.filter({ visible: true }).last(),
+          b.filter({ visible: true }).first(),
+          b.last(),
+          b.first(),
+        ]) {
+          if (await clickExpectsDownloadOutcome(pick)) {
+            return true;
+          }
+        }
+      }
+      const iconHost = root
+        .locator("i.pi-download, i.pi-cloud-download, .pi-download, [class*='pi-download']")
+        .first()
+        .locator(
+          "xpath=ancestor::button[1] | ancestor::a[1] | ancestor::*[contains(@class,'p-button')][1]",
+        );
+      if (await clickExpectsDownloadOutcome(iconHost)) {
+        return true;
+      }
+      return false;
+    };
+
+    if (await tryToolbarDownloadInRoot(panel)) {
       return;
     }
-
-    const toolbarDownloadAlt = strip
-      .locator("button")
-      .filter({ hasText: /^Download$/i })
-      .filter({ visible: true })
-      .last();
-    if (await clickExpectsDownloadOutcome(toolbarDownloadAlt)) {
+    if (await tryToolbarDownloadInRoot(strip)) {
+      return;
+    }
+    if (await tryToolbarDownloadInRoot(uploadPanelByRole)) {
       return;
     }
 
     const tryDownloadFromOverflow = async (row: Locator): Promise<boolean> => {
       const toggles = [
-        row.locator("button").filter({ has: row.locator(".pi-ellipsis-v, .pi-ellipsis-h, .pi-bars") }),
+        row.locator("button").filter({ has: row.locator(".pi-ellipsis-v, .pi-ellipsis-h") }),
         row.getByRole("button", { name: /more|actions|menu|options/i }),
       ];
       for (const t of toggles) {
@@ -1024,18 +970,261 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   async deleteUploadedDocumentTileByBasenameAndExpectRemoved(basename: string): Promise<void> {
     await this.ensureUploadTab();
     const escaped = basename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const row = this.page
+    const nameRe = new RegExp(escaped, "i");
+
+    const tilePreferred = this.page
+      .locator(".p-fileupload-files > div, .p-fileupload-content > div")
+      .filter({ hasText: nameRe })
+      .first();
+    const rowFallback = this.page
       .locator(".p-fileupload-row, tr, .p-fileupload-file")
-      .filter({ hasText: new RegExp(escaped, "i") })
+      .filter({ hasText: nameRe })
       .first();
-    await row.waitFor({ state: "visible", timeout: 60000 });
-    const del = row
-      .getByRole("button", { name: /Delete|Remove/i })
-      .or(row.locator("button").filter({ has: row.locator(".pi-trash, .pi-times") }))
+
+    const container = (await tilePreferred.isVisible({ timeout: 5_000 }).catch(() => false))
+      ? tilePreferred
+      : rowFallback;
+
+    await expect(container).toBeVisible({ timeout: 60_000 });
+    const deleteBtn = container.locator("button").first();
+    await expect(deleteBtn).toBeVisible({ timeout: 10_000 });
+    await deleteBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await deleteBtn
+      .click({ timeout: 10_000 })
+      .catch(async () => {
+        await deleteBtn.click({ force: true, timeout: 5_000 });
+      });
+    await expect(container).not.toBeVisible({ timeout: 45_000 });
+  }
+
+  /**
+   * After Documents / long flows the header can be off-screen. Bring **workflow status** (Open Quote)
+   * or the **Open Quote** control into view before opening the menu so **Submit** / **Withdraw** is reachable.
+   */
+  private async scrollWorkflowStatusHeaderIntoView(): Promise<void> {
+    this.assertPageOpen("scrollWorkflowStatusHeaderIntoView");
+    const p = this.page;
+    const statusStrip = p
+      .locator('input[name="workFlowStatus"]')
+      .filter({ visible: true })
+      .first()
+      .or(p.locator("div.col-2.status.w-10rem.ng-star-inserted").filter({ visible: true }).first())
+      .or(p.locator(".col-2.status").filter({ visible: true }).first());
+    if (await statusStrip.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await statusStrip.scrollIntoViewIfNeeded();
+    } else {
+      await p
+        .getByRole("button", { name: /Open Quote/i })
+        .first()
+        .scrollIntoViewIfNeeded()
+        .catch(() => {});
+    }
+    await this.postSubmitMicroDelay(100);
+  }
+
+  /** Opens the quote **workflow status** menu (same triggers as {@link submitQuoteFromStatusMenu}). */
+  private async openWorkflowStatusDropdownInner(): Promise<void> {
+    this.assertPageOpen("openWorkflowStatusDropdownInner");
+    const p = this.page;
+    const workflowStatusByName = p.locator('input[name="workFlowStatus"]').filter({ visible: true }).first();
+    if (await workflowStatusByName.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await workflowStatusByName.scrollIntoViewIfNeeded();
+      await workflowStatusByName.click({ timeout: 10_000 });
+      await this.postSubmitMicroDelay(150);
+      return;
+    }
+
+    const statusColVisible = p
+      .locator("div.col-2.status.w-10rem.ng-star-inserted")
+      .filter({ visible: true })
       .first();
-    await del.click({ timeout: 15000 }).catch(() => del.click({ force: true }));
-    await expect(this.page.getByText(new RegExp(`^${escaped}$`, "i")).first()).not.toBeVisible({
-      timeout: 45000,
+    if (await statusColVisible.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await statusColVisible.scrollIntoViewIfNeeded();
+      await statusColVisible.click({ timeout: 10_000 });
+      await this.postSubmitMicroDelay(150);
+      return;
+    }
+
+    const workflowStatusInput = p
+      .locator(".col-2.status, .col-2.status.w-10rem, [class*='status'].w-10rem")
+      .first()
+      .locator("input.p-element.p-inputtext.p-component, input.p-inputtext.p-component.p-element")
+      .first();
+    if (await workflowStatusInput.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await workflowStatusInput.scrollIntoViewIfNeeded();
+      await workflowStatusInput.click({ timeout: 10_000 });
+      await this.postSubmitMicroDelay(120);
+      return;
+    }
+
+    const statusQuoteCell = p
+      .locator(".col-2.status.w-10rem.ng-star-inserted, .col-2.status.w-10rem, .col-2.status")
+      .or(
+        p
+          .locator("[class*='status']")
+          .filter({ has: p.locator("p-dropdown, p-select, .p-dropdown, .p-select") }),
+      )
+      .first();
+    if (await statusQuoteCell.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const trigger = statusQuoteCell
+        .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
+        .first();
+      if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.click({ timeout: 10_000 });
+      } else {
+        await statusQuoteCell.click({ timeout: 10_000 });
+      }
+      await this.postSubmitMicroDelay(120);
+      return;
+    }
+
+    const openQuote = p.getByRole("button", { name: /Open Quote/i });
+    if (await openQuote.isVisible({ timeout: 2_500 }).catch(() => false)) {
+      await expect(openQuote).toBeVisible({ timeout: 8_000 });
+      await openQuote.scrollIntoViewIfNeeded();
+      await openQuote.click({ timeout: 12_000 });
+      await this.postSubmitMicroDelay(120);
+      return;
+    }
+
+    await statusQuoteCell.waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
+    if (await statusQuoteCell.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      const trigger = statusQuoteCell
+        .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
+        .first();
+      if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.click({ timeout: 10_000 });
+      } else {
+        await statusQuoteCell.click({ timeout: 10_000 });
+      }
+      await this.postSubmitMicroDelay(120);
+    }
+  }
+
+  private workflowMenuOverlayLocator(): Locator {
+    return this.page
+      .locator(
+        ".p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
+      )
+      .filter({ visible: true })
+      .filter({ hasText: /Submit|Withdraw/i })
+      .first();
+  }
+
+  private async clickWorkflowMenuItemByRegex(
+    itemLabel: RegExp,
+    opts?: { pressEscapeAfter?: boolean },
+  ): Promise<boolean> {
+    const pressEscapeAfter = opts?.pressEscapeAfter ?? true;
+    const p = this.page;
+    const scopedItem = (root: Locator) =>
+      root
+        .getByRole("menuitem", { name: itemLabel })
+        .or(root.locator("li.p-menuitem, li[role='menuitem']").filter({ hasText: itemLabel }))
+        .or(root.locator("a.p-menuitem-link, .p-menuitem-text").filter({ hasText: itemLabel }))
+        .or(root.getByRole("option", { name: itemLabel }))
+        .or(root.locator("li.p-dropdown-item, li.p-select-option").filter({ hasText: itemLabel }))
+        .first();
+
+    const overlayRoots = p
+      .locator(
+        ".p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
+      )
+      .filter({ visible: true });
+
+    const n = await overlayRoots.count();
+    for (let i = 0; i < n; i++) {
+      const root = overlayRoots.nth(i);
+      if (!(await root.isVisible({ timeout: 600 }).catch(() => false))) continue;
+      const target = scopedItem(root);
+      if (await target.isVisible({ timeout: 1_200 }).catch(() => false)) {
+        await target.scrollIntoViewIfNeeded();
+        await target.click({ timeout: 12_000 });
+        if (pressEscapeAfter) {
+          await p.keyboard.press("Escape").catch(() => {});
+        }
+        return true;
+      }
+    }
+
+    for (const candidate of [
+      p.getByRole("menuitem", { name: itemLabel }).first(),
+      p.locator("li.p-menuitem").filter({ hasText: itemLabel }).first(),
+    ]) {
+      if (await candidate.isVisible({ timeout: 900 }).catch(() => false)) {
+        await candidate.scrollIntoViewIfNeeded();
+        await candidate.click({ timeout: 12_000 });
+        if (pressEscapeAfter) {
+          await p.keyboard.press("Escape").catch(() => {});
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * **Workflow status** (shows **Open Quote**) → **Withdraw** → expect confirmation → **Cancel** →
+   * assert status still **Open Quote**. Same open-menu behaviour as {@link submitQuoteFromStatusMenu}.
+   */
+  async workflowWithdrawThenCancelExpectOpenQuoteStatus(): Promise<void> {
+    this.logStep("Workflow: Withdraw → Cancel → expect Open Quote");
+    const p = this.page;
+    this.assertPageOpen("workflowWithdrawThenCancelExpectOpenQuoteStatus");
+    await p.keyboard.press("Escape").catch(() => {});
+    await this.scrollWorkflowStatusHeaderIntoView();
+    // eslint-disable-next-line no-console
+    console.log("Workflow: Open Quote");
+    await this.openWorkflowStatusDropdownInner();
+    // eslint-disable-next-line no-console
+    console.log("Workflow dropdown opened");
+    await expect(this.workflowMenuOverlayLocator())
+      .toBeVisible({ timeout: 6_000 })
+      .catch(() => {});
+
+    const withdrawOption = p
+      .locator("div.action-item")
+      .filter({ hasText: /^Withdraw$/i })
+      .first()
+      .or(p.getByText(/^Withdraw$/i).first());
+
+    await expect(withdrawOption).toBeVisible({ timeout: 10_000 });
+    // eslint-disable-next-line no-console
+    console.log("Withdraw visible:", await withdrawOption.isVisible().catch(() => false));
+
+    await withdrawOption.click({ force: true, timeout: 10_000 });
+    // eslint-disable-next-line no-console
+    console.log("Withdraw clicked");
+
+    await this.postSubmitMicroDelay(150);
+
+    const confirmDlg = p
+      .locator("p-confirmdialog, .p-confirm-dialog")
+      .filter({ visible: true })
+      .filter({ hasText: /Withdraw|withdraw|sure|confirm|certain/i })
+      .first()
+      .or(p.getByRole("dialog").filter({ visible: true }).filter({ hasText: /Withdraw/i }).first());
+    await expect(confirmDlg).toBeVisible({ timeout: 15_000 });
+
+    const cancelBtn = confirmDlg
+      .getByRole("button", { name: /^Cancel$/i })
+      .or(confirmDlg.locator("button.p-confirm-dialog-reject").first())
+      .first();
+    await cancelBtn.click({ timeout: 12_000 });
+    // eslint-disable-next-line no-console
+    console.log("Workflow: Withdraw cancelled");
+    await confirmDlg.waitFor({ state: "hidden", timeout: 20_000 }).catch(() => {});
+    await p.keyboard.press("Escape").catch(() => {});
+
+    const wfInp = p.locator('input[name="workFlowStatus"]').filter({ visible: true }).first();
+    if (await wfInp.isVisible({ timeout: 6_000 }).catch(() => false)) {
+      await expect(wfInp).toHaveValue(/Open Quote/i, { timeout: 12_000 });
+      return;
+    }
+    await expect(p.getByRole("button", { name: /Open Quote/i }).first()).toBeVisible({
+      timeout: 10_000,
     });
   }
 
@@ -1057,131 +1246,13 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .filter({ hasText: /^\s*Submit\s*$/i })
       .first();
 
-    const openMenu = async (): Promise<void> => {
-      /**
-       * OL: workflow field is often `input[name="workFlowStatus"]` (readonly, shows e.g. **Open Quote**)
-       * inside `div.col-2.status.w-10rem.ng-star-inserted` — open that **before** **Open Quote** button.
-       */
-      const workflowStatusByName = p.locator('input[name="workFlowStatus"]').filter({ visible: true }).first();
-      if (await workflowStatusByName.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await workflowStatusByName.scrollIntoViewIfNeeded();
-        await workflowStatusByName.click({ timeout: 10_000 });
-        await p.waitForTimeout(150);
-        return;
-      }
-
-      const statusColVisible = p
-        .locator("div.col-2.status.w-10rem.ng-star-inserted")
-        .filter({ visible: true })
-        .first();
-      if (await statusColVisible.isVisible({ timeout: 4_000 }).catch(() => false)) {
-        await statusColVisible.scrollIntoViewIfNeeded();
-        await statusColVisible.click({ timeout: 10_000 });
-        await p.waitForTimeout(150);
-        return;
-      }
-
-      /**
-       * Finance Lease / QAT: workflow status is a PrimeNG dropdown **display input**
-       * (`input.p-element.p-inputtext.p-component…`). Omit `ng-*` — those change after touch/validation.
-       * Prefer the **Status** column so we do not hit unrelated header inputs.
-       */
-      const workflowStatusInput = p
-        .locator(".col-2.status, .col-2.status.w-10rem, [class*='status'].w-10rem")
-        .first()
-        .locator("input.p-element.p-inputtext.p-component, input.p-inputtext.p-component.p-element")
-        .first();
-      if (await workflowStatusInput.isVisible({ timeout: 4_000 }).catch(() => false)) {
-        await workflowStatusInput.scrollIntoViewIfNeeded();
-        await workflowStatusInput.click({ timeout: 10_000 });
-        await p.waitForTimeout(120);
-        return;
-      }
-
-      const statusQuoteCell = p
-        .locator(".col-2.status.w-10rem.ng-star-inserted, .col-2.status.w-10rem, .col-2.status")
-        .or(
-          p
-            .locator("[class*='status']")
-            .filter({ has: p.locator("p-dropdown, p-select, .p-dropdown, .p-select") }),
-        )
-        .first();
-      if (await statusQuoteCell.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        const trigger = statusQuoteCell
-          .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
-          .first();
-        if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
-          await trigger.scrollIntoViewIfNeeded();
-          await trigger.click({ timeout: 10_000 });
-        } else {
-          await statusQuoteCell.click({ timeout: 10_000 });
-        }
-        await p.waitForTimeout(120);
-        return;
-      }
-
-      const openQuote = p.getByRole("button", { name: /Open Quote/i });
-      if (await openQuote.isVisible({ timeout: 2_500 }).catch(() => false)) {
-        await expect(openQuote).toBeVisible({ timeout: 8_000 });
-        await openQuote.scrollIntoViewIfNeeded();
-        await openQuote.click({ timeout: 12_000 });
-        await p.waitForTimeout(120);
-        return;
-      }
-
-      /** Last resort: status cell may mount late on slow QAT. */
-      await statusQuoteCell.waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
-      if (await statusQuoteCell.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        const trigger = statusQuoteCell
-          .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
-          .first();
-        if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
-          await trigger.scrollIntoViewIfNeeded();
-          await trigger.click({ timeout: 10_000 });
-        } else {
-          await statusQuoteCell.click({ timeout: 10_000 });
-        }
-        await p.waitForTimeout(120);
-      }
-    };
-
     await p.keyboard.press("Escape").catch(() => {});
 
-    /**
-     * After Documents / long flows the header can be off-screen. Bring **workflow status** (Open Quote)
-     * or the **Open Quote** control into view before opening the menu so **Submit** is reachable.
-     */
-    const statusStrip = p
-      .locator('input[name="workFlowStatus"]')
-      .filter({ visible: true })
-      .first()
-      .or(p.locator("div.col-2.status.w-10rem.ng-star-inserted").filter({ visible: true }).first())
-      .or(p.locator(".col-2.status").filter({ visible: true }).first());
-    if (await statusStrip.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await statusStrip.scrollIntoViewIfNeeded();
-    } else {
-      await p
-        .getByRole("button", { name: /Open Quote/i })
-        .first()
-        .scrollIntoViewIfNeeded()
-        .catch(() => {});
-    }
-    await p.waitForTimeout(100);
-
-    await openMenu();
+    await this.scrollWorkflowStatusHeaderIntoView();
+    await this.openWorkflowStatusDropdownInner();
 
     /** Short wait for overlay paint — prefer tight timeouts so retries run quickly. */
-    await expect(
-      p
-        .locator(
-          ".p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
-        )
-        .filter({ visible: true })
-        .filter({ hasText: /Submit|Withdraw/i })
-        .first(),
-    )
-      .toBeVisible({ timeout: 6_000 })
-      .catch(() => {});
+    await expect(this.workflowMenuOverlayLocator()).toBeVisible({ timeout: 6_000 }).catch(() => {});
 
     const clickSubmitMenuItem = async (): Promise<boolean> => {
       const scopedSubmit = (root: Locator) =>
@@ -1240,18 +1311,8 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
     await p.keyboard.press("Escape").catch(() => {});
     await p.waitForTimeout(120);
-    await openMenu();
-    await expect(
-      p
-        .locator(
-          ".p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
-        )
-        .filter({ visible: true })
-        .filter({ hasText: /Submit|Withdraw/i })
-        .first(),
-    )
-      .toBeVisible({ timeout: 5_000 })
-      .catch(() => {});
+    await this.openWorkflowStatusDropdownInner();
+    await expect(this.workflowMenuOverlayLocator()).toBeVisible({ timeout: 5_000 }).catch(() => {});
 
     if (await clickSubmitMenuItem()) {
       await p.waitForTimeout(150);
@@ -1335,6 +1396,8 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    */
   async submitQuoteThroughWorkflowDeclaration(): Promise<void> {
     await this.submitQuoteFromStatusMenu();
+    // eslint-disable-next-line no-console
+    console.log("Workflow: Submit clicked");
     await this.confirmSubmitQuoteDialogIfPresent();
     await this.completeOriginatorDeclaration();
   }
@@ -1419,8 +1482,12 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     } catch {
       const proceedLoose = p.getByRole("button", { name: /^Proceed$/i }).first();
       if (await proceedLoose.isVisible({ timeout: 12_000 }).catch(() => false)) {
+        // eslint-disable-next-line no-console
+        console.log("Workflow: Final submit clicked");
         await proceedLoose.click({ timeout: 15_000 }).catch(() => {});
         await this.expectPostSubmitWorkflowSuccess();
+        // eslint-disable-next-line no-console
+        console.log("Workflow: Quote submitted");
       }
       return;
     }
@@ -1435,6 +1502,8 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         await box.click();
       }
     }
+    // eslint-disable-next-line no-console
+    console.log("Workflow: Declaration checked");
 
     const proceed = scope
       .getByRole("button", { name: /^Proceed$/i })
@@ -1442,7 +1511,11 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .first();
     await proceed.waitFor({ state: "visible", timeout: 25_000 });
     await proceed.click({ timeout: 15_000 });
+    // eslint-disable-next-line no-console
+    console.log("Workflow: Final submit clicked");
     await scope.waitFor({ state: "hidden", timeout: 90_000 }).catch(() => {});
     await this.expectPostSubmitWorkflowSuccess();
+    // eslint-disable-next-line no-console
+    console.log("Workflow: Quote submitted");
   }
 }
