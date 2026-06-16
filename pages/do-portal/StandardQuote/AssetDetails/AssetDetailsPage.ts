@@ -1,7 +1,5 @@
 import { expect, Locator, Page } from "@playwright/test";
-import { BasePage } from "../../..";
-import { DOAddAssetPage } from "./AddAssetPage";
-import { DOAddOnsAccessoriesPage } from "./AddOnsAccessoriesPage";
+import { BasePage } from "../../../common/BasePage";
 
 export class DOAssetDetailsPage extends BasePage {
   readonly dialogBox: Locator;
@@ -158,9 +156,42 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
     this.calculateButton = page.getByRole("button", { name: /^Calculate$/i });
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
-    this.addBorrowerorGuarantorButton = page.getByRole("button", {
-      name: /Add Borrowers(\s*\/\s*Guarantors)?/i,
-    });
+    /** Customer Details: CTA label varies (`/`, `&`, `and`), may live on `p-button` or `span.p-button-label` (not always in a11y name). */
+    const quoteCustomerShell = page.locator("app-standard-quote, app-quote-details").first();
+    const addBorrowerLabel = /Add\s+Borrowers?\s*(\/|&|and)\s*Guarantors?/i;
+    const addBorrowerClickableFromText = (root: Locator): Locator =>
+      root
+        .getByText(addBorrowerLabel)
+        .first()
+        .locator("xpath=ancestor::button[1] | ancestor::a[1] | ancestor::p-button[1]");
+    const addBorrowerLooseTextClickable = (root: Locator): Locator =>
+      root
+        .getByText("Add Borrowers / Guarantors", { exact: false })
+        .first()
+        .locator("xpath=ancestor::button[1] | ancestor::a[1] | ancestor::p-button[1]");
+    this.addBorrowerorGuarantorButton = quoteCustomerShell
+      .getByRole("button", { name: addBorrowerLabel })
+      .or(quoteCustomerShell.getByRole("link", { name: addBorrowerLabel }))
+      .or(page.getByRole("button", { name: addBorrowerLabel }))
+      .or(page.getByRole("link", { name: addBorrowerLabel }))
+      .or(page.locator(':text-is("Add Borrowers / Guarantors")'))
+      .or(addBorrowerClickableFromText(quoteCustomerShell))
+      .or(addBorrowerClickableFromText(page.locator("body")))
+      .or(addBorrowerLooseTextClickable(quoteCustomerShell))
+      .or(addBorrowerLooseTextClickable(page.locator("body")))
+      .or(
+        quoteCustomerShell
+          .locator("button.p-button, button.p-element, p-button")
+          .filter({ hasText: addBorrowerLabel })
+          .first(),
+      )
+      .or(
+        page
+          .locator("button, a")
+          .filter({ hasText: addBorrowerLabel })
+          .first(),
+      )
+      .first();
     this.customerSearchDialog = page
       .getByRole("dialog")
       .filter({ has: page.getByRole("button", { name: /Search/i }) })
@@ -210,20 +241,16 @@ export class DOAssetDetailsPage extends BasePage {
       .filter({ hasText: /Balloon\s+Amount/i })
       .first();
     this.balloonAmountInput = balloonAmountHost.locator("#amount").first();
-    // `percentage` host often has **no** inner text "Balloon" (label sits on sibling `amount`). Resolve % from the same grid row as Balloon Amount.
+    // Balloon **%** uses PrimeNG `id="percent"` on that row. Do not use `//percentage//input[…spinbutton…]` —
+    // the same grid can contain other `p-inputnumber` spinbuttons (e.g. under `<number>`), which breaks strict mode.
     this.balloonPercentInput = balloonAmountHost
       .locator(
-        "xpath=ancestor::div[contains(@class,'grid')][1]//percentage//input[contains(@class,'p-inputnumber-input') or contains(@class,'p-inputtext') or @role='spinbutton']",
+        "xpath=ancestor::div[contains(@class,'grid')][1]//input[@id='percent']",
       )
       .first()
       .or(
-        balloonAmountHost.locator(
-          "xpath=ancestor::div[contains(@class,'grid')][1]//p-inputnumber//input[contains(@class,'p-inputtext') or contains(@class,'p-inputnumber-input') or @role='spinbutton']",
-        ).first(),
-      )
-      .or(
         paymentSummary.locator(
-          "xpath=.//label[contains(normalize-space(.),'Balloon Amount')]/ancestor::div[contains(@class,'grid')][1]//percentage//input",
+          "xpath=.//label[contains(normalize-space(.),'Balloon Amount')]/ancestor::div[contains(@class,'grid')][1]//input[@id='percent']",
         ).first(),
       );
     this.balloonFixedCheckbox = paymentSummary
@@ -273,10 +300,11 @@ export class DOAssetDetailsPage extends BasePage {
 
   /**
    * Choose an item from the program dropdown list
+   * (`getByText` is unsafe here — e.g. **CSA Personal - MV Dealer** is a substring of **Webform - CSA Personal - MV Dealer**.)
    */
   async selectProgram(programName: string): Promise<void> {
     this.logStep(`Selected program: ${this.stepValueDisplay(programName)}`);
-    await this.page.getByText(programName).click();
+    await this.page.getByRole("option", { name: programName, exact: true }).click();
   }
 
   /**
@@ -517,7 +545,10 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /** Outlined **Save** on the Standard Quote step (inside `lib-stepper` when present). */
-  async clickSaveStandardQuoteStep(): Promise<void> {
+  async clickSaveStandardQuoteStep(opts?: {
+    /** When Save opens the "required to save" dialog, fill **Originator Reference** and confirm. */
+    originatorRefForRequiredDialog?: string;
+  }): Promise<void> {
     this.logStep("Click Save Standard Quote Step");
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
 
@@ -558,6 +589,12 @@ export class DOAssetDetailsPage extends BasePage {
 
     await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
     await this.page.waitForTimeout(600);
+    if (opts?.originatorRefForRequiredDialog) {
+      await this.page.waitForTimeout(500);
+      await this.submitOriginatorReferenceRequiredToSaveDialogIfPresent(
+        opts.originatorRefForRequiredDialog,
+      );
+    }
   }
 
   /**
@@ -631,6 +668,75 @@ export class DOAssetDetailsPage extends BasePage {
     }
   }
 
+  /**
+   * After pricing/async refresh, **Loan Date** can flicker. Wait until the displayed value
+   * is unchanged for several consecutive reads (fast when already stable).
+   */
+  private async waitForLoanDateValueStable(
+    loanIn: Locator,
+    opts?: { timeoutMs?: number; intervalMs?: number; stableRounds?: number },
+  ): Promise<void> {
+    const timeoutMs = opts?.timeoutMs ?? 20_000;
+    const intervalMs = opts?.intervalMs ?? 200;
+    const needRounds = opts?.stableRounds ?? 3;
+    const deadline = Date.now() + timeoutMs;
+    let prev = "";
+    let stable = 0;
+    while (Date.now() < deadline) {
+      const loanTrim = (await loanIn.inputValue()).trim();
+      if (loanTrim.length > 4 && loanTrim === prev) {
+        stable += 1;
+        if (stable >= needRounds) return;
+      } else {
+        stable = loanTrim.length > 4 ? 1 : 0;
+        prev = loanTrim;
+      }
+      await this.page.waitForTimeout(intervalMs);
+    }
+    throw new Error(
+      `Loan Date did not stabilize within ${timeoutMs}ms (last read: "${(await loanIn.inputValue()).trim()}").`,
+    );
+  }
+
+  /**
+   * Wait until **Loan Date** and **First Payment** both have values and stop changing
+   * (pricing recalculation). Skips cheaply when values are already steady.
+   */
+  private async waitForLoanAndFirstPaymentValuesStable(
+    loanIn: Locator,
+    firstIn: Locator,
+    opts?: { timeoutMs?: number; intervalMs?: number; stableRounds?: number },
+  ): Promise<void> {
+    const timeoutMs = opts?.timeoutMs ?? 20_000;
+    const intervalMs = opts?.intervalMs ?? 200;
+    const needRounds = opts?.stableRounds ?? 3;
+    const deadline = Date.now() + timeoutMs;
+    let prev = "";
+    let stable = 0;
+    while (Date.now() < deadline) {
+      const loanTrim = (await loanIn.inputValue()).trim();
+      const firstTrim = (await firstIn.inputValue()).trim();
+      const snapshot = `${loanTrim}\0${firstTrim}`;
+      const bothOk = loanTrim.length > 4 && firstTrim.length > 4;
+      if (bothOk && snapshot === prev) {
+        stable += 1;
+        if (stable >= needRounds) return;
+      } else if (bothOk) {
+        stable = 1;
+        prev = snapshot;
+      } else {
+        stable = 0;
+        prev = "";
+      }
+      await this.page.waitForTimeout(intervalMs);
+    }
+    const loanTrim = (await loanIn.inputValue()).trim();
+    const firstTrim = (await firstIn.inputValue()).trim();
+    throw new Error(
+      `Loan Date / First Payment did not stabilize within ${timeoutMs}ms (loan="${loanTrim}", first="${firstTrim}").`,
+    );
+  }
+
   /** Loan Date must be set; fill First Payment from loan date when the UI left it empty (required for Calculate). */
   async ensureLoanDateAndFirstPaymentReadyForCalculate(): Promise<void> {
     this.logStep("Ensure Loan Date And First Payment Ready For Calculate");
@@ -640,6 +746,8 @@ export class DOAssetDetailsPage extends BasePage {
     await expect(loanIn).toBeEditable();
     expect((await loanIn.inputValue()).trim().length).toBeGreaterThan(4);
     await expect(firstIn).toBeVisible({ timeout: 15_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    await this.waitForLoanDateValueStable(loanIn);
     if ((await firstIn.inputValue()).trim().length < 5) {
       await expect(firstIn).toBeEditable();
       await this.enterFirstPaymentSuggestedFromLoanDdMmYyyy();
@@ -647,6 +755,8 @@ export class DOAssetDetailsPage extends BasePage {
         .poll(async () => (await firstIn.inputValue()).trim().length, { timeout: 12_000 })
         .toBeGreaterThan(4);
     }
+    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    await this.waitForLoanAndFirstPaymentValuesStable(loanIn, firstIn);
   }
 
   /** Clear origination reference and run **Calculate** (allowed with blank origin on some CSA builds). */
@@ -996,8 +1106,29 @@ export class DOAssetDetailsPage extends BasePage {
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     await expect(this.balloonAmountInput).toBeVisible({ timeout: 20_000 });
     await this.balloonAmountInput.scrollIntoViewIfNeeded();
-    await this.balloonAmountInput.fill(amount, { force: true });
-    await this.balloonAmountInput.press("Tab").catch(() => {});
+    /** Same PrimeNG `<amount>` / `#amount` pattern as {@link fillLoanDetailsCurrencyAmount} — raw `fill` often leaves $0.00. */
+    await this.fillLoanDetailsCurrencyAmount(this.balloonAmountInput, amount);
+    await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
+
+    const balloonAmountNumeric = async (): Promise<number> => {
+      const raw = (await this.balloonAmountInput.inputValue()).trim();
+      const n = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+      return Number.isNaN(n) ? 0 : n;
+    };
+
+    if ((await balloonAmountNumeric()) < 1) {
+      const stripped = amount.replace(/[$\s,]/g, "");
+      const parsed = parseFloat(stripped);
+      if (!Number.isNaN(parsed) && parsed >= 1) {
+        const withCents = `$${parsed.toFixed(2)}`;
+        await this.fillLoanDetailsCurrencyAmount(this.balloonAmountInput, withCents);
+        await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
+      }
+    }
+
+    await expect
+      .poll(async () => balloonAmountNumeric(), { timeout: 12_000 })
+      .toBeGreaterThanOrEqual(1);
   }
 
   async expectBalloonPercentInputMatches(rx: RegExp): Promise<void> {
@@ -1016,10 +1147,15 @@ export class DOAssetDetailsPage extends BasePage {
     await this.balloonPercentInput.scrollIntoViewIfNeeded();
     await this.balloonPercentInput.click({ force: true });
     await this.balloonPercentInput.press("ControlOrMeta+a");
-    await this.balloonPercentInput.fill(percentDigits, { force: true });
+    await this.balloonPercentInput.fill(percentDigits.replace(/%/g, "").trim(), { force: true });
     await this.balloonPercentInput.press("Tab").catch(() => {});
   }
 
+  /**
+   * Asserts the Balloon **$** masked input matches `rx`.
+   * When **Fixed** is unchecked and the value was set via **%** only, the $ control may stay empty
+   * until **Calculate** — use {@link expectBalloonPercentInputMatches} for that phase instead.
+   */
   async expectBalloonAmountInputMatches(rx: RegExp): Promise<void> {
     this.logStep("Expect Balloon Amount Input Matches");
     await expect
@@ -1031,32 +1167,189 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Check Balloon Fixed Checkbox");
     await expect(this.balloonFixedCheckbox).toBeVisible({ timeout: 12_000 });
     await this.balloonFixedCheckbox.scrollIntoViewIfNeeded();
+    await this.balloonFixedCheckbox.click({ force: true }).catch(() => {});
     await this.balloonFixedCheckbox.check({ force: true });
     await expect(this.balloonFixedCheckbox).toBeChecked({ timeout: 8_000 });
   }
 
   /**
    * Last **Payment Schedule** currency row should include `pattern` (e.g. final balloon instalment).
+   * Scoped to the schedule card/panel and **visible** rows only — avoids PrimeNG hidden scroll
+   * clones and `.last()` picking a row from another table under the quote shell.
    */
   async expectPaymentScheduleLastPaymentRowContains(pattern: RegExp): Promise<void> {
     this.logStep("Expect Payment Schedule Last Payment Row Contains");
     const root = this.standardQuoteRoot();
-    await expect(this.leaseOrPaymentScheduleTitle()).toBeVisible({ timeout: 45_000 });
-    const row = root
-      .locator("tbody tr, table tbody tr, .p-datatable-tbody > tr")
+    await expect(root.getByText(/Payment\s+Schedule/i).first()).toBeVisible({ timeout: 45_000 });
+
+    const scheduleScope = this.paymentScheduleContentScope();
+
+    const row = scheduleScope
+      .locator("tr")
       .filter({ hasText: /\$\s*[\d,.]+/ })
+      .filter({ visible: true })
       .last();
+
     await expect(row).toBeVisible({ timeout: 25_000 });
     await expect(row).toContainText(pattern);
   }
 
   /**
+   * Fills Origination / Originator Reference on a quote shell (`root`).
+   * Webform / Prime uses a real `input`; legacy CSA may use SVG `text#text` — try inputs first.
+   */
+  private async fillOriginationReferenceOnRoot(
+    origRef: string,
+    root: Locator,
+  ): Promise<boolean> {
+    const tryFill = async (el: Locator): Promise<boolean> => {
+      const t = el.first();
+      if (!(await t.isVisible({ timeout: 8_000 }).catch(() => false))) {
+        return false;
+      }
+      await t.scrollIntoViewIfNeeded();
+      await t.click({ force: true }).catch(() => {});
+      await t.clear().catch(() => {});
+      try {
+        await t.fill(origRef, { timeout: 15_000 });
+      } catch {
+        await t.press("ControlOrMeta+a");
+        await this.page.keyboard.type(origRef, { delay: 20 });
+      }
+      const v = (await t.inputValue().catch(() => "")).trim();
+      if (v.length > 0) {
+        return true;
+      }
+      await t.press("ControlOrMeta+a");
+      await this.page.keyboard.type(origRef, { delay: 20 });
+      return (await t.inputValue().catch(() => "")).trim().length > 0;
+    };
+
+    const originatorRoot = this.page.locator("app-quote-originator").first();
+    if (await originatorRoot.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      const originInput = originatorRoot.locator(
+        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/following::input[1]",
+      );
+      if (await tryFill(originInput.first())) {
+        return true;
+      }
+    }
+
+    if (
+      await tryFill(
+        root.getByLabel(
+          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+        ),
+      )
+    ) {
+      return true;
+    }
+    if (
+      await tryFill(
+        this.page.getByLabel(
+          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+        ),
+      )
+    ) {
+      return true;
+    }
+    if (
+      await tryFill(
+        root.getByRole("textbox", {
+          name: /Origination|Originator|Orig(ination)?\s*Ref/,
+        }),
+      )
+    ) {
+      return true;
+    }
+    if (
+      await tryFill(
+        this.page.getByRole("textbox", {
+          name: /Origination|Originator|Orig(ination)?\s*Ref/,
+        }),
+      )
+    ) {
+      return true;
+    }
+    for (const sel of [
+      'input[formControlName="originationReference"]',
+      'input[formControlName="originatorReference"]',
+      'input[name="originationReference"]',
+      'input[ng-reflect-name*="origination"]',
+      "p-float-label input",
+      ".p-field input.p-inputtext",
+    ]) {
+      if (await tryFill(root.locator(sel).first())) {
+        return true;
+      }
+    }
+    const row = root
+      .locator(".p-field, .p-col, .p-float-label, [class*='p-field']")
+      .filter({
+        hasText: /Origination|Originator\s*Ref|Origination\s*Ref/,
+      })
+      .first();
+    if (await tryFill(row.locator("input, textarea").first())) {
+      return true;
+    }
+    const fromLabel = root
+      .locator("span, label, .p-float-label")
+      .filter({ hasText: /Origination|Originator/i })
+      .first()
+      .locator(
+        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
+      );
+    if (await tryFill(fromLabel)) {
+      return true;
+    }
+    if (await tryFill(this.originationRefInput)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Enter text into the Origination Reference input field
-   * (CSA / legacy: SVG `text#text` under "Originator Reference" label in some builds.)
+   * (CSA: Prime `input` on Webform builds; legacy: SVG `text#text` under "Originator Reference".)
    */
   async enterOriginationReference(origRef: string): Promise<void> {
     this.logStep(`Entered origination reference as ${this.stepValueDisplay(origRef)}`);
-    await this.originationRefInput.fill(origRef);
+    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    const root = this.standardQuoteRoot();
+    await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    if (!(await this.fillOriginationReferenceOnRoot(origRef, root))) {
+      throw new Error(
+        `Could not set Origination / Originator Reference to "${origRef}" (tried inputs on quote shell and legacy SVG).`,
+      );
+    }
+    await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
+  }
+
+  /**
+   * If **Save** opens "The below information is required to save this quote" with **Originator Reference**,
+   * fill it and confirm the dialog **Save** (does nothing when the dialog is absent).
+   */
+  async submitOriginatorReferenceRequiredToSaveDialogIfPresent(origRef: string): Promise<void> {
+    const dlg = this.page
+      .getByRole("dialog")
+      .filter({ hasText: /required to save this quote/i })
+      .first();
+    if (!(await dlg.isVisible({ timeout: 6_000 }).catch(() => false))) {
+      return;
+    }
+    this.logStep(
+      `Submit Originator Reference in required-to-save dialog as ${this.stepValueDisplay(origRef)}`,
+    );
+    const input = dlg
+      .getByRole("textbox", { name: /Originator|Origination/i })
+      .or(dlg.locator("input").filter({ visible: true }).first());
+    const inp = input.first();
+    await inp.scrollIntoViewIfNeeded();
+    await inp.click({ force: true }).catch(() => {});
+    await inp.fill(origRef, { force: true });
+    await dlg.getByRole("button", { name: /^Save$/i }).click();
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    await this.page.waitForTimeout(400);
   }
 
   /**
@@ -1134,120 +1427,14 @@ export class DOAssetDetailsPage extends BasePage {
       .last();
     await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
 
-    const tryFill = async (el: Locator): Promise<boolean> => {
-      const t = el.first();
-      if (!(await t.isVisible({ timeout: 8_000 }).catch(() => false))) {
-        return false;
-      }
-      await t.scrollIntoViewIfNeeded();
-      await t.click({ force: true }).catch(() => {});
-      await t.clear().catch(() => {});
-      try {
-        await t.fill(origRef, { timeout: 15_000 });
-      } catch {
-        await t.press("ControlOrMeta+a");
-        await this.page.keyboard.type(origRef, { delay: 20 });
-      }
-      const v = (await t.inputValue().catch(() => "")).trim();
-      if (v.length > 0) {
-        return true;
-      }
-      await t.press("ControlOrMeta+a");
-      await this.page.keyboard.type(origRef, { delay: 20 });
-      return (await t.inputValue().catch(() => "")).trim().length > 0;
-    };
-
-    const originatorRoot = this.page.locator("app-quote-originator").first();
-    if (await originatorRoot.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      const originInput = originatorRoot.locator(
-        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/following::input[1]",
+    if (!(await this.fillOriginationReferenceOnRoot(origRef, root))) {
+      throw new Error(
+        `Finance Lease: could not set Origination Reference to "${origRef}" (tried getByLabel, getByRole textbox, p-field row, p-float-label).`,
       );
-      if (await tryFill(originInput.first())) {
-        if (!skipOverlayDismiss) {
-          await this.page.keyboard.press("Escape").catch(() => {});
-        }
-        return;
-      }
     }
-
-    // 1) ARIA: label (Prime float-label / p-field)
-    if (
-      await tryFill(
-        root.getByLabel(
-          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
-        ),
-      )
-    ) {
-      return;
+    if (!skipOverlayDismiss) {
+      await this.page.keyboard.press("Escape").catch(() => {});
     }
-    if (
-      await tryFill(
-        this.page.getByLabel(
-          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
-        ),
-      )
-    ) {
-      return;
-    }
-    // 2) textbox by accessible name
-    if (
-      await tryFill(
-        root.getByRole("textbox", {
-          name: /Origination|Originator|Orig(ination)?\s*Ref/,
-        }),
-      )
-    ) {
-      return;
-    }
-    if (
-      await tryFill(
-        this.page.getByRole("textbox", {
-          name: /Origination|Originator|Orig(ination)?\s*Ref/,
-        }),
-      )
-    ) {
-      return;
-    }
-    // 3) Common Angular / Prime `input` bindings
-    for (const sel of [
-      'input[formControlName="originationReference"]',
-      'input[formControlName="originatorReference"]',
-      'input[name="originationReference"]',
-      'input[ng-reflect-name*="origination"]',
-      "p-float-label input",
-      ".p-field input.p-inputtext",
-    ]) {
-      if (await tryFill(root.locator(sel).first())) {
-        return;
-      }
-    }
-    // 4) Label/span then following input
-    const row = root
-      .locator(".p-field, .p-col, .p-float-label, [class*='p-field']")
-      .filter({
-        hasText: /Origination|Originator\s*Ref|Origination\s*Ref/,
-      })
-      .first();
-    if (await tryFill(row.locator("input, textarea").first())) {
-      return;
-    }
-    const fromLabel = root
-      .locator("span, label, .p-float-label")
-      .filter({ hasText: /Origination|Originator/i })
-      .first()
-      .locator(
-        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
-      );
-    if (await tryFill(fromLabel)) {
-      return;
-    }
-    // 5) Last resort: same locator as CSA (if FL build also uses it)
-    if (await tryFill(this.originationRefInput)) {
-      return;
-    }
-    throw new Error(
-      `Finance Lease: could not set Origination Reference to "${origRef}" (tried getByLabel, getByRole textbox, p-field row, p-float-label).`,
-    );
   }
 
   /** Same discovery order as {@link enterOriginationReferenceFinanceLease} so verify reads the field we filled. */
@@ -1383,63 +1570,49 @@ export class DOAssetDetailsPage extends BasePage {
     await this.assetSearchField.fill(asset);
     await this.page.getByRole("option", { name: asset }).click();
   }
-
-  /** Caption / float-label for the Asset Details **Condition** row inside a quote shell. */
-  private conditionCaptionIn(root: Locator): Locator {
-    return root
-      .getByText("Condition *", { exact: true })
-      .or(root.getByText(/^Condition\s*\*?\s*$/i))
-      .first();
-  }
-
   /**
-   * Resolves `app-quote-details` / `app-standard-quote` host that actually contains the Condition field.
-   * Some builds omit **Asset Type** copy from inner text (or nest it), which made `.filter({ hasText: /Asset Type/ })` match nothing.
+   * Select a condition from the Condition dropdown
    */
-  private async resolveAssetDetailsConditionRoot(): Promise<Locator> {
-    const candidates: Locator[] = [
-      this.page
-        .locator("app-quote-details, app-standard-quote")
-        .filter({ hasText: /Condition/i })
-        .first(),
-      this.standardQuoteRoot(),
-      this.page
-        .locator("app-quote-details, app-standard-quote")
-        .filter({ hasText: /Asset Type/i })
-        .last(),
-    ];
-    for (const r of candidates) {
-      const cap = this.conditionCaptionIn(r);
-      if (await cap.isVisible({ timeout: 4_000 }).catch(() => false)) {
-        return r;
-      }
-    }
-    return this.standardQuoteRoot();
-  }
-
-  /** Prime overlay **option** — `exact` can fail when the a11y name includes extra copy. */
-  private async clickConditionOption(condition: string): Promise<void> {
-    const exact = this.page.getByRole("option", { name: condition, exact: true }).first();
-    if (await exact.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      await exact.click({ timeout: 15_000 });
+  async selectCondition(condition: string) {
+    const current = await this.page
+      .getByRole("combobox")
+      .first()
+      .inputValue()
+      .catch(() => "");
+  
+    if (current.includes(condition)) {
       return;
     }
-    const esc = condition.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const loose = this.page.getByRole("option", { name: new RegExp(esc, "i") }).first();
-    await loose.waitFor({ state: "visible", timeout: 20_000 });
-    await loose.click({ timeout: 15_000 });
+  
+    await this.conditionDropdown.click();
+  
+    await expect(
+      this.page.getByRole("option", { name: condition })
+    ).toBeVisible({ timeout: 10000 });
+  
+    await this.page
+      .getByRole("option", { name: condition })
+      .click();
   }
-
   /**
-   * Open the Condition `p-dropdown` under `root` and pick `condition` (panel is portaled to `document`).
+   * **Condition** on Standard Quote / Asset Details.
+   * - If the Prime **Option List** is already open, click the option.
+   * - Else dismiss overlays, anchor on **Condition *** caption, then open the nearest **following** `p-dropdown`
+   *   (`following-sibling` breaks when the label sits inside a wrapper that is not the dropdown’s direct sibling).
+   * - Root: quote shell that actually contains **Asset Type** (avoid `\\b` / strict filters that can drop the host).
    */
-  private async openAssetDetailsConditionAndSelect(
-    root: Locator,
-    condition: string,
-  ): Promise<void> {
+  async selectConditionInStandardQuote(condition: string): Promise<void> {
+    this.logStep(`Selected condition (standard quote): ${this.stepValueDisplay(condition)}`);
+
+    const root = this.page
+      .locator("app-quote-details, app-standard-quote")
+      .filter({ hasText: /Asset Type/i })
+      .last();
+    await root.waitFor({ state: "visible", timeout: 45_000 });
+
     const optionWhenOpen = this.page
       .getByRole("listbox", { name: /Option List/i })
-      .getByRole("option", { name: condition })
+      .getByRole("option", { name: condition, exact: true })
       .first();
     if (await optionWhenOpen.isVisible({ timeout: 2_500 }).catch(() => false)) {
       await optionWhenOpen.click({ timeout: 15_000 });
@@ -1450,8 +1623,11 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.keyboard.press("Escape").catch(() => {});
     await this.page.waitForTimeout(200);
 
-    const caption = this.conditionCaptionIn(root);
-    await caption.waitFor({ state: "visible", timeout: 25_000 });
+    const caption = root
+      .getByText("Condition *", { exact: true })
+      .or(root.getByText(/^Condition\s*\*?\s*$/i))
+      .first();
+    await caption.waitFor({ state: "visible", timeout: 20_000 });
     await caption.scrollIntoViewIfNeeded();
 
     const dropdownAfterCaption = caption
@@ -1462,48 +1638,15 @@ export class DOAssetDetailsPage extends BasePage {
       .or(dropdownAfterCaption.getByRole("button", { name: /dropdown trigger/i }))
       .first();
 
-    let opened = false;
+    await expect(trigger).toBeAttached({ timeout: 20_000 });
     try {
-      await expect(trigger).toBeAttached({ timeout: 15_000 });
       await trigger.click({ timeout: 12_000 });
-      opened = true;
     } catch {
-      try {
-        await trigger.click({ force: true, timeout: 12_000 });
-        opened = true;
-      } catch {
-        /* use SVG index fallback */
-      }
-    }
-    if (!opened) {
-      await this.conditionDropdown.click({ timeout: 12_000 }).catch(() => {});
+      await trigger.click({ force: true, timeout: 12_000 });
     }
 
-    await this.clickConditionOption(condition);
+    await this.page.getByRole("option", { name: condition, exact: true }).first().click({ timeout: 15_000 });
     await this.page.keyboard.press("Escape").catch(() => {});
-  }
-
-  /**
-   * Select a condition from the Condition dropdown on Asset Details.
-   * Uses {@link selectConditionInStandardQuote} (shared caption + trigger + option logic).
-   */
-  async selectCondition(condition: string) {
-    await this.selectConditionInStandardQuote(condition);
-  }
-
-  /**
-   * **Condition** on Standard Quote / Asset Details.
-   * - If the Prime **Option List** is already open, click the option.
-   * - Else dismiss overlays, anchor on **Condition *** caption, then open the nearest **following** `p-dropdown`
-   * - Root: first shell that shows a **Condition** caption; else {@link standardQuoteRoot}; else last shell with **Asset Type** text.
-   * - Fallback: legacy {@link conditionDropdown} SVG index if the caption trigger cannot be used.
-   */
-  async selectConditionInStandardQuote(condition: string): Promise<void> {
-    this.logStep(`Selected condition (standard quote): ${this.stepValueDisplay(condition)}`);
-
-    const root = await this.resolveAssetDetailsConditionRoot();
-    await root.waitFor({ state: "visible", timeout: 60_000 });
-    await this.openAssetDetailsConditionAndSelect(root, condition);
   }
 
   /**
@@ -1596,7 +1739,6 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async openAssetInsuranceTradeInSummary(): Promise<void> {
     this.logStep("Open Asset Insurance Trade In Summary");
-    await this.dismissPortalsVersionModalIfOpen();
     const quote = this.page.locator("app-quote-details, app-standard-quote").first();
     await quote.waitFor({ state: "visible", timeout: 60_000 });
     await quote.scrollIntoViewIfNeeded().catch(() => {});
@@ -1630,390 +1772,6 @@ export class DOAssetDetailsPage extends BasePage {
       .last()
       .waitFor({ state: "visible", timeout: 45_000 });
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
-  }
-
-  /**
-   * Clicks **Search & Add Asset** inside the Asset & Insurance Summary dialog. PrimeNG often renders this as
-   * `a.p-button-link` / `p-button` (not always `role="button"` + name), so we try several strategies.
-   */
-  private async clickSearchAddAssetInsideSummary(
-    summary: Locator,
-    motoLog: (msg: string) => void,
-  ): Promise<void> {
-    await this.dismissPortalsVersionModalIfOpen();
-    await this.waitUntilNoVisibleAppLoaderOverlays(45_000).catch(() => {});
-
-    for (let esc = 0; esc < 4; esc++) {
-      const probe = summary.getByText(/Search\s*&\s*Add\s+Asset/i).first();
-      if (await probe.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        break;
-      }
-      motoLog(`Step 2-prep: "Search & Add Asset" not visible in Summary — Escape (${esc + 1}/4) to dismiss overlay…`);
-      await this.page.keyboard.press("Escape").catch(() => {});
-      await this.page.waitForTimeout(400);
-      await this.waitUntilNoVisibleAppLoaderOverlays(12_000).catch(() => {});
-    }
-
-    await summary.scrollIntoViewIfNeeded();
-    // Footer **Search & Add Asset** often sits below a scrollable region — scroll **every** dialog content pane
-    // (`.last()` alone can target an empty header pane so the real table/footer never scrolls into view).
-    const contentPanes = summary.locator(".p-dialog-content, .p-dialog-body");
-    const paneCount = await contentPanes.count();
-    for (let pi = 0; pi < paneCount; pi++) {
-      const pane = contentPanes.nth(pi);
-      await pane
-        .evaluate((el) => {
-          el.scrollTop = el.scrollHeight;
-        })
-        .catch(() => {});
-    }
-    await this.page.waitForTimeout(400);
-
-    const searchAddCaption = summary.getByText(/Search\s*&\s*Add\s+Asset/i).first();
-    await expect(searchAddCaption).toBeVisible({ timeout: 30_000 });
-    await searchAddCaption.scrollIntoViewIfNeeded();
-
-    const tryClick = async (label: string, loc: Locator): Promise<boolean> => {
-      const el = loc.first();
-      if (!(await el.isVisible({ timeout: 3_000 }).catch(() => false))) {
-        motoLog(`  skip (${label}): not visible`);
-        return false;
-      }
-      motoLog(`  try ${label}…`);
-      await el.scrollIntoViewIfNeeded();
-      await el.click({ force: true, timeout: 20_000 });
-      return true;
-    };
-
-    /** Opens **Search Asset** (`app-search-asset`) — confirms the + **Search & Add Asset** control actually fired. */
-    const assertSearchAssetOpened = async (): Promise<void> => {
-      await expect
-        .poll(async () => this.page.locator("app-search-asset").first().isVisible().catch(() => false), {
-          timeout: 20_000,
-          intervals: [200, 500, 1_000, 2_000],
-        })
-        .toBeTruthy();
-    };
-
-    /**
-     * Clicks target (icon or button), then **DOM click** on the owning **button** if the Search dialog did not open.
-     */
-    const clickSearchAddUntilDialogOpens = async (label: string, target: Locator): Promise<boolean> => {
-      const first = target.first();
-      if (!(await first.isVisible({ timeout: 4_000 }).catch(() => false))) {
-        motoLog(`  skip (${label}): not visible`);
-        return false;
-      }
-      motoLog(`  try ${label}…`);
-      await first.scrollIntoViewIfNeeded();
-      try {
-        await first.click({ timeout: 12_000 });
-      } catch {
-        await first.click({ force: true, timeout: 12_000 }).catch(() => {});
-      }
-      if (await this.page.locator("app-search-asset").first().isVisible({ timeout: 6_000 }).catch(() => false)) {
-        return true;
-      }
-      motoLog(`  ${label}: dialog not open — DOM click on owning button…`);
-      await first
-        .evaluate((node: HTMLElement) => {
-          const btn = (node.closest("button") ?? node) as HTMLButtonElement;
-          btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-        })
-        .catch(() => {});
-      return await this.page.locator("app-search-asset").first().isVisible({ timeout: 8_000 }).catch(() => false);
-    };
-
-    motoLog('Step 2: Clicking "Search & Add Asset" (+ icon / button) inside Summary (multi-strategy)…');
-
-    // **A.** Summary-wide: any `button` / link whose **visible text** includes Search & Add Asset (does not rely on `app-asset-insurance-summary` paint order).
-    const summaryWideTextBtn = summary
-      .locator("button, a.p-button-link, a.p-button, a[role='button']")
-      .filter({ hasText: /Search\s*&\s*Add\s+Asset/i })
-      .first();
-    if (await clickSearchAddUntilDialogOpens("summary-wide button/a (hasText Search & Add Asset)", summaryWideTextBtn)) {
-      await assertSearchAssetOpened();
-      return;
-    }
-
-    // **B.** `gen-button` host (click wrapper — inner `button` can be zero-sized in some builds).
-    const genHostWide = summary.locator("gen-button").filter({ hasText: /Search\s*&\s*Add\s+Asset/i }).first();
-    if (await clickSearchAddUntilDialogOpens("summary gen-button host (Search & Add Asset)", genHostWide)) {
-      await assertSearchAssetOpened();
-      return;
-    }
-
-    const assetInsuranceHost = summary.locator("app-asset-insurance-summary").first();
-    if (await assetInsuranceHost.isVisible({ timeout: 15_000 }).catch(() => false)) {
-      await assetInsuranceHost.scrollIntoViewIfNeeded();
-      for (let pi = 0; pi < paneCount; pi++) {
-        await contentPanes
-          .nth(pi)
-          .evaluate((el) => {
-            el.scrollTop = el.scrollHeight;
-          })
-          .catch(() => {});
-      }
-      await this.page.waitForTimeout(350);
-
-      // **gen-button** wrapper — click **host** first (inner `button` can be 0×0); then inner button.
-      const genWrapped = assetInsuranceHost.locator("gen-button").filter({ hasText: /Search\s*&\s*Add\s+Asset/i });
-      const genHost = genWrapped.first();
-      if (await clickSearchAddUntilDialogOpens("app-asset-insurance-summary gen-button host", genHost)) {
-        await assertSearchAssetOpened();
-        return;
-      }
-      const genInnerBtn = genWrapped.locator("button.p-button, button").first();
-      if (await clickSearchAddUntilDialogOpens("gen-button inner button (Search & Add Asset)", genInnerBtn)) {
-        await assertSearchAssetOpened();
-        return;
-      }
-
-      const searchAddByHasText = assetInsuranceHost
-        .locator("button.p-button")
-        .filter({ hasText: /Search\s*&\s*Add\s+Asset/i })
-        .first();
-      if (await clickSearchAddUntilDialogOpens("app-asset-insurance-summary button (hasText)", searchAddByHasText)) {
-        await assertSearchAssetOpened();
-        return;
-      }
-
-      const searchAddAssetRowBtn = assetInsuranceHost
-        .locator("button.p-button.p-component")
-        .filter({ hasText: /Search\s*&\s*Add\s+Asset/i });
-      const searchAddPlusIcon = searchAddAssetRowBtn.locator(
-        'span[data-pc-section="icon"].fa-square-plus, span.p-button-icon.fa-solid.fa-square-plus, span.p-button-icon.fa-square-plus, span.fa-square-plus',
-      );
-      if (await clickSearchAddUntilDialogOpens("fa-square-plus inside Search & Add row", searchAddPlusIcon)) {
-        await assertSearchAssetOpened();
-        return;
-      }
-
-      if (
-        await clickSearchAddUntilDialogOpens(
-          "getByRole(button, Search & Add Asset)",
-          assetInsuranceHost.getByRole("button", { name: /Search\s*&\s*Add\s+Asset/i }),
-        )
-      ) {
-        await assertSearchAssetOpened();
-        return;
-      }
-
-      if (await clickSearchAddUntilDialogOpens("button.p-button (label row)", searchAddAssetRowBtn)) {
-        await assertSearchAssetOpened();
-        return;
-      }
-
-      const xpathBtn = summary.locator(
-        "xpath=.//app-asset-insurance-summary//button[contains(@class,'p-button')]" +
-          "[.//span[contains(@class,'fa-square-plus')]]" +
-          "[.//span[contains(normalize-space(.),'Search') and contains(normalize-space(.),'Add') and contains(normalize-space(.),'Asset')]]",
-      );
-      if (await clickSearchAddUntilDialogOpens("xpath Search&Add + fa-square-plus button", xpathBtn)) {
-        await assertSearchAssetOpened();
-        return;
-      }
-    }
-
-    const summarySearchAddRowBtn = summary
-      .locator("button.p-button.p-component")
-      .filter({ hasText: /Search\s*&\s*Add\s+Asset/i });
-    const summarySearchAddPlusIcon = summarySearchAddRowBtn.locator(
-      'span[data-pc-section="icon"].fa-square-plus, span.p-button-icon.fa-solid.fa-square-plus, span.p-button-icon.fa-square-plus, span.fa-square-plus',
-    );
-    if (await clickSearchAddUntilDialogOpens("summary fa-square-plus (Search & Add row)", summarySearchAddPlusIcon)) {
-      await assertSearchAssetOpened();
-      return;
-    }
-
-    if (
-      await clickSearchAddUntilDialogOpens(
-        "summary getByRole(button, Search & Add Asset)",
-        summary.getByRole("button", { name: /Search\s*&\s*Add\s+Asset/i }),
-      )
-    ) {
-      await assertSearchAssetOpened();
-      return;
-    }
-    if (await tryClick("getByRole(link)", summary.getByRole("link", { name: /Search\s*&\s*Add\s+Asset/i }))) {
-      await assertSearchAssetOpened();
-      return;
-    }
-    if (
-      await tryClick(
-        "p-button / p-button-link",
-        summary
-          .locator("button.p-button, a.p-button, a.p-button-link, button.p-button-link")
-          .filter({ hasText: /Search\s*&\s*Add\s+Asset/i }),
-      )
-    ) {
-      await assertSearchAssetOpened();
-      return;
-    }
-    if (
-      await tryClick(
-        "generic a/button [role=button]",
-        summary.locator("a, button, [role='button']").filter({ hasText: /Search\s*&\s*Add\s+Asset/i }),
-      )
-    ) {
-      await assertSearchAssetOpened();
-      return;
-    }
-    const xpath = summary.locator(
-      "xpath=.//*[self::button or self::a or @role='button'][contains(normalize-space(.),'Search')][contains(normalize-space(.),'Add')][contains(normalize-space(.),'Asset')]",
-    );
-    if (await tryClick("xpath text contains", xpath)) {
-      await assertSearchAssetOpened();
-      return;
-    }
-    const textClick = summary.getByText(/Search\s*&\s*Add\s+Asset/i).first();
-    motoLog("  fallback: click getByText(Search & Add Asset)…");
-    await expect(textClick).toBeVisible({ timeout: 20_000 });
-    await textClick.click({ force: true, timeout: 20_000 });
-    await assertSearchAssetOpened();
-  }
-
-  /**
-   * Second asset via **Search & Add Asset** on **Asset & Insurance Summary** (no row Edit / clone). Expects Summary
-   * still open after manual Asset #1 **Submit**. MotoCheck + Rego **Enter Number** → **Search** → **Motocheck Successfully
-   * Executed** → **Continue** → Add Asset (**do not** overwrite **Asset Value** — MotoCheck pre-fill) → **Submit**
-   * (`{@link DOAddAssetPage.clickSummitButton}`) → Summary visible again → **≥2** `tbody` rows. Caller then
-   * `{@link DOAddAssetPage.clickCrossButton}`.
-   */
-  async performMotoCheckAssetSearchAndAdd(options?: {
-    enterNumber?: string;
-    /**
-     * @deprecated MotoCheck add-asset keeps portal **Asset Value** as returned; do not fill (avoids mask overlap).
-     */
-    assetValueOnMotoSuccess?: string;
-  }): Promise<void> {
-    const enterNumber = options?.enterNumber ?? "BAGGED";
-
-    const motoLog = (msg: string): void => {
-      // eslint-disable-next-line no-console
-      console.log(`[MotoCheck Search & Add] ${msg}`);
-      this.log(msg);
-    };
-
-    this.logStep("performMotoCheckAssetSearchAndAdd (no edit / clone — Search & Add Asset only)");
-    motoLog("Step 1: Waiting for Asset & Insurance Summary dialog…");
-    const summary = this.assetInsuranceTradeInSummaryDialog();
-    await expect(summary).toBeVisible({ timeout: 60_000 });
-    motoLog(`Step 1b: tbody row count on summary = ${await summary.locator("tbody tr").count()}`);
-    await expect
-      .poll(async () => await summary.locator("tbody tr").count(), { timeout: 30_000, intervals: [400, 1_000] })
-      .toBeGreaterThanOrEqual(1);
-    motoLog("Step 1c: Confirmed at least 1 asset row (manual Asset #1) before Search & Add Asset.");
-
-    await this.clickSearchAddAssetInsideSummary(summary, motoLog);
-
-    motoLog("Step 3: Waiting for Search Asset UI (app-search-asset inside dialog)…");
-    const searchAssetShell = this.page.locator("app-search-asset").first();
-    await expect
-      .poll(
-        async () => searchAssetShell.isVisible().catch(() => false),
-        { timeout: 35_000, intervals: [300, 700, 1_500, 2_500] },
-      )
-      .toBeTruthy();
-    await searchAssetShell.scrollIntoViewIfNeeded();
-
-    // Prefer the dialog that actually hosts **app-search-asset** (title text alone is unreliable vs stacked modals).
-    const searchAssetDialog = this.page
-      .getByRole("dialog")
-      .filter({ has: this.page.locator("app-search-asset") })
-      .last();
-    await expect(searchAssetDialog).toBeVisible({ timeout: 15_000 });
-
-    motoLog("Step 4: Ensuring Motocheck is selected (PrimeNG hidden radio + p-radiobutton)…");
-    const motoRadioInput = searchAssetDialog.locator('input[type="radio"][value="motocheck"]').first();
-    await expect(motoRadioInput).toBeAttached({ timeout: 20_000 });
-    if (!(await motoRadioInput.isChecked().catch(() => false))) {
-      motoLog("Step 4b: Motocheck not selected — clicking Motocheck label…");
-      await searchAssetDialog
-        .locator("label.p-radiobutton-label")
-        .filter({ hasText: /^Motocheck$/i })
-        .first()
-        .click({ force: true, timeout: 10_000 });
-    }
-    await expect(motoRadioInput).toBeChecked({ timeout: 10_000 });
-
-    motoLog('Step 5: Verifying Search By shows "Rego Number" (do not open dropdown)…');
-    await expect(
-      searchAssetDialog.locator("p-dropdown .p-dropdown-label").filter({ hasText: /Rego\s*Number/i }).first(),
-    ).toBeVisible({ timeout: 15_000 });
-
-    motoLog(`Step 6: Filling Enter Number / rego with "${enterNumber}"…`);
-    const enterNumberInput = searchAssetDialog
-      .getByRole("textbox", { name: /Enter\s*Number/i })
-      .or(searchAssetShell.locator("motocheck-tab input.p-inputtext").first())
-      .or(searchAssetDialog.locator("input.p-inputtext.p-component.p-element.form-control").first())
-      .or(searchAssetShell.locator('input[pinputtext], input.form-control').first());
-    await enterNumberInput.first().waitFor({ state: "visible", timeout: 20_000 });
-    await enterNumberInput.first().click({ timeout: 5_000 }).catch(() => {});
-    await enterNumberInput.first().fill(enterNumber);
-
-    motoLog('Step 7: Clicking Search in Search Asset dialog (scoped + fallbacks)…');
-    const searchInModal = searchAssetDialog
-      .getByRole("button", { name: /^Search$/i })
-      .or(searchAssetDialog.locator("button.p-button").filter({ hasText: /^Search$/i }))
-      .or(searchAssetDialog.locator("button").filter({ hasText: /^Search$/i }));
-    await searchInModal.first().scrollIntoViewIfNeeded();
-    await searchInModal.first().click({ force: true, timeout: 20_000 });
-
-    motoLog('Step 8: Waiting for "Motocheck Successfully Executed"…');
-    const successMsg = this.page.getByText(/Motocheck Successfully Executed/i).first();
-    await expect(successMsg).toBeVisible({ timeout: 60_000 });
-
-    motoLog("Step 9: Clicking Continue inside Search Asset dialog (avoid page-level Continue)…");
-    const continueInSearchDialog = searchAssetDialog
-      .getByRole("button", { name: /^Continue$/i })
-      .or(searchAssetDialog.locator("button.p-button").filter({ hasText: /^Continue$/i }))
-      .or(searchAssetDialog.locator(':text-is("Continue")'))
-      .first();
-    await expect(continueInSearchDialog).toBeVisible({ timeout: 20_000 });
-    await continueInSearchDialog.click({ timeout: 15_000 });
-
-    motoLog("Step 10: Waiting for Add Asset page (submit with MotoCheck **Asset Value** unchanged)…");
-    const addAssetPage = new DOAddAssetPage(this.page);
-    await expect(addAssetPage.assetValueInputField).toBeVisible({ timeout: 30_000 });
-    motoLog("Step 11: Skipping Asset Value entry (MotoCheck pre-filled; avoids overlapping digits).");
-    motoLog("Step 12: Clicking Submit (Summit) on Add Asset…");
-    await addAssetPage.clickSummitButton();
-
-    motoLog("Step 13: Waiting until Asset & Insurance Summary is visible again…");
-    let summaryAfter = this.assetInsuranceTradeInSummaryDialog();
-    if (!(await summaryAfter.isVisible({ timeout: 5_000 }).catch(() => false))) {
-      await this.openAssetInsuranceTradeInSummary();
-      summaryAfter = this.assetInsuranceTradeInSummaryDialog();
-    }
-    await expect(summaryAfter).toBeVisible({ timeout: 45_000 });
-
-    motoLog("Step 14: Verifying Asset Summary has at least 2 asset rows…");
-    await expect
-      .poll(async () => await summaryAfter.locator("tbody tr").count(), {
-        timeout: 35_000,
-        intervals: [400, 1_000, 2_000],
-      })
-      .toBeGreaterThanOrEqual(2);
-    motoLog("MotoCheck second asset complete (Asset #1 manual, Asset #2 MotoCheck). Caller may clickCrossButton next.");
-  }
-
-  /**
-   * Re-opens **Asset & Insurance Summary** and asserts the asset table has **at least** `minRows` `tbody` rows.
-   */
-  async reopenAssetSummaryAndAssertMinimumAssetRows(minRows: number): Promise<void> {
-    // eslint-disable-next-line no-console
-    console.log(`[MotoCheck Search & Add] reopenAssetSummaryAndAssertMinimumAssetRows(${minRows})`);
-    this.logStep(`reopenAssetSummaryAndAssertMinimumAssetRows(${minRows})`);
-    await this.openAssetInsuranceTradeInSummary();
-    const summary = this.assetInsuranceTradeInSummaryDialog();
-    await expect(summary).toBeVisible({ timeout: 45_000 });
-    await expect
-      .poll(async () => await summary.locator("tbody tr").count(), {
-        timeout: 35_000,
-        intervals: [400, 1_000, 2_000],
-      })
-      .toBeGreaterThanOrEqual(minRows);
   }
 
   /**
@@ -2208,111 +1966,13 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Exact **Lease Schedule** / **Payment Schedule** section title (not **Edit Payment Schedule**).
-   */
-  private leaseOrPaymentScheduleTitle(): Locator {
-    const root = this.standardQuoteRoot();
-    return root
-      .getByText(/^Lease Schedule$/i)
-      .or(root.getByText(/^Payment Schedule$/i))
-      .first();
-  }
-
-  /**
-   * Close **Portal's Version** if a prior mis-click opened it (footer `24.1.0` / global controls must not block the flow).
-   */
-  private async dismissPortalsVersionModalIfOpen(): Promise<void> {
-    const portalDlg = this.page
-      .getByRole("dialog")
-      .filter({ hasText: /Portal'?s Version/i })
-      .or(this.page.locator(".p-dialog").filter({ hasText: /Portal'?s Version/i }))
-      .first();
-    if (!(await portalDlg.isVisible({ timeout: 600 }).catch(() => false))) {
-      return;
-    }
-    const close = portalDlg
-      .locator(
-        "button.p-dialog-header-close, .p-dialog-header-icon, button[aria-label='Close'], button[aria-label='close']",
-      )
-      .first();
-    await close.click({ timeout: 5_000 }).catch(async () => {
-      await this.page.keyboard.press("Escape");
-    });
-    await portalDlg.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
-  }
-
-  /**
-   * Ancestor of **Lease / Payment Schedule** title that contains the schedule **table**
-   * (scoped — not **Payment Summary** or global **radio** groups).
-   */
-  private leaseScheduleSectionWithTable(): Locator {
-    const title = this.leaseOrPaymentScheduleTitle();
-    return title.locator("xpath=ancestor::*[.//table][1]").first();
-  }
-
-  /**
-   * **Lease / Payment Schedule** list view: the section has **two** `role="radio"` switches; the first is
-   * default (Summary). Clicks the **second** switch only — no **`pi-bars`** / icon locators.
-   */
-  private async ensureLeaseScheduleListViewSelected(): Promise<void> {
-    await this.dismissPortalsVersionModalIfOpen();
-    await expect(this.leaseOrPaymentScheduleTitle()).toBeVisible({ timeout: 20_000 });
-
-    const leaseSchedule = this.leaseScheduleSectionWithTable();
-    await expect(leaseSchedule).toBeVisible({ timeout: 15_000 });
-
-    const radios = leaseSchedule.getByRole("radio");
-    const n = await radios.count();
-    // eslint-disable-next-line no-console
-    console.log("Radio count:", n);
-    if (n >= 2) {
-      await radios.nth(1).click({ force: true, timeout: 12_000 });
-      // eslint-disable-next-line no-console
-      console.log("Second switch selected");
-    } else {
-      throw new Error(
-        `Lease Schedule: expected at least 2 radio/switch controls in section, found ${n}`,
-      );
-    }
-
-    await this.page.waitForTimeout(400);
-    await this.page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
-  }
-
-  /**
-   * **Summary** view often has no **`tbody tr`** data rows; **list** view (second section radio) shows them.
-   * No-op when the section has fewer than two radios (caller should still assert rows separately).
-   */
-  private async trySelectLeaseScheduleListViewForDataRows(): Promise<boolean> {
-    await this.dismissPortalsVersionModalIfOpen();
-    const leaseSchedule = this.leaseScheduleSectionWithTable();
-    if (!(await leaseSchedule.isVisible({ timeout: 6_000 }).catch(() => false))) {
-      return false;
-    }
-    const radios = leaseSchedule.getByRole("radio");
-    const n = await radios.count();
-    // eslint-disable-next-line no-console
-    console.log("Lease schedule view radios:", n);
-    if (n < 2) {
-      return false;
-    }
-    await radios.nth(1).click({ force: true, timeout: 12_000 });
-    // eslint-disable-next-line no-console
-    console.log("Lease schedule: selected list view for schedule table rows");
-    await this.page.waitForTimeout(400);
-    await this.page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
-    return true;
-  }
-
-  /**
-   * **Payment Schedule** card: heading, table with Date / Number / Frequency / Payment, and at least one **`tbody tr`**
-   * (after **Calculate**). If rows are still empty, selects the **list** schedule view (second section radio) — **Summary**
-   * often renders no data rows until that view is active.
+   * **Payment Schedule** card: heading, table with Date / Number / Frequency / Payment, and at least one row
+   * with a currency amount (after **Calculate**).
    */
   async expectPaymentScheduleSectionWithTableData(): Promise<void> {
     this.logStep("Expect Payment Schedule Section With Table Data");
     const root = this.standardQuoteRoot();
-    await expect(this.leaseOrPaymentScheduleTitle()).toBeVisible({
+    await expect(root.getByText(/Payment\s+Schedule/i).first()).toBeVisible({
       timeout: 45_000,
     });
 
@@ -2346,43 +2006,20 @@ export class DOAssetDetailsPage extends BasePage {
       timeout: 10_000,
     });
 
-    const leaseScheduleSection = this.leaseScheduleSectionWithTable();
-    await expect(leaseScheduleSection).toBeVisible({ timeout: 15_000 });
-
-    const dataRows = leaseScheduleSection.locator("tbody tr");
-    const pollRowCount = async (totalMs: number): Promise<number> => {
-      const deadline = Date.now() + totalMs;
-      while (Date.now() < deadline) {
-        const c = await dataRows.count();
-        if (c > 0) {
-          return c;
-        }
-        await this.page.waitForTimeout(350);
-      }
-      return await dataRows.count();
-    };
-
-    let count = await pollRowCount(14_000);
-    // eslint-disable-next-line no-console
-    console.log("Lease schedule rows:", count);
-    if (count === 0) {
-      await this.trySelectLeaseScheduleListViewForDataRows();
-      count = await pollRowCount(22_000);
-      // eslint-disable-next-line no-console
-      console.log("Lease schedule rows (after list view):", count);
-    }
-
-    await expect(dataRows.first()).toBeVisible({
-      timeout: 20_000,
-    });
+    const dataRow = root
+      .locator("tr")
+      .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
+      .filter({ hasText: /Monthly|Weekly|Fortnightly/i })
+      .first();
+    await expect(dataRow).toBeVisible({ timeout: 25_000 });
   }
 
   /**
-   * Card / panel that wraps **Lease / Payment Schedule** (section chrome).
+   * Card / panel that wraps **Payment Schedule** (for header icon toggles).
    */
   private paymentScheduleCard(): Locator {
     const root = this.standardQuoteRoot();
-    const title = this.leaseOrPaymentScheduleTitle();
+    const title = root.getByText(/Payment\s+Schedule/i).first();
     return title
       .locator("xpath=ancestor::p-card[1]")
       .first()
@@ -2395,11 +2032,33 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Table rows OK → second **Lease Schedule** list **radio** → **Edit Payment Schedule** → modal flow.
+   * Host for **Payment Schedule** table rows (card when present, else a div that contains the title).
+   * Keeps row queries off other grids under {@link standardQuoteRoot} (fees, summary, etc.).
+   */
+  private paymentScheduleContentScope(): Locator {
+    const root = this.standardQuoteRoot();
+    const card = this.paymentScheduleCard();
+    const title = root.getByText(/Payment\s+Schedule/i).first();
+    const withTable = root
+      .locator("div")
+      .filter({ has: title })
+      .filter({
+        has: root.locator("table").filter({ hasText: /Date|Number|Frequency|Payment/i }),
+      })
+      .first();
+    return card.or(withTable).or(root.locator("div").filter({ has: title }).first());
+  }
+
+  /**
+   * **Payment Schedule** view toggles: PrimeNG often uses **`p-selectButton`** (two+ options);
+   * older builds use icon-only **`pi-bars`** / **`pi-table`** / **`pi-th-large`** next to the title.
+   * **$** row checks use {@link standardQuoteRoot} — the table is not always a descendant of the
+   * narrow `p-card` title ancestor used for header buttons.
    */
   async clickPaymentScheduleViewTogglesAndExpectRowsRemain(): Promise<void> {
     this.logStep("Click Payment Schedule View Toggles And Expect Rows Remain");
     const root = this.standardQuoteRoot();
+    const scheduleScope = this.paymentScheduleContentScope();
 
     const paymentRow = root
       .locator("tr")
@@ -2412,12 +2071,83 @@ export class DOAssetDetailsPage extends BasePage {
     };
 
     await assertMoneyRowVisible();
-    await this.ensureLeaseScheduleListViewSelected();
+
+    const selectGroup = scheduleScope
+      .locator("p-selectbutton, p-selectButton, p-togglebutton, .p-selectbutton")
+      .first();
+    if (await selectGroup.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      const btns = selectGroup.locator("button, .p-button, [role='button']");
+      const n = await btns.count();
+      if (n >= 2) {
+        await expect(btns.last()).toBeVisible({ timeout: 10_000 });
+        await btns.last().scrollIntoViewIfNeeded();
+        await btns.last().click({ force: true, timeout: 10_000 });
+        await this.page.waitForTimeout(400);
+        await assertMoneyRowVisible();
+        await btns.first().scrollIntoViewIfNeeded();
+        await btns.first().click({ force: true, timeout: 10_000 });
+        await this.page.waitForTimeout(400);
+        await assertMoneyRowVisible();
+        return;
+      }
+    }
+
+    const card = root.locator("p-card").filter({ hasText: /Payment\s+Schedule/i }).first();
+    const toggleScope = (await card.isVisible({ timeout: 5_000 }).catch(() => false))
+      ? card
+      : scheduleScope;
+
+    const rightViewBtn = toggleScope
+      .locator("button:has(i.pi.pi-bars)")
+      .first()
+      .or(toggleScope.locator("a:has(i.pi.pi-bars)").first())
+      .or(toggleScope.locator("button:has(i.pi.pi-table)").first())
+      .or(toggleScope.locator("button:has(i.pi.pi-th-large)").first())
+      .or(toggleScope.locator("button:has(i.pi.pi-list)").first())
+      .or(
+        toggleScope
+          .locator("i.pi.pi-bars, i.pi.pi-table, i.pi.pi-th-large")
+          .first()
+          .locator("xpath=ancestor::button[1] | ancestor::a[1]"),
+      );
+
+    await expect(rightViewBtn).toBeVisible({ timeout: 15_000 });
+    await rightViewBtn.scrollIntoViewIfNeeded();
+    await rightViewBtn.click({ force: true, timeout: 10_000 });
+    await this.page.waitForTimeout(400);
     await assertMoneyRowVisible();
+
+    const group = rightViewBtn
+      .locator(
+        "xpath=ancestor::p-selectButton[1] | ancestor::p-selectbutton[1] | ancestor::div[contains(@class,'p-button-group')][1] | ancestor::div[contains(@class,'p-buttonset')][1] | ancestor::div[contains(@class,'p-selectbutton')][1]",
+      )
+      .first();
+
+    if (await group.isVisible({ timeout: 2_500 }).catch(() => false)) {
+      const groupBtns = group.getByRole("button");
+      const c = await groupBtns.count();
+      for (let i = 0; i < c; i++) {
+        const b = groupBtns.nth(i);
+        if (!(await b.isVisible({ timeout: 800 }).catch(() => false))) {
+          continue;
+        }
+        const hasBarsOrListIcon =
+          (await b.locator("i.pi.pi-bars, i.pi.pi-list").count()) > 0;
+        if (hasBarsOrListIcon) {
+          continue;
+        }
+        await b.scrollIntoViewIfNeeded();
+        await b.click({ force: true, timeout: 8_000 });
+        await this.page.waitForTimeout(400);
+        await assertMoneyRowVisible();
+        break;
+      }
+    }
   }
 
   /**
-   * Assert **Payment Schedule** is populated, then second **Lease Schedule** list **radio** and row checks.
+   * Assert **Payment Schedule** is populated, then exercise view toggles (`p-selectButton` or
+   * icon buttons), asserting **$** rows stay visible.
    */
   async expectPaymentScheduleViewTogglesWorkAndTablePopulated(): Promise<void> {
     this.logStep("Expect Payment Schedule View Toggles Work And Table Populated");
@@ -2426,363 +2156,27 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Resolves the **Edit Payment Schedule** modal after {@link clickEditPaymentScheduleLink}.
-   * Prime often leaves **duplicate** `.p-dialog` / `[role=dialog]` nodes (hidden template + visible overlay);
-   * `.filter({ has: page.getByText(...) }).first()` can attach to the **wrong** (invisible) shell. We scan
-   * **visible** hosts from **last → first** (top overlay is usually last in DOM) and fingerprint on **innerText**
-   * (Calculate, Reset, APPLY or CANCELAPPLY, plus segment type labels Normal or Fixed).
-   */
-  private async resolveEditPaymentScheduleDialog(): Promise<Locator> {
-    // eslint-disable-next-line no-console
-    console.log("Waiting for Payment Schedule dialog");
-    await this.waitUntilNoVisibleAppLoaderOverlays(90_000).catch(() => {});
-    await this.page.waitForTimeout(300);
-
-    const shells = this.page.locator('[role="dialog"], .p-dialog, p-dynamicdialog');
-
-    const innerLooksLikePaymentScheduleEditor = (text: string): boolean => {
-      const t = text.replace(/\s+/g, " ");
-      if (!/Calculate/i.test(t)) return false;
-      if (!/Reset/i.test(t)) return false;
-      if (!/APPLY|CANCELAPPLY|CANCEL\s*APPLY/i.test(t)) return false;
-      if (!/(?:Normal|Fixed|Type\s*Number|Segment)/i.test(t)) return false;
-      return true;
-    };
-
-    let chosenIdx = -1;
-    try {
-      await expect
-        .poll(
-          async () => {
-            const n = await shells.count();
-            for (let i = n - 1; i >= 0; i--) {
-              const d = shells.nth(i);
-              if (!(await d.isVisible({ timeout: 600 }).catch(() => false))) continue;
-              const raw = (await d.innerText().catch(() => "")).trim();
-              if (raw.length === 0) continue;
-              if (!innerLooksLikePaymentScheduleEditor(raw)) continue;
-              chosenIdx = i;
-              return true;
-            }
-            return false;
-          },
-          { timeout: 45_000, intervals: [200, 400, 800, 1_500, 2_500] },
-        )
-        .toBeTruthy();
-    } catch {
-      const dialogs = await this.page
-        .locator('[role="dialog"], .p-dialog, p-dynamicdialog')
-        .allTextContents();
-      // eslint-disable-next-line no-console
-      console.log(dialogs);
-      await this.page
-        .screenshot({
-          path: "test-results/edit-payment-schedule-dialog-timeout.png",
-          fullPage: true,
-        })
-        .catch(() => {});
-      throw new Error(
-        "Payment Schedule dialog not visible within 45s (expected visible dialog with Calculate, Reset, APPLY, and segment type UI).",
-      );
-    }
-
-    if (chosenIdx < 0) {
-      throw new Error("resolveEditPaymentScheduleDialog: poll succeeded but no dialog index chosen.");
-    }
-
-    const dlg = shells.nth(chosenIdx);
-    await expect(dlg).toBeVisible({ timeout: 8_000 });
-    return dlg;
-  }
-
-  /** **Edit Payment Schedule** — scoped to quote; **`getByRole` + regex** matches Prime label text. */
-  async clickEditPaymentScheduleLink(): Promise<void> {
-    this.logStep("Payment Schedule: click Edit Payment Schedule");
-    await this.dismissPortalsVersionModalIfOpen();
-    const root = this.standardQuoteRoot();
-    const edit = root
-      .getByRole("button", { name: /Edit\s+Payment\s+Schedule/i })
-      .or(root.getByRole("button", { name: "Edit Payment Schedule", exact: true }))
-      .or(root.getByText("Edit Payment Schedule", { exact: true }))
-      .or(root.getByRole("link", { name: /Edit\s+Payment\s+Schedule/i }))
-      .first();
-    await expect(edit).toBeVisible({ timeout: 15_000 });
-    await edit.scrollIntoViewIfNeeded();
-    await edit.click({ force: true, timeout: 15_000 });
-    // eslint-disable-next-line no-console
-    console.log("Clicked Edit Payment Schedule");
-    await this.waitUntilNoVisibleAppLoaderOverlays(90_000).catch(() => {});
-    await this.page.waitForTimeout(300);
-  }
-
-  private async readPrimeDropdownLabel(dd: Locator): Promise<string> {
-    const prime = dd.locator(".p-dropdown-label").first();
-    if (await prime.isVisible({ timeout: 600 }).catch(() => false)) {
-      return (await prime.innerText().catch(() => "")).trim();
-    }
-    return (await dd.innerText().catch(() => "")).trim();
-  }
-
-  /** Open row **Type** control (Prime **`p-dropdown`** or **`combobox`**) and choose **Fixed**. */
-  private async selectFixedFromRowTypeControl(control: Locator): Promise<void> {
-    await expect(control).toBeVisible({ timeout: 12_000 });
-    const trigger = control.locator(".p-dropdown-trigger").first();
-    if (await trigger.isVisible({ timeout: 1_500 }).catch(() => false)) {
-      await trigger.click({ force: true, timeout: 10_000 });
-    } else {
-      await control.click({ force: true, timeout: 10_000 });
-    }
-    const fixed = this.page
-      .locator(".p-dropdown-panel li, .p-overlay-visible li, div[role='listbox'] [role='option']")
-      .filter({ hasText: /^Fixed$/ })
-      .first();
-    await expect(fixed).toBeVisible({ timeout: 10_000 });
-    await fixed.click({ timeout: 12_000 });
-    await this.page.keyboard.press("Escape").catch(() => {});
-  }
-
-  /**
-   * Visible segment **Type** label (**Normal** or **Fixed**) in **Edit Payment Schedule**.
-   * Some builds default the first row to **Fixed** (no standalone **Normal** text) — still need the dropdown.
-   */
-  private visibleScheduleTypeLabelsInDialog(dlg: Locator): Locator {
-    return dlg.getByText(/^(Normal|Fixed)$/i).filter({ visible: true });
-  }
-
-  /** @deprecated Use {@link visibleScheduleTypeLabelsInDialog} — kept name for call sites that mean “type column”. */
-  private visibleNormalTypeLabelsInDialog(dlg: Locator): Locator {
-    return this.visibleScheduleTypeLabelsInDialog(dlg);
-  }
-
-  /** Prime **`p-dropdown`** host wrapping a visible **Normal** label (`nth` = which visible **Normal**, not `tbody tr`). */
-  private typeDropdownHostFromVisibleNormal(
-    dlg: Locator,
-    visibleNormalIndex: number,
-  ): Locator {
-    const label = this.visibleScheduleTypeLabelsInDialog(dlg).nth(visibleNormalIndex);
-    return label
-      .locator(
-        "xpath=ancestor::p-dropdown[1] | ancestor::*[contains(@class,'p-dropdown')][1]",
-      )
-      .first();
-  }
-
-  private async clickTypeDropdownTriggerBesideVisibleNormal(
-    dlg: Locator,
-    visibleNormalIndex: number,
-  ): Promise<Locator> {
-    const label = this.visibleNormalTypeLabelsInDialog(dlg).nth(visibleNormalIndex);
-    await expect(label).toBeVisible({ timeout: 15_000 });
-    const host = this.typeDropdownHostFromVisibleNormal(dlg, visibleNormalIndex);
-    await expect(host).toBeVisible({ timeout: 10_000 });
-    const trigger = host
-      .locator(
-        ".p-dropdown-trigger, .p-dropdown-trigger-icon, span.p-dropdown-trigger-icon, button.p-dropdown-trigger",
-      )
-      .first();
-    await trigger.click({ force: true, timeout: 12_000 });
-    return host;
-  }
-
-  private async chooseFixedFromOpenDropdownPanel(): Promise<void> {
-    const fixed = this.page
-      .locator(".p-dropdown-panel li, .p-overlay-visible li, div[role='listbox'] [role='option']")
-      .filter({ hasText: /^Fixed$/ })
-      .first();
-    await expect(fixed).toBeVisible({ timeout: 12_000 });
-    await fixed.click({ timeout: 12_000 });
-    await this.page.keyboard.press("Escape").catch(() => {});
-  }
-
-  private async chooseNormalFromOpenDropdownPanel(): Promise<void> {
-    const normal = this.page
-      .locator(".p-dropdown-panel li, .p-overlay-visible li, div[role='listbox'] [role='option']")
-      .filter({ hasText: /^Normal$/i })
-      .first();
-    await expect(normal).toBeVisible({ timeout: 12_000 });
-    await normal.click({ timeout: 12_000 });
-    await this.page.keyboard.press("Escape").catch(() => {});
-  }
-
-  /**
-   * **Edit Payment Schedule** (single dialog session): **Normal → Fixed** → **Calculate** → **Reset** →
-   * loader + settle → **Calculate** again → **APPLY** when enabled.
-   * Does **not** close/re-open the dialog between **Reset** and **APPLY**.
-   * Does **not** assert “no errors” here — Prime **alert** / toast locators can stay attached or visible while **APPLY** is still valid (same practical outcome as flows without this modal).
-   */
-  private async editPaymentScheduleDialogFixedCalculateNormalErrorRecoverApply(
-    dlg: Locator,
-  ): Promise<void> {
-    this.logStep(
-      "Edit Payment Schedule: Normal→Fixed → Calculate → Reset → Calculate → Apply",
-    );
-
-    await expect(dlg).toBeVisible({ timeout: 10_000 });
-    // eslint-disable-next-line no-console
-    console.log("Dialog opened");
-
-    const openDropdownFromSegmentTypeLabel = async (label: Locator): Promise<void> => {
-      const typeRowL = label.locator("xpath=ancestor::tr[1]");
-      const useRowScopedL =
-        (await typeRowL.count()) > 0 &&
-        (await typeRowL
-          .first()
-          .isVisible({ timeout: 2_000 })
-          .catch(() => false));
-      const host = useRowScopedL
-        ? typeRowL.first().locator("p-dropdown, [class*='p-dropdown']").first()
-        : label
-            .locator(
-              "xpath=ancestor::p-dropdown[1] | ancestor::*[contains(@class,'p-dropdown')][1]",
-            )
-            .first();
-      await expect(host).toBeVisible({ timeout: 10_000 });
-      await host
-        .locator(
-          ".p-dropdown-trigger, .p-dropdown-trigger-icon, span.p-dropdown-trigger-icon, button.p-dropdown-trigger",
-        )
-        .first()
-        .click({ force: true, timeout: 12_000 });
-    };
-
-    const pickInitialSegmentTypeIndex = async (): Promise<number> => {
-      const n = await this.visibleScheduleTypeLabelsInDialog(dlg).count();
-      return n >= 2 ? 1 : 0;
-    };
-
-    const idx = await pickInitialSegmentTypeIndex();
-    const typeLabels = this.visibleScheduleTypeLabelsInDialog(dlg);
-    const nLab = await typeLabels.count();
-    const labelForRow =
-      nLab > 0
-        ? typeLabels.nth(idx)
-        : dlg
-            .locator("tbody tr")
-            .filter({ has: dlg.locator("p-dropdown, [class*='p-dropdown']") })
-            .first()
-            .locator("p-dropdown, [class*='p-dropdown']")
-            .first();
-
-    await expect(labelForRow).toBeVisible({
-      timeout: 15_000,
-    });
-
-    await openDropdownFromSegmentTypeLabel(labelForRow);
-    await this.chooseFixedFromOpenDropdownPanel();
-    // eslint-disable-next-line no-console
-    console.log("Fixed selected");
-    await this.page.waitForTimeout(500);
-
-    await dlg.getByRole("button", { name: /^Calculate$/i }).first().click({ timeout: 15_000 });
-    // eslint-disable-next-line no-console
-    console.log("First Calculate clicked");
-    await this.waitUntilNoVisibleAppLoaderOverlays(45_000).catch(() => {});
-    await this.page.waitForTimeout(600);
-
-    await dlg.getByRole("button", { name: /^Reset$/i }).first().click({ timeout: 15_000 });
-    // eslint-disable-next-line no-console
-    console.log("Reset clicked");
-    await this.waitUntilNoVisibleAppLoaderOverlays(45_000).catch(() => {});
-    await this.page.waitForTimeout(1_000);
-    // eslint-disable-next-line no-console
-    console.log("Schedule restored");
-
-    await dlg.getByRole("button", { name: /^Calculate$/i }).first().click({ timeout: 15_000 });
-    // eslint-disable-next-line no-console
-    console.log("Second Calculate clicked");
-    await this.waitUntilNoVisibleAppLoaderOverlays(45_000).catch(() => {});
-    await this.page.waitForTimeout(600);
-
-    const applyBtn = dlg
-      .locator("button")
-      .filter({ hasText: /^APPLY$/i })
-      .or(dlg.getByRole("button", { name: /^APPLY$/i }))
-      .first();
-    await expect(applyBtn).toBeEnabled({ timeout: 30_000 });
-    // eslint-disable-next-line no-console
-    console.log("Apply enabled");
-    await applyBtn.click({ timeout: 15_000 });
-    // eslint-disable-next-line no-console
-    console.log("Apply clicked");
-    await this.waitUntilNoVisibleAppLoaderOverlays(45_000).catch(() => {});
-    await dlg.waitFor({ state: "hidden", timeout: 30_000 }).catch(() => {});
-  }
-
-  /**
-   * **Payment Schedule** table data → **Edit Payment Schedule** → Normal/Fixed validation dialog flow.
-   * {@link expectPaymentScheduleSectionWithTableData} may select the **list** schedule radio when **Summary**
-   * leaves **`tbody`** empty (required for **Edit Payment Schedule**); the **dialog** steps do not toggle radios.
-   */
-  async editPaymentScheduleListViewFixedResetCalculateApply(): Promise<void> {
-    this.logStep(
-      "Payment Schedule: table → Edit Payment Schedule → Fixed → Calculate → Reset → Calculate → Apply",
-    );
-    await this.expectPaymentScheduleSectionWithTableData();
-    await this.clickEditPaymentScheduleLink();
-
-    await this.dismissPortalsVersionModalIfOpen();
-    const dlg = await this.resolveEditPaymentScheduleDialog();
-    await this.editPaymentScheduleDialogFixedCalculateNormalErrorRecoverApply(dlg);
-  }
-
-  /**
-   * Prime **`role="dialog"`** opened from **Asset & Insurance** / **Trade-in** summary link.
-   * Do not use **`dialog` `.last()`** — another overlay (e.g. **Portal's Version**) can stack above
-   * or sit later in the DOM and steal focus from the real summary modal.
-   */
-  private assetInsuranceTradeInSummaryDialog(): Locator {
-    const titleRe =
-      /Asset\s*(?:,\s*|\s*&\s*)Insurance(?:\s*&\s*Trade-?\s*in|\s*Summary)?/i;
-    return this.page.getByRole("dialog").filter({ hasText: titleRe }).last();
-  }
-
-  /**
    * Clicks edit on the asset/insurance summary dialog. Finance Lease vs CSA may use
    * `.fa-pen-to-square`, `fa-pen`, Prime `pi-pen`, or a text "Edit" button.
    */
   async clickAssetSummaryEditButton(): Promise<void> {
     this.logStep("Click Asset Summary Edit Button");
-    await this.dismissPortalsVersionModalIfOpen();
-
-    const summaryDialog = this.assetInsuranceTradeInSummaryDialog();
-    await expect(summaryDialog).toBeVisible({ timeout: 30_000 });
+    const dialogLast = this.page.getByRole("dialog").last();
+    await dialogLast.waitFor({ state: "visible", timeout: 30_000 });
 
     const tryClickEdit = async (summary: Locator): Promise<boolean> => {
-      const byRole = summary.getByRole("button", {
-        name: /^(Edit|Update)$/i,
-      });
-      if (await byRole.isVisible({ timeout: 2_500 }).catch(() => false)) {
+      const byRole = summary.getByRole("button", { name: /^(Edit|Update)$/i });
+      if (await byRole.isVisible({ timeout: 1_000 }).catch(() => false)) {
         await byRole.first().click({ force: true, timeout: 15_000 });
         return true;
       }
-      const byRoleLoose = summary.getByRole("button", { name: /\bEdit\b/i });
-      if (await byRoleLoose.isVisible({ timeout: 1_500 }).catch(() => false)) {
-        await byRoleLoose.first().click({ force: true, timeout: 15_000 });
-        return true;
-      }
-      const byAriaTitle = summary.locator(
-        "button[aria-label*='Edit' i], a[aria-label*='Edit' i], button[title*='Edit' i], a[title*='Edit' i]",
-      );
-      if (await byAriaTitle.first().isVisible({ timeout: 1_500 }).catch(() => false)) {
-        await byAriaTitle.first().scrollIntoViewIfNeeded();
-        await byAriaTitle.first().click({ force: true, timeout: 15_000 });
-        return true;
-      }
-      const iconButtons = summary.locator(
-        "button:has(.pi-pencil), button:has(.pi-pen), a:has(.pi-pencil), a:has(.pi-pen), button:has(.fa-pen), a:has(.fa-pen)",
-      );
-      if (await iconButtons.first().isVisible({ timeout: 1_500 }).catch(() => false)) {
-        await iconButtons.first().scrollIntoViewIfNeeded();
-        await iconButtons.first().click({ force: true, timeout: 15_000 });
-        return true;
-      }
       for (const sel of [
-        "i.fa-pen-to-square, i.fa-pen, [class*='fa-pen-to-square'], [class*='pen-to-square'], .fa-solid.fa-pen-to-square, .fa-regular.fa-pen-to-square",
-        ".pi-pen, .pi-pencil, i[class*='pencil'], span.pi-pencil, span.pi-pen",
-        ".cursor-pointer.fa-pen-to-square, .fa-pen-to-square, svg[class*='pencil'], svg[class*='pen']",
+        "i.fa-pen-to-square, i.fa-pen, [class*='fa-pen-to-square'], [class*='pen-to-square']",
+        ".pi-pen, .pi-pencil, i[class*='pencil']",
+        ".cursor-pointer.fa-pen-to-square, .fa-pen-to-square",
       ]) {
         const icon = summary.locator(sel).first();
-        if (await icon.isVisible({ timeout: 2_500 }).catch(() => false)) {
+        if (await icon.isVisible({ timeout: 2_000 }).catch(() => false)) {
           const parent = icon.locator(
             "xpath=ancestor::button[1] | ancestor::a[1] | self::i",
           );
@@ -2805,42 +2199,21 @@ export class DOAssetDetailsPage extends BasePage {
           .click({ force: true, timeout: 15_000 });
         return true;
       }
-      /** FL / some builds: **Edit** sits on **Standard Quote** shell (e.g. ` Edit`), not inside summary `dialog`. */
-      const root = this.standardQuoteRoot();
-      const editNamed = root.getByRole("button", { name: /Edit/i });
-      const editCount = await editNamed.count();
-      for (let i = 0; i < editCount; i++) {
-        const b = editNamed.nth(i);
-        const a11y = ((await b.getAttribute("aria-label")) ?? "").toLowerCase();
-        const txt = ((await b.innerText().catch(() => "")) ?? "")
-          .replace(/\s+/g, " ")
-          .trim()
-          .toLowerCase();
-        if (a11y.includes("payment schedule") || txt.includes("payment schedule")) {
-          continue;
-        }
-        if (await b.isVisible({ timeout: 800 }).catch(() => false)) {
-          await b.scrollIntoViewIfNeeded().catch(() => {});
-          await b.click({ force: true, timeout: 15_000 });
-          return true;
-        }
-      }
       return false;
     };
 
     for (let round = 0; round < 2; round++) {
       if (round > 0) {
         await this.page.keyboard.press("Escape").catch(() => {});
-        await this.dismissPortalsVersionModalIfOpen();
         await this.openAssetInsuranceTradeInSummary();
       }
-      const s = this.assetInsuranceTradeInSummaryDialog();
-      await expect(s).toBeVisible({ timeout: 45_000 });
-      for (let w = 0; w < 10; w++) {
+      const s = this.page.getByRole("dialog").last();
+      await s.waitFor({ state: "visible", timeout: 45_000 });
+      for (let w = 0; w < 6; w++) {
         if (await tryClickEdit(s)) {
           return;
         }
-        await this.page.waitForTimeout(600);
+        await this.page.waitForTimeout(500);
       }
     }
     throw new Error(
@@ -2948,11 +2321,8 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   private interestRateAcceptable(n: number, target: number): boolean {
-    return (
-      !Number.isNaN(n) &&
-      n <= 5 &&
-      Math.abs(n - target) < 0.75
-    );
+    if (Number.isNaN(n) || Number.isNaN(target)) return false;
+    return Math.abs(n - target) < 0.75;
   }
 
   private async readInterestRateValue(field: Locator): Promise<number> {
@@ -2961,9 +2331,10 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Interest rate: Calculate / async pricing often overwrites the field (e.g. 12.75%).
-   * Fill, blur, wait for network settle, retry many times, and require a short stability
-   * window so we do not return while a late patch is still about to apply.
+   * Interest rate: async pricing may overwrite the field (e.g. 12.75% vs intended 4%).
+   * Fill, blur, wait for network / loaders, retry, and require a short stability window
+   * so we do not return while a late patch is still about to apply. Works for CSA rates
+   * above single-digit caps (e.g. 9%) and Finance Lease–style low rates.
    */
   async interestRate(rate: string): Promise<void> {
     this.logStep(`Set interest rate as ${this.stepValueDisplay(rate)}`);
@@ -2979,6 +2350,7 @@ export class DOAssetDetailsPage extends BasePage {
       await field.click({ clickCount: 3 });
       await field.fill(rate);
       await field.press("Tab");
+      await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
       await this.page
         .waitForLoadState("networkidle", { timeout: 8000 })
         .catch(() => {});
@@ -2991,6 +2363,7 @@ export class DOAssetDetailsPage extends BasePage {
       await this.page.keyboard.press("Control+A");
       await this.page.keyboard.type(rate, { delay: 40 });
       await field.press("Tab");
+      await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
       await this.page
         .waitForLoadState("networkidle", { timeout: 8000 })
         .catch(() => {});
@@ -3021,8 +2394,8 @@ export class DOAssetDetailsPage extends BasePage {
 
     const final = await this.readInterestRateValue(field);
     throw new Error(
-      `Interest rate did not stay at or below 5% (wanted ${rate}%, last read ${final}). ` +
-        `Calculate/async pricing may still be overwriting the field (e.g. 12.75%).`,
+      `Interest rate did not stabilize at ${rate}% (last read ${final}). ` +
+        `Async pricing may still be overwriting the field (e.g. 12.75%).`,
     );
   }
 
@@ -3032,6 +2405,80 @@ export class DOAssetDetailsPage extends BasePage {
     );
     await this.termsOfFinance(term);
     await this.interestRate(rate);
+  }
+
+  /**
+   * Finance Lease — Payment Summary: "Initial Lease Amount" is required (validation) before Calculate.
+   * Uses the label, then the row’s `p-inputtext` / input; avoids brittle `ng-pristine` / `ng-touched` classes.
+   */
+  async enterInitialLeaseAmountFinanceLease(amount: string): Promise<void> {
+    this.logStep(`Entered initial lease amount (finance lease) as ${this.stepValueDisplay(amount)}`);
+    const root = this.page
+      .locator("app-quote-details, app-standard-quote, app-payment-summary")
+      .last();
+    const value = amount.replace(/^\$/, "").trim() || amount;
+    const labelText = "Initial Lease Amount";
+
+    const fillInput = async (inp: Locator): Promise<void> => {
+      await inp.waitFor({ state: "visible", timeout: 20_000 });
+      await inp.scrollIntoViewIfNeeded();
+      await inp.click({ force: true });
+      await inp.clear().catch(() => {});
+      try {
+        await inp.fill(amount, { timeout: 10_000 });
+      } catch {
+        await inp.fill(value, { timeout: 10_000 });
+      }
+      await inp.press("Tab");
+    };
+
+    const byLabel = root.getByLabel(/Initial Lease Amount/i);
+    if (await byLabel.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await fillInput(byLabel);
+      return;
+    }
+
+    await root
+      .getByText(labelText, { exact: true })
+      .first()
+      .waitFor({ state: "visible", timeout: 20_000 });
+
+    const row = root
+      .locator(".p-field, .p-col, [class*='p-field']")
+      .filter({ has: root.getByText(labelText, { exact: true }) })
+      .first();
+    const inRow = row
+      .locator(
+        "input.p-inputtext, p-inputnumber input, input[mode='currency']",
+      )
+      .first();
+    if (await inRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await fillInput(inRow);
+      return;
+    }
+
+    const fromLabelXpath = root
+      .getByText(labelText, { exact: true })
+      .first()
+      .locator(
+        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'row') or contains(@class,'grid')][1]//input[contains(@class,'p-inputtext') or not(@type='hidden')][1]",
+      );
+    if (await fromLabelXpath.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await fillInput(fromLabelXpath);
+      return;
+    }
+
+    const wFull = root
+      .locator("input.p-inputtext.p-component.p-element.w-full")
+      .first();
+    if (await wFull.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await fillInput(wFull);
+      return;
+    }
+
+    throw new Error(
+      "Finance Lease: could not set Initial Lease Amount (tried getByLabel, p-field row, label ancestor input, w-full p-inputtext).",
+    );
   }
 
   /**
@@ -3214,14 +2661,10 @@ export class DOAssetDetailsPage extends BasePage {
       await this.page.waitForTimeout(400);
     }
     await btn.scrollIntoViewIfNeeded();
-    const enabled = await btn.isEnabled().catch(() => false);
     try {
       await btn.click({ timeout: 25_000 });
     } catch {
       await btn.click({ force: true, timeout: 25_000 });
-    }
-    if (!enabled) {
-      await btn.click({ force: true, timeout: 15_000 }).catch(() => {});
     }
 
     await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
@@ -3231,233 +2674,11 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
     await this.page.waitForTimeout(1_500);
   }
-
-  /**
-   * Finds a **visible** `app-payment-summary` that shows the **Payment Summary** heading (scans newest-first under
-   * the quote shell, then `body` — avoids a single `.filter({ visible: true })` on the host when the browser
-   * mis-reports visibility on the custom element).
-   */
-  private async findPaymentSummaryPanel(): Promise<Locator | null> {
-    const scan = async (root: Locator): Promise<Locator | null> => {
-      const list = root.locator("app-payment-summary");
-      const n = await list.count();
-      for (let i = n - 1; i >= 0; i--) {
-        const p = list.nth(i);
-        /** Prefer heading visibility — the `app-payment-summary` host is sometimes not “visible” to Playwright. */
-        const heading = p.getByText(/Payment\s+Summary/i).first();
-        if (await heading.isVisible({ timeout: 1_200 }).catch(() => false)) {
-          return p;
-        }
-      }
-      return null;
-    };
-
-    const shells = this.page.locator("app-quote-details, app-standard-quote");
-    const shellCount = await shells.count();
-    for (let s = shellCount - 1; s >= 0; s--) {
-      const shell = shells.nth(s);
-      if (!(await shell.isVisible({ timeout: 500 }).catch(() => false))) continue;
-      const panel = await scan(shell);
-      if (panel) return panel;
-    }
-
-    return scan(this.page.locator("body"));
-  }
-
-  /** **Calculate** in Payment Summary — outlined PrimeNG, role, or label → `button` ancestor. */
-  private async findPaymentSummaryCalculateButton(panel: Locator): Promise<Locator> {
-    const candidates: Locator[] = [
-      panel
-        .locator(`button.p-button-outlined[data-pc-name="button"]:has(span.p-button-label)`)
-        .filter({ hasText: /^Calculate$/i })
-        .first(),
-      panel.locator("button.p-button-outlined").filter({ hasText: /^Calculate$/i }).first(),
-      panel.getByRole("button", { name: /^Calculate$/i }).first(),
-      panel
-        .locator("span.p-button-label")
-        .filter({ hasText: /^Calculate$/ })
-        .first()
-        .locator("xpath=ancestor::button[1]"),
-    ];
-    for (const c of candidates) {
-      if ((await c.count()) > 0 && (await c.isVisible({ timeout: 2_500 }).catch(() => false))) {
-        return c;
-      }
-    }
-    return panel.getByRole("button", { name: /^Calculate$/i }).first();
-  }
-
-  private addonLikeUrl(): boolean {
-    return /add-on-accessories|addon-accessories|addOnAccessories|add_on_accessories/i.test(
-      this.page.url(),
-    );
-  }
-
-  /** When Add Ons is full-page, return to the quote so **Payment Summary** exists. */
-  private async leaveAddOnsSurfaceIfPaymentSummaryMissing(): Promise<void> {
-    if ((await this.findPaymentSummaryPanel()) != null) {
-      return;
-    }
-
-    if (this.addonLikeUrl()) {
-      this.logStep("Add Ons URL pattern — goBack toward quote (Payment Summary)");
-      await this.page.goBack({ waitUntil: "domcontentloaded" }).catch(() => {});
-      await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
-      await this.page.waitForTimeout(900);
-      return;
-    }
-
-    const addOnsHost = this.page.locator("app-add-on-accessories").last();
-    if (await addOnsHost.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      this.logStep("Add-ons host visible but no Payment Summary — goBack (dedicated view without URL match)");
-      await this.page.goBack({ waitUntil: "domcontentloaded" }).catch(() => {});
-      await this.waitUntilNoVisibleAppLoaderOverlays(90_000).catch(() => {});
-      await this.page.waitForTimeout(900);
-    }
-  }
-
-  /**
-   * Clicks **Calculate** inside **Payment Summary** only (scoped `app-payment-summary` → `getByRole('button', { name: 'Calculate' })`).
-   * **Fast path:** walk visible quote shells and click the first visible summary **Calculate** (typical Asset Details layout).
-   * **Fallback:** dedicated add-ons route (`goBack`) + {@link findPaymentSummaryPanel} + outlined/label locators.
-   */
-  async clickPaymentSummaryCalculateButton(): Promise<void> {
-    this.logStep("Click Calculate (Payment Summary)");
-    // eslint-disable-next-line no-console
-    console.log("Before Calculate");
-
-    await this.page.keyboard.press("Escape").catch(() => {});
-    await this.waitUntilNoVisibleAppLoaderOverlays(20_000).catch(() => {});
-
-    await this.leaveAddOnsSurfaceIfPaymentSummaryMissing();
-
-    const paymentSummaryHeading = this.page.getByText(/Payment\s+Summary/i).first();
-    await expect(paymentSummaryHeading).toBeVisible({ timeout: 45_000 });
-    await paymentSummaryHeading.scrollIntoViewIfNeeded();
-    await this.waitUntilNoVisibleAppLoaderOverlays(30_000).catch(() => {});
-    await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(() => {});
-
-    const finishAfterPaymentSummaryCalculate = async (): Promise<void> => {
-      await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
-      await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(() => {});
-      await this.page.waitForLoadState("domcontentloaded").catch(() => {});
-      await this.page.waitForTimeout(800);
-      // eslint-disable-next-line no-console
-      console.log("After Calculate");
-    };
-
-    /** Embedded **Payment Summary** (`gen-card` / `div.PaymentSummary` / `base-form`) may not use `app-payment-summary` on some builds. */
-    const clickCalculateFromPaymentSummaryHeading = async (): Promise<boolean> => {
-      const heading = this.page.getByText(/^Payment Summary$/i).first();
-      if (!(await heading.isVisible({ timeout: 3_000 }).catch(() => false))) {
-        return false;
-      }
-      const shell = heading
-        .locator(
-          "xpath=ancestor::app-payment-summary[1] | ancestor::p-card[1] | ancestor::gen-card[1] | ancestor::div[contains(@class,'PaymentSummary')][1]",
-        )
-        .first();
-      const btn = shell.getByRole("button", { name: /^Calculate$/i }).first();
-      if (!(await btn.isVisible({ timeout: 2_500 }).catch(() => false))) {
-        return false;
-      }
-      await heading.scrollIntoViewIfNeeded();
-      await btn.scrollIntoViewIfNeeded();
-      for (let w = 0; w < 50; w++) {
-        if (await btn.isEnabled().catch(() => false)) break;
-        await this.page.waitForTimeout(200);
-      }
-      try {
-        await btn.click({ timeout: 12_000 });
-      } catch {
-        try {
-          await btn.click({ force: true, timeout: 10_000 });
-        } catch {
-          await btn.evaluate((el) => (el as HTMLElement).click());
-        }
-      }
-      return true;
-    };
-
-    if (await clickCalculateFromPaymentSummaryHeading()) {
-      await finishAfterPaymentSummaryCalculate();
-      return;
-    }
-
-    const clickCalculateOnHost = async (host: Locator): Promise<boolean> => {
-      const btn = host.getByRole("button", { name: /^Calculate$/i }).first();
-      if (!(await btn.isVisible({ timeout: 2_500 }).catch(() => false))) {
-        return false;
-      }
-      await host.scrollIntoViewIfNeeded();
-      await btn.scrollIntoViewIfNeeded();
-      for (let w = 0; w < 50; w++) {
-        if (await btn.isEnabled().catch(() => false)) break;
-        await this.page.waitForTimeout(200);
-      }
-      try {
-        await btn.click({ timeout: 12_000 });
-      } catch {
-        try {
-          await btn.click({ force: true, timeout: 10_000 });
-        } catch {
-          await btn.evaluate((el) => (el as HTMLElement).click());
-        }
-      }
-      return true;
-    };
-
-    const shells = this.page.locator("app-quote-details, app-standard-quote");
-    const shellCount = await shells.count();
-    for (let s = shellCount - 1; s >= 0; s--) {
-      const shell = shells.nth(s);
-      if (!(await shell.isVisible({ timeout: 500 }).catch(() => false))) continue;
-      const summaries = shell.locator("app-payment-summary");
-      const n = await summaries.count();
-      for (let i = n - 1; i >= 0; i--) {
-        if (await clickCalculateOnHost(summaries.nth(i))) {
-          await finishAfterPaymentSummaryCalculate();
-          return;
-        }
-      }
-    }
-
-    await expect
-      .poll(async () => (await this.findPaymentSummaryPanel()) !== null, {
-        timeout: 25_000,
-        intervals: [300, 800, 1_500],
-      })
-      .toBeTruthy();
-
-    const panel = (await this.findPaymentSummaryPanel())!;
-    await panel.scrollIntoViewIfNeeded();
-    await this.waitUntilNoVisibleAppLoaderOverlays(15_000).catch(() => {});
-
-    const btn = await this.findPaymentSummaryCalculateButton(panel);
-    await btn.waitFor({ state: "visible", timeout: 20_000 });
-    await btn.scrollIntoViewIfNeeded();
-    for (let w = 0; w < 50; w++) {
-      if (await btn.isEnabled().catch(() => false)) break;
-      await this.page.waitForTimeout(200);
-    }
-    try {
-      await btn.click({ timeout: 12_000 });
-    } catch {
-      try {
-        await btn.click({ force: true, timeout: 10_000 });
-      } catch {
-        await btn.evaluate((el) => (el as HTMLElement).click());
-      }
-    }
-
-    await finishAfterPaymentSummaryCalculate();
-  }
-
   async paymentSummary(): Promise<void> {
     this.logStep("Payment Summary");
     // await this.loanDAte();
     // await this.firstPayment();
-    await this.clickPaymentSummaryCalculateButton();
+    await this.clickCalculateButton();
   }
   async clickNextButton(): Promise<void> {
     this.logStep("Click Next Button");
@@ -3470,11 +2691,6 @@ export class DOAssetDetailsPage extends BasePage {
     await this.nextButton.click();
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
     await this.page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
-  }
-
-  /** Page object for **Add Ons & Accessories** (Standard Quote / Lease Details expansion). */
-  addOnsAccessoriesPage(): DOAddOnsAccessoriesPage {
-    return new DOAddOnsAccessoriesPage(this.page);
   }
 
   /**
@@ -3554,11 +2770,25 @@ export class DOAssetDetailsPage extends BasePage {
 
   async waitForAddBorrowerButton(): Promise<void> {
     this.logStep("Wait For Add Borrower Button");
-    await this.addBorrowerorGuarantorButton.waitFor({
-      state: "visible",
-      timeout: 120000,
-    });
-    await this.addBorrowerorGuarantorButton.scrollIntoViewIfNeeded();
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    await this.standardQuoteRoot()
+      .getByText(/Customer\s+Details/i)
+      .first()
+      .waitFor({ state: "visible", timeout: 90_000 })
+      .catch(() => {});
+    await expect
+      .poll(
+        async () => {
+          const btn = await this.addBorrowerorGuarantorButton.isVisible().catch(() => false);
+          const personal = await this.page.locator("app-personal-details").isVisible().catch(() => false);
+          return btn || personal;
+        },
+        { timeout: 120_000 },
+      )
+      .toBe(true);
+    if (await this.addBorrowerorGuarantorButton.isVisible().catch(() => false)) {
+      await this.addBorrowerorGuarantorButton.scrollIntoViewIfNeeded();
+    }
   }
 
   async clickAddBorrowerorGuarantorButton(): Promise<void> {
