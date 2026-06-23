@@ -10,9 +10,12 @@ import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAddressDetailsPage,
   DOAssetDetailsPage,
+  DOCustomerQuotePostSubmitPage,
   DODashboardPage,
   DOEmploymentDetailsPage,
   DOFinancialPositionPage,
+  DOReferenceDetailsPage,
+  DOSoleTraderDetailsPage,
   DOTrustDetailsPage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
@@ -31,7 +34,7 @@ const TLC_DEALER = "Armstrong Prestige Wellington";
  * Override with `UDC_EXISTING_CUSTOMER_NUMBER` when QAT data differs.
  */
 const EXISTING_UDC_CUSTOMER_NUMBER =
-  process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "1183126";
+  process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "1183121";
 
 /** Existing **Business** party for FIS pre-populate (UDP-T3750). Override with `UDC_EXISTING_BUSINESS_UDC_NUMBER`. */
 const EXISTING_BUSINESS_UDC_CUSTOMER_NUMBER =
@@ -45,9 +48,9 @@ const UDP_T3715_COMPANY_NAME_SEARCH =
 const UDP_T3716_REGISTERED_NUMBER_SEARCH =
   process.env.UDC_EXISTING_REGISTERED_NUMBER_SEARCH?.trim() || "789123";
 
-/** Optional: trust name substring for UDP-T3717 borrower search; default matches CSA trust regression data. */
-const UDP_T3717_TRUST_NAME_SEARCH =
-  process.env.UDC_EXISTING_TRUST_NAME_SEARCH?.trim() || "TLC Automation Family Trust";
+/** Optional: partial **Customer Name** when UDC existing-individual search has no hit (UDP-T3764 / T3743). */
+const EXISTING_CUSTOMER_NAME_SEARCH =
+  process.env.UDC_EXISTING_CUSTOMER_NAME_SEARCH?.trim() || "Doe";
 
 function standardQuoteRoot(page: Page): Locator {
   return page.locator("app-quote-details, app-standard-quote").first();
@@ -112,6 +115,7 @@ async function openStandardQuoteOnCustomerDetailsStep(page: Page): Promise<DOAss
   await selectCsaProductAndProgram(assetDetailsPage);
   await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
   await assetDetailsPage.clickCalculateButton();
+  await assetDetailsPage.enterOriginationReference("SQ-CSA-CD-Ref");
   await assetDetailsPage.clickNextButton();
   await assetDetailsPage.waitForAddBorrowerButton();
   return assetDetailsPage;
@@ -130,6 +134,7 @@ async function openStandardQuoteBusinessLoanOnCustomerDetailsStep(
   await assetDetailsPage.chooseProgram(CSA_B_SQ_PROGRAM);
   await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
   await assetDetailsPage.clickCalculateButton();
+  await assetDetailsPage.enterOriginationReference("SQ-CSA-CD-Ref");
   await assetDetailsPage.clickNextButton();
   await assetDetailsPage.waitForAddBorrowerButton();
   return assetDetailsPage;
@@ -415,16 +420,315 @@ async function fillMinimalAddressContinue(
   page: Page,
   addressDetailsPage: DOAddressDetailsPage,
 ): Promise<void> {
+  await fillAddressWithResidenceTypeAndContinue(page, addressDetailsPage, "Boarding");
+}
+
+async function fillAddressWithResidenceTypeAndContinue(
+  page: Page,
+  addressDetailsPage: DOAddressDetailsPage,
+  residenceType: string,
+): Promise<void> {
   await addressDetailsPage.waitForPhysicalAddressStep();
   await addressDetailsPage.timeAtAddress("5", "0");
   await addressDetailsPage.enterStreetNumber("123");
   await addressDetailsPage.enterStreetName("Main Street");
   await addressDetailsPage.enterCity("Wellington");
   await addressDetailsPage.chooseCountry("New Zealand");
-  await addressDetailsPage.selectResidenceType("Boarding");
+  await addressDetailsPage.selectResidenceType(residenceType);
   await addressDetailsPage.clickReuseForPostalAddressToggle();
   await addressDetailsPage.clickSaveAddressDetails();
   await addressDetailsPage.clickNextButton();
+}
+
+async function fillTrustNameSearchTerm(dlg: Locator, term: string): Promise<void> {
+  const byLabel = dlg.getByRole("textbox", { name: /Trust Name/i }).first();
+  const byTextHost = dlg.locator("text").filter({ hasText: /^Trust Name/i }).locator("#text").first();
+  const byXpath = dlg.locator(
+    "xpath=.//label[contains(normalize-space(.),'Trust Name')][1]/following::input[contains(@class,'p-inputtext')][1]",
+  );
+  if (await byLabel.isVisible({ timeout: 6_000 }).catch(() => false)) {
+    await byLabel.fill(term);
+  } else if (await byTextHost.isVisible({ timeout: 4_000 }).catch(() => false)) {
+    await byTextHost.fill(term);
+  } else {
+    await byXpath.fill(term);
+  }
+}
+
+/** CSA-B: **Trust Name** search hit → **Borrower Result** → **Add** → **Trust Details** (UDP-T3753). */
+async function openExistingTrustDetailsViaTrustNameSearch(
+  assetDetailsPage: DOAssetDetailsPage,
+  trustSearchTerm: string = UDP_T3717_TRUST_NAME_SEARCH,
+): Promise<DOTrustDetailsPage> {
+  const page = assetDetailsPage.page;
+  await assetDetailsPage.waitForAddBorrowerButton();
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  const dlg = customerSearchDialog(page);
+  await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
+  await clickSearchCustomerType(dlg, "trust");
+  await assetDetailsPage.searchByDropdownClick();
+  const panel = page.locator(".p-dropdown-panel").last();
+  const trustNameOpt = panel.getByRole("option", { name: /Trust Name/i }).first();
+  if (await trustNameOpt.isVisible({ timeout: 12_000 }).catch(() => false)) {
+    await trustNameOpt.click();
+    await page
+      .locator(".p-dropdown-panel")
+      .last()
+      .waitFor({ state: "hidden", timeout: 15_000 })
+      .catch(() => {});
+  }
+  await fillTrustNameSearchTerm(dlg, trustSearchTerm);
+  await assetDetailsPage.clickSearchButton();
+  await waitBorrowerResultAndClickAdd(page);
+  const trustPage = new DOTrustDetailsPage(page);
+  await trustPage.waitForTrustDetailsStep();
+  return trustPage;
+}
+
+async function selectCustomerRole(page: Page, role: string): Promise<void> {
+  const roleTrig = page
+    .locator("label")
+    .filter({ hasText: /Customer Role/i })
+    .first()
+    .locator(
+      "xpath=following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+    );
+  await expect.soft(roleTrig).toBeVisible({ timeout: 15_000 });
+  await roleTrig.click();
+  const escaped = role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  await page.getByRole("option", { name: new RegExp(`^${escaped}$`, "i") }).first().click({
+    timeout: 15_000,
+  });
+  await page.locator(".p-dropdown-panel").last().waitFor({ state: "hidden", timeout: 12_000 }).catch(() => {});
+}
+
+async function fillMinimalIndividualFinancialForSubmit(fin: DOFinancialPositionPage): Promise<void> {
+  await fin.waitForFinancialPositionStep();
+  await fin.selectIndividualHomeOwnershipType("Mortgage");
+  await fin.fillIndividualVehicleValueAmount("$18,000.00");
+  await fin.fillIndividualFurnitureEffectsValueAmount("$12,500.00");
+  await fin.fillFirstLiabilityBalanceAndAmount("$500,000.00", "$2,500.00");
+  await fin.setFirstLiabilityRowFrequencyMonthly();
+  await fin.fillFirstIncomeAmount("$5,000.00");
+  await fin.setTakeHomePayFrequencyMonthly();
+  await fin.fillExpenditureAmountByLabel(/Council Rates/i, "$220.00");
+  await fin.setExpenditureRowFrequencyMonthlyByLabel(/Council Rates/i);
+  await fin.fillExpenditureAmountByLabel(/Living Expenses/i, "$900.00");
+  await fin.setExpenditureRowFrequencyMonthlyByLabel(/Living Expenses/i);
+  await fin.expectEssentialOutgoingTypeDefaultOther();
+  await fin.fillEssentialOutgoingAmount("$150.00");
+  await fin.setEssentialOutgoingFrequencyMonthly();
+}
+
+async function completeIndividualBorrowerAfterAddressStep(page: Page): Promise<void> {
+  const emp = new DOEmploymentDetailsPage(page);
+  await emp.waitForEmploymentDetailsStep();
+  await emp.enterCurrentEmployerName("Employer Ltd");
+  await emp.selectCurrentOccupation("Accountant");
+  await emp.selectCurrentEmploymentType("Full Time Employed");
+  await emp.enterCurrentTimeWithEmployer("5", "0");
+  await emp.clickNextButton();
+
+  const fin = new DOFinancialPositionPage(page);
+  await fillMinimalIndividualFinancialForSubmit(fin);
+  await fin.clickNextButton();
+
+  const ref = new DOReferenceDetailsPage(page);
+  await ref.waitForReferenceDetailsStep();
+  await ref.confirmCustomerDetailsCorrect();
+  await ref.clickSubmitButton();
+}
+
+async function submitPrimaryIndividualBorrowerToUploadStep(
+  page: Page,
+): Promise<{ assetDetailsPage: DOAssetDetailsPage }> {
+  const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+  const personalDetailsPage = await openAddNewIndividualPersonal(assetDetailsPage);
+  await fillValidIndividualPersonalBorrower(personalDetailsPage);
+  await personalDetailsPage.clickNextButton();
+
+  const addressDetailsPage = new DOAddressDetailsPage(page);
+  await fillMinimalAddressContinue(page, addressDetailsPage);
+  await completeIndividualBorrowerAfterAddressStep(page);
+
+  const postSubmit = new DOCustomerQuotePostSubmitPage(page);
+  await postSubmit.waitForUploadStep();
+  return { assetDetailsPage };
+}
+
+async function waitForPersonalDetailsAfterCustomerAdd(page: Page): Promise<void> {
+  const markers = [
+    page.locator("app-personal-details").first(),
+    page.locator("app-personal-detail").first(),
+    page.getByText(/1\.\s*Personal Details/i).first(),
+    page.getByRole("textbox", { name: /First Name/i }).first(),
+  ];
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    for (const marker of markers) {
+      if (await marker.isVisible({ timeout: 500 }).catch(() => false)) {
+        return;
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error("Personal Details did not open after borrower Add.");
+}
+
+async function advanceIndividualToEmploymentStep(page: Page): Promise<void> {
+  const onEmployment = async (): Promise<boolean> =>
+    page.getByText(/^Current Employment$/i).first().isVisible({ timeout: 5_000 }).catch(() => false);
+
+  if (await onEmployment()) {
+    return;
+  }
+
+  const personal = new DOPersonalDetailsPage(page);
+  const onPersonal =
+    (await personal.personalDetailsRoot.isVisible({ timeout: 8_000 }).catch(() => false)) ||
+    (await page.locator("app-personal-detail").first().isVisible({ timeout: 5_000 }).catch(() => false));
+
+  if (onPersonal) {
+    await personal.clickNextButton();
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+  }
+
+  if (await onEmployment()) {
+    return;
+  }
+
+  const address = new DOAddressDetailsPage(page);
+  if (await address.physicalSearchInput.isVisible({ timeout: 30_000 }).catch(() => false)) {
+    await fillMinimalAddressContinue(page, address);
+    return;
+  }
+
+  const empStep = page.locator(':text-is("3. Employment Details")');
+  if (await empStep.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    await empStep.click({ timeout: 30_000 });
+  }
+}
+
+async function openIndividualOnEmploymentStep(
+  page: Page,
+  opts?: { existingUdcNumber?: string },
+): Promise<DOEmploymentDetailsPage> {
+  const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+  if (opts?.existingUdcNumber) {
+    await addExistingIndividualFromSearch(assetDetailsPage, page, opts.existingUdcNumber);
+    await waitForPersonalDetailsAfterCustomerAdd(page);
+  } else {
+    const personal = await openAddNewIndividualPersonal(assetDetailsPage);
+    await fillValidIndividualPersonalBorrower(personal);
+  }
+  await advanceIndividualToEmploymentStep(page);
+  const emp = new DOEmploymentDetailsPage(page);
+  await emp.waitForEmploymentDetailsStep();
+  return emp;
+}
+
+/** CSA-B business loan — Individual search → **Add New Customer** → Sole Trader business + personal step. */
+async function openAddNewSoleTraderIndividual(
+  assetDetailsPage: DOAssetDetailsPage,
+  page: Page,
+): Promise<{ sole: DOSoleTraderDetailsPage; personal: DOPersonalDetailsPage }> {
+  const postSubmit = new DOCustomerQuotePostSubmitPage(page);
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  await postSubmit.selectSearchCustomerIndividualType();
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber("420");
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+  const sole = new DOSoleTraderDetailsPage(page);
+  await sole.waitForSoleTraderBusinessDetailsStep();
+  return { sole, personal: new DOPersonalDetailsPage(page) };
+}
+
+async function fillValidSoleTraderBorrower(
+  sole: DOSoleTraderDetailsPage,
+  personal: DOPersonalDetailsPage,
+): Promise<void> {
+  await sole.enterTradingName("Test Trading");
+  await sole.enterGstNumber("12345678");
+  await sole.fillBusinessDescription("Automation test — wholesale trade sample description.");
+  await sole.selectPrimaryNatureOfBusiness("0113 Vegetable Growing");
+  await sole.enterTimeInBusiness("5", "3");
+  await personal.chooseTitle("Dame");
+  await personal.enterFirstName("Liza");
+  await personal.enterMiddleName("Marie");
+  await personal.enterLastName("Doe");
+  await personal.chooseGender("Female");
+  await sole.enterDateOfBirth("01/01/1980");
+  await personal.chooseMarritalStatus("Married");
+  await personal.chooseNoOfDependents("2");
+  await personal.fillDependantsAgesInYears(["8", "12"]);
+  await sole.enterBusinessAreaCode("9");
+  await sole.enterBusinessPhoneNumber("0211234567");
+  await sole.enterBusinessEmail("liza.doe@example.com");
+  await personal.chooseLicenceType("Full Licence");
+  await personal.chooseCountryOfIssue("New Zealand");
+  await personal.enterLicenceNumber("AB123456");
+  await personal.enterVersionNumber("244");
+  await personal.chooseNewZealandResident("Yes");
+  await personal.chooseCountryOfBirth("New Zealand");
+  await personal.chooseCountryOfCitizenship("New Zealand");
+}
+
+async function fillMinimalSoleTraderAddressContinue(
+  page: Page,
+  address: DOAddressDetailsPage,
+): Promise<void> {
+  await address.waitForPhysicalAddressStep();
+  await address.selectResidenceType("Boarding");
+  try {
+    await address.timeAtAddress("1", "1");
+  } catch {
+    const soleRoot = page.locator("app-sole-trade").filter({ visible: true }).first();
+    const timeLabel = soleRoot.getByText(/Time at Address/i).first();
+    const yearsInput = timeLabel.locator("xpath=following::input[1]");
+    const monthsInput = soleRoot.getByText(/^Months$/i).first().locator("xpath=preceding::input[1]");
+    if (await yearsInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await yearsInput.fill("1");
+    }
+    if (await monthsInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await monthsInput.fill("1");
+    }
+  }
+  await address.enterStreetNumber("123");
+  await address.enterStreetName("Main Street");
+  await address.enterCity("Wellington");
+  await address.chooseCountry("New Zealand");
+  await address.clickReuseForPostalAddressToggle();
+  await address.clickNextButton();
+}
+
+async function fillMinimalSoleTraderEmploymentContinue(emp: DOEmploymentDetailsPage): Promise<void> {
+  await emp.waitForEmploymentDetailsStep();
+  await emp.enterCurrentEmployerName("Acme Finance Ltd");
+  await emp.selectCurrentOccupation("Accountant");
+  await emp.selectCurrentEmploymentType("Full Time Employed");
+  await emp.enterCurrentTimeWithEmployer("3", "0");
+  await emp.clickNextButton();
+}
+
+/** Individual + Business loan purpose (Sole Trader) through Employment → **Financial Position** (UDP-T3782). */
+async function openSoleTraderOnFinancialPositionStep(page: Page): Promise<DOFinancialPositionPage> {
+  const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+  const { sole, personal } = await openAddNewSoleTraderIndividual(assetDetailsPage, page);
+  await fillValidSoleTraderBorrower(sole, personal);
+  await sole.clickNextButton();
+  const address = new DOAddressDetailsPage(page);
+  await fillMinimalSoleTraderAddressContinue(page, address);
+  const emp = new DOEmploymentDetailsPage(page);
+  await fillMinimalSoleTraderEmploymentContinue(emp);
+  const fin = new DOFinancialPositionPage(page);
+  await fin.waitForFinancialPositionStep();
+  return fin;
+}
+
+async function clickCustomerDetailsStepperStep(page: Page, stepLabel: string): Promise<void> {
+  await page.locator(`:text-is("${stepLabel}")`).click({ timeout: 30_000 });
 }
 
 function customerSearchDialog(page: Page): Locator {
@@ -522,13 +826,98 @@ async function expectBorrowerSearchResultPage(page: Page): Promise<void> {
   await expect.soft(borrowerResultHit.first()).toBeVisible({ timeout: 90_000 });
 }
 
+/** Optional: trust name substring for UDP-T3717 borrower search; default matches CSA trust regression data. */
+const UDP_T3717_TRUST_NAME_SEARCH =
+  process.env.UDC_EXISTING_TRUST_NAME_SEARCH?.trim() || "TLC Automation Family Trust";
+
+async function fillIndividualCustomerNameSearchTerm(dlg: Locator, term: string): Promise<void> {
+  const byLabel = dlg.getByRole("textbox", { name: /Customer Name|First Name/i }).first();
+  const byTextHost = dlg
+    .locator("text")
+    .filter({ hasText: /^(Customer Name|First Name)/i })
+    .locator("#text")
+    .first();
+  const byXpath = dlg.locator(
+    "xpath=.//label[contains(normalize-space(.),'Customer Name') or contains(normalize-space(.),'First Name')][1]/following::input[contains(@class,'p-inputtext')][1]",
+  );
+  if (await byLabel.isVisible({ timeout: 6_000 }).catch(() => false)) {
+    await byLabel.fill(term);
+  } else if (await byTextHost.isVisible({ timeout: 4_000 }).catch(() => false)) {
+    await byTextHost.fill(term);
+  } else {
+    await byXpath.fill(term);
+  }
+}
+
 /**
- * After UDC-number search with a hit, the app navigates to **Borrower Result** (full page).
- * Click the result card **Add** (`p-button` label "Add") — not **Add New Customer**.
+ * After individual search: **true** when a result **Add** was clicked; **false** when Borrower Result shows no hit.
  */
-async function waitBorrowerResultAndClickAdd(page: Page): Promise<void> {
+async function waitBorrowerResultAndClickAdd(page: Page): Promise<boolean> {
   await expect.soft(page.getByText(/Borrower Result/i).first()).toBeVisible({ timeout: 90_000 });
-  await page.getByRole("button", { name: "Add", exact: true }).first().click({ timeout: 30_000 });
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+
+  const noData = page
+    .getByRole("img", { name: /No Data Found/i })
+    .or(page.getByText(/No Data Found/i));
+  if (await noData.first().isVisible({ timeout: 12_000 }).catch(() => false)) {
+    return false;
+  }
+
+  const addCandidates: Locator[] = [
+    page.getByRole("button", { name: /^Add$/i }),
+    page.locator("p-button").filter({ hasText: /^Add$/i }),
+    page.locator("button, a, span").filter({ hasText: /^Add$/i }),
+  ];
+  for (const candidate of addCandidates) {
+    const btn = candidate.first();
+    if (await btn.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await btn.scrollIntoViewIfNeeded();
+      await btn.click({ timeout: 30_000 });
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await waitForPersonalDetailsAfterCustomerAdd(page).catch(() => {});
+      return true;
+    }
+  }
+
+  throw new Error("Borrower Result loaded with data but no Add control was found.");
+}
+
+async function addExistingIndividualFromSearch(
+  assetDetailsPage: DOAssetDetailsPage,
+  page: Page,
+  udcNumber: string = EXISTING_UDC_CUSTOMER_NUMBER,
+  nameFallback: string = EXISTING_CUSTOMER_NAME_SEARCH,
+): Promise<void> {
+  const searchExistingByUdc = async (): Promise<boolean> => {
+    await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+    await assetDetailsPage.searchByDropdownClick();
+    await assetDetailsPage.selectUDCSelectOption();
+    await assetDetailsPage.enterUDCCustomerNumber(udcNumber);
+    await assetDetailsPage.clickSearchButton();
+    return waitBorrowerResultAndClickAdd(page);
+  };
+
+  if (await searchExistingByUdc()) return;
+
+  await page.getByRole("button", { name: /^Cancel$/i }).first().click({ timeout: 20_000 }).catch(() => {});
+  await assetDetailsPage.waitForAddBorrowerButton();
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  const dlg = customerSearchDialog(page);
+  await assetDetailsPage.searchByDropdownClick();
+  const panel = page.locator(".p-dropdown-panel").last();
+  const nameOpt = panel.getByRole("option", { name: /Customer Name|First Name/i }).first();
+  if (await nameOpt.isVisible({ timeout: 12_000 }).catch(() => false)) {
+    await nameOpt.click();
+    await panel.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+  }
+  await fillIndividualCustomerNameSearchTerm(dlg, nameFallback);
+  await assetDetailsPage.clickSearchButton();
+  if (await waitBorrowerResultAndClickAdd(page)) return;
+
+  throw new Error(
+    `No existing individual search hit for UDC ${udcNumber} or Customer Name "${nameFallback}". ` +
+      "Set UDC_EXISTING_CUSTOMER_NUMBER / UDC_EXISTING_CUSTOMER_NAME_SEARCH.",
+  );
 }
 
 test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709–UDP-T3795)", () => {
@@ -811,7 +1200,7 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       await assetDetailsPage.clickAddBorrowerorGuarantorButton();
       await assetDetailsPage.searchByDropdownClick();
       await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber("1183126");
+      await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
       await assetDetailsPage.clickSearchButton();
       await expect
         .soft(assetDetailsPage.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
@@ -1499,18 +1888,96 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3753 - Existing Trust Customer - Pre - Populated from FIS AF",
     { tag: ["@do", "@regression", "@UDP-T3753"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Existing Trust from FIS — needs stable search + party data.");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      const trustPage = await openExistingTrustDetailsViaTrustNameSearch(assetDetailsPage);
+
+      await expect.soft(trustPage.root).toBeVisible({ timeout: 30_000 });
+      await expect.soft(page.getByText(/Trust Details/i).first()).toBeVisible({ timeout: 30_000 });
+
+      const trustName = (await trustPage.trustNameInput().inputValue().catch(() => "")).trim();
+      await expect.soft(trustName).toMatch(/\S/);
+
+      const trustTypeLabel = (await trustPage.trustTypeDropdownLabel().textContent().catch(() => ""))?.trim() ?? "";
+      await expect.soft(trustTypeLabel).toMatch(/\S/);
+      await expect.soft(trustTypeLabel).not.toMatch(/select|choose/i);
+
+      const regNo = (
+        await trustPage.page
+          .locator("app-trust-detail .trust_details")
+          .locator("xpath=.//label[contains(.,'Registered Number')]/following::input[1]")
+          .inputValue()
+          .catch(() => "")
+      ).trim();
+      const gst = (
+        await trustPage.page
+          .locator("app-trust-detail .trust_details")
+          .locator("xpath=.//label[contains(.,'GST')]/following::input[1]")
+          .inputValue()
+          .catch(() => "")
+      ).trim();
+      await expect.soft(regNo.length > 0 || gst.length > 0).toBeTruthy();
+
+      const editedName = `${trustName} Edited`;
+      await trustPage.enterTrustName(editedName);
+      await expect.soft(trustPage.trustNameInput()).toHaveValue(editedName);
     },
   );
 
   test(
     "UDP-T3754 - Copy Primary Borrower Address - Visible for Co - Borrower/Guarantor Only",
     { tag: ["@do", "@regression", "@UDP-T3754"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Copy primary borrower address — needs Co-Borrower/Guarantor flow + primary address baseline.");
+      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      const primaryPersonal = await openAddNewIndividualPersonal(assetDetailsPage);
+      await fillValidIndividualPersonalBorrower(primaryPersonal);
+      await primaryPersonal.clickNextButton();
+
+      const addressDetailsPage = new DOAddressDetailsPage(page);
+      await addressDetailsPage.waitForPhysicalAddressStep();
+      await expect
+        .soft(await addressDetailsPage.isCopyPrimaryBorrowerAddressToggleVisible(4_000))
+        .toBeFalsy();
+
+      await fillAddressWithResidenceTypeAndContinue(page, addressDetailsPage, "Boarding");
+      await completeIndividualBorrowerAfterAddressStep(page);
+
+      const postSubmit = new DOCustomerQuotePostSubmitPage(page);
+      await postSubmit.waitForUploadStep();
+
+      await postSubmit.clickAddBorrowersOrGuarantorsButton();
+      await assetDetailsPage.searchByDropdownClick();
+      await assetDetailsPage.selectUDCSelectOption();
+      await assetDetailsPage.enterUDCCustomerNumber("421");
+      await assetDetailsPage.clickSearchButton();
+      await assetDetailsPage.clickAddNewCustomerButton();
+
+      const coBorrowerPersonal = new DOPersonalDetailsPage(page);
+      await selectCustomerRole(page, "Co-Borrower");
+      await coBorrowerPersonal.chooseTitle("Mr");
+      await coBorrowerPersonal.enterFirstName("Co");
+      await coBorrowerPersonal.enterMiddleName("Test");
+      await coBorrowerPersonal.enterLastName("Borrower");
+      await coBorrowerPersonal.chooseGender("Male");
+      await coBorrowerPersonal.enterDateOfBirth("02/02/1985");
+      await coBorrowerPersonal.chooseMarritalStatus("Single");
+      await coBorrowerPersonal.chooseNoOfDependents("0");
+      await coBorrowerPersonal.enterMobileNumber("0219876543");
+      await coBorrowerPersonal.enterEmail("co.borrower@example.com");
+      await coBorrowerPersonal.chooseLicenceType("Full Licence");
+      await coBorrowerPersonal.chooseCountryOfIssue("New Zealand");
+      await coBorrowerPersonal.enterLicenceNumber("CD123456");
+      await coBorrowerPersonal.enterVersionNumber("123");
+      await coBorrowerPersonal.chooseNewZealandResident("Yes");
+      await coBorrowerPersonal.chooseCountryOfBirth("New Zealand");
+      await coBorrowerPersonal.chooseCountryOfCitizenship("New Zealand");
+      await coBorrowerPersonal.clickNextButton();
+
+      await addressDetailsPage.waitForPhysicalAddressStep();
+      await expect.soft(await addressDetailsPage.isCopyPrimaryBorrowerAddressToggleVisible()).toBeTruthy();
+      await addressDetailsPage.expectCopyPrimaryBorrowerAddressToggleDefaultNo();
     },
   );
 
@@ -1640,9 +2107,13 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3764 - Have Employment Details Changed Slider - Existing Customers Only",
     { tag: ["@do", "@regression", "@UDP-T3764"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Employment details changed slider — existing customer / FIS only.");
+      const emp = await openIndividualOnEmploymentStep(page, {
+        existingUdcNumber: EXISTING_UDC_CUSTOMER_NUMBER,
+      });
+      await expect.soft(await emp.isEmploymentDetailsChangedSliderVisible()).toBeTruthy();
+      await emp.expectEmploymentDetailsChangedSwitchVisible();
     },
   );
 
@@ -1658,6 +2129,7 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       await fillMinimalAddressContinue(page, a);
       const emp = new DOEmploymentDetailsPage(page);
       await emp.waitForEmploymentDetailsStep();
+      await expect.soft(await emp.isEmploymentDetailsChangedSliderVisible(4_000)).toBeFalsy();
       await emp.enterCurrentEmployerName("");
       await emp.touchCurrentOccupationDropdownWithoutSelection();
       await emp.touchCurrentEmploymentTypeDropdownWithoutSelection();
@@ -1679,36 +2151,92 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3767 - Occupation - Conditionally Mandatory; Excludes Z - Not Applicable",
     { tag: ["@do", "@regression", "@UDP-T3767"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Occupation conditional — align with Employed type when employment POM steps are stable per build.");
+      const emp = await openIndividualOnEmploymentStep(page);
+      await emp.enterCurrentEmployerName("Acme Finance Ltd");
+      await emp.selectCurrentEmploymentType("Full Time Employed");
+      await emp.touchCurrentOccupationDropdownWithoutSelection();
+      await emp.clickSaveEmploymentDetails();
+      await emp.expectOccupationRequiredVisible();
+
+      await emp.selectCurrentEmploymentType("Retired");
+      await emp.clickSaveEmploymentDetails();
+      await emp.expectOccupationRequiredHidden();
+
+      await emp.openCurrentOccupationDropdown();
+      await expect.soft(page.getByRole("option", { name: /Z-\s*Not\s*Applicable/i })).toHaveCount(0);
+      await page.keyboard.press("Escape");
     },
   );
 
   test(
     "UDP-T3768 - Time with Current Employer - Years/Months; Conditionally Mandatory",
     { tag: ["@do", "@regression", "@UDP-T3768"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Time with current employer — conditional mandatory when employer filled.");
+      const emp = await openIndividualOnEmploymentStep(page);
+      await emp.enterCurrentEmployerName("Acme Finance Ltd");
+      await emp.selectCurrentEmploymentType("Full Time Employed");
+      await emp.selectCurrentOccupation("Accountant");
+      await emp.enterCurrentTimeWithEmployer("", "");
+      await emp.clickSaveEmploymentDetails();
+      await emp.expectTimeWithEmployerRequiredVisible();
+
+      await emp.enterCurrentTimeWithEmployer("0", "0");
+      await emp.clickSaveEmploymentDetails();
+      await emp.expectTimeWithEmployerMustBeGreaterThanZeroVisible();
+
+      await emp.enterCurrentTimeWithEmployer("2", "6");
+      await emp.clickSaveEmploymentDetails();
+      await emp.expectTimeWithEmployerRequiredHidden();
     },
   );
 
   test(
     "UDP-T3769 - Previous Employment - Visible When Current Duration < 3 Years",
     { tag: ["@do", "@regression", "@UDP-T3769"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Previous employment visibility < 3 years — needs employment field wiring.");
+      const emp = await openIndividualOnEmploymentStep(page);
+      await emp.enterCurrentEmployerName("Acme Finance Ltd");
+      await emp.selectCurrentOccupation("Accountant");
+      await emp.selectCurrentEmploymentType("Full Time Employed");
+      await emp.enterCurrentTimeWithEmployer("1", "6");
+      await emp.clickSaveEmploymentDetails();
+      await emp.expectPreviousEmploymentSectionVisible();
     },
   );
 
   test(
     "UDP-T3770 - Existing Customer - Employment Pre - Populated from FIS AF",
     { tag: ["@do", "@regression", "@UDP-T3770"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Existing customer employment from FIS — needs UDC_EXISTING_CUSTOMER_NUMBER + employment assertions.");
+      const emp = await openIndividualOnEmploymentStep(page, {
+        existingUdcNumber: EXISTING_UDC_CUSTOMER_NUMBER,
+      });
+
+      const employerName = await emp.getCurrentEmployerName();
+      const occupation = await emp.getCurrentOccupationLabel();
+      const employmentType = await emp.getCurrentEmploymentTypeLabel();
+      const timeWithEmployer = await emp.getCurrentTimeWithEmployer();
+
+      await expect.soft(employerName).toMatch(/\S/);
+      await expect.soft(occupation).toMatch(/\S/);
+      await expect.soft(employmentType).toMatch(/\S/);
+      await expect
+        .soft(`${timeWithEmployer.years}${timeWithEmployer.months}`)
+        .toMatch(/\d/);
+
+      const updatedEmployer = employerName.trim()
+        ? employerName.endsWith(" Updated")
+          ? employerName
+          : `${employerName} Updated`
+        : "Acme Finance Ltd Updated";
+      await emp.enterCurrentEmployerName(updatedEmployer);
+      await emp.clickSaveEmploymentDetails();
+      await expect(await emp.getCurrentEmployerName()).toBe(updatedEmployer);
     },
   );
 
@@ -1792,13 +2320,42 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       const p = await openAddNewIndividualPersonal(await openStandardQuoteOnCustomerDetailsStep(page));
       await fillValidIndividualPersonalBorrower(p);
       await p.clickNextButton();
+
       const a = new DOAddressDetailsPage(page);
-      await fillMinimalAddressContinue(page, a);
+      await fillAddressWithResidenceTypeAndContinue(page, a, "Mortgage");
+
       const emp = new DOEmploymentDetailsPage(page);
+      await emp.waitForEmploymentDetailsStep();
       await emp.clickNextButton();
+
       const fin = new DOFinancialPositionPage(page);
       await fin.waitForFinancialPositionStep();
-      await expect.soft(fin.liabilitiesCard).toBeVisible({ timeout: 60_000 }).catch(() => {});
+      await expect.soft(fin.mortgageRentLiabilityRowLabel()).toBeVisible({ timeout: 60_000 });
+      await fin.fillFirstLiabilityBalanceAndAmount("$500,000.00", "$2,500.00");
+      await fin.setFirstLiabilityRowFrequencyMonthly();
+
+      const mappingAfterMortgage = await fin.getMortgageRentFisMappingTarget();
+      if (mappingAfterMortgage) {
+        await expect.soft(mappingAfterMortgage).toBe("Mortgage");
+      }
+
+      await clickCustomerDetailsStepperStep(page, "2. Address Details");
+      await a.waitForPhysicalAddressStep();
+      await a.selectResidenceType("Renting");
+      await a.clickSaveAddressDetails();
+
+      await clickCustomerDetailsStepperStep(page, "4. Financial Position");
+      await fin.waitForFinancialPositionStep();
+      await expect.soft(fin.mortgageRentLiabilityRowLabel()).toBeVisible({ timeout: 60_000 });
+
+      const mappingAfterRenting = await fin.getMortgageRentFisMappingTarget();
+      if (mappingAfterRenting) {
+        await expect.soft(mappingAfterRenting).toBe("Rent");
+      } else if (mappingAfterMortgage) {
+        await expect
+          .poll(async () => fin.getMortgageRentFisMappingTarget(), { timeout: 25_000 })
+          .toBe("Rent");
+      }
     },
   );
 
@@ -1904,9 +2461,15 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3782 - Business Financial Position - Individual + Business Loan Purpose",
     { tag: ["@do", "@regression", "@UDP-T3782"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business financial position sole trader — needs Business loan purpose program.");
+      const fin = await openSoleTraderOnFinancialPositionStep(page);
+      await fin.expectSoleTraderFinancialPositionSectionsVisible();
+      await expect.soft(fin.soleTradeFinancialRoot).toBeVisible({ timeout: 30_000 });
+      await expect
+        .soft(fin.businessFinancialRoot)
+        .toBeHidden({ timeout: 5_000 })
+        .catch(() => {});
     },
   );
 

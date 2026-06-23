@@ -107,10 +107,21 @@ export class DOTrustDetailsPage extends BasePage {
     await this.touchDropdownWithoutSelection(this.dropdownTriggerNearLabel(/Primary Nature of Trust/i));
   }
 
+  trustNameInput(): Locator {
+    return this.inputAfterLabel("Trust Name");
+  }
+
+  trustTypeDropdownLabel(): Locator {
+    return this.trustDetailsForm
+      .locator("label")
+      .filter({ hasText: /Trust Type/i })
+      .first()
+      .locator("xpath=following::*[contains(@class,'p-dropdown-label')][1]");
+  }
+
   async enterTrustName(name: string): Promise<void> {
     this.logStep(`Entered trust name as ${this.stepValueDisplay(name)}`);
-    const el = this.inputAfterLabel("Trust Name");
-    await el.fill(name);
+    await this.trustNameInput().fill(name);
   }
 
   async enterRegisteredNumber(value: string): Promise<void> {
@@ -157,7 +168,7 @@ export class DOTrustDetailsPage extends BasePage {
   /** Leave required text fields empty (validation scenario — do not enter Trust Name / Registered Number / phone / email). */
   async clearTrustName(): Promise<void> {
     this.logStep("Clear Trust Name");
-    await this.inputAfterLabel("Trust Name").clear();
+    await this.trustNameInput().clear();
   }
 
   async clearRegisteredNumber(): Promise<void> {

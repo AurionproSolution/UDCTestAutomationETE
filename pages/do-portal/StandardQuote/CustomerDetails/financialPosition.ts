@@ -442,6 +442,52 @@ export class DOFinancialPositionPage extends BasePage {
     await page.keyboard.press("Escape").catch(() => {});
   }
 
+  mortgageRentLiabilityRowLabel(): Locator {
+    return this.liabilitiesCard.getByText(/Mortgage\s*\/\s*Rent/i).first();
+  }
+
+  /**
+   * Infers FIS AF mapping for the **Mortgage / Rent** liability row from control names on
+   * `app-individual-liabilities` (driven by **Residence Type** on Address Details — UDP-T3775).
+   */
+  async getMortgageRentFisMappingTarget(): Promise<"Mortgage" | "Rent" | null> {
+    const card = this.liabilitiesCard;
+    if (!(await card.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return null;
+    }
+    return card.evaluate((root) => {
+      const fcNames = Array.from(root.querySelectorAll("[formcontrolname]")).map((el) =>
+        (el.getAttribute("formcontrolname") ?? "").toLowerCase(),
+      );
+      const hasMortgageFc = fcNames.some((n) => /mortgage/.test(n) && !/^rent/.test(n));
+      const hasRentFc = fcNames.some((n) => /^rent$|rentamount|rentpayment|rental/.test(n));
+      if (hasMortgageFc && !hasRentFc) return "Mortgage";
+      if (hasRentFc && !hasMortgageFc) return "Rent";
+      if (hasRentFc) return "Rent";
+      if (hasMortgageFc) return "Mortgage";
+
+      const meta = Array.from(root.querySelectorAll("input[name], input[id], [data-fis-field]"))
+        .map((el) => {
+          const name = (el as HTMLInputElement).name ?? "";
+          const id = el.id ?? "";
+          const data = el.getAttribute("data-fis-field") ?? "";
+          return `${name} ${id} ${data}`.toLowerCase();
+        })
+        .join(" ");
+      if (/\bmortgage\b/.test(meta) && !/\brent\b/.test(meta)) return "Mortgage";
+      if (/\brent\b/.test(meta)) return "Rent";
+      return null;
+    });
+  }
+
+  async expectMortgageRentLiabilityMapsToFisField(target: "Mortgage" | "Rent"): Promise<void> {
+    this.logStep(`Expect Mortgage/Rent liability maps to FIS ${target}`);
+    await expect(this.mortgageRentLiabilityRowLabel()).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => this.getMortgageRentFisMappingTarget(), { timeout: 25_000 })
+      .toBe(target);
+  }
+
   /** Liabilities — first row: first two `amount` → `#amount` fields (Balance/Limit, then Amount). */
   async fillFirstLiabilityBalanceAndAmount(
     balanceLimit: string,
@@ -615,6 +661,51 @@ export class DOFinancialPositionPage extends BasePage {
     await expect(
       this.essentialOutgoingsCard.getByText(/Regular Recurring Essential Outgoings/i),
     ).toBeVisible({ timeout: 15_000 });
+  }
+
+  /**
+   * Sole Trader + Business loan purpose — Profit Declaration, Turnover, Balance Information,
+   * Personal Statement of Position (UDP-T3782).
+   */
+  async expectSoleTraderFinancialPositionSectionsVisible(): Promise<void> {
+    this.logStep("Expect Sole Trader Financial Position Sections Visible");
+    await this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 60_000 });
+
+    const profitDeclaration = this.page
+      .locator("app-sole-trade-financial app-sole-trade-profit-declaration")
+      .first()
+      .or(
+        this.soleTradeFinancialRoot.getByText(
+          /Profit Declaration|Did you make a Net Profit|Net Profit last year/i,
+        ),
+      );
+    await expect(profitDeclaration.first()).toBeVisible({ timeout: 30_000 });
+
+    await expect(this.turnoverInformationRoot).toBeVisible({ timeout: 30_000 });
+    await expect(
+      this.turnoverInformationRoot
+        .getByText(/Turnover Information/i)
+        .or(this.soleTradeFinancialRoot.getByText(/Turnover Information/i)),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await expect(this.balanceInformationHost).toBeVisible({ timeout: 30_000 });
+    await expect(
+      this.balanceInformationHost
+        .getByText(/Balance Information/i)
+        .or(this.soleTradeFinancialRoot.getByText(/Balance Information/i)),
+    ).toBeVisible({ timeout: 15_000 });
+
+    const personalStatement = this.page
+      .locator("app-sole-trade-financial app-sole-trade-assets")
+      .first()
+      .or(this.soleTradeFinancialRoot.getByText(/Personal Statement of Position/i));
+    await expect(personalStatement.first()).toBeVisible({ timeout: 30_000 });
+
+    const liabilities = this.page
+      .locator("app-sole-trade-financial app-sole-trade-liabilities")
+      .first()
+      .or(this.soleTradeFinancialRoot.getByText(/^Liabilities$/i));
+    await expect(liabilities.first()).toBeVisible({ timeout: 30_000 });
   }
 
   /** `app-individual-asset-details` — row that contains `labelRx` and an `<amount>` control. */
