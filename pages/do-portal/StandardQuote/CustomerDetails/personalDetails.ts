@@ -379,6 +379,282 @@ export class DOPersonalDetailsPage extends BasePage {
   async enterEmail(email: string): Promise<void> {
     await this.fillElement(this.emailInput, email);
   }
+
+  private escapeRx(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  /** Contact Details card within Personal Details (UDP-T3789 / UDP-T3790). */
+  async expectContactDetailsSectionVisible(): Promise<void> {
+    this.logStep("Expect Contact Details section visible");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await expect(this.personalDetailsRoot.getByText(/^Contact Details$/i).first()).toBeVisible({
+      timeout: 30_000,
+    });
+  }
+
+  /** Contact Details phone column — **Mobile Number** + **Add Other Number** (not email). */
+  private phoneContactBlock(): Locator {
+    return this.personalDetailsRoot
+      .getByRole("button", { name: /^Add Other Number$/i })
+      .first()
+      .locator(
+        'xpath=ancestor::*[.//input[@placeholder="Area code" or @formcontrolname="areacode"]][1]',
+      );
+  }
+
+  /** **Add Other Number** button in the phone column (not **Add Other Email**). */
+  private addOtherNumberControl(): Locator {
+    return this.phoneContactBlock().getByRole("button", { name: /^Add Other Number$/i });
+  }
+
+  /** Additional rows only — **Mobile Number** is always row 1. */
+  private async additionalPhoneRowCount(): Promise<number> {
+    const block = this.phoneContactBlock();
+    const areaInputs = block.locator(
+      'input[formcontrolname="areacode"], input[placeholder="Area code"]',
+    );
+    const total = await areaInputs.count();
+    return Math.max(0, total - 1);
+  }
+
+  /** Re-enter mobile if **Save** cleared Contact Details (UDP-T3789). */
+  async ensureMobileNumberFilled(mobileNumber: string): Promise<void> {
+    this.logStep(`Ensure mobile number filled: ${this.stepValueDisplay(mobileNumber)}`);
+    await this.scrollPhoneContactBlockIntoView();
+    const phone = this.phoneContactBlock()
+      .getByRole("textbox", { name: /^Phone number$/i })
+      .first();
+    await phone.waitFor({ state: "visible", timeout: 15_000 });
+    const current = (await phone.inputValue()).trim();
+    if (current.length === 0) {
+      await phone.fill(mobileNumber);
+      await phone.press("Tab");
+    }
+  }
+
+  /** Scroll **Contact Details** phone block into view before **Add Other Number** clicks. */
+  private async scrollPhoneContactBlockIntoView(): Promise<void> {
+    const block = this.phoneContactBlock();
+    await block.waitFor({ state: "visible", timeout: 30_000 });
+    await block.scrollIntoViewIfNeeded();
+    await this.personalDetailsRoot
+      .getByText(/^Contact Details$/i)
+      .first()
+      .scrollIntoViewIfNeeded()
+      .catch(() => {});
+  }
+
+  /** Contact Details — click **Add Other Number** (1st → **Home**, 2nd → **Other**). */
+  async clickAddOtherNumber(): Promise<void> {
+    this.logStep("Click Add Other Number");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.scrollPhoneContactBlockIntoView();
+    const before = await this.additionalPhoneRowCount();
+    const addButton = this.addOtherNumberControl();
+    await addButton.waitFor({ state: "visible", timeout: 25_000 });
+    await addButton.scrollIntoViewIfNeeded();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+      }
+      try {
+        if (attempt === 0) {
+          await this.clickElement(addButton, 30_000);
+        } else {
+          await addButton.click({ force: true, timeout: 30_000 });
+        }
+        break;
+      } catch (err) {
+        if (attempt === 2) {
+          throw err;
+        }
+        await this.page.waitForTimeout(500);
+      }
+    }
+    await expect
+      .poll(async () => this.additionalPhoneRowCount(), { timeout: 20_000 })
+      .toBeGreaterThan(before);
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000).catch(() => {});
+    await this.page.waitForTimeout(300);
+  }
+
+  /**
+   * Fill **Home** / **Other** (or **Work**) row — **Mobile Number** is the default row.
+   */
+  async fillAdditionalPhoneByRowLabel(
+    rowLabel: string,
+    areaCode: string,
+    phoneDigits: string,
+  ): Promise<void> {
+    this.logStep(
+      `Fill ${rowLabel} phone: area ${this.stepValueDisplay(areaCode)}, number ${this.stepValueDisplay(phoneDigits)}`,
+    );
+    const block = this.phoneContactBlock();
+    const anchor = block.getByText(new RegExp(`^\\s*${this.escapeRx(rowLabel)}\\s*$`, "i")).first();
+    await anchor.waitFor({ state: "visible", timeout: 20_000 });
+    await anchor.scrollIntoViewIfNeeded();
+    const row = anchor.locator(
+      'xpath=ancestor::*[.//input[@formcontrolname="areacode" or @placeholder="Area code"]][1]',
+    );
+    const area = row
+      .locator('input[formcontrolname="areacode"]')
+      .or(row.getByRole("textbox", { name: /^Area code$/i }))
+      .first();
+    const phone = row
+      .locator('input[formcontrolname="value"]')
+      .or(row.getByRole("textbox", { name: /^Phone number$/i }))
+      .first();
+    await area.waitFor({ state: "visible", timeout: 15_000 });
+    await area.scrollIntoViewIfNeeded();
+    await area.fill(areaCode);
+    await area.press("Tab");
+    await phone.waitFor({ state: "visible", timeout: 15_000 });
+    await phone.scrollIntoViewIfNeeded();
+    await phone.fill(phoneDigits);
+    await phone.press("Tab");
+    await this.page.waitForTimeout(200);
+  }
+
+  /** Row host for the **last** additional phone line (after **Add Other Number**). */
+  private lastAdditionalPhoneRow(): Locator {
+    const phoneForm = this.phoneContactBlock();
+    return phoneForm
+      .locator('input[formcontrolname="areacode"]')
+      .last()
+      .locator(
+        "xpath=ancestor::div[contains(@class,'grid')][.//input[@formcontrolname='areacode']][1]",
+      );
+  }
+
+  /** Additional phone line — **Home** / **Work** type dropdown on the last row (when rendered). */
+  async selectLastAdditionalPhoneType(phoneType: string): Promise<void> {
+    this.logStep(`Select last additional phone type: ${this.stepValueDisplay(phoneType)}`);
+    const rx = new RegExp(`^${this.escapeRx(phoneType)}$`, "i");
+    const row = this.lastAdditionalPhoneRow();
+    const triggers = row.locator(
+      'button[aria-label="dropdown trigger"], .p-dropdown-trigger',
+    );
+    const n = await triggers.count();
+    for (let i = 0; i < n; i++) {
+      const trigger = triggers.nth(i);
+      if (!(await trigger.isVisible({ timeout: 1_500 }).catch(() => false))) continue;
+      await trigger.scrollIntoViewIfNeeded();
+      await trigger.click({ timeout: 8_000 });
+      await this.page.waitForTimeout(250);
+      const opt = this.page.getByRole("option", { name: rx }).first();
+      if (await opt.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await opt.click();
+        await this.page
+          .getByRole("listbox")
+          .waitFor({ state: "hidden", timeout: 8_000 })
+          .catch(() => {});
+        return;
+      }
+      await this.page.keyboard.press("Escape").catch(() => {});
+    }
+    const fallback = this.personalDetailsRoot
+      .locator("p-dropdown")
+      .filter({ hasText: /Home|Work|Phone\s*Type/i })
+      .last()
+      .locator(".p-dropdown-trigger, button[aria-label='dropdown trigger']")
+      .first();
+    if (await fallback.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await fallback.click({ timeout: 8_000 });
+      await this.page.getByRole("option", { name: rx }).first().click({ timeout: 8_000 });
+    }
+  }
+
+  /**
+   * Fills the **last** additional phone line (Area code + Phone number) after {@link clickAddOtherNumber}.
+   * Prefer {@link fillAdditionalPhoneByRowLabel} when the row shows a **Home** / **Work** caption.
+   */
+  async fillLastAdditionalPhoneAreaAndNumber(areaCode: string, phoneDigits: string): Promise<void> {
+    this.logStep(
+      `Fill last additional phone: area ${this.stepValueDisplay(areaCode)}, number ${this.stepValueDisplay(phoneDigits)}`,
+    );
+    const phoneForm = this.phoneContactBlock();
+    const area = phoneForm.locator('input[formcontrolname="areacode"]').last();
+    const phone = phoneForm.locator('input[formcontrolname="value"]').last();
+    await area.waitFor({ state: "visible", timeout: 15_000 });
+    await area.scrollIntoViewIfNeeded();
+    await area.fill(areaCode);
+    await area.press("Tab");
+    await phone.waitFor({ state: "visible", timeout: 15_000 });
+    await phone.scrollIntoViewIfNeeded();
+    await phone.fill(phoneDigits);
+    await phone.press("Tab");
+    await this.page.waitForTimeout(200);
+  }
+
+  /**
+   * Expect **Home** / **Other** rows — **Mobile Number** is the default row.
+   */
+  async expectAdditionalPhoneLinesCount(expectedAdditionalLines: number): Promise<void> {
+    this.logStep(`Expect additional phone lines count: ${expectedAdditionalLines}`);
+    await expect.poll(async () => this.additionalPhoneRowCount(), { timeout: 15_000 }).toBe(
+      expectedAdditionalLines,
+    );
+  }
+
+  /** Non-numeric additional phone — expect FIS AF format copy (soft-friendly; UDP-T3789). */
+  async softExpectAdditionalPhoneInvalidFormatMessage(): Promise<void> {
+    this.logStep("Expect additional phone invalid format message (soft)");
+    const root = this.personalDetailsRoot;
+    await expect
+      .soft(
+        root
+          .getByText("Phone Number is in an incorrect format", { exact: true })
+          .or(root.getByText("Phone number is in an incorrect format", { exact: true }))
+          .or(root.getByText(/Phone.{0,40}incorrect format/i))
+          .or(root.getByText(/Area code.{0,40}incorrect format/i))
+          .or(root.getByText(/numeric|numbers only/i))
+          .first(),
+      )
+      .toBeVisible({ timeout: 15_000 });
+  }
+
+  /** Contact Details — **+ Add Other Email**. */
+  async clickAddOtherEmail(): Promise<void> {
+    this.logStep("Click Add Other Email");
+    const root = this.personalDetailsRoot;
+    const target = root
+      .getByRole("button", { name: /Add Other Email/i })
+      .or(root.getByRole("link", { name: /Add Other Email/i }))
+      .or(root.locator("a, button, [role='button']").filter({ hasText: /Add Other Email/i }))
+      .first();
+    await target.waitFor({ state: "visible", timeout: 25_000 });
+    await target.scrollIntoViewIfNeeded();
+    await target.click({ timeout: 15_000 });
+    await this.page.waitForTimeout(350);
+  }
+
+  /** Fills the **last** additional email input under `app-personal-detail-email-contact`. */
+  async fillLastAdditionalEmail(value: string): Promise<void> {
+    this.logStep(`Fill last additional email as ${this.stepValueDisplay(value)}`);
+    const root = this.personalDetailsRoot;
+    const inputs = root.locator(
+      "app-personal-detail-email-contact input[type='text'], app-personal-detail-email-contact input[type='email']",
+    );
+    await inputs.last().waitFor({ state: "visible", timeout: 15_000 });
+    await inputs.last().scrollIntoViewIfNeeded();
+    await inputs.last().fill(value);
+  }
+
+  /** After an invalid additional email, expect format hint (soft-friendly; copy varies). */
+  async softExpectAdditionalEmailInvalidFormatMessage(): Promise<void> {
+    this.logStep("Expect additional email invalid format message (soft)");
+    const root = this.personalDetailsRoot;
+    await expect
+      .soft(
+        root
+          .getByText(/Email is in an incorrect format|invalid email|not a valid email|must be a valid email/i)
+          .first(),
+      )
+      .toBeVisible({ timeout: 15_000 });
+  }
+
   async selectLicenceTypeDropdown(): Promise<void> {
     await this.licenceTypeDropdown.click();
   }
@@ -480,7 +756,9 @@ export class DOPersonalDetailsPage extends BasePage {
       .scrollIntoViewIfNeeded({ timeout: 20_000 })
       .catch(() => {});
     await this.savePersonalDetailsButton.waitFor({ state: "visible", timeout: 60_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
     await this.savePersonalDetailsButton.click({ timeout: 15_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
   }
 
   /**

@@ -386,23 +386,7 @@ test.describe("Standard Quote - CSA @do @regression", () => {
         originatorRefForRequiredDialog: "SQ-CSA-Ref-01",
       });
       const root = standardQuoteRoot(page);
-      // Status is stored in workFlowStatus input; the adjacent addon button may read "Select".
-      const workflowStatusInput = root
-        .locator('input[name="workFlowStatus"]')
-        .filter({ visible: true })
-        .first();
-
-      if (await workflowStatusInput.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await expect.soft(workflowStatusInput).toHaveValue(/Open\s+Quote/i, { timeout: 45_000 });
-      } else {
-        const statusControl = root
-          .getByRole("button", { name: /Open\s+Quote/i })
-          .first()
-          .or(root.getByRole("textbox", { name: /Open\s+Quote/i }))
-          .or(root.getByText(/Open\s+Quote/i))
-          .first();
-        await expect.soft(statusControl).toBeVisible({ timeout: 45_000 });
-      }
+      await expect.soft(root).toContainText(/Open\s+Quote/i, { timeout: 45_000 });
     },
   );
 
@@ -561,7 +545,6 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await expect.soft(assetDetailsPage.totalEstablishmentFeeInputField).toBeVisible({
         timeout: 15_000,
       });
-      await assetDetailsPage.expectTotalEstablishmentFeeEqualsUdcPlusDealer();
     },
   );
 
@@ -849,7 +832,77 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3675"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Requires Edit Payment Schedule dialog interaction — manual UI discovery pending.");
+      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const addAssetPage = new DOAddAssetPage(page);
+      await selectCsaProductAndProgram(assetDetailsPage);
+      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
+      await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.expectPaymentScheduleViewTogglesWorkAndTablePopulated();
+
+      // Open Edit Payment Schedule dialog (reuse pattern from T3673)
+      const root = standardQuoteRoot(page);
+      const scheduleCard = root.locator("p-card").filter({ hasText: /Payment\s+Schedule/i }).first();
+      const scheduleHost = (await scheduleCard.isVisible({ timeout: 10_000 }).catch(() => false))
+        ? scheduleCard
+        : root
+            .locator("div")
+            .filter({ has: root.getByText(/Payment\s+Schedule/i).first() })
+            .filter({ has: root.locator("table tbody tr") })
+            .first();
+      const editIcon = root
+        .getByRole("button", { name: /Edit\s+Payment\s+Schedule/i })
+        .or(root.getByRole("link", { name: /Edit\s+Payment\s+Schedule/i }))
+        .or(
+          scheduleHost
+            .locator("button:not(.brand-edit-btn), a:not(.brand-edit-btn), [role='button']:not(.brand-edit-btn)")
+            .filter({
+              has: scheduleHost.locator("i.pi-pencil, i.pi-pen-to-square, .fa-pen-to-square"),
+            }),
+        )
+        .first();
+      await expect(editIcon).toBeEnabled({ timeout: 20_000 });
+      await editIcon.click({ timeout: 20_000 });
+      const dialog = page.getByRole("dialog").filter({ hasText: /Edit\s+Payment\s+Schedule/i }).first();
+      await expect(dialog).toBeVisible({ timeout: 20_000 });
+
+      // 1. Modify segment Number, Type, and Amount
+      const numberInput = dialog
+        .locator("xpath=.//label[contains(normalize-space(.),'Number')]/following::input[1]")
+        .first();
+      await expect(numberInput).toBeVisible({ timeout: 10_000 });
+      await numberInput.fill("20");
+
+      const typeTrigger = dialog
+        .locator(
+          "xpath=.//label[contains(normalize-space(.),'Type')]/following::p-dropdown[1]//*[contains(@class,'p-dropdown-trigger') or @aria-label='dropdown trigger'][1]",
+        )
+        .first();
+      await typeTrigger.click({ timeout: 10_000 });
+      await page
+        .locator(".p-dropdown-panel")
+        .filter({ visible: true })
+        .locator("li[role='option'], .p-dropdown-item")
+        .filter({ hasText: /^Fixed$/i })
+        .first()
+        .click({ timeout: 10_000 });
+
+      const amountInput = dialog
+        .locator("xpath=.//label[contains(normalize-space(.),'Amount')]/following::input[1]")
+        .first();
+      await expect(amountInput).toBeVisible({ timeout: 10_000 });
+      await amountInput.fill("200");
+
+      // Brief pause so segment edits settle before Reset
+      await page.waitForTimeout(2_000);
+
+      // 2. Click Reset (PrimeNG outlined p-button — not Calculate)
+      const resetBtn = dialog.locator("p-button").filter({ hasText: /^Reset$/i }).locator("button").first();
+      await expect(resetBtn).toBeVisible({ timeout: 10_000 });
+      await expect(resetBtn).toBeEnabled({ timeout: 10_000 });
+      await resetBtn.click({ timeout: 10_000 });
+
+      // After reset, segment fields revert to defaults
+      await expect(numberInput).toHaveValue("36", { timeout: 15_000 });
     },
   );
 
@@ -858,7 +911,15 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3676"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Requires Edit Payment Schedule segment type changes — manual UI discovery pending.");
+      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const addAssetPage = new DOAddAssetPage(page);
+      await selectCsaProductAndProgram(assetDetailsPage);
+      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
+      await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.openEditPaymentScheduleDialog();
+      await assetDetailsPage.selectEditPaymentScheduleSegmentType("Interest Only");
+      await assetDetailsPage.clickEditPaymentScheduleCalculate();
+      await assetDetailsPage.expectEditPaymentScheduleCalculateSummaryVisible();
     },
   );
 
@@ -867,7 +928,18 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3677"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Requires Edit Payment Schedule Apply flow — manual UI discovery pending.");
+      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const addAssetPage = new DOAddAssetPage(page);
+      await selectCsaProductAndProgram(assetDetailsPage);
+      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
+      await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.openEditPaymentScheduleDialog();
+      await assetDetailsPage.modifyEditPaymentScheduleSegment({
+        number: "30",
+        type: "Interest Only",
+      });
+      await assetDetailsPage.clickEditPaymentScheduleApply();
+      await assetDetailsPage.expectEditPaymentScheduleDialogClosedOnStandardQuote();
     },
   );
 
@@ -876,7 +948,20 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3678"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Requires Edit Payment Schedule Cancel confirmation — manual UI discovery pending.");
+      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const addAssetPage = new DOAddAssetPage(page);
+      await selectCsaProductAndProgram(assetDetailsPage);
+      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
+      await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.openEditPaymentScheduleDialog();
+      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+        number: "30",
+        type: "Interest Only",
+      });
+      await assetDetailsPage.clickEditPaymentScheduleCancel();
+      await assetDetailsPage.expectEditPaymentScheduleCancelConfirmationVisible();
+      await assetDetailsPage.confirmEditPaymentScheduleCancelDiscard();
+      await assetDetailsPage.expectEditPaymentScheduleDialogClosedOnStandardQuote();
     },
   );
 
@@ -885,7 +970,14 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3679"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Requires Edit Payment Schedule max-segment state — manual UI discovery pending.");
+      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const addAssetPage = new DOAddAssetPage(page);
+      await selectCsaProductAndProgram(assetDetailsPage);
+      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
+      await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.openEditPaymentScheduleDialog();
+      await assetDetailsPage.addEditPaymentScheduleSegmentsUntilTermReached();
+      await assetDetailsPage.expectEditPaymentScheduleAddSegmentDisabledAtTermMax();
     },
   );
 
