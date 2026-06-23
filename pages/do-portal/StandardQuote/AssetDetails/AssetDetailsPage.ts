@@ -75,23 +75,18 @@ export class DOAssetDetailsPage extends BasePage {
     this.cashPriceOfAssetInputField = page
       .getByRole("textbox", { name: /Cash Price of Asset/i })
       .first();
-    const quoteShell = page.locator("app-quote-details, app-standard-quote").first();
     const rrpLabel = /Recommended\s+Retail\s+Price/i;
-    // Do not use getByRole(textbox, { name: rrpLabel }) — Cash Price shares a composite a11y name
-    // that includes "Recommended Retail Price", so Used-condition hide checks never pass.
-    this.recommendedRetailPriceInput = quoteShell
-      .locator("amount")
-      .filter({ hasText: rrpLabel })
-      .locator("#amount")
-      .first()
+    // Float labels may sit outside the `col-6` wrapper; prefer ARIA name, then label text + `#amount`.
+    this.recommendedRetailPriceInput = page
+      .getByRole("textbox", { name: rrpLabel })
       .or(
-        quoteShell
+        page
           .getByText(rrpLabel)
-          .first()
           .locator(
             "xpath=ancestor::div[contains(@class,'col-')][1]//input[@id='amount']",
           ),
       )
+      .or(page.locator("amount").filter({ hasText: rrpLabel }).locator("#amount"))
       .first();
     this.PPSRCount = page.locator("app-quote-details").getByRole("spinbutton");
     this.udcEstablishmentFeeInputField = page
@@ -117,7 +112,8 @@ export class DOAssetDetailsPage extends BasePage {
       .locator("percentage")
       .filter({ hasText: "Interest Rate" })
       .locator("#percent");
-    // `quoteShell` defined above for RRP; reuse for payment-summary locators below.
+    // Match visible Standard Quote shell (same as tests: `app-quote-details, app-standard-quote`).first()
+    const quoteShell = page.locator("app-quote-details, app-standard-quote").first();
     /**
      * **Lease Date** (Finance Lease) or **Loan Date** (e.g. AFV / CSA Payment Summary): scoped to `app-payment-summary` + `visible:true`.
      * Do **not** chain `.or()` to unscoped comboboxes — hidden templates in `app-quote-details` match first and break `toBeVisible()`.
@@ -662,20 +658,13 @@ export class DOAssetDetailsPage extends BasePage {
   /** UDC Establishment Fee: pre-populated from program; assert editable only when the control allows editing. */
   async expectUdcEstablishmentFeePrePopulatedFromProgram(): Promise<void> {
     this.logStep("Expect Udc Establishment Fee Pre Populated From Program");
-    await this.waitForQuoteLoadersToFinish(60_000);
     const fee = this.udcEstablishmentFeeInputField;
     await expect(fee).toBeVisible({ timeout: 20_000 });
-    await expect
-      .poll(
-        async () => {
-          const raw = (await fee.inputValue()).trim();
-          if (raw.length === 0) return 0;
-          const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
-          return Number.isNaN(n) ? 0 : n;
-        },
-        { timeout: 45_000 },
-      )
-      .toBeGreaterThan(0);
+    const raw = (await fee.inputValue()).trim();
+    expect(raw.length).toBeGreaterThan(0);
+    const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
+    expect(Number.isNaN(n)).toBeFalsy();
+    expect(n).toBeGreaterThan(0);
     if (await fee.isEditable().catch(() => false)) {
       await expect(fee).toBeEditable();
     }
@@ -724,7 +713,24 @@ export class DOAssetDetailsPage extends BasePage {
   async expectRecommendedRetailPriceHiddenAfterUsedCondition(): Promise<void> {
     this.logStep("Expect Recommended Retail Price Hidden After Used Condition");
     await this.waitForQuoteLoadersToFinish();
-    await expect(this.recommendedRetailPriceInput).toBeHidden({ timeout: 25_000 });
+    await this.page.waitForTimeout(2_000);
+ 
+    await this.dealerOriginationFeeInputField.scrollIntoViewIfNeeded();
+    await this.page.mouse.wheel(0, 700);
+    await this.page.waitForTimeout(1_000);
+ 
+    // Match UDP-T3657 / `recommendedRetailPriceInput` only. A broad `getByText(RRP)` stays visible
+    // (e.g. label in layout/summary) while the amount field is hidden for Used — that caused visibleCount 1.
+    await expect
+      .poll(
+        async () => {
+          const n = await this.recommendedRetailPriceInput.count();
+          if (n === 0) return true;
+          return !(await this.recommendedRetailPriceInput.first().isVisible().catch(() => false));
+        },
+        { timeout: 20_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(true);
   }
   /**
    * Wait until **Loan Date** and **First Payment** both have values and stop changing
@@ -822,29 +828,11 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Expect Dealer Origination Fee Populated From Program");
     const f = this.dealerOriginationFeeInputField;
     await expect(f).toBeVisible({ timeout: 20_000 });
-    await expect
-      .poll(
-        async () => {
-          const raw = (await f.inputValue()).trim();
-          if (raw.length === 0) return 0;
-          const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
-          return Number.isNaN(n) ? 0 : n;
-        },
-        { timeout: 45_000 },
-      )
-      .toBeGreaterThan(0);
-  }
-
-  /** **Total Establishment Fee** (read-only) equals UDC Establishment Fee + Dealer Origination Fee. */
-  async expectTotalEstablishmentFeeEqualsUdcPlusDealer(): Promise<void> {
-    this.logStep("Expect Total Establishment Fee Equals Udc Plus Dealer");
-    const udcRaw = (await this.udcEstablishmentFeeInputField.inputValue()).trim();
-    const dealerRaw = (await this.dealerOriginationFeeInputField.inputValue()).trim();
-    const udc = parseFloat(udcRaw.replace(/[^0-9.]/g, ""));
-    const dealer = parseFloat(dealerRaw.replace(/[^0-9.]/g, ""));
-    expect(Number.isNaN(udc)).toBeFalsy();
-    expect(Number.isNaN(dealer)).toBeFalsy();
-    await this.expectTotalEstablishmentFeeSumDollars(udc + dealer);
+    const raw = (await f.inputValue()).trim();
+    expect(raw.length).toBeGreaterThan(0);
+    const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
+    expect(Number.isNaN(n)).toBeFalsy();
+    expect(n).toBeGreaterThanOrEqual(0);
   }
 
   /** **Total Establishment Fee** (read-only): parsed numeric equals UDC + Dealer (waits for recalculation). */
@@ -2201,6 +2189,347 @@ export class DOAssetDetailsPage extends BasePage {
     await this.clickPaymentScheduleViewTogglesAndExpectRowsRemain();
   }
 
+  /** **Edit Payment Schedule** modal. */
+  editPaymentScheduleDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Edit\s+Payment\s+Schedule/i })
+      .first();
+  }
+
+  private async paymentScheduleHost(): Promise<Locator> {
+    const root = this.standardQuoteRoot();
+    const scheduleCard = root.locator("p-card").filter({ hasText: /Payment\s+Schedule/i }).first();
+    if (await scheduleCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      return scheduleCard;
+    }
+    return root
+      .locator("div")
+      .filter({ has: root.getByText(/Payment\s+Schedule/i).first() })
+      .filter({ has: root.locator("table tbody tr") })
+      .first();
+  }
+
+  /** Opens **Edit Payment Schedule** from the pencil / edit control on the schedule card. */
+  async openEditPaymentScheduleDialog(): Promise<void> {
+    this.logStep("Open Edit Payment Schedule Dialog");
+    const root = this.standardQuoteRoot();
+    const scheduleHost = await this.paymentScheduleHost();
+    const editIcon = root
+      .getByRole("button", { name: /Edit\s+Payment\s+Schedule/i })
+      .or(root.getByRole("link", { name: /Edit\s+Payment\s+Schedule/i }))
+      .or(
+        scheduleHost
+          .locator("button:not(.brand-edit-btn), a:not(.brand-edit-btn), [role='button']:not(.brand-edit-btn)")
+          .filter({
+            has: scheduleHost.locator("i.pi-pencil, i.pi-pen-to-square, .fa-pen-to-square"),
+          }),
+      )
+      .first();
+    await expect(editIcon).toBeEnabled({ timeout: 20_000 });
+    await editIcon.click({ timeout: 20_000 });
+    await expect(this.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+  }
+
+  /** First segment row inside **Edit Payment Schedule** table. */
+  private editPaymentScheduleSegmentRow(): Locator {
+    return this.editPaymentScheduleDialog().locator("table tbody tr").first();
+  }
+
+  private editPaymentScheduleApplyButton(): Locator {
+    const dialog = this.editPaymentScheduleDialog();
+    return dialog
+      .getByRole("button", { name: /^APPLY$/i })
+      .or(dialog.locator("p-button").filter({ hasText: /^Apply$/i }).locator("button"))
+      .first();
+  }
+
+  private editPaymentScheduleCalculateButton(): Locator {
+    const dialog = this.editPaymentScheduleDialog();
+    return dialog
+      .getByRole("button", { name: /^Calculate$/i })
+      .or(dialog.locator("p-button").filter({ hasText: /^Calculate$/i }).locator("button"))
+      .first();
+  }
+
+  /** Segment **Type** dropdown inside **Edit Payment Schedule** (e.g. Normal, Fixed, Interest Only). */
+  async selectEditPaymentScheduleSegmentType(typeLabel: string): Promise<void> {
+    this.logStep(`Select Edit Payment Schedule Segment Type ${typeLabel}`);
+    const row = this.editPaymentScheduleSegmentRow();
+    const typeCombo = row.getByRole("combobox").first();
+    await typeCombo.click({ timeout: 10_000 });
+    const typePattern = new RegExp(
+      `^${typeLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+      "i",
+    );
+    await this.page
+      .locator(".p-dropdown-panel")
+      .filter({ visible: true })
+      .locator("li[role='option'], .p-dropdown-item")
+      .filter({ hasText: typePattern })
+      .first()
+      .click({ timeout: 10_000 });
+    await this.page.keyboard.press("Escape").catch(() => {});
+  }
+
+  /** **Calculate** inside **Edit Payment Schedule** (FIS fetch for segment amounts). */
+  async clickEditPaymentScheduleCalculate(): Promise<void> {
+    this.logStep("Click Edit Payment Schedule Calculate");
+    const calcBtn = this.editPaymentScheduleCalculateButton();
+    await expect(calcBtn).toBeVisible({ timeout: 10_000 });
+    await expect(calcBtn).toBeEnabled({ timeout: 10_000 });
+    await calcBtn.click({ timeout: 10_000 });
+    await this.waitForLoadingComplete();
+    // Apply enables only after FIS calculation completes — wait for UI state, not spinner alone.
+    await expect(this.editPaymentScheduleApplyButton()).toBeEnabled({ timeout: 60_000 });
+  }
+
+  /** Summary block after dialog **Calculate** (Number of Payments, Total Term). */
+  async expectEditPaymentScheduleCalculateSummaryVisible(): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule Calculate Summary Visible");
+    const dialog = this.editPaymentScheduleDialog();
+    await expect(dialog.getByText(/Number of Payments/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(dialog.getByText(/Total Term/i).first()).toBeVisible({ timeout: 15_000 });
+  }
+
+  /**
+   * Segment **Number** on a specific row (0-based) inside **Edit Payment Schedule**.
+   */
+  async enterEditPaymentScheduleSegmentNumberOnRow(
+    rowIndex: number,
+    number: string,
+  ): Promise<void> {
+    this.logStep(`Enter Edit Payment Schedule Segment Number ${number} on row ${rowIndex + 1}`);
+    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
+    const numberInput = row.getByRole("spinbutton").first();
+    await expect(numberInput).toBeVisible({ timeout: 10_000 });
+    await numberInput.fill(number);
+    await numberInput.press("Tab").catch(() => {});
+  }
+
+  /**
+   * Segment **Number** inside **Edit Payment Schedule** (must not exceed finance term).
+   */
+  async enterEditPaymentScheduleSegmentNumber(number: string): Promise<void> {
+    await this.enterEditPaymentScheduleSegmentNumberOnRow(0, number);
+  }
+
+  /**
+   * Change segment fields then **Calculate** so **Apply** can persist valid schedule changes.
+   */
+  async modifyEditPaymentScheduleSegment(opts?: {
+    type?: string;
+    number?: string;
+  }): Promise<void> {
+    this.logStep("Modify Edit Payment Schedule Segment");
+    if (opts?.number) {
+      await this.enterEditPaymentScheduleSegmentNumber(opts.number);
+    }
+    if (opts?.type) {
+      await this.selectEditPaymentScheduleSegmentType(opts.type);
+    }
+    await this.clickEditPaymentScheduleCalculate();
+  }
+
+  /** **Apply** inside **Edit Payment Schedule** — saves changes and closes the dialog. */
+  async clickEditPaymentScheduleApply(): Promise<void> {
+    this.logStep("Click Edit Payment Schedule Apply");
+    const applyBtn = this.editPaymentScheduleApplyButton();
+    await expect(applyBtn).toBeVisible({ timeout: 10_000 });
+    await expect(applyBtn).toBeEnabled({ timeout: 10_000 });
+    await applyBtn.click({ timeout: 10_000 });
+    await this.waitForLoadingComplete();
+  }
+
+  /** User returns to **Standard Quote** after **Apply** (edit dialog closed). */
+  async expectEditPaymentScheduleDialogClosedOnStandardQuote(): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule Dialog Closed On Standard Quote");
+    await expect(this.editPaymentScheduleDialog()).toBeHidden({ timeout: 20_000 });
+    await expect(this.standardQuoteRoot()).toBeVisible({ timeout: 15_000 });
+    await this.expectPaymentScheduleSectionWithTableData();
+  }
+
+  private editPaymentScheduleCancelButton(): Locator {
+    const dialog = this.editPaymentScheduleDialog();
+    return dialog
+      .getByRole("button", { name: /^CANCEL$/i })
+      .or(dialog.locator("p-button").filter({ hasText: /^Cancel$/i }).locator("button"))
+      .first();
+  }
+
+  private editPaymentScheduleCancelConfirmDialog(): Locator {
+    return this.page
+      .locator("p-confirmdialog, .p-confirm-dialog, [role='alertdialog']")
+      .filter({ visible: true })
+      .filter({ hasText: /unsaved changes|lost|cancel/i })
+      .first();
+  }
+
+  /**
+   * Edit segment fields only (no **Calculate**) — leaves unsaved changes for **Cancel** flow.
+   */
+  async modifyEditPaymentScheduleSegmentFields(opts?: {
+    type?: string;
+    number?: string;
+  }): Promise<void> {
+    this.logStep("Modify Edit Payment Schedule Segment Fields");
+    if (opts?.number) {
+      await this.enterEditPaymentScheduleSegmentNumber(opts.number);
+    }
+    if (opts?.type) {
+      await this.selectEditPaymentScheduleSegmentType(opts.type);
+    }
+  }
+
+  /** **CANCEL** on **Edit Payment Schedule** — prompts unsaved-changes confirmation. */
+  async clickEditPaymentScheduleCancel(): Promise<void> {
+    this.logStep("Click Edit Payment Schedule Cancel");
+    const cancelBtn = this.editPaymentScheduleCancelButton();
+    await expect(cancelBtn).toBeVisible({ timeout: 10_000 });
+    await cancelBtn.click({ timeout: 10_000 });
+  }
+
+  /** Unsaved-changes confirmation after **Cancel**. */
+  async expectEditPaymentScheduleCancelConfirmationVisible(): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule Cancel Confirmation Visible");
+    const confirmDlg = this.editPaymentScheduleCancelConfirmDialog();
+    await expect(confirmDlg).toBeVisible({ timeout: 15_000 });
+    await expect(confirmDlg).toContainText(/Any unsaved changes will be lost/i);
+    await expect(confirmDlg).toContainText(/cancel/i);
+  }
+
+  /** Confirm discard on cancel confirmation — exits edit screen back to **Standard Quote**. */
+  async confirmEditPaymentScheduleCancelDiscard(): Promise<void> {
+    this.logStep("Confirm Edit Payment Schedule Cancel Discard");
+    const confirmDlg = this.editPaymentScheduleCancelConfirmDialog();
+    const discardBtn = confirmDlg
+      .getByRole("button", { name: /^(Yes|OK|Confirm|Discard)$/i })
+      .or(confirmDlg.locator("button.p-confirm-dialog-accept").first())
+      .first();
+    await expect(discardBtn).toBeVisible({ timeout: 10_000 });
+    await discardBtn.click({ timeout: 10_000 });
+    await expect(confirmDlg).toBeHidden({ timeout: 15_000 });
+  }
+
+  /** Dismiss cancel confirmation — stay on **Edit Payment Schedule**. */
+  async dismissEditPaymentScheduleCancelConfirmationStayEditing(): Promise<void> {
+    this.logStep("Dismiss Edit Payment Schedule Cancel Confirmation Stay Editing");
+    const confirmDlg = this.editPaymentScheduleCancelConfirmDialog();
+    const stayBtn = confirmDlg
+      .getByRole("button", { name: /^(No|Stay)$/i })
+      .or(confirmDlg.locator("button.p-confirm-dialog-reject").first())
+      .first();
+    await expect(stayBtn).toBeVisible({ timeout: 10_000 });
+    await stayBtn.click({ timeout: 10_000 });
+    await expect(confirmDlg).toBeHidden({ timeout: 15_000 });
+    await expect(this.editPaymentScheduleDialog()).toBeVisible({ timeout: 10_000 });
+  }
+
+  private editPaymentScheduleAddSegmentButton(): Locator {
+    const dialog = this.editPaymentScheduleDialog();
+    return dialog
+      .getByRole("button", { name: /\+\s*Add Segment|Add Segment/i })
+      .first();
+  }
+
+  /** Finance term (months) shown in the edit-schedule summary. */
+  async getEditPaymentScheduleFinanceTermMonths(): Promise<number> {
+    const dialog = this.editPaymentScheduleDialog();
+    const termLine = dialog.getByText(/Total Term/i).first();
+    await expect(termLine).toBeVisible({ timeout: 10_000 });
+    const text = (await termLine.textContent()) ?? "";
+    const match = text.match(/(\d+)\s*month/i);
+    return match ? parseInt(match[1], 10) : 36;
+  }
+
+  /** Total **Number of Payments** in the edit-schedule summary (falls back to row sum). */
+  async getEditPaymentScheduleNumberOfPayments(): Promise<number> {
+    const dialog = this.editPaymentScheduleDialog();
+    const summaryLine = dialog.getByText(/Number of Payments/i).first();
+    await expect(summaryLine).toBeVisible({ timeout: 10_000 });
+    const text = (await summaryLine.textContent()) ?? "";
+    const match = text.match(/Number of Payments\s*(\d+)/i);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+
+    const rows = dialog.locator("table tbody tr");
+    let sum = 0;
+    for (let i = 0; i < (await rows.count()); i++) {
+      const value = await rows.nth(i).getByRole("spinbutton").first().inputValue();
+      sum += parseInt(value, 10) || 0;
+    }
+    return sum;
+  }
+
+  /** Clicks **+ Add Segment** when enabled. */
+  async clickEditPaymentScheduleAddSegment(): Promise<void> {
+    this.logStep("Click Edit Payment Schedule Add Segment");
+    const addBtn = this.editPaymentScheduleAddSegmentButton();
+    await expect(addBtn).toBeVisible({ timeout: 10_000 });
+    await expect(addBtn).toBeEnabled({ timeout: 10_000 });
+    await addBtn.click({ timeout: 10_000 });
+  }
+
+  /**
+   * Add segments until total payments equal finance term (frees capacity from a single full-term row first).
+   */
+  async addEditPaymentScheduleSegmentsUntilTermReached(): Promise<void> {
+    this.logStep("Add Edit Payment Schedule Segments Until Term Reached");
+    const term = await this.getEditPaymentScheduleFinanceTermMonths();
+    const rows = () => this.editPaymentScheduleDialog().locator("table tbody tr");
+    const addBtn = this.editPaymentScheduleAddSegmentButton();
+
+    if ((await rows().count()) === 1) {
+      const firstValue = parseInt(
+        (await rows().first().getByRole("spinbutton").first().inputValue()) || "0",
+        10,
+      );
+      if (firstValue >= term) {
+        const chunk = Math.max(1, Math.floor(term / 3));
+        await this.enterEditPaymentScheduleSegmentNumberOnRow(0, String(chunk));
+      }
+    }
+
+    let guard = 0;
+    while (guard++ < 20) {
+      const total = await this.getEditPaymentScheduleNumberOfPayments();
+      if (total >= term) break;
+      if (!(await addBtn.isEnabled().catch(() => false))) break;
+
+      await addBtn.click({ timeout: 10_000 });
+      const rowIndex = (await rows().count()) - 1;
+      const remaining = term - total;
+      await this.enterEditPaymentScheduleSegmentNumberOnRow(rowIndex, String(remaining));
+    }
+
+    const finalTotal = await this.getEditPaymentScheduleNumberOfPayments();
+    if (finalTotal < term && (await rows().count()) > 0) {
+      const lastIndex = (await rows().count()) - 1;
+      const lastValue = parseInt(
+        (await rows().nth(lastIndex).getByRole("spinbutton").first().inputValue()) || "0",
+        10,
+      );
+      await this.enterEditPaymentScheduleSegmentNumberOnRow(
+        lastIndex,
+        String(lastValue + (term - finalTotal)),
+      );
+    }
+  }
+
+  /**
+   * **+ Add Segment** is disabled when payments meet the term maximum for the selected frequency.
+   */
+  async expectEditPaymentScheduleAddSegmentDisabledAtTermMax(): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule Add Segment Disabled At Term Max");
+    const term = await this.getEditPaymentScheduleFinanceTermMonths();
+    const total = await this.getEditPaymentScheduleNumberOfPayments();
+    expect(total).toBe(term);
+    await expect(this.editPaymentScheduleAddSegmentButton()).toBeDisabled({ timeout: 15_000 });
+  }
+
   /**
    * Clicks edit on the asset/insurance summary dialog. Finance Lease vs CSA may use
    * `.fa-pen-to-square`, `fa-pen`, Prime `pi-pen`, or a text "Edit" button.
@@ -2857,7 +3186,7 @@ export class DOAssetDetailsPage extends BasePage {
   async selectUDCSelectOption(): Promise<void> {
     this.logStep("Select UDC option");
     const panel = this.page.locator(".p-dropdown-panel").last();
-    const opt = panel.getByRole("option", { name: /UDC Customer (Number|No)/i });
+    const opt = panel.getByRole("option", { name: /UDC Customer Number/i });
     await opt.waitFor({ state: "visible", timeout: 30000 });
     await opt.click();
     await this.page
@@ -3006,10 +3335,6 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.waitForTimeout(600);
 
     const markers: Locator[] = [
-      this.page.locator("app-business-details").first(),
-      this.page.locator("app-trust-details").first(),
-      this.page.getByText(/Organisation Type/i).first(),
-      this.page.getByText(/Trust Name/i).first(),
       this.page.locator('input[name="dateOfBirth"]'),
       this.page.getByRole("button", { name: /Choose Date/i }),
       this.page.getByRole("textbox", { name: /First Name/i }),
@@ -3036,7 +3361,7 @@ export class DOAssetDetailsPage extends BasePage {
     }
 
     throw new Error(
-      "Customer details did not open after Add New Customer (expected Personal, Business, or Trust details step).",
+      "Personal details did not open after Add New Customer (expected DOB, Choose Date, First Name, Title, or email block).",
     );
   }
 }

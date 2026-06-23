@@ -12,40 +12,31 @@ export class DOEmploymentDetailsPage extends BasePage {
   readonly currentEmploymentRoot: Locator;
   readonly previousEmploymentRoot: Locator;
   readonly nextButton: Locator;
+  readonly backButton: Locator;
   /** Outlined **Save** on Employment Details (Prime pattern aligned with Personal / Address). */
   readonly saveEmploymentDetailsButton: Locator;
 
   constructor(page: Page) {
     super(page);
-    const individual = page.locator("app-individual").filter({ visible: true }).first();
     // Visible `app-sole-trade` only — avoids hidden shells / duplicate hosts so `waitFor` does not hang.
     const sole = page.locator("app-sole-trade").filter({ visible: true }).first();
+    const employmentHost = page.locator("app-employment-details").filter({ visible: true }).first();
 
-    this.employmentRoot = individual
-      .locator("app-employment-details")
-      .first()
+    this.employmentRoot = employmentHost
       .or(sole.locator("app-employment-details").first())
-      .or(page.locator("app-employment-details").filter({ visible: true }).first())
-      .or(individual)
+      .or(page.locator("app-employment-details").first())
       .or(sole);
 
-    const individualEmploymentCard = individual
+    const currentEmploymentCard = page
       .locator("gen-card, p-card")
       .filter({ hasText: /Current Employment/i })
+      .filter({ visible: true })
       .first();
-    const individualCurrent = individual.locator("app-current-employment").filter({ visible: true }).first();
-    const currentEmploymentCard = sole
-      .locator("gen-card, p-card")
-      .filter({ hasText: /Current Employment/i })
-      .first();
-    const currentInSole = sole.locator("app-current-employment").first();
     const currentGlobalVisible = page.locator("app-current-employment").filter({ visible: true }).first();
-    this.currentEmploymentRoot = individualEmploymentCard
-      .or(individualCurrent)
+    this.currentEmploymentRoot = employmentHost
       .or(currentEmploymentCard)
-      .or(currentInSole)
       .or(currentGlobalVisible)
-      .or(individual)
+      .or(sole.locator("app-current-employment").first())
       .or(sole);
 
     // Individual flow exposes `app-previous-employee` (not under `app-sole-trade`). Prefer it when visible.
@@ -71,6 +62,8 @@ export class DOEmploymentDetailsPage extends BasePage {
       .or(page.locator("app-previous-employment").filter({ visible: true }).first());
 
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
+    /** Footer **Previous** / **Back** — last in Customer Details chrome (Zephyr UDP-T3791). */
+    this.backButton = page.getByRole("button", { name: /Previous|Back/i }).last();
     this.saveEmploymentDetailsButton = page
       .locator(
         "button.p-ripple.p-element.p-button.p-component.p-button-outlined",
@@ -82,146 +75,34 @@ export class DOEmploymentDetailsPage extends BasePage {
     return "Standard quote — Employment details";
   }
 
-  /** Row for "Have the Employment Details Changed?" — avoid `.first()` slider in the whole card (wrong control). */
-  employmentDetailsChangedLabel(): Locator {
-    return this.page.getByText(/Have the Employment Details Changed\??/i).first();
-  }
-
-  private employmentDetailsChangedRow(): Locator {
-    return this.employmentDetailsChangedLabel().locator(
-      "xpath=ancestor::div[.//p-inputswitch or .//span[contains(@class,'p-inputswitch')]][1]",
-    );
-  }
-
-  /** **Existing customers only** — FIS pre-populated employment shows this toggle (UDP-T3764). */
-  async isEmploymentDetailsChangedSliderVisible(timeoutMs = 10_000): Promise<boolean> {
-    const labelVisible = await this.employmentDetailsChangedLabel()
-      .isVisible({ timeout: timeoutMs })
-      .catch(() => false);
-    if (!labelVisible) return false;
-    const switchHost = this.employmentDetailsChangedRow()
-      .locator("p-inputswitch, span.p-inputswitch")
-      .first();
-    return switchHost.isVisible({ timeout: 4_000 }).catch(() => false);
-  }
-
-  /** PrimeNG hides `input[role="switch"]` off-screen — assert the visible switch host (UDP-T3764). */
-  async expectEmploymentDetailsChangedSwitchVisible(): Promise<void> {
-    this.logStep("Expect Employment Details Changed Switch Visible");
-    await expect(this.employmentDetailsChangedLabel()).toBeVisible({ timeout: 20_000 });
-    const row = this.employmentDetailsChangedRow();
-    const switchHost = row.locator("p-inputswitch, span.p-inputswitch").first();
-    await expect(switchHost).toBeVisible({ timeout: 15_000 });
-    await expect(row.locator('input[role="switch"]').first()).toBeAttached({ timeout: 10_000 });
-  }
-
-  /** Open **Occupation** dropdown on Current Employment (panel stays open — UDP-T3767). */
-  async openCurrentOccupationDropdown(): Promise<void> {
-    this.logStep("Open Current Occupation Dropdown");
-    const root = await this.resolveEmploymentFormRoot();
-    await this.openEmploymentDropdown(root, "Occupation");
-  }
-
-  async expectOccupationRequiredVisible(): Promise<void> {
-    this.logStep("Expect Occupation Required Visible");
-    const root = await this.employmentValidationScope();
-    await expect(root.getByText("Occupation is required", { exact: true }).first()).toBeVisible({
-      timeout: 20_000,
-    });
-  }
-
-  async expectOccupationRequiredHidden(): Promise<void> {
-    this.logStep("Expect Occupation Required Hidden");
-    const root = await this.employmentValidationScope();
-    await expect(root.getByText("Occupation is required", { exact: true })).toHaveCount(0, {
-      timeout: 12_000,
-    });
-  }
-
-  async expectTimeWithEmployerRequiredVisible(): Promise<void> {
-    this.logStep("Expect Time With Employer Required Visible");
-    await this.scrollCurrentEmploymentSectionIntoViewForValidation();
-    const root = await this.employmentValidationScope();
-    const exact = root.getByText("Time with Employer is required", { exact: true });
-    const loose = root.getByText(/Time with Employer is required/i);
-    try {
-      await expect(exact).toHaveCount(2, { timeout: 12_000 });
-      await expect(exact.nth(0)).toBeVisible({ timeout: 15_000 });
-      await expect(exact.nth(1)).toBeVisible({ timeout: 15_000 });
-    } catch {
-      await expect(loose.first()).toBeVisible({ timeout: 20_000 });
+  /** **.app-loader-overlay** blocks Years/Months and **Save** after employment save round-trips. */
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const overlays = this.page.locator(".app-loader-overlay");
+      const count = await overlays.count();
+      let anyVisible = false;
+      for (let i = 0; i < count; i++) {
+        if (await overlays.nth(i).isVisible().catch(() => false)) {
+          anyVisible = true;
+          break;
+        }
+      }
+      if (!anyVisible) {
+        return;
+      }
+      await this.page.waitForTimeout(200);
     }
   }
 
-  async expectTimeWithEmployerMustBeGreaterThanZeroVisible(): Promise<void> {
-    this.logStep("Expect Time With Employer Must Be Greater Than Zero Visible");
-    await this.scrollCurrentEmploymentSectionIntoViewForValidation();
-    const host = this.page.locator("app-individual").filter({ visible: true }).first();
-    const pattern = /Time with Employer must be greater than 0/i;
-
-    await expect
-      .poll(
-        async () => {
-          if (await host.isVisible().catch(() => false)) {
-            const text = await host.innerText().catch(() => "");
-            if (pattern.test(text)) return true;
-          }
-          const body = await this.page.locator("body").innerText().catch(() => "");
-          return pattern.test(body);
-        },
-        {
-          timeout: 30_000,
-          message: "Expected Time with Employer must be greater than 0 validation",
-        },
-      )
-      .toBe(true);
-  }
-
-  async expectTimeWithEmployerRequiredHidden(): Promise<void> {
-    this.logStep("Expect Time With Employer Required Hidden");
-    const root = await this.employmentValidationScope();
-    await expect(
-      root.getByText(/Time with Employer is required|Time with Employer must be greater than 0/i),
-    ).toHaveCount(0, {
-      timeout: 12_000,
-    });
-  }
-
-  private async openEmploymentDropdown(root: Locator, labelNeedle: string): Promise<void> {
-    const q = labelNeedle.replace(/'/g, "");
-    const primary = root.locator(
-      `xpath=.//label[contains(normalize-space(.),'${q}')]/following-sibling::*//div[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]`,
-    );
-    const fallback = root
-      .locator("label")
-      .filter({ hasText: new RegExp(q, "i") })
+  /** Row for "Have the Employment Details Changed?" — avoid `.first()` slider in the whole card (wrong control). */
+  private employmentDetailsChangedRow(): Locator {
+    return this.employmentRoot
+      .getByText(/Have the Employment Details Changed\??/i)
       .first()
       .locator(
-        "xpath=following::button[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+        "xpath=ancestor::div[.//p-inputswitch or .//span[contains(@class,'p-inputswitch')]][1]",
       );
-    let trigger: Locator = (await primary.isVisible({ timeout: 4_000 }).catch(() => false))
-      ? primary
-      : fallback;
-    const byRoleCombo = root.getByRole("combobox", { name: new RegExp(q, "i") }).first();
-    if (
-      !(await trigger.isVisible({ timeout: 1_500 }).catch(() => false)) &&
-      (await byRoleCombo.isVisible({ timeout: 4_000 }).catch(() => false))
-    ) {
-      trigger = byRoleCombo;
-    }
-    const triggerInHostDropdown = root.locator(
-      `xpath=.//label[contains(normalize-space(.),'${q}')]/ancestor::p-dropdown[1]//*[contains(@class,'p-dropdown-trigger') or @aria-label='dropdown trigger'][1]`,
-    );
-    if (
-      !(await trigger.isVisible({ timeout: 1_200 }).catch(() => false)) &&
-      (await triggerInHostDropdown.isVisible({ timeout: 4_000 }).catch(() => false))
-    ) {
-      trigger = triggerInHostDropdown;
-    }
-    await trigger.waitFor({ state: "visible", timeout: 20_000 });
-    await trigger.scrollIntoViewIfNeeded();
-    await trigger.click();
-    await this.page.getByRole("listbox").waitFor({ state: "visible", timeout: 15_000 });
   }
 
   async waitForEmploymentDetailsStep(): Promise<void> {
@@ -257,19 +138,12 @@ export class DOEmploymentDetailsPage extends BasePage {
       .getByRole("textbox", { name: /Employer Name/i })
       .first();
 
-    const employmentChangedPage = this.page
-      .getByText(/Have the Employment Details Changed\??/i)
-      .first();
     const employmentChanged = sole.getByText(/Have the Employment Details Changed\??/i).first();
-    const employmentChangedIndividual = individual
-      .getByText(/Have the Employment Details Changed\??/i)
-      .first();
     const empCard = sole.locator("gen-card, p-card").filter({ hasText: /Current Employment/i }).first();
     const byEmployerSole = sole.getByRole("textbox", { name: /Employer Name/i }).first();
     const byEmployerLoose = sole.getByRole("textbox", { name: /Employer/i }).first();
     const byEmployerLabel = sole.getByLabel(/Employer Name/i).first();
     const byEmployerPage = this.page.getByRole("textbox", { name: /Employer Name/i }).first();
-    const indCardTitle = individual.getByText(/^Current Employment$/i).first();
     const byCardTitle = sole.getByText(/^Current Employment$/i).first();
     const nestedCurrent = sole.locator("app-current-employment").first();
     const globalCurrent = this.page.locator("app-current-employment").filter({ visible: true }).first();
@@ -278,15 +152,17 @@ export class DOEmploymentDetailsPage extends BasePage {
     // `Promise.any`: first success wins. UI may expose Employer as non-textbox or omit `app-current-employment`.
     try {
       await Promise.any([
+        this.page
+          .locator("app-employment-details")
+          .filter({ visible: true })
+          .first()
+          .waitFor({ state: "visible", timeout }),
         indEmploymentHost.waitFor({ state: "visible", timeout }),
         indCurrentEmp.waitFor({ state: "visible", timeout }),
         indEmpCard.waitFor({ state: "visible", timeout }),
         indEmployerName.waitFor({ state: "visible", timeout }),
-        employmentChangedPage.waitFor({ state: "visible", timeout }),
-        employmentChangedIndividual.waitFor({ state: "visible", timeout }),
         employmentChanged.waitFor({ state: "visible", timeout }),
         empCard.waitFor({ state: "visible", timeout }),
-        indCardTitle.waitFor({ state: "visible", timeout }),
         byEmployerSole.waitFor({ state: "visible", timeout }),
         byEmployerLoose.waitFor({ state: "visible", timeout }),
         byEmployerLabel.waitFor({ state: "visible", timeout }),
@@ -300,6 +176,19 @@ export class DOEmploymentDetailsPage extends BasePage {
         "Employment Details step: form not ready (no visible Employment question, Current Employment card, Employer field, or app-current-employment).",
       );
     }
+  }
+
+  /** UDP-T3791 — **Next** from Address Details returns to Employment Details. */
+  async expectEmploymentDetailsStepVisible(): Promise<void> {
+    this.logStep("Expect Employment Details step visible");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.waitForEmploymentDetailsStep();
+    await expect(
+      this.page.locator("app-employment-details").filter({ visible: true }).first(),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(this.page.getByText(/^Current Employment$/i).first()).toBeVisible({
+      timeout: 20_000,
+    });
   }
 
   /** Turns on "Have the Employment Details Changed?" so Previous Employment is shown. */
@@ -386,42 +275,13 @@ export class DOEmploymentDetailsPage extends BasePage {
    * an unrelated `app-sole-trade` subtree (trace: Occupation trigger not visible on whole shell).
    */
   private async resolveEmploymentFormRoot(): Promise<Locator> {
-    const individual = this.page.locator("app-individual").filter({ visible: true }).first();
-    const indCard = individual
-      .locator("gen-card, p-card")
-      .filter({ hasText: /Current Employment/i })
-      .first();
-    if (await indCard.isVisible({ timeout: 10_000 }).catch(() => false)) return indCard;
-    const indCurrent = individual.locator("app-current-employment").filter({ visible: true }).first();
-    if (await indCurrent.isVisible({ timeout: 5_000 }).catch(() => false)) return indCurrent;
-    const indEmployer = individual.getByRole("textbox", { name: /Employer Name/i }).first();
-    if (await indEmployer.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      const wrap = indEmployer.locator(
-        "xpath=ancestor::*[self::p-card or self::gen-card or self::app-current-employment][1]",
-      );
-      if (await wrap.isVisible({ timeout: 3_000 }).catch(() => false)) return wrap;
-      return individual;
-    }
-
     const sole = this.page.locator("app-sole-trade").filter({ visible: true }).first();
     const card = sole.locator("gen-card, p-card").filter({ hasText: /Current Employment/i }).first();
-    if (await card.isVisible({ timeout: 10_000 }).catch(() => false)) return card;
+    if (await card.isVisible({ timeout: 10000 }).catch(() => false)) return card;
     const nested = sole.locator("app-current-employment").first();
-    if ((await nested.count()) > 0 && (await nested.isVisible({ timeout: 5_000 }).catch(() => false)))
+    if ((await nested.count()) > 0 && (await nested.isVisible({ timeout: 5000 }).catch(() => false)))
       return nested;
     return this.currentEmploymentRoot;
-  }
-
-  private async employmentValidationScope(): Promise<Locator> {
-    const individual = this.page.locator("app-individual").filter({ visible: true }).first();
-    if (await individual.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      return individual;
-    }
-    const root = await this.resolveEmploymentFormRoot();
-    if (await root.isVisible({ timeout: 2_000 }).catch(() => false)) return root;
-    return this.page.locator("app-individual, app-employment-details, app-current-employment").filter({
-      visible: true,
-    }).first().or(this.page.locator("body"));
   }
 
   /**
@@ -731,17 +591,15 @@ export class DOEmploymentDetailsPage extends BasePage {
   /** Outlined **Save** on Employment Details. */
   async clickSaveEmploymentDetails(): Promise<void> {
     this.logStep("Click Save Employment Details");
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     await this.saveEmploymentDetailsButton.waitFor({
       state: "visible",
       timeout: 30_000,
     });
     await this.saveEmploymentDetailsButton.scrollIntoViewIfNeeded();
     await this.saveEmploymentDetailsButton.click({ timeout: 15_000 });
-    await this.page
-      .locator(".app-loader-overlay, .p-blockui, .p-progress-spinner, p-progressspinner")
-      .first()
-      .waitFor({ state: "hidden", timeout: 30_000 })
-      .catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
+    await this.waitForLoadingComplete();
   }
 
   private async scrollCurrentEmploymentSectionIntoViewForValidation(): Promise<void> {
@@ -887,7 +745,249 @@ export class DOEmploymentDetailsPage extends BasePage {
     }
   }
 
-  /** Current — Employer Name (`getByLabel`, roles, gen-text, SelectorHub row). */
+  /** **Employed** types — blank employer name shows required validation after **Save**. */
+  async expectCurrentEmployerNameRequiredValidationMessage(): Promise<void> {
+    this.logStep("Expect Current Employer Name Required Validation Message");
+    await this.scrollCurrentEmploymentSectionIntoViewForValidation();
+    const root = await this.resolveEmploymentFormRoot();
+    const el = root.getByText(/Employer name is required/i).first();
+    await el.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+    await expect(el).toBeVisible({ timeout: 20_000 });
+  }
+
+  /**
+   * **Beneficiary / Unemployed / Retired / Unknown** — employer name is optional (no required marker / error).
+   */
+  async expectCurrentEmployerNameOptional(): Promise<void> {
+    this.logStep("Expect Current Employer Name Optional");
+    const root = await this.resolveEmploymentFormRoot();
+    await root.scrollIntoViewIfNeeded().catch(() => {});
+
+    const requiredLabel = root
+      .locator("label, span, .p-label, text")
+      .filter({ hasText: /Employer Name\s*\*/i });
+    await expect(requiredLabel).toHaveCount(0, { timeout: 10_000 });
+
+    const input = this.employerNameInputFor(root);
+    await expect(input).toBeVisible({ timeout: 15_000 });
+
+    await this.enterCurrentEmployerName("");
+    await this.clickSaveEmploymentDetails();
+    await this.waitForLoadingComplete();
+
+    await expect(root.getByText(/Employer name is required/i)).toHaveCount(0, {
+      timeout: 20_000,
+    });
+  }
+
+  /** Employer Name accepts at most 30 characters (business rule — may not match HTML maxlength). */
+  async expectCurrentEmployerNameMaxLengthThirty(): Promise<void> {
+    this.logStep("Expect Current Employer Name Max Length Thirty");
+    const root = await this.resolveEmploymentFormRoot();
+    const input = this.employerNameInputFor(root);
+    await expect(input).toBeVisible({ timeout: 15_000 });
+    const overLimit = "A".repeat(31);
+    await input.fill(overLimit);
+    await input.press("Tab").catch(() => {});
+    const value = await input.inputValue();
+    expect(value.length).toBeLessThanOrEqual(30);
+  }
+
+  /** **Time with Employer** required when employer is entered and years/months are blank or 0/0. */
+  async expectCurrentTimeWithEmployerRequiredValidationMessage(): Promise<void> {
+    this.logStep("Expect Current Time With Employer Required Validation Message");
+    await this.scrollCurrentEmploymentSectionIntoViewForValidation();
+    const root = await this.resolveEmploymentFormRoot();
+    const scopes = [this.page, root];
+    const patterns = [
+      /Time with Employe[e]?r is required/i,
+      /Time with employer is required/i,
+    ];
+    for (const scope of scopes) {
+      for (const pattern of patterns) {
+        const el = scope.getByText(pattern).first();
+        if (await el.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await el.scrollIntoViewIfNeeded({ timeout: 10_000 }).catch(() => {});
+          await expect(el).toBeVisible({ timeout: 20_000 });
+          return;
+        }
+      }
+    }
+    await expect(this.page.getByText(/Time with Employe[e]?r is required/i).first()).toBeVisible({
+      timeout: 20_000,
+    });
+  }
+
+  async expectCurrentTimeWithEmployerRequiredValidationMessageAbsent(): Promise<void> {
+    this.logStep("Expect Current Time With Employer Required Validation Message Absent");
+    const root = await this.resolveEmploymentFormRoot();
+    await expect(root.getByText(/Time with Employe[e]?r is required/i)).toHaveCount(0, {
+      timeout: 15_000,
+    });
+  }
+
+  async expectCurrentTimeWithEmployerYearsMonths(
+    years: string,
+    months: string,
+  ): Promise<void> {
+    this.logStep(
+      `Expect current time with employer years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
+    );
+    const root = await this.resolveEmploymentFormRoot();
+    const { years: yIn, months: mIn } =
+      await this.resolveTimeWithEmployerYearMonthInputs(root);
+    const yearPattern = new RegExp(`^0*${years}$`);
+    const monthPattern = new RegExp(`^0*${months}$`);
+    await expect(yIn).toHaveValue(yearPattern, { timeout: 15_000 });
+    await expect(mIn).toHaveValue(monthPattern, { timeout: 15_000 });
+  }
+
+  private async fillNumericTimeInput(input: Locator, value: string): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
+    await input.scrollIntoViewIfNeeded();
+    await expect(input).toBeVisible({ timeout: 15_000 });
+    await input.click({ timeout: 10_000, force: true }).catch(async () => {
+      await input.focus();
+    });
+    await input.press("Control+A").catch(async () => {
+      await input.click({ clickCount: 3, force: true });
+    });
+    await input.fill(value, { force: true });
+    await input.press("Tab").catch(() => {});
+    await this.page.waitForTimeout(250);
+  }
+
+  private async resolveTimeWithEmployerYearMonthInputs(
+    root: Locator,
+  ): Promise<{ years: Locator; months: Locator }> {
+    const cols = root.locator("div.col.yearmonthClass, div.yearmonthClass");
+    if ((await cols.count()) >= 2) {
+      const yCol = cols.nth(0).locator("input").first();
+      const mCol = cols.nth(1).locator("input").first();
+      if (
+        (await yCol.isVisible().catch(() => false)) &&
+        (await mCol.isVisible().catch(() => false))
+      ) {
+        return { years: yCol, months: mCol };
+      }
+    }
+
+    const prevEmp = await this.resolvePreviousEmployeeAngularHost(root);
+    if (await prevEmp.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      const yIn = prevEmp
+        .locator(
+          "form > div:nth-child(1) > div:nth-child(4) text div div:nth-child(2) input",
+        )
+        .first();
+      const mIn = prevEmp
+        .locator(
+          "form > div:nth-child(1) > div:nth-child(6) text div div:nth-child(2) input",
+        )
+        .first();
+      if (
+        (await yIn.isVisible({ timeout: 2_500 }).catch(() => false)) &&
+        (await mIn.isVisible({ timeout: 2_500 }).catch(() => false))
+      ) {
+        return { years: yIn, months: mIn };
+      }
+    }
+
+    const soleTradeRowPairs: Array<[number, number]> = [
+      [4, 6],
+      [5, 7],
+      [6, 8],
+      [3, 5],
+    ];
+    for (const [yIdx, mIdx] of soleTradeRowPairs) {
+      const yIn = root
+        .locator(
+          `form > div:nth-child(1) > div:nth-child(${yIdx}) text div div:nth-child(2) input`,
+        )
+        .first();
+      const mIn = root
+        .locator(
+          `form > div:nth-child(1) > div:nth-child(${mIdx}) text div div:nth-child(2) input`,
+        )
+        .first();
+      const yOk = await yIn.isVisible({ timeout: 2000 }).catch(() => false);
+      const mOk = await mIn.isVisible({ timeout: 2000 }).catch(() => false);
+      if (yOk && mOk) {
+        return { years: yIn, months: mIn };
+      }
+    }
+
+    const yearsAnchor = root.getByText(/^Years$/i).first();
+    if (await yearsAnchor.isVisible({ timeout: 2500 }).catch(() => false)) {
+      const gridInputs = yearsAnchor
+        .locator(
+          "xpath=ancestor::*[contains(@class,'grid') or contains(@class,'row') or contains(@class,'flex')][1]",
+        )
+        .locator("input.p-inputtext, p-inputnumber input.p-inputtext, p-inputnumber input");
+      if ((await gridInputs.count()) >= 2) {
+        return { years: gridInputs.nth(0), months: gridInputs.nth(1) };
+      }
+    }
+
+    const monthsAnchor = root.getByText(/^Months$/i).first();
+    if (await monthsAnchor.isVisible({ timeout: 2500 }).catch(() => false)) {
+      const row = monthsAnchor.locator(
+        "xpath=ancestor::*[contains(@class,'grid') or contains(@class,'row') or contains(@class,'flex')][1]",
+      );
+      const pair = row.locator(
+        "input.p-inputtext, p-inputnumber input.p-inputtext, p-inputnumber input",
+      );
+      if ((await pair.count()) >= 2) {
+        return { years: pair.nth(0), months: pair.nth(1) };
+      }
+    }
+
+    const timeStrip = root
+      .locator("div, section")
+      .filter({
+        has: root.getByText(/Time with (Current Employer|Previous Employer|Employer)/i),
+      })
+      .first();
+    if ((await timeStrip.count()) > 0 && (await timeStrip.isVisible().catch(() => false))) {
+      const nums = timeStrip.locator(
+        "p-inputnumber input.p-inputtext, p-inputnumber input, input.p-inputtext",
+      );
+      if ((await nums.count()) >= 2) {
+        return { years: nums.nth(0), months: nums.nth(1) };
+      }
+    }
+
+    const legacyY = root
+      .locator(
+        "form > div > div:nth-child(5) > text > div > div:nth-child(2) > input",
+      )
+      .first();
+    const legacyM = root
+      .locator(
+        "form > div > div:nth-child(6) > text > div > div:nth-child(2) > input",
+      )
+      .first();
+    const legacyYOk = await legacyY.isVisible().catch(() => false);
+    const legacyMOk = await legacyM.isVisible().catch(() => false);
+    if (legacyYOk && legacyMOk) {
+      return { years: legacyY, months: legacyM };
+    }
+
+    throw new Error(
+      "Time with Employer: could not resolve visible Years and Months inputs for this layout.",
+    );
+  }
+
+  private async fillTimeYearsMonthsInCard(
+    root: Locator,
+    years: string,
+    months: string,
+  ): Promise<void> {
+    const { years: yIn, months: mIn } =
+      await this.resolveTimeWithEmployerYearMonthInputs(root);
+    await this.fillNumericTimeInput(yIn, years);
+    await this.fillNumericTimeInput(mIn, months);
+  }
+
   private employerNameInputFor(r: Locator): Locator {
     return r
       .getByLabel(/Employer Name/i)
@@ -960,104 +1060,6 @@ export class DOEmploymentDetailsPage extends BasePage {
     await input.fill(name);
   }
 
-  async getCurrentEmployerName(): Promise<string> {
-    const root = await this.resolveEmploymentFormRoot();
-    const input = this.employerNameInputFor(root);
-    await input.waitFor({ state: "visible", timeout: 30_000 });
-    return (await input.inputValue()).trim();
-  }
-
-  private async employmentDropdownDisplayValue(
-    root: Locator,
-    labelNeedle: string,
-  ): Promise<string> {
-    const combo = root.getByRole("combobox", { name: new RegExp(labelNeedle, "i") }).first();
-    if (await combo.isVisible({ timeout: 6_000 }).catch(() => false)) {
-      const aria = (await combo.getAttribute("aria-label"))?.trim() ?? "";
-      if (aria && !/dropdown trigger/i.test(aria)) return aria;
-      const text = (await combo.textContent())?.trim() ?? "";
-      if (text) return text;
-    }
-    const label = root.locator("label").filter({ hasText: new RegExp(labelNeedle, "i") }).first();
-    const ddLabel = label.locator(
-      "xpath=following::*[contains(@class,'p-dropdown-label')][1]",
-    );
-    if (await ddLabel.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      return (await ddLabel.textContent())?.trim() ?? "";
-    }
-    return "";
-  }
-
-  async getCurrentOccupationLabel(): Promise<string> {
-    const root = await this.resolveEmploymentFormRoot();
-    return this.employmentDropdownDisplayValue(root, "Occupation");
-  }
-
-  async getCurrentEmploymentTypeLabel(): Promise<string> {
-    const root = await this.resolveEmploymentFormRoot();
-    return this.employmentDropdownDisplayValue(root, "Employment Type");
-  }
-
-  async getCurrentTimeWithEmployer(): Promise<{ years: string; months: string }> {
-    const root = await this.resolveEmploymentFormRoot();
-    const textInputs = root.locator("input.p-inputtext:visible, input.form-control:visible");
-    const inputCount = await textInputs.count();
-    if (inputCount >= 3) {
-      const years = ((await textInputs.nth(1).inputValue()) ?? "").trim();
-      const months = ((await textInputs.nth(2).inputValue()) ?? "").trim();
-      if (years || months) {
-        return { years, months };
-      }
-    }
-
-    const timeLabel = root.getByText(/Time with Current Employer/i).first();
-    if (await timeLabel.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      const yearsInput = timeLabel.locator("xpath=following::input[1]");
-      const monthsInput = root.getByText(/^Years$/i).first().locator("xpath=following::input[1]");
-      if (await yearsInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        return {
-          years: ((await yearsInput.inputValue()) ?? "").trim(),
-          months: ((await monthsInput.inputValue().catch(() => "")) ?? "").trim(),
-        };
-      }
-    }
-
-    const cols = root.locator("div.col.yearmonthClass, div.yearmonthClass");
-    if ((await cols.count()) >= 2) {
-      const years = ((await cols.nth(0).locator("input").first().inputValue()) ?? "").trim();
-      const months = ((await cols.nth(1).locator("input").first().inputValue()) ?? "").trim();
-      if (years || months) return { years, months };
-    }
-    const yearsAnchor = root.getByText(/^Years$/i).first();
-    if (await yearsAnchor.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      const inputs = yearsAnchor
-        .locator(
-          "xpath=ancestor::*[contains(@class,'grid') or contains(@class,'row') or contains(@class,'flex')][1]",
-        )
-        .locator("input.p-inputtext, p-inputnumber input");
-      if ((await inputs.count()) >= 2) {
-        return {
-          years: ((await inputs.nth(0).inputValue()) ?? "").trim(),
-          months: ((await inputs.nth(1).inputValue()) ?? "").trim(),
-        };
-      }
-    }
-    const timeStrip = root
-      .locator("div, section")
-      .filter({
-        has: root.getByText(/Time with (Current Employer|Previous Employer|Employer)/i),
-      })
-      .first();
-    const nums = timeStrip.locator("p-inputnumber input, input.p-inputtext");
-    if ((await nums.count()) >= 2) {
-      return {
-        years: ((await nums.nth(0).inputValue()) ?? "").trim(),
-        months: ((await nums.nth(1).inputValue()) ?? "").trim(),
-      };
-    }
-    return { years: "", months: "" };
-  }
-
   async selectCurrentOccupation(optionName: string): Promise<void> {
     this.logStep(`Selected current occupation: ${this.stepValueDisplay(optionName)}`);
     const root = await this.resolveEmploymentFormRoot();
@@ -1070,150 +1072,6 @@ export class DOEmploymentDetailsPage extends BasePage {
     await this.selectDropdownInEmploymentCard(root, "Employment Type", optionName);
   }
 
-  private async fillTimeYearsMonthsInCard(
-    root: Locator,
-    years: string,
-    months: string,
-  ): Promise<void> {
-    const cols = root.locator("div.col.yearmonthClass, div.yearmonthClass");
-    if ((await cols.count()) >= 2) {
-      const yCol = cols.nth(0).locator("input").first();
-      const mCol = cols.nth(1).locator("input").first();
-      if (
-        (await yCol.isVisible().catch(() => false)) &&
-        (await mCol.isVisible().catch(() => false))
-      ) {
-        await yCol.fill(years);
-        await mCol.fill(months);
-        return;
-      }
-    }
-
-    // Individual **Previous Employment** (`app-previous-employee`): SelectorHub Years = `form … div(4) … input`, Months = `div(6) … input`.
-    const prevEmp = await this.resolvePreviousEmployeeAngularHost(root);
-    if (await prevEmp.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      const yIn = prevEmp
-        .locator(
-          "form > div:nth-child(1) > div:nth-child(4) text div div:nth-child(2) input",
-        )
-        .first();
-      const mIn = prevEmp
-        .locator(
-          "form > div:nth-child(1) > div:nth-child(6) text div div:nth-child(2) input",
-        )
-        .first();
-      if (
-        (await yIn.isVisible({ timeout: 2_500 }).catch(() => false)) &&
-        (await mIn.isVisible({ timeout: 2_500 }).catch(() => false))
-      ) {
-        await yIn.fill(years);
-        await mIn.fill(months);
-        return;
-      }
-    }
-
-    // Sole Trade Employment (`app-sole-trade-current-employment` / `app-sole-trade-previous-employee`):
-    // gen-card rows often expose Years / Months as form rows 4 & 6 (Selector Hub), sometimes 5 & 7 or 6 & 8 (see `DOSoleTraderDetailsPage.enterTimeInBusiness`).
-    const soleTradeRowPairs: Array<[number, number]> = [
-      [4, 6],
-      [5, 7],
-      [6, 8],
-      [3, 5],
-    ];
-    for (const [yIdx, mIdx] of soleTradeRowPairs) {
-      const yIn = root
-        .locator(
-          `form > div:nth-child(1) > div:nth-child(${yIdx}) text div div:nth-child(2) input`,
-        )
-        .first();
-      const mIn = root
-        .locator(
-          `form > div:nth-child(1) > div:nth-child(${mIdx}) text div div:nth-child(2) input`,
-        )
-        .first();
-      const yOk = await yIn.isVisible({ timeout: 2000 }).catch(() => false);
-      const mOk = await mIn.isVisible({ timeout: 2000 }).catch(() => false);
-      if (yOk && mOk) {
-        await yIn.fill(years);
-        await mIn.fill(months);
-        return;
-      }
-    }
-
-    // Sole Trader / PrimeFlex: "Years" / "Months" near "Time with … Employer" (same idea as `DOSoleTraderDetailsPage.enterTimeInBusiness`).
-    const yearsAnchor = root.getByText(/^Years$/i).first();
-    if (await yearsAnchor.isVisible({ timeout: 2500 }).catch(() => false)) {
-      const gridInputs = yearsAnchor
-        .locator(
-          "xpath=ancestor::*[contains(@class,'grid') or contains(@class,'row') or contains(@class,'flex')][1]",
-        )
-        .locator("input.p-inputtext, p-inputnumber input.p-inputtext, p-inputnumber input");
-      if ((await gridInputs.count()) >= 2) {
-        await gridInputs.nth(0).fill(years);
-        await gridInputs.nth(1).fill(months);
-        return;
-      }
-    }
-    const monthsAnchor = root.getByText(/^Months$/i).first();
-    if (await monthsAnchor.isVisible({ timeout: 2500 }).catch(() => false)) {
-      const row = monthsAnchor.locator(
-        "xpath=ancestor::*[contains(@class,'grid') or contains(@class,'row') or contains(@class,'flex')][1]",
-      );
-      const pair = row.locator(
-        "input.p-inputtext, p-inputnumber input.p-inputtext, p-inputnumber input",
-      );
-      if ((await pair.count()) >= 2) {
-        await pair.nth(0).fill(years);
-        await pair.nth(1).fill(months);
-        return;
-      }
-    }
-
-    const timeStrip = root
-      .locator("div, section")
-      .filter({
-        has: root.getByText(/Time with (Current Employer|Previous Employer|Employer)/i),
-      })
-      .first();
-    if ((await timeStrip.count()) > 0 && (await timeStrip.isVisible().catch(() => false))) {
-      const nums = timeStrip.locator(
-        "p-inputnumber input.p-inputtext, p-inputnumber input",
-      );
-      if ((await nums.count()) >= 2) {
-        await nums.nth(0).fill(years);
-        await nums.nth(1).fill(months);
-        return;
-      }
-    }
-
-    const legacyY = root
-      .locator(
-        "form > div > div:nth-child(5) > text > div > div:nth-child(2) > input",
-      )
-      .first();
-    const legacyM = root
-      .locator(
-        "form > div > div:nth-child(6) > text > div > div:nth-child(2) > input",
-      )
-      .first();
-    const legacyYOk = await legacyY.isVisible().catch(() => false);
-    const legacyMOk = await legacyM.isVisible().catch(() => false);
-    if (legacyYOk && legacyMOk) {
-      await legacyY.fill(years);
-      await legacyM.fill(months);
-      return;
-    }
-    if (legacyYOk || legacyMOk) {
-      throw new Error(
-        "Time with Employer: only one of Years/Months inputs resolved — refusing partial fill (fix locators).",
-      );
-    }
-
-    throw new Error(
-      "Time with Employer: could not resolve visible Years and Months inputs for this layout.",
-    );
-  }
-
   async enterCurrentTimeWithEmployer(
     years: string,
     months: string,
@@ -1221,6 +1079,7 @@ export class DOEmploymentDetailsPage extends BasePage {
     this.logStep(
       `Entered current time with employer: years ${this.stepValueDisplay(years)}, months ${this.stepValueDisplay(months)}`,
     );
+    await this.scrollCurrentEmploymentSectionIntoViewForValidation();
     const root = await this.resolveEmploymentFormRoot();
     await this.fillTimeYearsMonthsInCard(root, years, months);
   }
@@ -1262,10 +1121,164 @@ export class DOEmploymentDetailsPage extends BasePage {
     await this.fillTimeYearsMonthsInCard(root, years, months);
   }
 
+  private employmentDropdownDisplay(root: Locator, fieldLabel: string): Locator {
+    return root
+      .locator(
+        `xpath=.//label[contains(normalize-space(.),'${fieldLabel}')]/following::p-dropdown[1]`,
+      )
+      .locator(".p-dropdown-label, [role='combobox']")
+      .first();
+  }
+
+  private employmentDropdownTrigger(root: Locator, fieldLabel: string): Locator {
+    return root
+      .locator(
+        `xpath=.//label[contains(normalize-space(.),'${fieldLabel}')]/following::p-dropdown[1]//*[contains(@class,'p-dropdown-trigger') or @aria-label='dropdown trigger'][1]`,
+      )
+      .first();
+  }
+
+  /** FIS AF — current employment fields are pre-populated (Employer, Occupation, Type, Time). */
+  async expectCurrentEmploymentFieldsPopulatedFromFis(): Promise<void> {
+    this.logStep("Expect Current Employment Fields Populated From FIS");
+    const root = await this.resolveEmploymentFormRoot();
+    const employerInput = this.employerNameInputFor(root);
+    await expect(employerInput).toBeVisible({ timeout: 15_000 });
+    expect((await employerInput.inputValue()).trim().length).toBeGreaterThan(0);
+
+    for (const label of ["Occupation", "Employment Type"]) {
+      const display = this.employmentDropdownDisplay(root, label);
+      await expect(display).toBeVisible({ timeout: 15_000 });
+      const text =
+        ((await display.textContent()) ?? (await display.getAttribute("aria-label")) ?? "").trim();
+      expect(text.length).toBeGreaterThan(0);
+      expect(text).not.toMatch(/^(select|choose)/i);
+    }
+
+    const { years, months } = await this.resolveTimeWithEmployerYearMonthInputs(root);
+    const yearsValue = (await years.inputValue()).trim();
+    const monthsValue = (await months.inputValue()).trim();
+    expect(yearsValue.length + monthsValue.length).toBeGreaterThan(0);
+  }
+
+  /** FIS AF — current employment fields remain editable on the portal. */
+  async expectCurrentEmploymentFieldsEditable(): Promise<void> {
+    this.logStep("Expect Current Employment Fields Editable");
+    const root = await this.resolveEmploymentFormRoot();
+    await expect(this.employerNameInputFor(root)).toBeEnabled({ timeout: 15_000 });
+
+    for (const label of ["Occupation", "Employment Type"]) {
+      const trigger = this.employmentDropdownTrigger(root, label);
+      await expect(trigger).toBeVisible({ timeout: 15_000 });
+      await expect(trigger).toBeEnabled({ timeout: 15_000 });
+    }
+
+    const { years, months } = await this.resolveTimeWithEmployerYearMonthInputs(root);
+    await expect(years).toBeEnabled({ timeout: 15_000 });
+    await expect(months).toBeEnabled({ timeout: 15_000 });
+  }
+
+  /** Edit employer name and **Save** — updated value persists (save back to FIS AF). */
+  async expectCurrentEmploymentSaveAfterEdit(): Promise<void> {
+    this.logStep("Expect Current Employment Save After Edit");
+    const root = await this.resolveEmploymentFormRoot();
+    const employerInput = this.employerNameInputFor(root);
+    const original = (await employerInput.inputValue()).trim();
+    const suffix = "-E2E";
+    const edited = `${original}${suffix}`.slice(0, 30);
+    await this.enterCurrentEmployerName(edited);
+    await this.clickSaveEmploymentDetails();
+    await expect(employerInput).toHaveValue(edited, { timeout: 20_000 });
+  }
+
+  /**
+   * Customer Details footer **Previous** — PrimeNG `button` with chevron + label (UDP-T3791).
+   * ```html
+   * <button class="p-button p-component" data-pc-section="root">
+   *   <span class="p-button-icon fas fa-chevron-left …"></span>
+   *   <span class="p-button-label">Previous</span>
+   * </button>
+   * ```
+   */
+  private footerPreviousButton(): Locator {
+    return this.page
+      .locator("button.p-button.p-component")
+      .filter({ has: this.page.locator("span.p-button-label", { hasText: /^Previous$/ }) })
+      .filter({ has: this.page.locator("span.fas.fa-chevron-left, .fa-chevron-left") })
+      .filter({ visible: true })
+      .last();
+  }
+
   async clickNextButton(): Promise<void> {
     this.logStep("Click Next Button");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     await this.nextButton.scrollIntoViewIfNeeded();
     await this.nextButton.click();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  }
+
+  async clickPreviousButton(): Promise<void> {
+    this.logStep("Click Previous Button");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    const previous = this.footerPreviousButton();
+    await expect(previous).toBeVisible({ timeout: 60_000 });
+    await expect(previous).toBeEnabled({ timeout: 30_000 });
+    await previous.scrollIntoViewIfNeeded();
+    await previous.click({ timeout: 30_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  }
+
+  /** Alias for {@link clickPreviousButton} — some builds label the control **Back**. */
+  async clickBackButton(): Promise<void> {
+    await this.clickPreviousButton();
+  }
+
+  /** Standard Quote footer **Cancel** (Customer Details chrome). */
+  private standardQuoteCancelButton(): Locator {
+    return this.page
+      .locator("app-quote-details, app-standard-quote")
+      .first()
+      .getByRole("button", { name: /^Cancel$/i })
+      .first()
+      .or(this.page.getByRole("button", { name: /^Cancel$/i }).first());
+  }
+
+  private unsavedChangesCancelConfirmDialog(): Locator {
+    return this.page
+      .locator("p-confirmdialog, .p-confirm-dialog, [role='alertdialog']")
+      .filter({ visible: true })
+      .filter({ hasText: /unsaved changes|lost|cancel/i })
+      .first();
+  }
+
+  async clickCancelButton(): Promise<void> {
+    this.logStep("Click Cancel (Standard Quote)");
+    const cancelBtn = this.standardQuoteCancelButton();
+    await expect(cancelBtn).toBeVisible({ timeout: 30_000 });
+    await cancelBtn.scrollIntoViewIfNeeded();
+    await cancelBtn.click({ timeout: 15_000 });
+  }
+
+  /** After **Cancel** with unsaved Employment Details — confirmation copy (UDP-T3794). */
+  async expectUnsavedChangesCancelConfirmationVisible(): Promise<void> {
+    this.logStep("Expect unsaved changes cancel confirmation");
+    const confirmDlg = this.unsavedChangesCancelConfirmDialog();
+    await expect(confirmDlg).toBeVisible({ timeout: 15_000 });
+    await expect(confirmDlg).toContainText(/Any unsaved changes will be lost/i);
+    await expect(confirmDlg).toContainText(/Are you sure you want to cancel/i);
+  }
+
+  /** Confirm discard on cancel — navigates away from the quote (e.g. back to Dashboard). */
+  async confirmCancelDiscardUnsavedChanges(): Promise<void> {
+    this.logStep("Confirm cancel — discard unsaved changes");
+    const confirmDlg = this.unsavedChangesCancelConfirmDialog();
+    const discardBtn = confirmDlg
+      .getByRole("button", { name: /^(Yes|OK|Confirm|Discard)$/i })
+      .or(confirmDlg.locator("button.p-confirm-dialog-accept").first())
+      .first();
+    await expect(discardBtn).toBeVisible({ timeout: 10_000 });
+    await discardBtn.click({ timeout: 10_000 });
+    await expect(confirmDlg).toBeHidden({ timeout: 20_000 }).catch(() => {});
   }
 }
