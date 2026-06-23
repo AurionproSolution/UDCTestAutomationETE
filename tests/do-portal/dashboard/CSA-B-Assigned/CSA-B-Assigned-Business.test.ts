@@ -1,8 +1,11 @@
+import { DO_BASE_URL } from "../../../../config/env";
 import { test, expect } from "@fixtures/doPortalTest";
+
+const doOrigin = () => DO_BASE_URL().replace(/\/$/, "");
 
 test('test', async ({ page }) => {
   //Login
-  await page.goto('https://testportaludc.aurionpro.com/login');
+  await page.goto(`${doOrigin()}/login`);
   await page.getByRole('button', { name: 'Login with FIS' }).click();
   await page.getByRole('searchbox', { name: 'Username' }).click();
   await page.getByRole('searchbox', { name: 'Username' }).fill('pramod.more');
@@ -24,13 +27,13 @@ test('test', async ({ page }) => {
   //Dashboard page
   await page.getByRole('button', { name: ' + Create Standard Quote' }).click();
   await page.getByRole('dialog').locator('div').filter({ hasText: 'Credit Sale Agreement Assured' }).click();
-  await page.goto('https://testportaludc.aurionpro.com/dealer/standard-quote'); 
+  await page.goto(`${doOrigin()}/dealer/standard-quote`); 
  //stand quote page
   await page.getByRole('link', { name: 'Credit Sale Agreement' }).click();
   await page.locator('#pn_id_166').getByRole('button', { name: 'dropdown trigger' }).click();
   await page.getByRole('option', { name: 'CSA-B-Assigned' }).click();
   await page.locator('#pn_id_169').getByRole('button', { name: 'dropdown trigger' }).click();
-  await page.getByText('Webform - CSA Business - MV').click();
+  await page.getByText("MYUDC-B-CSA-Assigned MV").click();
   await page.locator('text').filter({ hasText: 'Originator Reference' }).locator('#text').click();
   await page.locator('text').filter({ hasText: 'Originator Reference' }).locator('#text').fill('test');
   await page.locator('input[name="assetTypeDD"]').click();
@@ -62,7 +65,7 @@ test('test', async ({ page }) => {
   await page.getByText('10', { exact: true }).click();
   await page.getByRole('button', { name: 'Calculate' }).click();
   await page.getByRole('button', { name: 'Next' }).click();
-  await page.goto('https://testportaludc.aurionpro.com/dealer/standard-quote/create/5156');
+  await page.goto(`${doOrigin()}/dealer/standard-quote/create/5156`);
   // Customer Page
   await page.getByRole('button', { name: ' Add Borrowers / Guarantors' }).click();
   await page.locator('p-radiobutton').filter({ hasText: 'Individual' }).click();

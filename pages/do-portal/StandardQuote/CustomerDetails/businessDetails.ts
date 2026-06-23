@@ -13,6 +13,8 @@ export class DOBusinessDetailsPage extends BasePage {
    */
   readonly businessEmailInput: Locator;
   readonly nextButton: Locator;
+  /** Outlined **Save** on Business Details (quote footer — same Prime pattern as Personal / Trust). */
+  readonly saveBusinessDetailsButton: Locator;
 
   constructor(page: Page) {
     super(page);
@@ -29,6 +31,15 @@ export class DOBusinessDetailsPage extends BasePage {
         "xpath=preceding::input[(@type='text' or @type='email' or not(@type)) and not(@type='url')][1]",
       );
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
+    const outlinedSaveSel =
+      "button.p-ripple.p-element.p-button.p-component.p-button-outlined";
+    this.saveBusinessDetailsButton = page
+      .locator("app-quote-details, app-standard-quote")
+      .first()
+      .locator(outlinedSaveSel)
+      .filter({ hasText: /^Save$/i })
+      .or(page.locator(outlinedSaveSel).filter({ hasText: /^Save$/i }))
+      .first();
   }
 
   protected stepLogPrefix(): string {
@@ -42,6 +53,26 @@ export class DOBusinessDetailsPage extends BasePage {
       .getByText(/Organisation Type/i)
       .first()
       .waitFor({ state: "visible", timeout: 30000 });
+  }
+
+  /** `.app-loader-overlay` intercepts footer **Save** / **Next** clicks after validation round-trips. */
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const overlays = this.page.locator(".app-loader-overlay");
+      const count = await overlays.count();
+      let anyVisible = false;
+      for (let i = 0; i < count; i++) {
+        if (await overlays.nth(i).isVisible().catch(() => false)) {
+          anyVisible = true;
+          break;
+        }
+      }
+      if (!anyVisible) {
+        return;
+      }
+      await this.page.waitForTimeout(200);
+    }
   }
 
   /**
@@ -199,10 +230,10 @@ export class DOBusinessDetailsPage extends BasePage {
 
   async enterLegalName(value: string): Promise<void> {
     this.logStep(`Entered legal name as ${this.stepValueDisplay(value)}`);
-    const primary = this.floatTextInput(/^Legal Name/i);
-    if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await primary.click();
-      await primary.fill(value);
+    const input = this.legalNameInput();
+    if (await input.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await input.click();
+      await input.fill(value);
       return;
     }
     const fb = this.businessRoot
@@ -214,12 +245,23 @@ export class DOBusinessDetailsPage extends BasePage {
     await fb.fill(value);
   }
 
+  /** Resolves the **Legal Name** text input under `app-business-details`. */
+  legalNameInput(): Locator {
+    const primary = this.floatTextInput(/^Legal Name/i);
+    const fb = this.businessRoot
+      .locator("label")
+      .filter({ hasText: /^Legal Name/i })
+      .first()
+      .locator("xpath=following::input[contains(@class,'p-inputtext')][1]");
+    return primary.or(fb).first();
+  }
+
   async enterTradingName(value: string): Promise<void> {
     this.logStep(`Entered trading name as ${this.stepValueDisplay(value)}`);
-    const primary = this.floatTextInput(/^Trading Name/i);
-    if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await primary.click();
-      await primary.fill(value);
+    const input = this.tradingNameInput();
+    if (await input.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await input.click();
+      await input.fill(value);
       return;
     }
     const fb = this.businessRoot
@@ -229,11 +271,40 @@ export class DOBusinessDetailsPage extends BasePage {
     await fb.fill(value);
   }
 
+  /** Resolves the **Trading Name** text input under `app-business-details`. */
+  tradingNameInput(): Locator {
+    const primary = this.floatTextInput(/^Trading Name/i);
+    const fb = this.businessRoot
+      .locator("label")
+      .filter({ hasText: /^Trading Name/i })
+      .first()
+      .locator("xpath=following::input[contains(@class,'p-inputtext')][1]");
+    return primary.or(fb).first();
+  }
+
+  async clearTradingName(): Promise<void> {
+    await this.enterTradingName("");
+  }
+
+  async clickSaveBusinessDetails(): Promise<void> {
+    this.logStep("Click Save Business Details");
+    await this.businessRoot.waitFor({ state: "visible", timeout: 60_000 });
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    await this.saveBusinessDetailsButton
+      .scrollIntoViewIfNeeded({ timeout: 20_000 })
+      .catch(() => {});
+    await this.saveBusinessDetailsButton.waitFor({ state: "visible", timeout: 60_000 });
+    await this.saveBusinessDetailsButton.click({ timeout: 30_000 });
+    await this.page.waitForLoadState("networkidle", { timeout: 25_000 }).catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+  }
+
   async enterRegisteredCompanyNumber(value: string): Promise<void> {
     this.logStep(`Entered registered company number as ${this.stepValueDisplay(value)}`);
-    const primary = this.floatTextInput(/Registered Company Number/i);
-    if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await primary.fill(value);
+    const input = this.registeredCompanyNumberInput();
+    if (await input.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await input.fill(value);
       return;
     }
     const fb = this.businessRoot
@@ -245,11 +316,26 @@ export class DOBusinessDetailsPage extends BasePage {
     await fb.fill(value);
   }
 
+  /** Resolves the **Registered Company Number** text input under `app-business-details`. */
+  registeredCompanyNumberInput(): Locator {
+    const primary = this.floatTextInput(/Registered Company Number/i);
+    const fb = this.businessRoot
+      .locator("label")
+      .filter({ hasText: /Registered Company Number/i })
+      .first()
+      .locator("xpath=following::input[contains(@class,'p-inputtext')][1]");
+    return primary.or(fb).first();
+  }
+
+  async clearRegisteredCompanyNumber(): Promise<void> {
+    await this.enterRegisteredCompanyNumber("");
+  }
+
   async enterNzBusinessNumber(value: string): Promise<void> {
     this.logStep(`Entered NZ business number as ${this.stepValueDisplay(value)}`);
-    const primary = this.floatTextInput(/New Zealand Business Number/i);
-    if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await primary.fill(value);
+    const input = this.nzBusinessNumberInput();
+    if (await input.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await input.fill(value);
       return;
     }
     const fb = this.businessRoot
@@ -261,11 +347,26 @@ export class DOBusinessDetailsPage extends BasePage {
     await fb.fill(value);
   }
 
+  /** Resolves the **New Zealand Business Number (NZBN)** text input. */
+  nzBusinessNumberInput(): Locator {
+    const primary = this.floatTextInput(/New Zealand Business Number/i);
+    const fb = this.businessRoot
+      .locator("label")
+      .filter({ hasText: /New Zealand Business Number/i })
+      .first()
+      .locator("xpath=following::input[contains(@class,'p-inputtext')][1]");
+    return primary.or(fb).first();
+  }
+
+  async clearNzBusinessNumber(): Promise<void> {
+    await this.enterNzBusinessNumber("");
+  }
+
   async enterGstNumber(value: string): Promise<void> {
     this.logStep(`Entered GST number as ${this.stepValueDisplay(value)}`);
-    const primary = this.floatTextInput(/^GST Number/i);
-    if (await primary.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await primary.fill(value);
+    const input = this.gstNumberInput();
+    if (await input.isVisible({ timeout: 4000 }).catch(() => false)) {
+      await input.fill(value);
       return;
     }
     const fb = this.businessRoot
@@ -273,6 +374,21 @@ export class DOBusinessDetailsPage extends BasePage {
       .first();
     await fb.waitFor({ state: "visible", timeout: 15000 });
     await fb.fill(value);
+  }
+
+  /** Resolves the **GST Number** text input under `app-business-details`. */
+  gstNumberInput(): Locator {
+    const primary = this.floatTextInput(/^GST Number/i);
+    const fb = this.businessRoot
+      .locator("label")
+      .filter({ hasText: /^GST Number/i })
+      .first()
+      .locator("xpath=following::input[contains(@class,'p-inputtext')][1]");
+    return primary.or(fb).first();
+  }
+
+  async clearGstNumber(): Promise<void> {
+    await this.enterGstNumber("");
   }
 
   async fillBusinessDescription(note: string): Promise<void> {

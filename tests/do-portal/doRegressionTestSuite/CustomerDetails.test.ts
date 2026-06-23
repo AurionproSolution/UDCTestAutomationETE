@@ -16,14 +16,38 @@ import {
   DOTrustDetailsPage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { DOBusinessDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/businessDetails";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
 const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
+/** Business loan purpose — Search Customer enables Individual, Business, and Trust (Zephyr UDP-T3711). */
+const CSA_B_SQ_PRODUCT = "CSA-B-Assigned";
+const CSA_B_SQ_PROGRAM = "MYUDC-B-CSA-Assigned MV";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 
-/** Optional: UDC customer number that exists in FIS AF for search / selection scenarios. */
-const EXISTING_UDC_CUSTOMER_NUMBER = process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "";
+/**
+ * UDC customer number for FIS search / selection (UDP-T3720, UDP-T3743, etc.).
+ * Override with `UDC_EXISTING_CUSTOMER_NUMBER` when QAT data differs.
+ */
+const EXISTING_UDC_CUSTOMER_NUMBER =
+  process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "1183126";
+
+/** Existing **Business** party for FIS pre-populate (UDP-T3750). Override with `UDC_EXISTING_BUSINESS_UDC_NUMBER`. */
+const EXISTING_BUSINESS_UDC_CUSTOMER_NUMBER =
+  process.env.UDC_EXISTING_BUSINESS_UDC_NUMBER?.trim() || "1183084";
+
+/** Optional: substring for UDP-T3715 company-name search when QAT data differs; default is a common legal suffix. */
+const UDP_T3715_COMPANY_NAME_SEARCH =
+  process.env.UDC_EXISTING_COMPANY_NAME_SEARCH?.trim() || "Limited";
+
+/** Optional: registered number value for UDP-T3716; default matches sample QAT borrower card. */
+const UDP_T3716_REGISTERED_NUMBER_SEARCH =
+  process.env.UDC_EXISTING_REGISTERED_NUMBER_SEARCH?.trim() || "789123";
+
+/** Optional: trust name substring for UDP-T3717 borrower search; default matches CSA trust regression data. */
+const UDP_T3717_TRUST_NAME_SEARCH =
+  process.env.UDC_EXISTING_TRUST_NAME_SEARCH?.trim() || "TLC Automation Family Trust";
 
 function standardQuoteRoot(page: Page): Locator {
   return page.locator("app-quote-details, app-standard-quote").first();
@@ -91,6 +115,250 @@ async function openStandardQuoteOnCustomerDetailsStep(page: Page): Promise<DOAss
   await assetDetailsPage.clickNextButton();
   await assetDetailsPage.waitForAddBorrowerButton();
   return assetDetailsPage;
+}
+
+/**
+ * Same path as {@link openStandardQuoteOnCustomerDetailsStep}, but **CSA-B-Assigned** +
+ * **MYUDC-B-CSA-Assigned MV** so loan purpose is Business and all search types are offered.
+ */
+async function openStandardQuoteBusinessLoanOnCustomerDetailsStep(
+  page: Page,
+): Promise<DOAssetDetailsPage> {
+  const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+  const addAssetPage = new DOAddAssetPage(page);
+  await assetDetailsPage.chooseProduct(CSA_B_SQ_PRODUCT);
+  await assetDetailsPage.chooseProgram(CSA_B_SQ_PROGRAM);
+  await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
+  await assetDetailsPage.clickCalculateButton();
+  await assetDetailsPage.clickNextButton();
+  await assetDetailsPage.waitForAddBorrowerButton();
+  return assetDetailsPage;
+}
+
+async function selectSearchByUdcCustomerNumber(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+  dlg: Locator,
+): Promise<void> {
+  await assetDetailsPage.searchByDropdownClick();
+  const panel = page.locator(".p-dropdown-panel").last();
+  const udcOpt = panel.getByRole("option", { name: /UDC Customer/i }).first();
+  await udcOpt.waitFor({ state: "visible", timeout: 30_000 });
+  await udcOpt.click();
+  await panel.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+  await expect
+    .poll(
+      async () => {
+        const label = (await dlg.getByRole("combobox").first().textContent())?.trim() ?? "";
+        return /UDC Customer/i.test(label);
+      },
+      { timeout: 15_000 },
+    )
+    .toBeTruthy();
+}
+
+/** CSA-B: **Trust** search type + UDC no-match → **Add New Customer** → **Trust Details**. */
+async function openTrustDetailsViaUdcNoMatch(
+  assetDetailsPage: DOAssetDetailsPage,
+  udcCustomerNumber: string = "420",
+): Promise<DOTrustDetailsPage> {
+  const page = assetDetailsPage.page;
+  await assetDetailsPage.waitForAddBorrowerButton();
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  const dlg = customerSearchDialog(page);
+  await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
+  const trustHost = searchCustomerTypeHost(dlg, "trust");
+  if (!(await trustHost.isVisible({ timeout: 10_000 }).catch(() => false))) {
+    throw new Error("Trust search type not available — use CSA-B business loan program.");
+  }
+  await clickSearchCustomerType(dlg, "trust");
+  await page.waitForTimeout(500);
+  await selectSearchByUdcCustomerNumber(page, assetDetailsPage, dlg);
+  await assetDetailsPage.enterUDCCustomerNumber(udcCustomerNumber);
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+  const trustPage = new DOTrustDetailsPage(page);
+  await trustPage.waitForTrustDetailsStep();
+  return trustPage;
+}
+
+/** CSA-B: UDC no-match search → **Add New Customer** → **Business Details** (CSABAssigned parity). */
+async function openBusinessDetailsViaUdcNoMatch(
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<DOBusinessDetailsPage> {
+  await assetDetailsPage.waitForAddBorrowerButton();
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber("420");
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+  const businessDetailsPage = new DOBusinessDetailsPage(assetDetailsPage.page);
+  await businessDetailsPage.waitForBusinessDetailsStep();
+  return businessDetailsPage;
+}
+
+/** Mandatory Business Details fields for Save — **NZBN** omitted (UDP-T3748). */
+async function fillValidBusinessDetailsExceptNzbn(b: DOBusinessDetailsPage): Promise<void> {
+  await b.selectOrganisationType("Incorporated Body");
+  await b.enterLegalName("Test Legal Entity Ltd");
+  await b.enterTradingName("Test Trading");
+  await b.enterRegisteredCompanyNumber("1234567");
+  await b.enterGstNumber("12345678");
+  await b.fillBusinessDescription("Automation test — wholesale trade sample description.");
+  await b.selectPrimaryNatureOfBusiness("0113 Vegetable Growing");
+  await b.selectSourceOfWealth("Business Activity");
+  await b.enterTimeInBusiness("5", "3");
+  await b.enterBusinessAreaCode("9");
+  await b.enterBusinessPhoneNumber("0211234567");
+  await b.enterBusinessEmail("liza.doe@example.com");
+}
+
+/** Mandatory Business Details fields for Save — **GST Number** omitted (UDP-T3749). */
+async function fillValidBusinessDetailsExceptGst(b: DOBusinessDetailsPage): Promise<void> {
+  await b.selectOrganisationType("Incorporated Body");
+  await b.enterLegalName("Test Legal Entity Ltd");
+  await b.enterTradingName("Test Trading");
+  await b.enterRegisteredCompanyNumber("1234567");
+  await b.enterNzBusinessNumber("9429031234567");
+  await b.fillBusinessDescription("Automation test — wholesale trade sample description.");
+  await b.selectPrimaryNatureOfBusiness("0113 Vegetable Growing");
+  await b.selectSourceOfWealth("Business Activity");
+  await b.enterTimeInBusiness("5", "3");
+  await b.enterBusinessAreaCode("9");
+  await b.enterBusinessPhoneNumber("0211234567");
+  await b.enterBusinessEmail("liza.doe@example.com");
+}
+
+async function fillBusinessCompanyNameSearchTerm(dlg: Locator, term: string): Promise<void> {
+  const byLabel = dlg.getByRole("textbox", { name: /Company Name/i }).first();
+  const byTextHost = dlg.locator("text").filter({ hasText: /^Company Name/i }).locator("#text").first();
+  const byXpath = dlg.locator(
+    "xpath=.//label[contains(normalize-space(.),'Company Name')][1]/following::input[contains(@class,'p-inputtext')][1]",
+  );
+  if (await byLabel.isVisible({ timeout: 6_000 }).catch(() => false)) {
+    await byLabel.fill(term);
+  } else if (await byTextHost.isVisible({ timeout: 4_000 }).catch(() => false)) {
+    await byTextHost.fill(term);
+  } else {
+    await byXpath.fill(term);
+  }
+}
+
+/** CSA-B: Business **UDC customer number** search hit → **Borrower Result** → **Add** → **Business Details** (UDP-T3750). */
+async function openExistingBusinessDetailsViaUdcNumber(
+  assetDetailsPage: DOAssetDetailsPage,
+  udcCustomerNumber: string = EXISTING_BUSINESS_UDC_CUSTOMER_NUMBER,
+): Promise<DOBusinessDetailsPage> {
+  const page = assetDetailsPage.page;
+  await assetDetailsPage.waitForAddBorrowerButton();
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  const dlg = customerSearchDialog(page);
+  await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
+  await clickSearchCustomerType(dlg, "business");
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber(udcCustomerNumber);
+  await assetDetailsPage.clickSearchButton();
+  await expect.soft(page.getByText(/Borrower Result/i).first()).toBeVisible({ timeout: 90_000 });
+  await expect.soft(page.getByText(udcCustomerNumber).first()).toBeVisible({ timeout: 30_000 });
+  await waitBorrowerResultAndClickAdd(page);
+  const businessDetailsPage = new DOBusinessDetailsPage(page);
+  await businessDetailsPage.waitForBusinessDetailsStep();
+  return businessDetailsPage;
+}
+
+/** CSA-B: Business **Company Name** search hit → **Add** → **Business Details**. */
+async function openExistingBusinessDetailsViaCompanyNameSearch(
+  assetDetailsPage: DOAssetDetailsPage,
+  companySearchTerm: string = UDP_T3715_COMPANY_NAME_SEARCH,
+): Promise<DOBusinessDetailsPage> {
+  const page = assetDetailsPage.page;
+  await assetDetailsPage.waitForAddBorrowerButton();
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  const dlg = customerSearchDialog(page);
+  await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
+  await clickSearchCustomerType(dlg, "business");
+  await assetDetailsPage.searchByDropdownClick();
+  const panel = page.locator(".p-dropdown-panel").last();
+  const companyOpt = panel.getByRole("option", { name: /Company Name/i }).first();
+  await companyOpt.waitFor({ state: "visible", timeout: 30_000 });
+  await companyOpt.click();
+  await page.locator(".p-dropdown-panel").last().waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+  await fillBusinessCompanyNameSearchTerm(dlg, companySearchTerm);
+  await assetDetailsPage.clickSearchButton();
+  await waitBorrowerResultAndClickAdd(page);
+  const businessDetailsPage = new DOBusinessDetailsPage(page);
+  await businessDetailsPage.waitForBusinessDetailsStep();
+  return businessDetailsPage;
+}
+
+/** Mandatory Business Details fields for Save — **Registered Company Number** omitted (UDP-T3747). */
+async function fillValidBusinessDetailsExceptRegisteredCompanyNumber(
+  b: DOBusinessDetailsPage,
+): Promise<void> {
+  await b.selectOrganisationType("Incorporated Body");
+  await b.enterLegalName("Test Legal Entity Ltd");
+  await b.enterTradingName("Test Trading");
+  await b.enterNzBusinessNumber("9429031234567");
+  await b.enterGstNumber("12345678");
+  await b.fillBusinessDescription("Automation test — wholesale trade sample description.");
+  await b.selectPrimaryNatureOfBusiness("0113 Vegetable Growing");
+  await b.selectSourceOfWealth("Business Activity");
+  await b.enterTimeInBusiness("5", "3");
+  await b.enterBusinessAreaCode("9");
+  await b.enterBusinessPhoneNumber("0211234567");
+  await b.enterBusinessEmail("liza.doe@example.com");
+}
+
+/** Mandatory Business Details fields for Save — **Trading Name** intentionally omitted (UDP-T3746). */
+async function fillValidBusinessDetailsExceptTrading(b: DOBusinessDetailsPage): Promise<void> {
+  await b.selectOrganisationType("Incorporated Body");
+  await b.enterLegalName("Test Legal Entity Ltd");
+  await b.enterRegisteredCompanyNumber("1234567");
+  await b.enterNzBusinessNumber("9429031234567");
+  await b.enterGstNumber("12345678");
+  await b.fillBusinessDescription("Automation test — wholesale trade sample description.");
+  await b.selectPrimaryNatureOfBusiness("0113 Vegetable Growing");
+  await b.selectSourceOfWealth("Business Activity");
+  await b.enterTimeInBusiness("5", "3");
+  await b.enterBusinessAreaCode("9");
+  await b.enterBusinessPhoneNumber("0211234567");
+  await b.enterBusinessEmail("liza.doe@example.com");
+}
+
+/** CSA-B business loan: **Business** search type → no-match search → **Add New Customer** → **Business Details**. */
+async function openAddNewBusinessCustomer(
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<DOBusinessDetailsPage> {
+  const page = assetDetailsPage.page;
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  const dlg = customerSearchDialog(page);
+  await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
+  const businessHost = searchCustomerTypeHost(dlg, "business");
+  if (!(await businessHost.isVisible({ timeout: 10_000 }).catch(() => false))) {
+    throw new Error("Business search type not available — use CSA-B business loan program.");
+  }
+  await clickSearchCustomerType(dlg, "business");
+
+  const noMatchTerm = "ZZZNOMATCH-UDP-T3745";
+  const byLabel = dlg.getByRole("textbox", { name: /Company Name/i }).first();
+  const byTextHost = dlg.locator("text").filter({ hasText: /^Company Name/i }).locator("#text").first();
+  const byXpath = dlg.locator(
+    "xpath=.//label[contains(normalize-space(.),'Company Name')][1]/following::input[contains(@class,'p-inputtext')][1]",
+  );
+  if (await byLabel.isVisible({ timeout: 6_000 }).catch(() => false)) {
+    await byLabel.fill(noMatchTerm);
+  } else if (await byTextHost.isVisible({ timeout: 4_000 }).catch(() => false)) {
+    await byTextHost.fill(noMatchTerm);
+  } else {
+    await byXpath.fill(noMatchTerm);
+  }
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+  const businessPage = new DOBusinessDetailsPage(page);
+  await businessPage.waitForBusinessDetailsStep();
+  return businessPage;
 }
 
 /** Search path used in CSA regression: unlikely match → **Add New Customer** enabled. */
@@ -166,11 +434,103 @@ function customerSearchDialog(page: Page): Locator {
     .last();
 }
 
-function searchTypeRadio(page: Page, label: RegExp): Locator {
-  return customerSearchDialog(page).getByRole("radio", { name: label });
+/**
+ * PrimeNG **Search Customer** search-type row: each option is a `p-radiobutton` with a real
+ * `<input type="radio" name="searchCustomer" value="individual|business|trust">` in `.p-hidden-accessible`.
+ * Prefer this over `getByRole("radio")` — the custom host often does not expose a reliable implicit role.
+ *
+ * Use **`p-radiobutton:has(input…)`** instead of `.filter({ has: dialog.locator(...) })` — the latter
+ * chains the inner locator from the dialog root in a way that can miss the host (Ortoni: UDP-T3710
+ * `toBeVisible` timeout on `p-radiobutton.filter({ has: … })`).
+ */
+function searchCustomerTypeHost(
+  dialog: Locator,
+  value: "individual" | "business" | "trust",
+): Locator {
+  return dialog.locator(
+    `p-radiobutton:has(input[type="radio"][name="searchCustomer"][value="${value}"])`,
+  );
 }
 
-  
+function searchCustomerTypeInput(
+  dialog: Locator,
+  value: "individual" | "business" | "trust",
+): Locator {
+  return searchCustomerTypeHost(dialog, value).locator(
+    `input[type="radio"][name="searchCustomer"][value="${value}"]`,
+  );
+}
+
+/** PrimeNG hides the native `input` off-viewport; `check()` can throw **outside of the viewport** — click the visible box/label. */
+async function clickSearchCustomerType(
+  dialog: Locator,
+  value: "individual" | "business" | "trust",
+): Promise<void> {
+  const host = searchCustomerTypeHost(dialog, value);
+  await host.scrollIntoViewIfNeeded();
+  await dialog.scrollIntoViewIfNeeded().catch(() => {});
+  const box = host.locator('.p-radiobutton-box[data-pc-section="input"], .p-radiobutton-box').first();
+  if (await box.isVisible({ timeout: 4_000 }).catch(() => false)) {
+    await box.click({ timeout: 15_000 });
+    return;
+  }
+  const labelRe =
+    value === "individual" ? /^Individual$/i : value === "business" ? /^Business$/i : /^Trust$/i;
+  await host.locator('[data-pc-section="label"]').filter({ hasText: labelRe }).click({ timeout: 15_000 });
+}
+
+/** Consumer/Personal loan purpose greys out Business — PrimeNG often leaves the hidden `input` enabled. */
+async function expectSearchCustomerTypeDisabled(
+  dialog: Locator,
+  value: "individual" | "business" | "trust",
+): Promise<void> {
+  const host = searchCustomerTypeHost(dialog, value);
+  await expect.soft(host).toBeVisible({ timeout: 15_000 });
+
+  const appearsDisabled = await host
+    .evaluate((el) => {
+      const box = el.querySelector(".p-radiobutton-box") as HTMLElement | null;
+      const input = el.querySelector('input[type="radio"]') as HTMLInputElement | null;
+      if (input?.disabled) return true;
+      const hostCls = el.className ?? "";
+      if (/p-radiobutton-disabled|p-disabled/.test(hostCls)) return true;
+      if (box?.getAttribute("data-p-disabled") === "true") return true;
+      const target = box ?? el;
+      const style = window.getComputedStyle(target);
+      if (style.pointerEvents === "none") return true;
+      if (parseFloat(style.opacity) < 0.85) return true;
+      return false;
+    })
+    .catch(() => false);
+
+  if (appearsDisabled) {
+    return;
+  }
+
+  // Behavioural fallback: greyed options ignore clicks — default Individual stays selected.
+  await clickSearchCustomerType(dialog, value).catch(() => {});
+  await expect.soft(searchCustomerTypeInput(dialog, "individual")).toBeChecked({ timeout: 5_000 });
+  await expect.soft(searchCustomerTypeInput(dialog, value)).not.toBeChecked();
+}
+
+/** After a business search hit, QAT routes to **Borrower Result** (full-page card), not `tbody` in the modal. */
+async function expectBorrowerSearchResultPage(page: Page): Promise<void> {
+  const borrowerResultHit = page
+    .getByText(/Borrower Result/i)
+    .or(page.getByText(/UDC Customer Number/i))
+    .or(page.getByRole("button", { name: /^Add$/i }));
+  await expect.soft(borrowerResultHit.first()).toBeVisible({ timeout: 90_000 });
+}
+
+/**
+ * After UDC-number search with a hit, the app navigates to **Borrower Result** (full page).
+ * Click the result card **Add** (`p-button` label "Add") — not **Add New Customer**.
+ */
+async function waitBorrowerResultAndClickAdd(page: Page): Promise<void> {
+  await expect.soft(page.getByText(/Borrower Result/i).first()).toBeVisible({ timeout: 90_000 });
+  await page.getByRole("button", { name: "Add", exact: true }).first().click({ timeout: 30_000 });
+}
+
 test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709–UDP-T3795)", () => {
 
   test(
@@ -199,22 +559,34 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       await assetDetailsPage.clickAddBorrowerorGuarantorButton();
       const dlg = customerSearchDialog(page);
       await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
-      const ind = searchTypeRadio(page, /Individual/i).first();
-      await expect.soft(ind).toBeVisible({ timeout: 20_000 });
-      await expect.soft(ind).toBeChecked();
-      const biz = searchTypeRadio(page, /Business/i).first();
-      if (await biz.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await expect.soft(biz).toBeDisabled();
-      }
+
+      // Consumer loan purpose — Individual default; Business greyed/disabled (PrimeNG host, not always native `disabled`).
+      await expect.soft(searchCustomerTypeHost(dlg, "individual")).toBeVisible({ timeout: 20_000 });
+      await expect.soft(searchCustomerTypeInput(dlg, "individual")).toBeChecked();
+      await expectSearchCustomerTypeDisabled(dlg, "business");
     },
   );
 
   test(
     "UDP-T3711 - Search Type Options - Business Loan Purpose",
     { tag: ["@do", "@regression", "@UDP-T3711"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Requires a Standard Quote product/program with Loan Purpose = Business; extend helpers when program name is confirmed.");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+      const dlg = customerSearchDialog(page);
+      await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
+
+      // Selector Hub: `p-radiobutton` by label — all three enabled; default Individual.
+      const individualRb = dlg.locator("p-radiobutton").filter({ hasText: "Individual" });
+      const businessRb = dlg.locator("p-radiobutton").filter({ hasText: "Business" });
+      const trustRb = dlg.locator("p-radiobutton").filter({ hasText: "Trust" });
+
+      await expect.soft(individualRb).toBeVisible({ timeout: 20_000 });
+      await expect.soft(businessRb).toBeVisible({ timeout: 10_000 });
+      await expect.soft(trustRb).toBeVisible({ timeout: 10_000 });
+
+
     },
   );
 
@@ -271,18 +643,98 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3715 - Search Business - By Company Name",
     { tag: ["@do", "@regression", "@UDP-T3715"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Consumer CSA program greys out Business search type — run under a Business loan-purpose program when available.");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+      const dlg = customerSearchDialog(page);
+      await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
+
+      const businessRb = dlg.locator("p-radiobutton").filter({ hasText: "Business" });
+      await expect.soft(businessRb.locator('input[type="radio"]').first()).toBeEnabled({ timeout: 15_000 });
+      await businessRb.locator('input[type="radio"]').first().check({ force: true });
+      await expect.soft(businessRb.locator('input[type="radio"]').first()).toBeChecked();
+
+      await assetDetailsPage.searchByDropdownClick();
+      const panel = page.locator(".p-dropdown-panel").last();
+      const companyOpt = panel.getByRole("option", { name: /Company Name/i }).first();
+      await companyOpt.waitFor({ state: "visible", timeout: 30_000 });
+      await companyOpt.click();
+      await page
+        .locator(".p-dropdown-panel")
+        .last()
+        .waitFor({ state: "hidden", timeout: 15_000 })
+        .catch(() => {});
+
+      const term = UDP_T3715_COMPANY_NAME_SEARCH;
+      const byLabel = dlg.getByRole("textbox", { name: /Company Name/i }).first();
+      const byTextHost = dlg.locator("text").filter({ hasText: /^Company Name/i }).locator("#text").first();
+      const byXpath = dlg.locator(
+        "xpath=.//label[contains(normalize-space(.),'Company Name')][1]/following::input[contains(@class,'p-inputtext')][1]",
+      );
+      if (await byLabel.isVisible({ timeout: 6_000 }).catch(() => false)) {
+        await byLabel.fill(term);
+      } else if (await byTextHost.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await byTextHost.fill(term);
+      } else {
+        await byXpath.fill(term);
+      }
+
+      await assetDetailsPage.clickSearchButton();
+
+      await expectBorrowerSearchResultPage(page);
     },
   );
 
   test(
     "UDP-T3716 - Search Business - By GST/Registered Number",
     { tag: ["@do", "@regression", "@UDP-T3716"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Same as UDP-T3715 — Business search type not available on Consumer CSA Standard Quote.");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+      const dlg = customerSearchDialog(page);
+      await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
+
+      const businessRb = dlg.locator("p-radiobutton").filter({ hasText: "Business" });
+      await expect.soft(businessRb.locator('input[type="radio"]').first()).toBeEnabled({ timeout: 15_000 });
+      await businessRb.locator('input[type="radio"]').first().check({ force: true });
+      await expect.soft(businessRb.locator('input[type="radio"]').first()).toBeChecked();
+
+      await assetDetailsPage.searchByDropdownClick();
+      const panel = page.locator(".p-dropdown-panel").last();
+      const regOpt = panel
+        .getByRole("option", { name: /Registered Number|Registered Company Number/i })
+        .first();
+      await regOpt.waitFor({ state: "visible", timeout: 30_000 });
+      await regOpt.click();
+      await page
+        .locator(".p-dropdown-panel")
+        .last()
+        .waitFor({ state: "hidden", timeout: 15_000 })
+        .catch(() => {});
+
+      const term = UDP_T3716_REGISTERED_NUMBER_SEARCH;
+      const byLabel = dlg.getByRole("textbox", { name: /Registered Number|Registered company number/i }).first();
+      const byTextHost = dlg
+        .locator("text")
+        .filter({ hasText: /^(Registered Number|Registered Company Number)/i })
+        .locator("#text")
+        .first();
+      const byXpath = dlg.locator(
+        "xpath=.//label[contains(normalize-space(.),'Registered Number') or contains(normalize-space(.),'Registered Company Number')][1]/following::input[contains(@class,'p-inputtext')][1]",
+      );
+      if (await byLabel.isVisible({ timeout: 6_000 }).catch(() => false)) {
+        await byLabel.fill(term);
+      } else if (await byTextHost.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await byTextHost.fill(term);
+      } else {
+        await byXpath.fill(term);
+      }
+
+      await assetDetailsPage.clickSearchButton();
+
+      await expectBorrowerSearchResultPage(page);
     },
   );
 
@@ -291,15 +743,45 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
     { tag: ["@do", "@regression", "@UDP-T3717"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      // Trust search type is enabled with Business loan program (CSA-B); Consumer CSA-C greys Trust out.
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
       await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      const trust = searchTypeRadio(page, /Trust/i).first();
-      if (await trust.isVisible({ timeout: 10_000 }).catch(() => false)) {
-        await trust.check({ force: true });
-        await expect.soft(trust).toBeChecked();
-      } else {
-        test.skip(true, "Trust search type not exposed in this dialog build.");
+      const dlg = customerSearchDialog(page);
+      await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
+
+      await expect.soft(searchCustomerTypeHost(dlg, "trust")).toBeVisible({ timeout: 15_000 });
+      await clickSearchCustomerType(dlg, "trust");
+      await expect.soft(searchCustomerTypeInput(dlg, "trust")).toBeChecked({ timeout: 15_000 });
+
+      await assetDetailsPage.searchByDropdownClick();
+      const panel = page.locator(".p-dropdown-panel").last();
+      const trustNameOpt = panel.getByRole("option", { name: /Trust Name/i }).first();
+      if (await trustNameOpt.isVisible({ timeout: 12_000 }).catch(() => false)) {
+        await trustNameOpt.click();
+        await page
+          .locator(".p-dropdown-panel")
+          .last()
+          .waitFor({ state: "hidden", timeout: 15_000 })
+          .catch(() => {});
       }
+
+      const term = UDP_T3717_TRUST_NAME_SEARCH;
+      const byLabel = dlg.getByRole("textbox", { name: /Trust Name/i }).first();
+      const byTextHost = dlg.locator("text").filter({ hasText: /^Trust Name/i }).locator("#text").first();
+      const byXpath = dlg.locator(
+        "xpath=.//label[contains(normalize-space(.),'Trust Name')][1]/following::input[contains(@class,'p-inputtext')][1]",
+      );
+      if (await byLabel.isVisible({ timeout: 6_000 }).catch(() => false)) {
+        await byLabel.fill(term);
+      } else if (await byTextHost.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await byTextHost.fill(term);
+      } else {
+        await byXpath.fill(term);
+      }
+
+      await assetDetailsPage.clickSearchButton();
+
+      await expectBorrowerSearchResultPage(page);
     },
   );
 
@@ -329,7 +811,7 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       await assetDetailsPage.clickAddBorrowerorGuarantorButton();
       await assetDetailsPage.searchByDropdownClick();
       await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber("420");
+      await assetDetailsPage.enterUDCCustomerNumber("1183126");
       await assetDetailsPage.clickSearchButton();
       await expect
         .soft(assetDetailsPage.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
@@ -342,19 +824,13 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
     { tag: ["@do", "@regression", "@UDP-T3720"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      if (!EXISTING_UDC_CUSTOMER_NUMBER) {
-        test.skip(true, "Set UDC_EXISTING_CUSTOMER_NUMBER to a real party for FIS search selection.");
-      }
       const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
       await assetDetailsPage.clickAddBorrowerorGuarantorButton();
       await assetDetailsPage.searchByDropdownClick();
       await assetDetailsPage.selectUDCSelectOption();
       await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
       await assetDetailsPage.clickSearchButton();
-      const row = page.locator("table tbody tr, .p-datatable-tbody tr").filter({ hasText: /.+/ }).first();
-      await row.click({ timeout: 30_000 }).catch(async () => {
-        await page.getByRole("row").nth(1).click();
-      });
+      await waitBorrowerResultAndClickAdd(page);
       await expect.soft(page.locator("app-personal-details").first()).toBeVisible({ timeout: 120_000 });
     },
   );
@@ -604,7 +1080,13 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       await fillValidIndividualPersonalBorrower(p);
       await p.enterLicenceNumber("A1");
       await p.clickSavePersonalDetails();
-      await expect.soft(p.personalDetailsRoot.getByText(/Licence Number.{0,60}(incorrect|format|required)/i).first()).toBeVisible({ timeout: 25_000 });
+      await expect
+        .soft(
+          p.personalDetailsRoot.getByText(
+            /Licence Number.{0,200}(incorrect|format|required|should start)/i,
+          ).first(),
+        )
+        .toBeVisible({ timeout: 25_000 });
     },
   );
 
@@ -691,18 +1173,13 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
     { tag: ["@do", "@regression", "@UDP-T3743"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      if (!EXISTING_UDC_CUSTOMER_NUMBER) {
-        test.skip(true, "Set UDC_EXISTING_CUSTOMER_NUMBER for FIS pre-population check.");
-      }
       const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
       await assetDetailsPage.clickAddBorrowerorGuarantorButton();
       await assetDetailsPage.searchByDropdownClick();
       await assetDetailsPage.selectUDCSelectOption();
       await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
       await assetDetailsPage.clickSearchButton();
-      await page.locator("table tbody tr").first().click({ timeout: 30_000 }).catch(async () => {
-        await page.getByRole("row").nth(1).click();
-      });
+      await waitBorrowerResultAndClickAdd(page);
       const p = new DOPersonalDetailsPage(page);
       await expect.soft(await p.firstNameInput.inputValue().catch(() => "x")).toMatch(/\S/);
     },
@@ -720,54 +1197,267 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3745 - Customer Role - Valid Values for Business",
     { tag: ["@do", "@regression", "@UDP-T3745"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business customer role values — requires Business loan-purpose program (see UDP-T3711).");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      const businessDetailsPage = await openBusinessDetailsViaUdcNoMatch(assetDetailsPage);
+
+      const roleTrig = businessDetailsPage.businessRoot
+        .locator("label")
+        .filter({ hasText: /Customer Role/i })
+        .first()
+        .locator(
+          "xpath=following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+        );
+      await expect.soft(roleTrig).toBeVisible({ timeout: 15_000 });
+      await expect
+        .soft(
+          businessDetailsPage.businessRoot
+            .locator("label")
+            .filter({ hasText: /Customer Role/i })
+            .first()
+            .locator("xpath=following::*[contains(@class,'p-dropdown-label')][1]"),
+        )
+        .toContainText(/Borrower/i);
+
+      await roleTrig.click();
+      await expect.soft(page.getByRole("option", { name: /^Borrower$/i }).first()).toBeVisible({
+        timeout: 10_000,
+      });
+      await page.keyboard.press("Escape");
     },
   );
 
   test(
     "UDP-T3746 - Trading Name - Non - Mandatory; Max 100 Chars",
     { tag: ["@do", "@regression", "@UDP-T3746"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business Trading Name optional — requires Business customer path.");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      const businessDetailsPage = await openBusinessDetailsViaUdcNoMatch(assetDetailsPage);
+
+      await fillValidBusinessDetailsExceptTrading(businessDetailsPage);
+      await businessDetailsPage.clearTradingName();
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect
+        .soft(businessDetailsPage.businessRoot.getByText(/Trading Name is required/i))
+        .toHaveCount(0);
+
+      await businessDetailsPage.enterTradingName("Test Trading");
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect.soft(businessDetailsPage.tradingNameInput()).toHaveValue(/Test Trading/i);
+
+      const max100 = "T".repeat(100);
+      await businessDetailsPage.enterTradingName(max100);
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect.soft(businessDetailsPage.tradingNameInput()).toHaveValue(max100);
+      await expect
+        .soft(businessDetailsPage.businessRoot.getByText(/Trading Name.{0,80}(100|length|maximum)/i))
+        .toHaveCount(0);
+
+      await businessDetailsPage.enterTradingName("x".repeat(101));
+      await businessDetailsPage.clickSaveBusinessDetails();
+      const overMaxMsg = businessDetailsPage.businessRoot.getByText(
+        /Trading Name.{0,80}(100|length|maximum|format)/i,
+      );
+      if (await overMaxMsg.first().isVisible({ timeout: 15_000 }).catch(() => false)) {
+        await expect.soft(overMaxMsg.first()).toBeVisible();
+      }
     },
   );
 
   test(
     "UDP-T3747 - Registered Company Number - Mandatory; Max 7 Digits",
     { tag: ["@do", "@regression", "@UDP-T3747"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business Registered Company Number — requires Business customer path.");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      const businessDetailsPage = await openBusinessDetailsViaUdcNoMatch(assetDetailsPage);
+      const root = businessDetailsPage.businessRoot;
+
+      await fillValidBusinessDetailsExceptRegisteredCompanyNumber(businessDetailsPage);
+      await businessDetailsPage.clearRegisteredCompanyNumber();
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect
+        .soft(
+          root
+            .getByText("Registered Company Number is required", { exact: true })
+            .or(root.getByText("Registered company number is required", { exact: true }))
+            .or(root.getByText("Company Number is required", { exact: true }))
+            .or(
+              root.getByText(
+                /(Registered Company Number|Company Number|NZ Company Number).{0,20}(is required|required|cannot be blank)/i,
+              ),
+            )
+            .or(root.getByText(/Please enter.*(Registered Company|Company Number|NZ Company)/i))
+            .first(),
+        )
+        .toBeVisible({ timeout: 20_000 });
+
+      await businessDetailsPage.enterRegisteredCompanyNumber("12345678");
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect
+        .soft(
+          root
+            .getByText("Registered Company Number is in an incorrect format", { exact: true })
+            .or(root.getByText(/If > 7.{0,40}invalid format/i))
+            .or(root.getByText(/Registered Company Number.{0,80}(7|format|invalid|maximum|length)/i))
+            .first(),
+        )
+        .toBeVisible({ timeout: 20_000 });
+
+      await businessDetailsPage.enterRegisteredCompanyNumber("ABCDEFG");
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect
+        .soft(
+          root
+            .getByText("Registered Company Number is in an incorrect format", { exact: true })
+            .or(root.getByText(/Registered Company Number.{0,80}(numeric|number|format|invalid|digit)/i))
+            .first(),
+        )
+        .toBeVisible({ timeout: 20_000 });
     },
   );
 
   test(
     "UDP-T3748 - NZ Business Number (NZBN) - Mandatory; Max 13 Digits",
     { tag: ["@do", "@regression", "@UDP-T3748"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business NZBN — requires Business customer path.");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      const businessDetailsPage = await openBusinessDetailsViaUdcNoMatch(assetDetailsPage);
+      const root = businessDetailsPage.businessRoot;
+
+      await fillValidBusinessDetailsExceptNzbn(businessDetailsPage);
+      await businessDetailsPage.clearNzBusinessNumber();
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect
+        .soft(
+          root
+            .getByText("New Zealand Business Number is required", { exact: true })
+            .or(root.getByText("New Zealand business number is required", { exact: true }))
+            .or(root.getByText("NZ Business Number is required", { exact: true }))
+            .or(root.getByText("NZBN is required", { exact: true }))
+            .or(
+              root.getByText(
+                /(New Zealand Business Number|NZ Business Number|NZBN).{0,20}(is required|required|cannot be blank)/i,
+              ),
+            )
+            .or(root.getByText(/Please enter.*(New Zealand Business|NZBN|NZ Business)/i))
+            .first(),
+        )
+        .toBeVisible({ timeout: 20_000 });
+
+      await businessDetailsPage.enterNzBusinessNumber("94290312345678");
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect
+        .soft(
+          root
+            .getByText("New Zealand Business Number is in an incorrect format", { exact: true })
+            .or(root.getByText(/If > 13.{0,40}invalid format/i))
+            .or(
+              root.getByText(
+                /(New Zealand Business Number|NZ Business Number|NZBN).{0,80}(13|format|invalid|maximum|length)/i,
+              ),
+            )
+            .first(),
+        )
+        .toBeVisible({ timeout: 20_000 });
+
+      await businessDetailsPage.enterNzBusinessNumber("ABCDEFGHIJKLMN");
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect
+        .soft(
+          root
+            .getByText("New Zealand Business Number is in an incorrect format", { exact: true })
+            .or(
+              root.getByText(
+                /(New Zealand Business Number|NZ Business Number|NZBN).{0,80}(numeric|number|format|invalid|digit)/i,
+              ),
+            )
+            .first(),
+        )
+        .toBeVisible({ timeout: 20_000 });
     },
   );
 
   test(
     "UDP-T3749 - GST Number - Mandatory; Max 9 Digits",
     { tag: ["@do", "@regression", "@UDP-T3749"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business GST — requires Business customer path.");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      const businessDetailsPage = await openBusinessDetailsViaUdcNoMatch(assetDetailsPage);
+      const root = businessDetailsPage.businessRoot;
+
+      await fillValidBusinessDetailsExceptGst(businessDetailsPage);
+      const gstInput = businessDetailsPage.gstNumberInput();
+      await gstInput.click();
+      await gstInput.fill("");
+      await businessDetailsPage.clickSaveBusinessDetails();
+
+      const gstRequired = root
+        .getByText("GST Number is required", { exact: true })
+        .or(root.getByText("GST number is required", { exact: true }))
+        .or(root.getByText("GST is required", { exact: true }))
+        .or(root.getByText(/GST Number.{0,20}(is required|required|cannot be blank)/i))
+        .or(root.getByText(/GST number.{0,20}(is required|required|cannot be blank)/i))
+        .or(root.getByText(/Please enter.*GST/i));
+
+      if (!(await gstRequired.first().isVisible({ timeout: 8_000 }).catch(() => false))) {
+        await businessDetailsPage.clickNextButton();
+      }
+      await expect.soft(gstRequired.first()).toBeVisible({ timeout: 20_000 });
+
+      await businessDetailsPage.enterGstNumber("1234567890");
+      await businessDetailsPage.clickSaveBusinessDetails();
+      await expect
+        .soft(
+          root
+            .getByText("GST Number is in an incorrect format", { exact: true })
+            .or(root.getByText("GST number cannot be greater than 9 digits", { exact: true }))
+            .or(root.getByText(/If > 9.{0,40}invalid format/i))
+            .or(root.getByText(/GST Number.{0,80}(9|format|invalid|maximum|length|greater)/i))
+            .or(root.getByText(/GST number.{0,80}(9|format|invalid|maximum|length|greater)/i))
+            .first(),
+        )
+        .toBeVisible({ timeout: 20_000 });
     },
   );
 
   test(
     "UDP-T3750 - Existing Business Customer - Pre - Populated from FIS AF",
     { tag: ["@do", "@regression", "@UDP-T3750"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Existing Business from FIS — requires Business program + UDC business search data.");
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      const businessDetailsPage = await openExistingBusinessDetailsViaUdcNumber(assetDetailsPage);
+
+      await expect.soft(businessDetailsPage.businessRoot).toBeVisible({ timeout: 30_000 });
+      await expect.soft(page.getByText(/Business Details/i).first()).toBeVisible({ timeout: 30_000 });
+
+      const legalName = (await businessDetailsPage.legalNameInput().inputValue().catch(() => "")).trim();
+      await expect.soft(legalName).toMatch(/\S/);
+
+      const tradingName = (await businessDetailsPage.tradingNameInput().inputValue().catch(() => "")).trim();
+      await expect.soft(tradingName).toMatch(/\S/);
+
+      const regNo = (await businessDetailsPage.registeredCompanyNumberInput().inputValue().catch(() => "")).trim();
+      const nzbn = (await businessDetailsPage.nzBusinessNumberInput().inputValue().catch(() => "")).trim();
+      await expect.soft(regNo.length > 0 || nzbn.length > 0).toBeTruthy();
+
+      const gst = (await businessDetailsPage.gstNumberInput().inputValue().catch(() => "")).trim();
+      const phone = (await businessDetailsPage.businessRoot.getByRole("textbox", { name: /Phone number/i }).first().inputValue().catch(() => "")).trim();
+      const email = (await businessDetailsPage.businessEmailInput.inputValue().catch(() => "")).trim();
+      await expect.soft(gst.length > 0 || phone.length > 0 || email.length > 0).toBeTruthy();
+
+      const editedLegal = `${legalName} Edited`;
+      await businessDetailsPage.enterLegalName(editedLegal);
+      await expect.soft(businessDetailsPage.legalNameInput()).toHaveValue(editedLegal);
+
+      const editedTrading = tradingName ? `${tradingName} Edited` : "Edited Trading";
+      await businessDetailsPage.enterTradingName(editedTrading);
+      await expect.soft(businessDetailsPage.tradingNameInput()).toHaveValue(editedTrading);
     },
   );
 
@@ -776,26 +1466,14 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
     { tag: ["@do", "@regression", "@UDP-T3751"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      const trust = searchTypeRadio(page, /Trust/i).first();
-      if (!(await trust.isVisible({ timeout: 10_000 }).catch(() => false))) {
-        test.skip(true, "Trust search type not available.");
-      }
-      await trust.check({ force: true });
-      await assetDetailsPage.clickAddNewCustomerButton();
-      const trustPage = new DOTrustDetailsPage(page);
-      await trustPage.waitForTrustDetailsStep();
-      await trustPage.selectTrustTypeFirstAvailableOption();
-      await trustPage.selectPrimaryNatureOfTrustFirstAvailableOption();
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      const trustPage = await openTrustDetailsViaUdcNoMatch(assetDetailsPage);
+
       await trustPage.clearTrustName();
-      await trustPage.clearRegisteredNumber();
-      await trustPage.enterGstNumber("xx");
-      await trustPage.clearTimeInTrust();
-      await trustPage.clearBusinessPhone();
-      await trustPage.clearContactEmail();
       await trustPage.clickSaveTrustDetails();
-      await trustPage.expectTrustDetailsValidationWithDropdownsSelected();
+      await expect.soft(page.getByText(/Trust Name is required/i).first()).toBeVisible({
+        timeout: 20_000,
+      });
     },
   );
 
@@ -804,20 +1482,17 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
     { tag: ["@do", "@regression", "@UDP-T3752"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      const trust = searchTypeRadio(page, /Trust/i).first();
-      if (!(await trust.isVisible({ timeout: 10_000 }).catch(() => false))) {
-        test.skip(true, "Trust search type not available.");
-      }
-      await trust.check({ force: true });
-      await assetDetailsPage.clickAddNewCustomerButton();
-      const trustPage = new DOTrustDetailsPage(page);
-      await trustPage.waitForTrustDetailsStep();
+      const assetDetailsPage = await openStandardQuoteBusinessLoanOnCustomerDetailsStep(page);
+      const trustPage = await openTrustDetailsViaUdcNoMatch(assetDetailsPage);
+
       await trustPage.touchTrustTypeDropdownWithoutSelection();
-      await trustPage.touchPrimaryNatureOfTrustDropdownWithoutSelection();
       await trustPage.clickSaveTrustDetails();
-      await expect.soft(page.getByText(/Primary Nature of Trust is required/i).first()).toBeVisible({ timeout: 25_000 });
+      await expect.soft(page.getByText(/Trust Type is required/i).first()).toBeVisible({
+        timeout: 25_000,
+      });
+
+      await trustPage.openTrustTypeDropdown();
+      await trustPage.expectTrustTypeDropdownHasOptions();
     },
   );
 

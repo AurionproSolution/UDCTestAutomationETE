@@ -75,18 +75,23 @@ export class DOAssetDetailsPage extends BasePage {
     this.cashPriceOfAssetInputField = page
       .getByRole("textbox", { name: /Cash Price of Asset/i })
       .first();
+    const quoteShell = page.locator("app-quote-details, app-standard-quote").first();
     const rrpLabel = /Recommended\s+Retail\s+Price/i;
-    // Float labels may sit outside the `col-6` wrapper; prefer ARIA name, then label text + `#amount`.
-    this.recommendedRetailPriceInput = page
-      .getByRole("textbox", { name: rrpLabel })
+    // Do not use getByRole(textbox, { name: rrpLabel }) — Cash Price shares a composite a11y name
+    // that includes "Recommended Retail Price", so Used-condition hide checks never pass.
+    this.recommendedRetailPriceInput = quoteShell
+      .locator("amount")
+      .filter({ hasText: rrpLabel })
+      .locator("#amount")
+      .first()
       .or(
-        page
+        quoteShell
           .getByText(rrpLabel)
+          .first()
           .locator(
             "xpath=ancestor::div[contains(@class,'col-')][1]//input[@id='amount']",
           ),
       )
-      .or(page.locator("amount").filter({ hasText: rrpLabel }).locator("#amount"))
       .first();
     this.PPSRCount = page.locator("app-quote-details").getByRole("spinbutton");
     this.udcEstablishmentFeeInputField = page
@@ -112,8 +117,7 @@ export class DOAssetDetailsPage extends BasePage {
       .locator("percentage")
       .filter({ hasText: "Interest Rate" })
       .locator("#percent");
-    // Match visible Standard Quote shell (same as tests: `app-quote-details, app-standard-quote`).first()
-    const quoteShell = page.locator("app-quote-details, app-standard-quote").first();
+    // `quoteShell` defined above for RRP; reuse for payment-summary locators below.
     /**
      * **Lease Date** (Finance Lease) or **Loan Date** (e.g. AFV / CSA Payment Summary): scoped to `app-payment-summary` + `visible:true`.
      * Do **not** chain `.or()` to unscoped comboboxes — hidden templates in `app-quote-details` match first and break `toBeVisible()`.
@@ -658,13 +662,20 @@ export class DOAssetDetailsPage extends BasePage {
   /** UDC Establishment Fee: pre-populated from program; assert editable only when the control allows editing. */
   async expectUdcEstablishmentFeePrePopulatedFromProgram(): Promise<void> {
     this.logStep("Expect Udc Establishment Fee Pre Populated From Program");
+    await this.waitForQuoteLoadersToFinish(60_000);
     const fee = this.udcEstablishmentFeeInputField;
     await expect(fee).toBeVisible({ timeout: 20_000 });
-    const raw = (await fee.inputValue()).trim();
-    expect(raw.length).toBeGreaterThan(0);
-    const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
-    expect(Number.isNaN(n)).toBeFalsy();
-    expect(n).toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () => {
+          const raw = (await fee.inputValue()).trim();
+          if (raw.length === 0) return 0;
+          const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
+          return Number.isNaN(n) ? 0 : n;
+        },
+        { timeout: 45_000 },
+      )
+      .toBeGreaterThan(0);
     if (await fee.isEditable().catch(() => false)) {
       await expect(fee).toBeEditable();
     }
@@ -713,24 +724,7 @@ export class DOAssetDetailsPage extends BasePage {
   async expectRecommendedRetailPriceHiddenAfterUsedCondition(): Promise<void> {
     this.logStep("Expect Recommended Retail Price Hidden After Used Condition");
     await this.waitForQuoteLoadersToFinish();
-    await this.page.waitForTimeout(2_000);
- 
-    await this.dealerOriginationFeeInputField.scrollIntoViewIfNeeded();
-    await this.page.mouse.wheel(0, 700);
-    await this.page.waitForTimeout(1_000);
- 
-    // Match UDP-T3657 / `recommendedRetailPriceInput` only. A broad `getByText(RRP)` stays visible
-    // (e.g. label in layout/summary) while the amount field is hidden for Used — that caused visibleCount 1.
-    await expect
-      .poll(
-        async () => {
-          const n = await this.recommendedRetailPriceInput.count();
-          if (n === 0) return true;
-          return !(await this.recommendedRetailPriceInput.first().isVisible().catch(() => false));
-        },
-        { timeout: 20_000, intervals: [500, 1_000, 2_000] },
-      )
-      .toBe(true);
+    await expect(this.recommendedRetailPriceInput).toBeHidden({ timeout: 25_000 });
   }
   /**
    * Wait until **Loan Date** and **First Payment** both have values and stop changing
@@ -828,11 +822,29 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Expect Dealer Origination Fee Populated From Program");
     const f = this.dealerOriginationFeeInputField;
     await expect(f).toBeVisible({ timeout: 20_000 });
-    const raw = (await f.inputValue()).trim();
-    expect(raw.length).toBeGreaterThan(0);
-    const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
-    expect(Number.isNaN(n)).toBeFalsy();
-    expect(n).toBeGreaterThanOrEqual(0);
+    await expect
+      .poll(
+        async () => {
+          const raw = (await f.inputValue()).trim();
+          if (raw.length === 0) return 0;
+          const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
+          return Number.isNaN(n) ? 0 : n;
+        },
+        { timeout: 45_000 },
+      )
+      .toBeGreaterThan(0);
+  }
+
+  /** **Total Establishment Fee** (read-only) equals UDC Establishment Fee + Dealer Origination Fee. */
+  async expectTotalEstablishmentFeeEqualsUdcPlusDealer(): Promise<void> {
+    this.logStep("Expect Total Establishment Fee Equals Udc Plus Dealer");
+    const udcRaw = (await this.udcEstablishmentFeeInputField.inputValue()).trim();
+    const dealerRaw = (await this.dealerOriginationFeeInputField.inputValue()).trim();
+    const udc = parseFloat(udcRaw.replace(/[^0-9.]/g, ""));
+    const dealer = parseFloat(dealerRaw.replace(/[^0-9.]/g, ""));
+    expect(Number.isNaN(udc)).toBeFalsy();
+    expect(Number.isNaN(dealer)).toBeFalsy();
+    await this.expectTotalEstablishmentFeeSumDollars(udc + dealer);
   }
 
   /** **Total Establishment Fee** (read-only): parsed numeric equals UDC + Dealer (waits for recalculation). */
@@ -2845,7 +2857,7 @@ export class DOAssetDetailsPage extends BasePage {
   async selectUDCSelectOption(): Promise<void> {
     this.logStep("Select UDC option");
     const panel = this.page.locator(".p-dropdown-panel").last();
-    const opt = panel.getByRole("option", { name: /UDC Customer Number/i });
+    const opt = panel.getByRole("option", { name: /UDC Customer (Number|No)/i });
     await opt.waitFor({ state: "visible", timeout: 30000 });
     await opt.click();
     await this.page
@@ -2994,6 +3006,10 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.waitForTimeout(600);
 
     const markers: Locator[] = [
+      this.page.locator("app-business-details").first(),
+      this.page.locator("app-trust-details").first(),
+      this.page.getByText(/Organisation Type/i).first(),
+      this.page.getByText(/Trust Name/i).first(),
       this.page.locator('input[name="dateOfBirth"]'),
       this.page.getByRole("button", { name: /Choose Date/i }),
       this.page.getByRole("textbox", { name: /First Name/i }),
@@ -3020,7 +3036,7 @@ export class DOAssetDetailsPage extends BasePage {
     }
 
     throw new Error(
-      "Personal details did not open after Add New Customer (expected DOB, Choose Date, First Name, Title, or email block).",
+      "Customer details did not open after Add New Customer (expected Personal, Business, or Trust details step).",
     );
   }
 }

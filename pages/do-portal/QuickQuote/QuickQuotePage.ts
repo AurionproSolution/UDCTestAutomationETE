@@ -200,30 +200,15 @@ export class DOQuickQuotePage extends BasePage {
         ),
       );
 
-    // Balloon row "Fixed" — anchor from balloon $ input so we never hit an unrelated preceding p-checkbox (e.g. Terms).
-    this.fixedCheckbox = this.balloonDollarInput
-      .locator("xpath=following::label[contains(normalize-space(.),'Fixed')][1]/preceding::p-checkbox[1]")
-      .or(
-        this.balloonDollarInput.locator(
-          "xpath=following::label[contains(normalize-space(.),'Fixed')][1]/following-sibling::p-checkbox[1]",
-        ),
-      )
-      .or(
-        this.quickQuoteForm.getByText("Fixed", { exact: true }).locator("xpath=preceding-sibling::p-checkbox[1]"),
-      )
-      .or(
-        this.quickQuoteForm.getByText("Fixed", { exact: true }).locator("xpath=following-sibling::p-checkbox[1]"),
-      )
-      .or(
-        this.quickQuoteForm.locator("p-checkbox").filter({
-          has: this.quickQuoteForm.locator("label").filter({ hasText: /^Fixed$/i }),
-        }),
-      )
-      .or(
-        this.quickQuoteForm.locator(
-          "xpath=.//label[contains(normalize-space(.), 'Fixed')]/preceding::p-checkbox[1]",
-        ),
-      )
+    // Balloon row "Fixed" — PrimeNG nests the label inside `p-checkbox` (not a sibling), so
+    // preceding/following-sibling xpath from the label never resolves the host.
+    this.fixedCheckbox = this.quickQuoteForm
+      .locator("label")
+      .filter({ hasText: /^\s*Balloon/i })
+      .first()
+      .locator("xpath=following::p-checkbox[.//label[contains(normalize-space(.),'Fixed')]][1]")
+      .or(this.quickQuoteForm.getByRole("checkbox", { name: /Fixed/i }))
+      .or(this.quickQuoteForm.locator("p-checkbox").filter({ hasText: /Fixed/i }))
       .first();
 
     this.depositDollarInput = this.quickQuoteForm
@@ -870,6 +855,28 @@ export class DOQuickQuotePage extends BasePage {
   async selectCalculateFor(calculateFor: string): Promise<void> {
     this.logStep(`Selected Calculate For: ${this.stepValueDisplay(calculateFor)}`);
     await this.selectFromDropdown(this.calculateForDropdownTrigger, calculateFor);
+  }
+
+  /**
+   * Displayed "Calculate For" value — from dropdown combobox when editable, or static text
+   * when a comparison panel locks the row to Payment (no `p-dropdown` trigger).
+   */
+  async readCalculateForOnQuote(quoteIndex = 0): Promise<string> {
+    const form = quoteIndex === 0 ? this.quickQuoteForm : this.quoteForm(quoteIndex);
+    const calcForLabel = form
+      .locator(
+        "xpath=.//*[contains(normalize-space(.), 'Calculate For') and not(descendant::*[contains(normalize-space(.), 'Calculate For')])][1]",
+      )
+      .first();
+    const valueHost = calcForLabel.locator("xpath=following-sibling::*[1]");
+    const combobox = valueHost.getByRole("combobox").first();
+    if (await combobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return (
+        (await combobox.innerText().catch(() => "")).trim() ||
+        ((await combobox.getAttribute("aria-label")) ?? "").trim()
+      );
+    }
+    return (await valueHost.innerText().catch(() => "")).trim();
   }
 
   /**
