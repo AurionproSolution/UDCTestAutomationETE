@@ -77,6 +77,26 @@ export class DOTrustDetailsPage extends BasePage {
     await listbox.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
   }
 
+  async openTrustTypeDropdown(): Promise<void> {
+    this.logStep("Open Trust Type Dropdown");
+    const trigger = this.dropdownTriggerNearLabel(/Trust Type/i);
+    await trigger.waitFor({ state: "visible", timeout: 20_000 });
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click({ timeout: 15_000 });
+    await this.page.locator(".p-dropdown-panel").last().waitFor({ state: "visible", timeout: 15_000 });
+  }
+
+  /** Assert FIS AF trust-type list has at least one selectable option in the open panel. */
+  async expectTrustTypeDropdownHasOptions(): Promise<void> {
+    this.logStep("Expect Trust Type Dropdown Has Options");
+    const panel = this.page.locator(".p-dropdown-panel").last();
+    const opts = panel.locator("li[role='option'], .p-dropdown-item").filter({ hasNotText: /^\s*$/ });
+    await expect(opts.first()).toBeVisible({ timeout: 15_000 });
+    expect(await opts.count()).toBeGreaterThan(0);
+    await this.page.keyboard.press("Escape");
+    await panel.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+  }
+
   async touchTrustTypeDropdownWithoutSelection(): Promise<void> {
     this.logStep("Touch Trust Type Dropdown Without Selection");
     await this.touchDropdownWithoutSelection(this.dropdownTriggerNearLabel(/Trust Type/i));

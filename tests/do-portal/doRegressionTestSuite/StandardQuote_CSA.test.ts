@@ -386,7 +386,23 @@ test.describe("Standard Quote - CSA @do @regression", () => {
         originatorRefForRequiredDialog: "SQ-CSA-Ref-01",
       });
       const root = standardQuoteRoot(page);
-      await expect.soft(root).toContainText(/Open\s+Quote/i, { timeout: 45_000 });
+      // Status is stored in workFlowStatus input; the adjacent addon button may read "Select".
+      const workflowStatusInput = root
+        .locator('input[name="workFlowStatus"]')
+        .filter({ visible: true })
+        .first();
+
+      if (await workflowStatusInput.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        await expect.soft(workflowStatusInput).toHaveValue(/Open\s+Quote/i, { timeout: 45_000 });
+      } else {
+        const statusControl = root
+          .getByRole("button", { name: /Open\s+Quote/i })
+          .first()
+          .or(root.getByRole("textbox", { name: /Open\s+Quote/i }))
+          .or(root.getByText(/Open\s+Quote/i))
+          .first();
+        await expect.soft(statusControl).toBeVisible({ timeout: 45_000 });
+      }
     },
   );
 
@@ -545,6 +561,7 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await expect.soft(assetDetailsPage.totalEstablishmentFeeInputField).toBeVisible({
         timeout: 15_000,
       });
+      await assetDetailsPage.expectTotalEstablishmentFeeEqualsUdcPlusDealer();
     },
   );
 

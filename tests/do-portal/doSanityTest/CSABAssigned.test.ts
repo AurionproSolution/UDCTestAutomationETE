@@ -48,7 +48,7 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
     await dashboardPage.clickCreateStandardQuote();
     await dashboardPage.selectCSAproduct();
     await assetDetailsPage.chooseProduct("CSA-B-Assigned");
-    await assetDetailsPage.chooseProgram("Webform - CSA Business - MV Dealer");
+    await assetDetailsPage.chooseProgram("MYUDC-B-CSA-Assigned MV");
     await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
     await assetDetailsPage.enterAsset("Car and Light Commercial /");
     await assetDetailsPage.selectCondition("Used");

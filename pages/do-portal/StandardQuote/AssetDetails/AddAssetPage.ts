@@ -1,6 +1,17 @@
 import { Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
+/** Visible `text` host + `#text` input for Add Asset wizard fields (avoids hidden template rows). */
+function addAssetTextField(page: Page, label: string): Locator {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return page
+    .locator("text")
+    .filter({ hasText: new RegExp(`^\\s*${escaped}\\s*$`, "i") })
+    .locator("#text")
+    .filter({ visible: true })
+    .first();
+}
+
 export class DOAddAssetPage extends BasePage {
   // Locators
   readonly addAssetButton: Locator;
@@ -47,50 +58,17 @@ export class DOAddAssetPage extends BasePage {
     this.conditionDropdown = page.locator(
       `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[2]`,
     );
-    this.yearInputField = page
-      .locator("text")
-      .filter({ hasText: "Year" })
-      .locator("#text");
-    this.makeInputField = page
-      .locator("text")
-      .filter({ hasText: "Make" })
-      .locator("#text");
-    this.modelInputField = page
-      .locator("text")
-      .filter({ hasText: "Model" })
-      .locator("#text");
-    this.variantInputField = page
-      .locator("text")
-      .filter({ hasText: "Variant" })
-      .locator("#text");
-    this.regoNOInputField = page
-      .locator("text")
-      .filter({ hasText: "Rego No." })
-      .locator("#text");
-    this.vinInputField = page
-      .locator("text")
-      .filter({ hasText: "VIN" })
-      .locator("#text");
-    this.odometerInputField = page
-      .locator("text")
-      .filter({ hasText: "Odometer" })
-      .locator("#text");
-    this.colourInputField = page
-      .locator("text")
-      .filter({ hasText: "Colour" })
-      .locator("#text");
-    this.serialNOInputField = page
-      .locator("text")
-      .filter({ hasText: "Serial / Chassis No." })
-      .locator("#text");
-    this.engineNOInputField = page
-      .locator("text")
-      .filter({ hasText: "Engine No" })
-      .locator("#text");
-    this.ccRatingInputField = page
-      .locator("text")
-      .filter({ hasText: "CC Rating" })
-      .locator("#text");
+    this.yearInputField = addAssetTextField(page, "Year");
+    this.makeInputField = addAssetTextField(page, "Make");
+    this.modelInputField = addAssetTextField(page, "Model");
+    this.variantInputField = addAssetTextField(page, "Variant");
+    this.regoNOInputField = addAssetTextField(page, "Rego No.");
+    this.vinInputField = addAssetTextField(page, "VIN");
+    this.odometerInputField = addAssetTextField(page, "Odometer");
+    this.colourInputField = addAssetTextField(page, "Colour");
+    this.serialNOInputField = addAssetTextField(page, "Serial / Chassis No.");
+    this.engineNOInputField = addAssetTextField(page, "Engine No");
+    this.ccRatingInputField = addAssetTextField(page, "CC Rating");
     this.motivePowerDropdown = page.locator(
       `//label[text()=' Motive Power ']/following-sibling::div//div[@aria-label='dropdown trigger']`,
     );
@@ -130,8 +108,12 @@ export class DOAddAssetPage extends BasePage {
     this.searchForAssetButton = page.locator(
       "//button[@class='p-ripple p-element p-button p-component p-button-outlined']",
     );
-    this.summitButton = page.locator("//span[text()='Submit']");
-    this.crossButton = page.locator("//button[@role='button']");
+    this.summitButton = page.getByRole("button", { name: /^Submit$/i }).filter({ visible: true }).last();
+    this.crossButton = page
+      .locator("button.p-dialog-header-close, timesicon button")
+      .filter({ visible: true })
+      .last()
+      .or(page.getByRole("button", { name: /^Close$/i }).filter({ visible: true }).last());
   }
 
   protected stepLogPrefix(): string {
@@ -192,27 +174,51 @@ export class DOAddAssetPage extends BasePage {
   }
   async selectYear(year: string): Promise<void> {
     this.logStep(`Selected year: ${this.stepValueDisplay(year)}`);
-    await this.yearInputField.fill(year);
+    const input = this.yearInputField;
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.click();
+    await input.fill(year);
+    await input.press("Tab");
   }
   async enterMake(make: string): Promise<void> {
     this.logStep(`Entered make as ${this.stepValueDisplay(make)}`);
-    await this.makeInputField.fill(make);
+    const input = this.makeInputField;
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.click();
+    await input.fill(make);
+    await input.press("Tab");
   }
   async enterModel(model: string): Promise<void> {
     this.logStep(`Entered model as ${this.stepValueDisplay(model)}`);
-    await this.modelInputField.fill(model);
+    const input = this.modelInputField;
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.click();
+    await input.fill(model);
+    await input.press("Tab");
   }
   async enterVariant(variant: string): Promise<void> {
     this.logStep(`Entered variant as ${this.stepValueDisplay(variant)}`);
-    await this.variantInputField.fill(variant);
+    const input = this.variantInputField;
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.click();
+    await input.fill(variant);
+    await input.press("Tab");
   }
   async enterRegoNO(regoNO: string): Promise<void> {
     this.logStep(`Entered rego number as ${this.stepValueDisplay(regoNO)}`);
-    await this.regoNOInputField.fill(regoNO);
+    const input = this.regoNOInputField;
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.click();
+    await input.fill(regoNO);
+    await input.press("Tab");
   }
   async enterVIN(vin: string): Promise<void> {
     this.logStep(`Entered VIN as ${this.stepValueDisplay(vin)}`);
-    await this.vinInputField.fill(vin);
+    const input = this.vinInputField;
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.click();
+    await input.fill(vin);
+    await input.press("Tab");
   }
   async enterOdometer(odometer: string): Promise<void> {
     this.logStep(`Entered odometer as ${this.stepValueDisplay(odometer)}`);
@@ -335,7 +341,9 @@ export class DOAddAssetPage extends BasePage {
   }
   async clickSummitButton(): Promise<void> {
     this.logStep("Clicked Submit on Add Asset");
+    await this.summitButton.waitFor({ state: "visible", timeout: 30_000 });
     await this.summitButton.click();
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
   }
 
   /** Same control as {@link clickSummitButton} — Submit on Add Asset. */
