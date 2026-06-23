@@ -1518,4 +1518,117 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     // eslint-disable-next-line no-console
     console.log("Workflow: Quote submitted");
   }
+
+  /** Post-submission document strip (`Upload` / `Documents` / `Signing`). */
+  documentManagementStrip(): Locator {
+    return this.documentManagementTabView();
+  }
+
+  /** UDP-T3823 — uploaded documents grid exposes FIS display columns (best-effort per build). */
+  async expectUploadTabUploadedDocumentsGridColumns(): Promise<void> {
+    this.logStep("Expect Upload Tab Uploaded Documents Grid Columns");
+    await this.ensureUploadTab();
+    const panel = this.uploadTabContentPanel();
+    const headers = [/Name/i, /Category/i, /Type/i, /Loaded On/i, /Loaded By/i, /Source/i];
+    for (const hdr of headers) {
+      const col = panel
+        .getByRole("columnheader", { name: hdr })
+        .or(panel.locator("th").filter({ hasText: hdr }))
+        .or(this.page.getByText(hdr).first());
+      await expect.soft(col.first()).toBeVisible({ timeout: 20_000 });
+    }
+  }
+
+  /** UDP-T3829 — Generated **Documents** tab grid headers (best-effort). */
+  async expectGeneratedDocumentsTabColumnHeaders(): Promise<void> {
+    this.logStep("Expect Generated Documents Tab Column Headers");
+    await this.openDocumentsTab();
+    const strip = this.documentManagementStrip();
+    const patterns = [
+      /Select All/i,
+      /Date\s*&\s*Time|Date and Time/i,
+      /Document Name/i,
+      /E-?Sign/i,
+      /Preview/i,
+      /Download/i,
+      /Print/i,
+    ];
+    for (const rx of patterns) {
+      await expect
+        .soft(strip.getByText(rx).or(strip.getByRole("columnheader", { name: rx })).first())
+        .toBeVisible({ timeout: 25_000 });
+    }
+  }
+
+  /** UDP-T3830 — click **Select All** on Generated Documents (when present). */
+  async clickGeneratedDocumentsSelectAll(): Promise<void> {
+    this.logStep("Click Generated Documents Select All");
+    await this.openDocumentsTab();
+    const strip = this.documentManagementStrip();
+    const selectAll = strip
+      .getByRole("checkbox", { name: /Select All/i })
+      .or(strip.locator("th").filter({ hasText: /Select All/i }).locator(".p-checkbox-box"))
+      .or(strip.getByText(/Select All/i).locator("xpath=ancestor::th[1]//div[contains(@class,'p-checkbox-box')]"))
+      .first();
+    await selectAll.scrollIntoViewIfNeeded();
+    await selectAll.click({ timeout: 20_000 });
+  }
+
+  /** UDP-T3844 — Credit Conditions tab is not offered during Customer Details. */
+  async expectCreditConditionsTabHidden(): Promise<void> {
+    this.logStep("Expect Credit Conditions Tab Hidden");
+    const tab = this.page
+      .getByRole("tab", { name: /Credit Conditions|Additional Approval Conditions/i })
+      .or(this.page.getByText(/Credit Conditions|Additional Approval Conditions/i));
+    await expect(tab).toHaveCount(0, { timeout: 8_000 });
+  }
+
+  /** UDP-T3845+ — open **Credit Conditions** tab in Post Submission (when AF data exists). */
+  async openCreditConditionsTab(): Promise<void> {
+    this.logStep("Open Credit Conditions Tab");
+    let root = this.documentManagementStrip();
+    if ((await root.count()) === 0) {
+      root = this.page.locator(".p-tabview").first();
+    }
+    const tab = root
+      .getByRole("tab", { name: /Credit Conditions|Additional Approval Conditions/i })
+      .or(root.locator("a.p-tabview-nav-link").filter({ hasText: /Credit Conditions|Additional Approval/i }))
+      .first();
+    await tab.waitFor({ state: "visible", timeout: 60_000 });
+    await tab.click({ timeout: 20_000 });
+    await expect(
+      root.getByText(/Condition/i).or(root.getByRole("columnheader", { name: /Condition/i })),
+    ).toBeVisible({ timeout: 45_000 });
+  }
+
+  /** UDP-T3862 — **Next** is not available on Post Submission. */
+  async expectPostSubmissionNextButtonHidden(): Promise<void> {
+    this.logStep("Expect Post Submission Next Button Hidden");
+    await this.waitForUploadStep();
+    const nextInPost = this.page
+      .locator("app-customer-quote-post-submit, app-post-submission")
+      .getByRole("button", { name: /^Next$/i });
+    await expect(nextInPost).toHaveCount(0, { timeout: 10_000 });
+  }
+
+  /** UDP-T3861 — Notes and Upload remain actionable in Post Submission. */
+  async expectPostSubmissionNotesAndUploadActionable(): Promise<void> {
+    this.logStep("Expect Post Submission Notes And Upload Actionable");
+    await this.waitForUploadStep();
+    await expect(this.addNewNotesButton).toBeEnabled({ timeout: 30_000 });
+    await expect(this.browseFilesButton).toBeVisible({ timeout: 30_000 });
+  }
+
+  /** UDP-T3852+ — loan date in the past confirmation dialog (Submit / Generate Documentation). */
+  async expectLoanDateInPastDialogVisible(): Promise<void> {
+    this.logStep("Expect Loan Date In Past Dialog Visible");
+    const dlg = this.page.getByRole("dialog").filter({
+      hasText: /Loan date is in the past/i,
+    });
+    await expect(dlg).toBeVisible({ timeout: 60_000 });
+    await expect.soft(dlg.getByText(/Update to today/i)).toBeVisible();
+    await expect.soft(dlg.getByRole("button", { name: /^Yes$/i })).toBeVisible();
+    await expect.soft(dlg.getByRole("button", { name: /^No$/i })).toBeVisible();
+    await expect.soft(dlg.getByRole("button", { name: /^Close$/i })).toBeVisible();
+  }
 }
