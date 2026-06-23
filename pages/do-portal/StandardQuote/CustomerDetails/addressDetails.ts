@@ -2897,6 +2897,46 @@ export class DOAddressDetailsPage extends BasePage {
     }
   }
 
+  /** Individual / Co-Borrower — **Copy Primary Borrower's address?** toggle label (UDP-T3754). */
+  /** Individual co-borrower / guarantor — `<label> Copy primary borrower's address? </label>` + `p-inputswitch`. */
+  copyPrimaryBorrowerAddressToggleLabel(): Locator {
+    return this.page
+      .locator("label")
+      .filter({ hasText: /Copy primary borrower.?s address/i })
+      .first()
+      .or(this.page.getByText(/Copy primary borrower.?s address/i).first());
+  }
+
+  private copyPrimaryBorrowerAddressToggleRow(): Locator {
+    const label = this.copyPrimaryBorrowerAddressToggleLabel();
+    return label
+      .locator("xpath=ancestor::*[.//p-inputswitch or .//*[@role='switch']][1]")
+      .first();
+  }
+
+  async isCopyPrimaryBorrowerAddressToggleVisible(timeoutMs = 8_000): Promise<boolean> {
+    return this.copyPrimaryBorrowerAddressToggleLabel()
+      .isVisible({ timeout: timeoutMs })
+      .catch(() => false);
+  }
+
+  /** Toggle is shown and defaults to **No** (`aria-checked="false"` / switch off). */
+  async expectCopyPrimaryBorrowerAddressToggleDefaultNo(): Promise<void> {
+    this.logStep("Expect Copy Primary Borrower Address Toggle Default No");
+    const label = this.copyPrimaryBorrowerAddressToggleLabel();
+    await expect(label).toBeVisible({ timeout: 20_000 });
+    const row = this.copyPrimaryBorrowerAddressToggleRow();
+    const switchInput = row.locator('input[role="switch"]').first();
+    if (await switchInput.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await expect(switchInput).toHaveAttribute("aria-checked", "false", { timeout: 12_000 });
+      return;
+    }
+    const slider = row.locator(".p-inputswitch-slider").first();
+    await expect.poll(async () => !(await this.isPrimeSwitchOnFromSliderOrHost(slider)), {
+      timeout: 12_000,
+    }).toBe(true);
+  }
+
   /** Outlined **Save** on Address Details (validates current + previous cards on this step). */
   async clickSaveAddressDetails(): Promise<void> {
     this.logStep("Click Save Address Details");
