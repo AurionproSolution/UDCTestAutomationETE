@@ -3635,4 +3635,127 @@ export class DOAssetDetailsPage extends BasePage {
       .toBeTruthy();
     await this.waitForLoadingComplete();
   }
+
+  /** **Total Amount Borrowed** (`amount` row, often Payment Summary / finance block). */
+  totalAmountBorrowedField(): Locator {
+    const inSummary = this.paymentSummaryRoot
+      .locator("amount")
+      .filter({ hasText: /Total\s+Amount\s+Borrowed/i })
+      .locator("#amount")
+      .first();
+    const onPage = this.page
+      .locator("amount")
+      .filter({ hasText: /Total\s+Amount\s+Borrowed/i })
+      .locator("#amount")
+      .first();
+    return inSummary.or(onPage);
+  }
+
+  /** **Interest Charge** (system-calculated from FIS AF; display-only). */
+  interestChargeField(): Locator {
+    const inSummary = this.paymentSummaryRoot
+      .locator("amount")
+      .filter({ hasText: /Interest\s+Charge/i })
+      .locator("#amount")
+      .first();
+    const onPage = this.page
+      .locator("amount")
+      .filter({ hasText: /Interest\s+Charge/i })
+      .locator("#amount")
+      .first();
+    return inSummary.or(onPage);
+  }
+
+  parseDisplayedCurrency(raw: string): number {
+    const n = Number.parseFloat(raw.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  async scrollTotalAmountBorrowedIntoView(): Promise<void> {
+    const field = this.totalAmountBorrowedField();
+    await field.scrollIntoViewIfNeeded().catch(() => {});
+    await this.paymentSummaryRoot.scrollIntoViewIfNeeded().catch(() => {});
+  }
+
+  async scrollInterestChargeIntoView(): Promise<void> {
+    const field = this.interestChargeField();
+    await field.scrollIntoViewIfNeeded().catch(() => {});
+    await this.paymentSummaryRoot.scrollIntoViewIfNeeded().catch(() => {});
+  }
+
+  async readTotalAmountBorrowed(): Promise<number> {
+    const field = this.totalAmountBorrowedField();
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    const raw =
+      (await field.inputValue().catch(() => "")).trim() ||
+      ((await field.textContent()) ?? "").trim();
+    return this.parseDisplayedCurrency(raw);
+  }
+
+  async readInterestCharge(): Promise<number> {
+    const field = this.interestChargeField();
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    const raw =
+      (await field.inputValue().catch(() => "")).trim() ||
+      ((await field.textContent()) ?? "").trim();
+    return this.parseDisplayedCurrency(raw);
+  }
+
+  async expectTotalAmountBorrowedReadOnly(): Promise<void> {
+    this.logStep("Expect Total Amount Borrowed display-only");
+    await this.scrollTotalAmountBorrowedIntoView();
+    const field = this.totalAmountBorrowedField();
+    await expect.soft(field).toBeVisible({ timeout: 30_000 });
+    const editable = await field.isEditable().catch(() => false);
+    expect.soft(editable).toBeFalsy();
+  }
+
+  async expectInterestChargeReadOnly(): Promise<void> {
+    this.logStep("Expect Interest Charge display-only");
+    await this.scrollInterestChargeIntoView();
+    const field = this.interestChargeField();
+    await expect.soft(field).toBeVisible({ timeout: 30_000 });
+    const editable = await field.isEditable().catch(() => false);
+    expect.soft(editable).toBeFalsy();
+  }
+
+  async expectTotalAmountBorrowedZero(): Promise<void> {
+    this.logStep("Expect Total Amount Borrowed $0.00");
+    await this.scrollTotalAmountBorrowedIntoView();
+    await expect
+      .poll(async () => await this.readTotalAmountBorrowed(), { timeout: 30_000 })
+      .toBe(0);
+  }
+
+  async expectTotalAmountBorrowedGreaterThanZero(): Promise<void> {
+    this.logStep("Expect Total Amount Borrowed > 0");
+    await this.scrollTotalAmountBorrowedIntoView();
+    await expect
+      .poll(async () => await this.readTotalAmountBorrowed(), { timeout: 60_000 })
+      .toBeGreaterThan(0);
+  }
+
+  async expectTotalAmountBorrowedMatchesAmount(
+    expected: number,
+    tolerance = 1,
+  ): Promise<void> {
+    this.logStep(
+      `Expect Total Amount Borrowed ≈ ${this.stepValueDisplay(String(expected))}`,
+    );
+    await this.scrollTotalAmountBorrowedIntoView();
+    await expect
+      .poll(async () => {
+        const tab = await this.readTotalAmountBorrowed();
+        return Math.abs(tab - expected) <= tolerance;
+      }, { timeout: 60_000 })
+      .toBeTruthy();
+  }
+
+  async expectInterestChargeNonNegative(): Promise<void> {
+    this.logStep("Expect Interest Charge ≥ $0.00");
+    await this.scrollInterestChargeIntoView();
+    await expect
+      .poll(async () => await this.readInterestCharge(), { timeout: 60_000 })
+      .toBeGreaterThanOrEqual(0);
+  }
 }
