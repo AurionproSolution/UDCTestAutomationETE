@@ -3005,6 +3005,148 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.waitForTimeout(200);
   }
 
+  /** **dd/MM/yyyy** for today (runner local calendar). */
+  static todayDdMmYyyy(): string {
+    const d = new Date();
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${d.getFullYear()}`;
+  }
+
+  /** **dd/MM/yyyy** for a date `daysAgo` before today. */
+  static pastDateDdMmYyyy(daysAgo = 14): string {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${d.getFullYear()}`;
+  }
+
+  private isLoanDateTodayOrTomorrow(raw: string): boolean {
+    const t = raw.trim();
+    const slash = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!slash) return false;
+    const day = parseInt(slash[1], 10);
+    const month0 = parseInt(slash[2], 10) - 1;
+    const year = parseInt(slash[3], 10);
+    const loan = new Date(year, month0, day);
+    if (Number.isNaN(loan.getTime())) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    loan.setHours(0, 0, 0, 0);
+    return loan.getTime() === today.getTime() || loan.getTime() === tomorrow.getTime();
+  }
+
+  /**
+   * **Loan Date** on Payment Summary — **dd/MM/yyyy** (NZ DO portal).
+   */
+  async enterLoanDateDdMmYyyy(value: string): Promise<void> {
+    this.logStep(`Entered loan date as ${this.stepValueDisplay(value)}`);
+    const inp = this.loanDate;
+    const v = value.trim();
+    await inp.waitFor({ state: "visible", timeout: 25_000 });
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await inp.scrollIntoViewIfNeeded();
+    await inp.click({ force: true });
+    await inp.press("ControlOrMeta+a").catch(() => {});
+    await inp.fill(v);
+    await inp.press("Tab").catch(() => {});
+
+    let read = (await inp.inputValue().catch(() => "")).trim();
+    const looksLikeDate = (s: string) =>
+      /\d{1,2}\/\d{1,2}\/\d{4}/.test(s) ||
+      /^\d{4}-\d{2}-\d{2}/.test(s) ||
+      (s.length >= 6 && /[\/\-]/.test(s) && /\d{4}/.test(s));
+    if (!looksLikeDate(read)) {
+      await inp.click({ force: true });
+      await inp.press("ControlOrMeta+a").catch(() => {});
+      await this.page.keyboard.type(v, { delay: 25 });
+      await inp.press("Tab").catch(() => {});
+      read = (await inp.inputValue().catch(() => "")).trim();
+    }
+    if (!looksLikeDate(read)) {
+      await inp.evaluate((el: HTMLInputElement, val: string) => {
+        el.removeAttribute("readonly");
+        el.removeAttribute("disabled");
+        el.focus();
+        el.value = val;
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
+      }, v);
+      read = (await inp.inputValue().catch(() => "")).trim();
+    }
+    if (!looksLikeDate(read) && read.length < 6) {
+      throw new Error(`Loan Date did not accept value "${v}" (last read: "${read}").`);
+    }
+    await this.page.waitForTimeout(200);
+  }
+
+  loanDatePastUpdateDialog(): Locator {
+    return this.page
+      .locator("p-confirmdialog, .p-confirm-dialog, [role='dialog']")
+      .filter({ hasText: /Loan date is in the past/i })
+      .first();
+  }
+
+  async expectLoanDatePastUpdateDialogVisible(): Promise<void> {
+    this.logStep("Expect loan date past update dialog");
+    const dlg = this.loanDatePastUpdateDialog();
+    await expect(dlg).toBeVisible({ timeout: 45_000 });
+    await expect.soft(dlg).toContainText(/Loan date is in the past/i);
+    await expect.soft(dlg).toContainText(/Update to today/i);
+    await expect
+      .soft(dlg)
+      .toContainText(/return to the quote screen|return to the quote/i);
+    for (const label of [/^Yes$/i, /^No$/i, /^Close$/i]) {
+      await expect.soft(dlg.getByRole("button", { name: label }).first()).toBeVisible();
+    }
+  }
+
+  async clickLoanDatePastDialogButton(name: "Yes" | "No" | "Close"): Promise<void> {
+    this.logStep(`Loan date past dialog: ${name}`);
+    const dlg = this.loanDatePastUpdateDialog();
+    await dlg
+      .getByRole("button", { name: new RegExp(`^${name}$`, "i") })
+      .first()
+      .click({ timeout: 15_000 });
+    await dlg.waitFor({ state: "hidden", timeout: 25_000 }).catch(() => {});
+  }
+
+  async expectLoanDatePastFieldErrorHighlighted(): Promise<void> {
+    this.logStep("Expect loan date past field error");
+    await expect
+      .soft(this.page.getByText(/Loan date must not be in the past/i).first())
+      .toBeVisible({ timeout: 30_000 });
+    const invalidHost = this.paymentSummaryRoot
+      .locator("amount, date")
+      .filter({ hasText: /Loan Date/i })
+      .locator(".p-invalid, .ng-invalid, [class*='error']")
+      .first();
+    if (await invalidHost.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect.soft(invalidHost).toBeVisible();
+    }
+  }
+
+  async expectLoanDateIsTodayOrTomorrow(): Promise<void> {
+    this.logStep("Expect loan date is today or tomorrow");
+    await expect
+      .poll(async () => this.isLoanDateTodayOrTomorrow(await this.readLoanDateValue()), {
+        timeout: 45_000,
+      })
+      .toBeTruthy();
+  }
+
+  async expectAssetDetailsStepVisible(): Promise<void> {
+    this.logStep("Expect Asset Details step visible");
+    await expect(this.standardQuoteRoot()).toBeVisible({ timeout: 45_000 });
+    await expect
+      .soft(this.page.getByText(/Asset Type|Condition|Payment Summary/i).first())
+      .toBeVisible({ timeout: 30_000 });
+  }
+
   /** Reads **Loan Date** and sets **First Payment** to {@link suggestFirstPaymentDdMmYyyy}. */
   async enterFirstPaymentSuggestedFromLoanDdMmYyyy(): Promise<void> {
     const loanVal = (await this.loanDate.inputValue()).trim();

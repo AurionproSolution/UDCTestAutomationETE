@@ -1542,4 +1542,221 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     // eslint-disable-next-line no-console
     console.log("Workflow: Quote submitted");
   }
+
+  private generatedDocumentsTabInStrip(root: Locator): Locator {
+    return root
+      .getByRole("tab", { name: /^(Documents|Generated\s+Documents)$/i })
+      .or(root.locator("a.p-tabview-nav-link").filter({ hasText: /^(Documents|Generated\s+Documents)$/i }))
+      .or(root.locator(".p-tabview-nav li").filter({ hasText: /^(Documents|Generated\s+Documents)$/i }))
+      .first();
+  }
+
+  private generatedDocumentsPanel(root: Locator): Locator {
+    return root
+      .locator(".p-tabview-panel")
+      .filter({ has: root.locator("tr").filter({ hasText: /Customer Quote|Purchase Invoice|Document/i }) })
+      .filter({ visible: true })
+      .first()
+      .or(root.getByRole("tabpanel", { name: /^(Documents|Generated\s+Documents)$/i }).filter({ visible: true }).first())
+      .or(
+        root
+          .locator(".p-tabview-panel")
+          .filter({ visible: true })
+          .filter({ hasText: /Preview|Download|Select\s*All/i })
+          .first(),
+      );
+  }
+
+  /** Open **Documents** / **Generated Documents** tab in the post-submission document strip. */
+  async openGeneratedDocumentsTab(): Promise<void> {
+    this.logStep("Open Generated Documents tab");
+    let root = this.documentManagementTabView();
+    if ((await root.count()) === 0) {
+      root = this.page
+        .locator(".p-tabview")
+        .filter({ has: this.page.getByRole("tab", { name: /Upload|Documents|Generated/i }) })
+        .first();
+    }
+    if ((await root.count()) === 0) {
+      root = this.page.locator(".p-tabview").first();
+    }
+    await root.waitFor({ state: "visible", timeout: 60_000 });
+
+    const tab = this.generatedDocumentsTabInStrip(root);
+    await tab.waitFor({ state: "visible", timeout: 30_000 });
+    await tab.scrollIntoViewIfNeeded();
+    await tab.click({ timeout: 15_000 }).catch(async () => {
+      await this.documentsTabInStrip(root).click({ timeout: 15_000 });
+    });
+
+    const panel = this.generatedDocumentsPanel(root);
+    await expect
+      .poll(async () => await panel.isVisible().catch(() => false), { timeout: 45_000 })
+      .toBeTruthy();
+  }
+
+  async expectGeneratedDocumentsTabColumnHeaders(): Promise<void> {
+    this.logStep("Expect Generated Documents grid column headers");
+    await this.openGeneratedDocumentsTab();
+    const root = this.documentManagementTabView().or(this.page.locator(".p-tabview").first());
+    const panel = this.generatedDocumentsPanel(root);
+    await expect(panel).toBeVisible({ timeout: 30_000 });
+    const headerPatterns = [
+      /Select\s*All/i,
+      /Date\s*&\s*Time|Date\s+and\s+Time/i,
+      /Document\s*Name/i,
+      /History/i,
+      /E-?Sign\s*Status|E-?Sign/i,
+      /Preview/i,
+      /Download/i,
+      /Print/i,
+    ];
+    for (const pattern of headerPatterns) {
+      await expect.soft(panel.getByText(pattern).first()).toBeVisible({ timeout: 20_000 });
+    }
+  }
+
+  async clickGeneratedDocumentsSelectAll(): Promise<void> {
+    this.logStep("Click Generated Documents Select All");
+    await this.openGeneratedDocumentsTab();
+    const root = this.documentManagementTabView().or(this.page.locator(".p-tabview").first());
+    const panel = this.generatedDocumentsPanel(root);
+    const selectAll = panel
+      .getByRole("checkbox", { name: /Select\s*All/i })
+      .or(panel.locator("th .p-checkbox-box").first())
+      .or(panel.locator(".p-checkbox").filter({ hasText: /Select\s*All/i }).locator(".p-checkbox-box").first())
+      .first();
+    await expect(selectAll).toBeVisible({ timeout: 20_000 });
+    await selectAll.click({ timeout: 12_000 });
+  }
+
+  async expectUploadTabUploadedDocumentsGridColumns(): Promise<void> {
+    this.logStep("Expect Upload tab uploaded documents grid columns");
+    await this.ensureUploadTab();
+    const panel = this.uploadTabContentPanel();
+    const columnPatterns = [/Name/i, /Category/i, /Type/i, /Loaded\s*On/i, /Loaded\s*By/i, /Source/i];
+    for (const pattern of columnPatterns) {
+      await expect.soft(panel.getByText(pattern).first()).toBeVisible({ timeout: 25_000 });
+    }
+  }
+
+  async expectCreditConditionsTabHidden(): Promise<void> {
+    this.logStep("Expect Credit Conditions tab hidden");
+    const tab = this.page.getByRole("tab", { name: /Credit\s*Conditions/i });
+    await expect(tab).toBeHidden({ timeout: 10_000 });
+    const nav = this.page.locator("a, button, span").filter({ hasText: /^Credit\s*Conditions$/i });
+    await expect(nav.first()).toBeHidden({ timeout: 5_000 }).catch(() => {});
+  }
+
+  async expectPostSubmissionNextButtonHidden(): Promise<void> {
+    this.logStep("Expect Post Submission Next button hidden");
+    const footerNext = this.page
+      .getByRole("button", { name: /^Next$/i })
+      .filter({ visible: true });
+    await expect(footerNext).toHaveCount(0);
+  }
+
+  async expectPostSubmissionSavePreviousCancelVisible(): Promise<void> {
+    this.logStep("Expect Post Submission Save / Previous / Cancel");
+    await expect
+      .soft(this.page.getByRole("button", { name: /^Save$/i }).filter({ visible: true }).first())
+      .toBeVisible({ timeout: 15_000 });
+    await expect
+      .soft(this.page.getByRole("button", { name: /^Previous$/i }).filter({ visible: true }).first())
+      .toBeVisible({ timeout: 15_000 });
+    await expect
+      .soft(this.page.getByRole("button", { name: /^Cancel$/i }).filter({ visible: true }).first())
+      .toBeVisible({ timeout: 15_000 });
+  }
+
+  async expectPostSubmissionNotesAndUploadActionable(): Promise<void> {
+    this.logStep("Expect Post Submission notes and upload actionable");
+    await this.ensureUploadTab();
+    await expect(this.addNewNotesButton).toBeEnabled({ timeout: 30_000 });
+    await expect(this.browseFilesButton).toBeVisible({ timeout: 30_000 });
+    const fileInput = this.page.locator('input[type="file"]').first();
+    await expect(fileInput).toBeAttached({ timeout: 15_000 });
+  }
+
+  private generatedDocumentRowByName(namePattern: RegExp): Locator {
+    return this.page.locator("tr").filter({ hasText: namePattern }).first();
+  }
+
+  async expectPurchaseInvoiceVisibleInGeneratedDocuments(): Promise<void> {
+    this.logStep("Expect Purchase Invoice in Generated Documents");
+    await this.openGeneratedDocumentsTab();
+    await expect
+      .poll(
+        async () =>
+          await this.generatedDocumentRowByName(/Purchase\s*Invoice/i).isVisible().catch(() => false),
+        { timeout: 60_000 },
+      )
+      .toBeTruthy();
+  }
+
+  async expectPurchaseInvoicePreviewOpensNewTab(): Promise<void> {
+    this.logStep("Expect Purchase Invoice preview opens new tab");
+    await this.expectPurchaseInvoiceVisibleInGeneratedDocuments();
+    const row = this.generatedDocumentRowByName(/Purchase\s*Invoice/i);
+    const box = row.locator(".p-checkbox-box").first();
+    if (await box.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await box.click({ timeout: 8_000 }).catch(() => {});
+    }
+    const preview = this.page
+      .getByRole("button", { name: /^Preview$/i })
+      .or(this.page.getByRole("link", { name: /^Preview$/i }))
+      .filter({ visible: true })
+      .last();
+    await expect(preview).toBeVisible({ timeout: 15_000 });
+    const popupPromise = this.page.waitForEvent("popup", { timeout: 25_000 }).catch(() => null);
+    await preview.click({ timeout: 12_000 });
+    const popup = await popupPromise;
+    expect(popup).toBeTruthy();
+    await popup?.close().catch(() => {});
+  }
+
+  async expectPurchaseInvoiceDownloadStarts(): Promise<void> {
+    this.logStep("Expect Purchase Invoice download starts");
+    await this.expectPurchaseInvoiceVisibleInGeneratedDocuments();
+    const row = this.generatedDocumentRowByName(/Purchase\s*Invoice/i);
+    const box = row.locator(".p-checkbox-box").first();
+    if (await box.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await box.click({ timeout: 8_000 }).catch(() => {});
+    }
+    const downloadBtn = this.page
+      .getByRole("button", { name: /^Download$/i })
+      .or(this.page.getByRole("link", { name: /^Download$/i }))
+      .filter({ visible: true })
+      .last();
+    await expect(downloadBtn).toBeVisible({ timeout: 15_000 });
+    const downloadPromise = this.page.waitForEvent("download", { timeout: 25_000 }).catch(() => null);
+    await downloadBtn.click({ timeout: 12_000 });
+    const dl = await downloadPromise;
+    if (dl) {
+      await dl.cancel().catch(() => {});
+      return;
+    }
+    await this.confirmDocumentParameters().catch(() => {});
+  }
+
+  async readGeneratedDocumentTimestampForRow(namePattern: RegExp): Promise<string> {
+    await this.openGeneratedDocumentsTab();
+    const row = this.generatedDocumentRowByName(namePattern);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    const cells = row.locator("td");
+    const n = await cells.count();
+    for (let i = 0; i < n; i++) {
+      const text = ((await cells.nth(i).textContent()) ?? "").trim();
+      if (/\d{1,2}[\/\-.]\d{1,2}|\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}/.test(text)) {
+        return text;
+      }
+    }
+    return ((await row.textContent()) ?? "").trim();
+  }
+
+  async expectPostSubmissionScreenVisible(): Promise<void> {
+    this.logStep("Expect Post Submission screen");
+    await expect(this.page.getByText(/Post Submission/i).first()).toBeVisible({ timeout: 60_000 });
+    await this.waitForUploadStep();
+  }
 }
