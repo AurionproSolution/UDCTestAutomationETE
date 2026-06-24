@@ -1603,6 +1603,247 @@ export class DOQuickQuotePage extends BasePage {
     }
   }
 
+  /** Opens the Asset Type hierarchical picker (Make / Model / Variant / Year). */
+  async openAssetTypeModal(): Promise<Locator> {
+    this.logStep("Open Asset Type modal");
+    await this.assetTypeSelectButton.scrollIntoViewIfNeeded();
+    await this.clickElement(this.assetTypeSelectButton);
+    const dlg = this.page.getByRole("dialog").last();
+    await dlg.waitFor({ state: "visible", timeout: 20_000 });
+    await expect(dlg.getByText(/Make/i).first()).toBeVisible({ timeout: 20_000 });
+    return dlg;
+  }
+
+  /**
+   * Quick Quote **Asset Type** dialog: Make / Model / Variant / Year (PrimeNG), then **Select**.
+   */
+  async selectVehicleFromAssetTypeModal(params: {
+    make: string;
+    model: string;
+    variant: string;
+    year: string;
+  }): Promise<void> {
+    this.logStep(
+      `Asset Type modal: ${params.make}, ${params.model}, ${params.variant}, ${params.year}`,
+    );
+    const dlg = await this.openAssetTypeModal();
+
+    const pickFromOpenPanel = async (name: string, exact: boolean) => {
+      const opt = this.page.getByRole("option", { name, exact }).first();
+      await opt.waitFor({ state: "visible", timeout: 20_000 });
+      await opt.click();
+      await this.page.keyboard.press("Escape").catch(() => {});
+      await new Promise((r) => setTimeout(r, 250));
+    };
+
+    await dlg.locator(".p-dropdown").first().locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    await pickFromOpenPanel(params.make, true);
+
+    const modelHost = this.page.locator("#pn_id_428_0");
+    if (await modelHost.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await modelHost.click();
+    } else {
+      await dlg.locator(".p-dropdown").nth(1).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    }
+    await pickFromOpenPanel(params.model, true);
+
+    await dlg.locator(".p-dropdown").nth(2).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    await pickFromOpenPanel(params.variant, true);
+
+    const yearHost = this.page.locator("#pn_id_434_0");
+    if (await yearHost.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await yearHost.click();
+    } else {
+      await dlg.locator(".p-dropdown").nth(3).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    }
+    await pickFromOpenPanel(params.year, true);
+
+    const selectByRole = dlg.getByRole("button", { name: /^Select$/i }).first();
+    if (await selectByRole.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await selectByRole.click({ timeout: 15_000 });
+    } else {
+      await dlg
+        .locator("p-button.p-element.pointer.text-semi-bold")
+        .filter({ has: dlg.locator("span.p-button-label").filter({ hasText: /^Select$/ }) })
+        .first()
+        .click({ timeout: 15_000 });
+    }
+
+    await expect(dlg).toBeHidden({ timeout: 45_000 });
+    await this.waitForLoadingComplete();
+  }
+
+  async readAssetTypeDisplayValue(): Promise<string> {
+    const inputVal = (await this.assetTypeDropdownTrigger.inputValue().catch(() => "")).trim();
+    if (inputVal.length > 0) {
+      return inputVal;
+    }
+    const attr = (await this.assetTypeDropdownTrigger.getAttribute("value"))?.trim() ?? "";
+    if (attr.length > 0) {
+      return attr;
+    }
+    return ((await this.assetTypeDropdownTrigger.textContent()) ?? "").trim();
+  }
+
+  async readSelectedProgramLabel(quoteIndex = 0): Promise<string> {
+    const host =
+      quoteIndex === 0
+        ? this.quickQuoteForm.locator(
+            "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
+          )
+        : this.programDropdownOnQuote(quoteIndex);
+    const combobox = host.getByRole("combobox").first();
+    if (await combobox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return (
+        (await combobox.textContent())?.trim() ??
+        (await combobox.getAttribute("aria-label"))?.trim() ??
+        ""
+      );
+    }
+    return (await host.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
+  }
+
+  kmAllowanceTriggerOnQuote(quoteIndex: number): Locator {
+    return this.quoteForm(quoteIndex)
+      .locator(
+        "xpath=.//label[contains(normalize-space(.), 'KM Allowance')]/following::p-dropdown[1]",
+      )
+      .getByRole("button", { name: /dropdown trigger/i });
+  }
+
+  async readPrimeDropdownLabel(trigger: Locator): Promise<string> {
+    const host = trigger.locator("xpath=ancestor::p-dropdown[1]");
+    const combobox = host.getByRole("combobox").first();
+    if (await combobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return (await combobox.textContent())?.trim() ?? "";
+    }
+    return (await host.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
+  }
+
+  async listDropdownOptions(trigger: Locator): Promise<string[]> {
+    await trigger.scrollIntoViewIfNeeded().catch(() => {});
+    await trigger.click({ timeout: 15_000 });
+    await expect(this.page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
+    const options = (await this.page.getByRole("option").allTextContents())
+      .map((t) => t.trim())
+      .filter(Boolean);
+    await this.page.keyboard.press("Escape");
+    await this.dismissQuickQuoteDropdownOverlays();
+    return options;
+  }
+
+  async readAssuredFutureValue(): Promise<string> {
+    return (await this.assuredFutureValueInput.inputValue().catch(() => "")).trim();
+  }
+
+  async assuredFutureValueIsReadOnly(): Promise<boolean> {
+    const input = this.assuredFutureValueInput;
+    if ((await input.count()) === 0 || !(await input.isVisible().catch(() => false))) {
+      return true;
+    }
+    const ro = await input.getAttribute("readonly");
+    const aria = await input.getAttribute("aria-readonly");
+    if (ro !== null || aria === "true") {
+      return true;
+    }
+    const editable = await input.isEditable().catch(() => null);
+    return editable === false;
+  }
+
+  async expandAfVDetailsSection(): Promise<void> {
+    this.logStep("Expand AFV Details section");
+    const accordionHeader = this.quickQuoteForm
+      .locator("p-accordiontab, .p-accordion-header, p-panel")
+      .filter({ hasText: /AFV Details/i })
+      .first();
+    if (await accordionHeader.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      const expanded = await accordionHeader.getAttribute("aria-expanded");
+      if (expanded !== "true") {
+        await accordionHeader.click({ timeout: 10_000 });
+      }
+      return;
+    }
+    const header = this.quickQuoteForm.getByText(/AFV Details/i).first();
+    if (await header.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await header.click({ timeout: 10_000 });
+    }
+  }
+
+  async expectCalculateForNotApplicable(quoteIndex = 0): Promise<void> {
+    const form = quoteIndex === 0 ? this.quickQuoteForm : this.quoteForm(quoteIndex);
+    const label = form.locator("label").filter({ hasText: /Calculate For/i }).first();
+    const visible = await label.isVisible({ timeout: 5_000 }).catch(() => false);
+    if (!visible) {
+      return;
+    }
+    const host = form.locator(
+      "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]",
+    );
+    await expect.soft(host).toBeHidden({ timeout: 5_000 });
+  }
+
+  async clearInterestRatePercent(quoteIndex = 0): Promise<void> {
+    const input =
+      quoteIndex === 0 ? this.interestRatePercentInput : this.interestRateInputOnQuote(quoteIndex);
+    await this.replaceInputValueByKeyboard(input, "");
+  }
+
+  async waitForAfVFieldsAfterAssetSelection(): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const cash = (await this.cashPriceInput.inputValue().catch(() => "")).trim();
+          return cash.length > 0 && /\d/.test(cash);
+        },
+        { timeout: 60_000 },
+      )
+      .toBeTruthy();
+    await this.waitForLoadingComplete();
+  }
+
+  async ensureMandatoryAfVFieldsForCalculate(): Promise<void> {
+    const term = await this.readTermsMonthsValue();
+    if (!term || !/\d/.test(term)) {
+      await this.enterTermsMonths("36");
+    }
+    const kmLabel = await this.readPrimeDropdownLabel(this.kmAllowanceDropdownTrigger);
+    if (!kmLabel || /select|choose/i.test(kmLabel)) {
+      const kmOptions = await this.listDropdownOptions(this.kmAllowanceDropdownTrigger);
+      if (kmOptions.length > 0) {
+        await this.selectKMAllowance(kmOptions[0]);
+      }
+    }
+    const freqLabel = await this.readPrimeDropdownLabel(this.frequencyDropdownTrigger);
+    if (!freqLabel || /select|choose/i.test(freqLabel)) {
+      await this.selectFrequency("Monthly");
+    }
+    const rate = (await this.interestRatePercentInput.inputValue().catch(() => "")).trim();
+    if (!rate || !/\d/.test(rate)) {
+      await this.enterInterestRatePercent("4");
+    }
+  }
+
+  async readTermsMonthsValue(quoteIndex = 0): Promise<string> {
+    if (quoteIndex === 0) {
+      const dropdownVisible = await this.termsMonthsDropdownTrigger
+        .isVisible({ timeout: 5_000 })
+        .catch(() => false);
+      if (dropdownVisible) {
+        return await this.readPrimeDropdownLabel(this.termsMonthsDropdownTrigger);
+      }
+      const inputVisible = await this.termsMonthsInput.isVisible({ timeout: 5_000 }).catch(() => false);
+      if (inputVisible) {
+        return (await this.termsMonthsInput.inputValue()).trim();
+      }
+      return "";
+    }
+    const trig = this.termsDropdownTriggerOnQuote(quoteIndex);
+    if (await trig.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return await this.readPrimeDropdownLabel(trig);
+    }
+    return (await this.termsInputOnQuote(quoteIndex).inputValue().catch(() => "")).trim();
+  }
+
   /**
    * End-to-end helper for common quick quote creation flow.
    */
