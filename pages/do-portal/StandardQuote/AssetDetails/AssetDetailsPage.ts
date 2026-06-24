@@ -3364,4 +3364,275 @@ export class DOAssetDetailsPage extends BasePage {
       "Personal details did not open after Add New Customer (expected DOB, Choose Date, First Name, Title, or email block).",
     );
   }
+
+  // ---- AFV Standard Quote helpers (UDP-T4020–UDP-T4072) ----
+
+  kmAllowanceDropdownTrigger(): Locator {
+    return this.standardQuoteRoot()
+      .locator("label")
+      .filter({ hasText: /KM Allowance/i })
+      .first()
+      .locator("xpath=following::p-dropdown[1]")
+      .getByRole("button", { name: /dropdown trigger/i });
+  }
+
+  assuredFutureValueInputField(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .getByRole("textbox", { name: /Assured Future Value/i })
+      .or(
+        root
+          .locator("label")
+          .filter({ hasText: /Assured Future Value/i })
+          .first()
+          .locator("xpath=following::input[@currencymask or @id='amount'][1]"),
+      )
+      .first();
+  }
+
+  programDropdownHost(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .locator("p-dropdown")
+      .filter({ has: root.locator("label").filter({ hasText: /^Program/i }) })
+      .first();
+  }
+
+  async readSelectedProgramLabel(): Promise<string> {
+    const host = this.programDropdownHost();
+    const combobox = host.getByRole("combobox").first();
+    if (await combobox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return (await combobox.textContent())?.trim() ?? "";
+    }
+    return (await host.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
+  }
+
+  async expectProgramDropdownDisabled(): Promise<void> {
+    this.logStep("Expect Program Dropdown Disabled");
+    const host = this.programDropdownHost();
+    const cls = (await host.getAttribute("class")) ?? "";
+    const disabled =
+      cls.includes("p-disabled") || (await host.getAttribute("ng-reflect-disabled")) === "true";
+    if (disabled) {
+      await expect.soft(host).toHaveClass(/p-disabled/);
+      return;
+    }
+    const trigger = host.getByRole("button", { name: /dropdown trigger/i }).first();
+    await expect.soft(trigger).toBeDisabled({ timeout: 15_000 });
+  }
+
+  async expandAfVDetailsSection(): Promise<void> {
+    this.logStep("Expand AFV Details section");
+    const root = this.standardQuoteRoot();
+    const accordionHeader = root
+      .locator("p-accordiontab, .p-accordion-header, p-panel")
+      .filter({ hasText: /AFV Details/i })
+      .first();
+    if (await accordionHeader.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      const expanded = await accordionHeader.getAttribute("aria-expanded");
+      if (expanded !== "true") {
+        await accordionHeader.click({ timeout: 10_000 });
+      }
+      return;
+    }
+    const header = root.getByText(/AFV Details/i).first();
+    if (await header.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await header.click({ timeout: 10_000 });
+    }
+  }
+
+  async readAssuredFutureValue(): Promise<string> {
+    return (await this.assuredFutureValueInputField().inputValue().catch(() => "")).trim();
+  }
+
+  async assuredFutureValueIsReadOnly(): Promise<boolean> {
+    const input = this.assuredFutureValueInputField();
+    if ((await input.count()) === 0 || !(await input.isVisible().catch(() => false))) {
+      return true;
+    }
+    const ro = await input.getAttribute("readonly");
+    const aria = await input.getAttribute("aria-readonly");
+    if (ro !== null || aria === "true") {
+      return true;
+    }
+    return (await input.isEditable().catch(() => null)) === false;
+  }
+
+  async readKmAllowanceLabel(): Promise<string> {
+    return this.readPrimeDropdownLabel(this.kmAllowanceDropdownTrigger());
+  }
+
+  private async readPrimeDropdownLabel(trigger: Locator): Promise<string> {
+    const host = trigger.locator("xpath=ancestor::p-dropdown[1]");
+    const combobox = host.getByRole("combobox").first();
+    if (await combobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return (await combobox.textContent())?.trim() ?? "";
+    }
+    return (await host.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
+  }
+
+  async listKmAllowanceOptions(): Promise<string[]> {
+    const trigger = this.kmAllowanceDropdownTrigger();
+    await trigger.scrollIntoViewIfNeeded().catch(() => {});
+    await trigger.click({ timeout: 15_000 });
+    await expect(this.page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
+    const options = (await this.page.getByRole("option").allTextContents())
+      .map((t) => t.trim())
+      .filter(Boolean);
+    await this.page.keyboard.press("Escape");
+    await this.page.keyboard.press("Escape").catch(() => {});
+    return options;
+  }
+
+  async selectKmAllowance(kmAllowance: string): Promise<void> {
+    this.logStep(`Selected KM allowance: ${this.stepValueDisplay(kmAllowance)}`);
+    const trigger = this.kmAllowanceDropdownTrigger();
+    await trigger.click({ timeout: 15_000 });
+    await this.page.getByRole("option", { name: kmAllowance, exact: false }).first().click({
+      timeout: 15_000,
+    });
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.waitForLoadingComplete();
+  }
+
+  async ensureKmAllowanceForAfV(): Promise<void> {
+    const label = await this.readPrimeDropdownLabel(this.kmAllowanceDropdownTrigger());
+    if (!label || /select|choose/i.test(label)) {
+      const options = await this.listKmAllowanceOptions();
+      if (options.length > 0) {
+        await this.selectKmAllowance(options[0]);
+      }
+    }
+  }
+
+  async expectBalloonFieldsHiddenForAfV(): Promise<void> {
+    this.logStep("Expect Balloon Fields Hidden For AFV");
+    const root = this.standardQuoteRoot();
+    await expect.soft(this.balloonAmountInput).toBeHidden({ timeout: 8_000 });
+    await expect.soft(this.balloonPercentInput).toBeHidden({ timeout: 8_000 });
+    await expect.soft(this.balloonFixedCheckbox).toBeHidden({ timeout: 8_000 });
+    const balloonLabel = root.getByText(/^Balloon/i).first();
+    await expect.soft(balloonLabel).toBeHidden({ timeout: 5_000 });
+  }
+
+  async readLoanDateValue(): Promise<string> {
+    return (await this.loanDate.inputValue().catch(() => "")).trim();
+  }
+
+  async expectFirstPaymentBeforeLoanDateValidation(): Promise<void> {
+    this.logStep("Expect First Payment Before Loan Date Validation");
+    await expect
+      .soft(
+        this.page
+          .getByText(/First Payment Date must not be before the Loan Date/i)
+          .first(),
+      )
+      .toBeVisible({ timeout: 25_000 });
+  }
+
+  async expectFirstPaymentExceedsSixWeeksValidation(): Promise<void> {
+    this.logStep("Expect First Payment Exceeds Six Weeks Validation");
+    await expect
+      .soft(
+        this.page
+          .getByText(/First payment must be within 6 weeks and in line with the customer/i)
+          .first(),
+      )
+      .toBeVisible({ timeout: 25_000 });
+  }
+
+  async expectAfVOptionsSectionVisible(): Promise<void> {
+    this.logStep("Expect AFV Options Section Visible");
+    const root = this.standardQuoteRoot();
+    const panel = root
+      .locator("p-card, div, section")
+      .filter({ hasText: /Assured Future Value Options/i })
+      .filter({ visible: true })
+      .first();
+    await expect.soft(panel).toBeVisible({ timeout: 45_000 });
+  }
+
+  async expectStandardPaymentOptionsHidden(): Promise<void> {
+    this.logStep("Expect Standard Payment Options Hidden");
+    const root = this.standardQuoteRoot();
+    const csaPanel = root
+      .locator("p-card, div")
+      .filter({ hasText: /Standard\s+Payment\s+Options/i })
+      .first();
+    await expect.soft(csaPanel).toBeHidden({ timeout: 8_000 });
+  }
+
+  async expectEditPaymentScheduleSegmentExceedsTermMessage(): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule Segment Exceeds Term Message");
+    const dialog = this.editPaymentScheduleDialog();
+    await expect
+      .soft(
+        dialog
+          .getByText(/sum of the segment.*Number.*must not exceed the loan term/i)
+          .first(),
+      )
+      .toBeVisible({ timeout: 25_000 });
+  }
+
+  async clickEditPaymentScheduleDelete(): Promise<void> {
+    this.logStep("Click Edit Payment Schedule Delete");
+    const dialog = this.editPaymentScheduleDialog();
+    const deleteBtn = dialog
+      .getByRole("button", { name: /^Delete$/i })
+      .or(dialog.locator("button, a").filter({ hasText: /^Delete$/i }))
+      .first();
+    await expect(deleteBtn).toBeVisible({ timeout: 10_000 });
+    await deleteBtn.click({ timeout: 10_000 });
+  }
+
+  async expectAfVRowInPaymentSchedule(): Promise<void> {
+    this.logStep("Expect AFV Row In Payment Schedule");
+    const root = this.standardQuoteRoot();
+    const afvRow = root
+      .locator("tr")
+      .filter({ hasText: /AFV|Assured Future Value/i })
+      .first();
+    await expect.soft(afvRow).toBeVisible({ timeout: 30_000 });
+  }
+
+  async openSettlementDialog(): Promise<void> {
+    this.logStep("Open Settlement Dialog");
+    const root = this.standardQuoteRoot();
+    const btn = root
+      .getByRole("button", { name: /^Settlement$/i })
+      .or(root.getByRole("link", { name: /^Settlement$/i }))
+      .first();
+    await btn.scrollIntoViewIfNeeded();
+    await btn.click({ timeout: 15_000 });
+    await this.page.getByRole("dialog").last().waitFor({ state: "visible", timeout: 30_000 });
+  }
+
+  async openAddonsAccessoriesFromQuote(): Promise<void> {
+    this.logStep("Open Addons Accessories From Quote");
+    const root = this.standardQuoteRoot();
+    const link = root
+      .getByRole("link", { name: /Addons?\s*&\s*Accessories/i })
+      .or(root.getByRole("button", { name: /Addons?\s*&\s*Accessories/i }))
+      .or(root.locator("a, button").filter({ hasText: /Addons?\s*&\s*Accessories/i }))
+      .first();
+    await link.scrollIntoViewIfNeeded();
+    await link.click({ timeout: 15_000 });
+    await this.page.locator("app-service-plan, app-accessories").first().waitFor({
+      state: "visible",
+      timeout: 45_000,
+    });
+  }
+
+  async waitForAfVCashPricePopulated(): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const cash = (await this.cashPriceOfAssetInputField.inputValue().catch(() => "")).trim();
+          return cash.length > 0 && /\d/.test(cash);
+        },
+        { timeout: 60_000 },
+      )
+      .toBeTruthy();
+    await this.waitForLoadingComplete();
+  }
 }
