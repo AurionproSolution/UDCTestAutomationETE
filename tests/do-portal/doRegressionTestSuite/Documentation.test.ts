@@ -6,6 +6,7 @@
  */
 
 import { expect, test } from "@fixtures/doPortalTest";
+import path from "path";
 import type { Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
@@ -17,6 +18,7 @@ import {
   DOFinancialPositionPage,
   DOReferenceDetailsPage,
 } from "../../../pages";
+import { DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF } from "../../../pages/do-portal/StandardQuote/CustomerDetails/customerQuotePostSubmit";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 
@@ -254,10 +256,11 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     async ({ page }) => {
       test.setTimeout(600_000);
       const post = await openPostSubmissionUploadStep(page);
+      const pdfName = path.basename(DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF);
       await post.uploadJpgThenPdfExpectBothVisible();
-      await post.expectUploadTabPreviewOpensNewTab();
-      await post.expectUploadTabDownloadStarts();
-      await post.deleteUploadedDocumentTileByBasenameAndExpectRemoved('minimal-upload.jpg');
+      await post.expectUploadTabPreviewOpensNewTab(pdfName);
+      await post.expectUploadTabDownloadStarts(pdfName);
+      await post.deleteUploadedDocumentTileByBasenameAndExpectRemoved("minimal-upload.jpg");
     },
   );
 
@@ -266,7 +269,9 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3825'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: More uploaded documents than can fit on screen. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      const post = await openPostSubmissionUploadStep(page);
+      await post.uploadManyDocumentsToUploadTab(9);
+      await post.expectUploadTabDocumentsGridScrollable(9);
     },
   );
 
@@ -275,7 +280,9 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3826'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Application has completed e-sign process. Signed documents exist. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      const post = await openPostSubmissionUploadStep(page);
+      await post.completeElectronicSigningFlow({ borrowerName: "Liza Marie Doe" });
+      await post.expectUploadTabElectronicallySignedDocumentVisible();
     },
   );
 
