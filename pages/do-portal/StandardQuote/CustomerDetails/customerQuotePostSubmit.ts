@@ -156,6 +156,89 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       );
   }
 
+  /** Uploaded-documents grid on the **Upload** tab (Name / Loaded On / Loaded By / Source). */
+  private uploadTabDocumentsTable(): Locator {
+    return this.uploadTabContentPanel().locator("table").first();
+  }
+
+  /**
+   * Select exactly one uploaded file row (uncheck others) so shared toolbar actions apply to that file.
+   */
+  async selectUploadTabRowByBasename(basename: string): Promise<Locator> {
+    await this.ensureUploadTab();
+    const panel = this.uploadTabContentPanel();
+    await panel.waitFor({ state: "visible", timeout: 60_000 });
+    const escaped = basename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const nameRe = new RegExp(escaped, "i");
+    const table = this.uploadTabDocumentsTable();
+    const targetRow = table.locator("tbody tr").filter({ hasText: nameRe }).first();
+    await expect(targetRow).toBeVisible({ timeout: 30_000 });
+
+    const allRows = table.locator("tbody tr");
+    const n = await allRows.count();
+    for (let i = 0; i < n; i++) {
+      const r = allRows.nth(i);
+      const box = r.locator(".p-checkbox-box").first();
+      if (!(await box.isVisible({ timeout: 1_000 }).catch(() => false))) {
+        continue;
+      }
+      const isTarget = (await r.filter({ hasText: nameRe }).count()) > 0;
+      const checked = r.locator(".p-checkbox-box.p-highlight");
+      const isChecked = await checked.isVisible({ timeout: 400 }).catch(() => false);
+      if (isTarget === isChecked) {
+        continue;
+      }
+      await box.scrollIntoViewIfNeeded();
+      await box.click({ timeout: 8_000 });
+      if (isTarget) {
+        await expect(checked).toBeVisible({ timeout: 8_000 });
+      } else {
+        await expect(checked).toHaveCount(0, { timeout: 8_000 });
+      }
+    }
+
+    await expect(targetRow.locator(".p-checkbox-box.p-highlight")).toBeVisible({ timeout: 8_000 });
+    return targetRow;
+  }
+
+  /** Shared toolbar control below the upload grid (visible instance — duplicates exist in DOM). */
+  private uploadTabSharedActionButton(action: "Preview" | "Download" | "Delete"): Locator {
+    const panel = this.uploadTabContentPanel();
+    const rx = new RegExp(`^${action}$`, "i");
+    return panel
+      .getByRole("link", { name: rx })
+      .or(panel.getByRole("button", { name: rx }))
+      .or(panel.locator("a, button").filter({ hasText: rx }))
+      .filter({ visible: true })
+      .last();
+  }
+
+  private async confirmUploadDeleteDialogIfPresent(): Promise<void> {
+    const confirmDlg = this.page
+      .locator("p-confirmdialog, .p-confirm-dialog")
+      .filter({ visible: true })
+      .first();
+    const roleDlg = this.page.getByRole("dialog").filter({ visible: true }).first();
+
+    const dlg =
+      (await confirmDlg.isVisible({ timeout: 6_000 }).catch(() => false))
+        ? confirmDlg
+        : (await roleDlg.isVisible({ timeout: 1_000 }).catch(() => false))
+          ? roleDlg
+          : null;
+    if (!dlg) {
+      return;
+    }
+
+    const accept = dlg
+      .getByRole("button", { name: /^(Yes|OK|Delete|Confirm)$/i })
+      .or(dlg.locator("button.p-confirm-dialog-accept"))
+      .first();
+    await accept.waitFor({ state: "visible", timeout: 8_000 });
+    await accept.click({ timeout: 8_000 });
+    await dlg.waitFor({ state: "hidden", timeout: 25_000 }).catch(() => {});
+  }
+
   /** When `role="tab"` / accessible name fails, hit the PrimeNG nav link directly. */
   private documentsTabInStrip(root: Locator): Locator {
     const link = root.locator("a.p-tabview-nav-link").filter({ hasText: /^Documents$/i });
@@ -166,12 +249,265 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     return link.or(li).or(byHeaderAction).first();
   }
 
+  private signingTabInStrip(root: Locator): Locator {
+    const link = root.locator("a.p-tabview-nav-link").filter({ hasText: /Signing\s*&\s*Verification/i });
+    const li = root.locator(".p-tabview-nav li").filter({ hasText: /Signing/i });
+    const byHeaderAction = root
+      .locator('[id^="pn_id_"][id$="_header_action"]')
+      .filter({ hasText: /Signing/i });
+    return link.or(li).or(byHeaderAction).first();
+  }
+
+  /** `app-signatories` panel inside the document-management strip. */
+  signatoriesPanel(): Locator {
+    return this.documentManagementTabView().locator("app-signatories").first();
+  }
+
+  /** Open **Signing & Verification** tab and wait for the signatories grid. */
+  async openSigningAndVerificationTab(): Promise<void> {
+    this.logStep("Open Signing And Verification Tab");
+    let root = this.documentManagementTabView();
+    if ((await root.count()) === 0) {
+      root = this.page
+        .locator(".p-tabview")
+        .filter({ has: this.page.getByRole("tab", { name: /^Upload$/i }) })
+        .first();
+    }
+    if ((await root.count()) === 0) {
+      root = this.page.locator(".p-tabview").first();
+    }
+    await root.waitFor({ state: "visible", timeout: 60_000 });
+
+    const scopedRole = root.getByRole("tab", { name: /Signing\s*&\s*Verification/i });
+    let tab: Locator =
+      (await scopedRole.count()) > 0 ? scopedRole.first() : this.signingTabInStrip(root);
+
+    await tab.waitFor({ state: "visible", timeout: 30_000 });
+    await tab.scrollIntoViewIfNeeded();
+    try {
+      await tab.click({ timeout: 15_000 });
+    } catch {
+      tab = this.signingTabInStrip(root);
+      await tab.click({ timeout: 30_000 });
+    }
+
+    const panel = this.signatoriesPanel();
+    await expect(panel).toBeVisible({ timeout: 45_000 });
+    await expect(panel.locator("table tbody tr").first()).toBeVisible({ timeout: 45_000 });
+  }
+
+  /** Preferred Delivery Method on Signing tab (default **Screen** per QAT). */
+  async selectPreferredDeliveryMethod(method: "Screen" | "Email" = "Screen"): Promise<void> {
+    this.logStep(`Select Preferred Delivery Method (${method})`);
+    const panel = this.signatoriesPanel();
+    const dropdown = panel.locator("p-dropdown").first();
+    await dropdown.waitFor({ state: "visible", timeout: 20_000 });
+    const label = dropdown.locator(".p-dropdown-label");
+    const current = ((await label.innerText().catch(() => "")) || "").trim();
+    if (new RegExp(`^${method}$`, "i").test(current)) {
+      return;
+    }
+    await dropdown.locator(".p-dropdown-trigger").click({ timeout: 10_000 });
+    const option = this.page
+      .locator(".p-dropdown-panel .p-dropdown-item, .p-dropdown-items .p-dropdown-item")
+      .filter({ hasText: new RegExp(`^${method}$`, "i") })
+      .first();
+    await option.waitFor({ state: "visible", timeout: 10_000 });
+    await option.click({ timeout: 8_000 });
+    await expect(label).toContainText(new RegExp(method, "i"), { timeout: 8_000 });
+  }
+
+  private signatoryRowByCustomerName(customerName: string): Locator {
+    const escaped = customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return this.signatoriesPanel()
+      .locator("tbody tr")
+      .filter({ hasText: new RegExp(escaped, "i") })
+      .first();
+  }
+
+  /** Dealer row **Preview/Sign** (eye) — signing order 1 when Screen delivery is used. */
+  async completeDealerOnScreenSigningIfRequired(): Promise<void> {
+    this.logStep("Complete Dealer On Screen Signing If Required");
+    const dealerRow = this.signatoriesPanel().locator("tbody tr").filter({ hasText: /Dealer/i }).first();
+    if (!(await dealerRow.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    const eyeBtn = dealerRow
+      .locator("button")
+      .filter({ has: dealerRow.locator(".fa-eye, .fa-regular.fa-eye") })
+      .first();
+    if (!(await eyeBtn.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      return;
+    }
+    await eyeBtn.scrollIntoViewIfNeeded();
+    await eyeBtn.click({ timeout: 10_000 });
+    await this.completeOnScreenSigningPrompts();
+  }
+
+  /**
+   * Borrower **Start Verification → Electronic** (UDP-T3826 step 1).
+   * QAT overlay: `p-overlaypanel` with Manual | Electronic.
+   */
+  async startBorrowerElectronicVerification(customerName: string): Promise<void> {
+    this.logStep(`Start Borrower Electronic Verification (${customerName})`);
+    const row = this.signatoryRowByCustomerName(customerName);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    const startVerification = row
+      .locator(".id-verification-cell-data, .id-verification-cell")
+      .filter({ hasText: /Start Verification/i })
+      .or(row.locator("td").filter({ hasText: /Start Verification/i }))
+      .first();
+    await expect(startVerification).toBeVisible({ timeout: 20_000 });
+    await startVerification.scrollIntoViewIfNeeded();
+    await startVerification.click({ timeout: 12_000 });
+
+    const picker = this.page.locator("dialog, [role='dialog']").last();
+    await expect(picker).toContainText(/Manual/i, { timeout: 15_000 });
+    await expect(picker).toContainText(/Electronic/i, { timeout: 5_000 });
+
+    const electronicLabel = picker.getByText("Electronic", { exact: true });
+    await expect(electronicLabel).toBeVisible({ timeout: 10_000 });
+    await electronicLabel
+      .locator("xpath=ancestor::*[contains(@class,'cursor-pointer')][1]")
+      .click({ timeout: 10_000 })
+      .catch(async () => {
+        await electronicLabel.click({ timeout: 10_000, force: true });
+      });
+  }
+
+  /** Click through on-screen signing / verification prompts until idle or e-signed row appears. */
+  async completeOnScreenSigningPrompts(): Promise<void> {
+    this.logStep("Complete On Screen Signing Prompts");
+    const deadline = Date.now() + 180_000;
+    while (Date.now() < deadline) {
+      if (await this.uploadTabHasElectronicallySignedRow()) {
+        return;
+      }
+
+      const dialog = this.page.getByRole("dialog").filter({ visible: true }).first();
+      if (await dialog.isVisible({ timeout: 800 }).catch(() => false)) {
+        const action = dialog
+          .getByRole("button", {
+            name: /^(Sign|I Agree|Agree|Accept|Complete|Proceed|Confirm|Continue|Submit|OK|Yes)$/i,
+          })
+          .filter({ visible: true })
+          .first();
+        if (await action.isVisible({ timeout: 1_500 }).catch(() => false)) {
+          await action.click({ timeout: 10_000 });
+          await dialog.waitFor({ state: "hidden", timeout: 30_000 }).catch(() => {});
+          continue;
+        }
+      }
+
+      const signBtn = this.page
+        .getByRole("button", { name: /^Sign$/i })
+        .filter({ visible: true })
+        .first();
+      if (await signBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await signBtn.click({ timeout: 10_000 });
+        continue;
+      }
+
+      const borrowerRow = this.signatoryRowByCustomerName("Liza Marie Doe");
+      const borrowerEye = borrowerRow
+        .locator("button")
+        .filter({ has: borrowerRow.locator(".fa-eye, .fa-regular.fa-eye") })
+        .first();
+      if (await borrowerEye.isVisible({ timeout: 800 }).catch(() => false)) {
+        const verified = borrowerRow.getByText(/verified|complete|signed/i);
+        if (!(await verified.isVisible({ timeout: 400 }).catch(() => false))) {
+          await borrowerEye.click({ timeout: 8_000 }).catch(() => {});
+        }
+      }
+
+      if (
+        await this.page
+          .getByText(/verification complete|successfully signed|electronically signed/i)
+          .first()
+          .isVisible({ timeout: 500 })
+          .catch(() => false)
+      ) {
+        return;
+      }
+
+      await this.page.waitForTimeout(1_200);
+    }
+  }
+
+  /**
+   * UDP-T3826 — generate documents, complete dealer + borrower e-sign on **Screen**, then assert Upload tab.
+   */
+  async completeElectronicSigningFlow(options?: {
+    borrowerName?: string;
+    deliveryMethod?: "Screen" | "Email";
+  }): Promise<void> {
+    const borrowerName = options?.borrowerName ?? "Liza Marie Doe";
+    const deliveryMethod = options?.deliveryMethod ?? "Screen";
+
+    await this.openDocumentsTab();
+    await this.selectCustomerQuoteBasicRow();
+    await this.clickDownload();
+    await this.confirmDocumentParameters();
+
+    await this.openSigningAndVerificationTab();
+    await this.selectPreferredDeliveryMethod(deliveryMethod);
+    await this.completeDealerOnScreenSigningIfRequired();
+    await this.startBorrowerElectronicVerification(borrowerName);
+    await this.completeOnScreenSigningPrompts();
+
+    const borrowerRow = this.signatoryRowByCustomerName(borrowerName);
+    const eyeBtn = borrowerRow
+      .locator("button")
+      .filter({ has: borrowerRow.locator(".fa-eye, .fa-regular.fa-eye") })
+      .first();
+    if (await eyeBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await eyeBtn.click({ timeout: 10_000 });
+      await this.completeOnScreenSigningPrompts();
+    }
+  }
+
+  private async uploadTabHasElectronicallySignedRow(): Promise<boolean> {
+    const table = this.uploadTabDocumentsTable();
+    return table
+      .locator("tbody tr")
+      .filter({ hasText: /\bElectronically Signed\b/i })
+      .first()
+      .isVisible({ timeout: 1_500 })
+      .catch(() => false);
+  }
+
+  /** UDP-T3826 step 2 — Upload tab lists e-signed documents with Source = Electronically Signed. */
+  async expectUploadTabElectronicallySignedDocumentVisible(): Promise<void> {
+    this.logStep("Expect Upload Tab Electronically Signed Document Visible");
+    await this.ensureUploadTab();
+    const table = this.uploadTabDocumentsTable();
+    await expect(table).toBeVisible({ timeout: 30_000 });
+
+    const eSignedRow = table.locator("tbody tr").filter({ hasText: /\bElectronically Signed\b/i });
+    await expect
+      .poll(async () => eSignedRow.count(), { timeout: 120_000, intervals: [1_000, 2_500, 5_000] })
+      .toBeGreaterThan(0);
+
+    const row = eSignedRow.first();
+    const rowText = (await row.innerText()).replace(/\s+/g, " ").trim();
+    expect(rowText).toMatch(/\bElectronically Signed\b/);
+    expect(rowText).toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/);
+    expect(rowText).toMatch(/\.(pdf|jpg|jpeg|png)/i);
+  }
+
   async waitForUploadStep(): Promise<void> {
     await this.page.waitForLoadState("load").catch(() => {});
     // Stepper label (FL Standard Quote) or Upload tab anchor — avoids racing Reference → Post Submission navigation.
-    await expect(
-      this.page.getByText(/Post Submission/i).first().or(this.browseFilesButton),
-    ).toBeVisible({ timeout: 120_000 });
+    // Poll instead of `.or()` — both "Post Submission" and "Browse Files" can be visible (strict-mode safe).
+    await expect
+      .poll(
+        async () =>
+          (await this.page.getByText(/Post Submission/i).first().isVisible().catch(() => false)) ||
+          (await this.browseFilesButton.isVisible().catch(() => false)),
+        { timeout: 120_000, intervals: [500, 1_500, 3_000] },
+      )
+      .toBeTruthy();
     await this.browseFilesButton.waitFor({ state: "visible", timeout: 60_000 });
   }
 
@@ -642,6 +978,141 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     }).toPass({ timeout: 90000, intervals: [500, 1500, 3000] });
   }
 
+  /** Upload one in-memory or on-disk file via the Upload tab file input. */
+  private async uploadFilePayload(
+    file: string | { name: string; mimeType: string; buffer: Buffer },
+  ): Promise<void> {
+    const fileInput = this.page.locator('input[type="file"]');
+    const responsePromise = this.page
+      .waitForResponse(
+        (res: Response) => DOCustomerQuotePostSubmitPage.looksLikeUploadRequest(res.request()),
+        { timeout: 25_000 },
+      )
+      .catch(() => null);
+
+    if ((await fileInput.count()) > 0) {
+      await fileInput.first().setInputFiles(file);
+    } else {
+      const fileChooserPromise = this.page.waitForEvent("filechooser", { timeout: 30_000 });
+      await this.browseFilesButton.click();
+      const chooser = await fileChooserPromise;
+      await chooser.setFiles(file);
+    }
+
+    const response = await responsePromise;
+    if (response && !response.ok()) {
+      throw new Error(
+        `Upload HTTP failed: ${response.status()} ${response.statusText()} ${response.url()}`,
+      );
+    }
+
+    const spinner = this.page.locator(".p-progress-spinner, .p-blockui").first();
+    if (await spinner.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await spinner.waitFor({ state: "hidden", timeout: 60_000 });
+    }
+    await this.page.waitForTimeout(500);
+  }
+
+  /**
+   * UDP-T3825 — upload enough files to overflow the uploaded-documents grid (default 9).
+   * Alternates small JPEG + PDF buffers with unique names so each row is distinct.
+   */
+  async uploadManyDocumentsToUploadTab(count: number = 9): Promise<void> {
+    this.logStep(`Upload Many Documents To Upload Tab (${count})`);
+    await this.ensureUploadTab();
+    const pdfPath = DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF;
+    if (!existsSync(pdfPath)) {
+      throw new Error(`uploadManyDocumentsToUploadTab: PDF fixture missing: ${pdfPath}`);
+    }
+    const pdfBuffer = readFileSync(pdfPath);
+
+    for (let i = 1; i <= count; i++) {
+      const suffix = String(i).padStart(2, "0");
+      const usePdf = i % 2 === 1;
+      const name = usePdf ? `scroll-upload-${suffix}.pdf` : `scroll-upload-${suffix}.jpg`;
+      const payload = usePdf
+        ? { name, mimeType: "application/pdf", buffer: pdfBuffer }
+        : { name, mimeType: "image/jpeg", buffer: MINIMAL_JPEG_BYTES };
+
+      await this.uploadFilePayload(payload);
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      await expect(
+        this.uploadTabDocumentsTable()
+          .locator("tbody tr")
+          .filter({ hasText: new RegExp(escaped, "i") })
+          .first(),
+      ).toBeVisible({ timeout: 90_000 });
+    }
+  }
+
+  /** Scroll metrics for the uploaded-documents grid wrapper (PrimeNG datatable). */
+  private async uploadTabDocumentsScrollMetrics(): Promise<{
+    scrollHeight: number;
+    clientHeight: number;
+    overflowY: string;
+  }> {
+    const table = this.uploadTabDocumentsTable();
+    return table.evaluate((tbl) => {
+      const pick = (el: HTMLElement) => {
+        const style = getComputedStyle(el);
+        return {
+          scrollHeight: el.scrollHeight,
+          clientHeight: el.clientHeight,
+          overflowY: style.overflowY,
+        };
+      };
+
+      const wrapper = tbl.closest(
+        ".p-datatable-wrapper, .p-datatable-scrollable-body, .p-scroller",
+      ) as HTMLElement | null;
+      if (wrapper) {
+        return pick(wrapper);
+      }
+
+      let el: HTMLElement | null = tbl.parentElement;
+      while (el) {
+        const style = getComputedStyle(el);
+        if (el.scrollHeight > el.clientHeight + 2 && /auto|scroll/i.test(style.overflowY)) {
+          return pick(el);
+        }
+        el = el.parentElement;
+      }
+
+      return pick((tbl.parentElement as HTMLElement | null) ?? tbl);
+    });
+  }
+
+  /**
+   * UDP-T3825 / TC_DOC_016 — when uploads exceed visible grid height, vertical scrolling is available.
+   */
+  async expectUploadTabDocumentsGridScrollable(minRows: number = 9): Promise<void> {
+    this.logStep(`Expect Upload Tab Documents Grid Scrollable (>= ${minRows} rows)`);
+    await this.ensureUploadTab();
+    const table = this.uploadTabDocumentsTable();
+    await expect(table).toBeVisible({ timeout: 30_000 });
+
+    const rows = table.locator("tbody tr");
+    await expect
+      .poll(async () => rows.count(), { timeout: 30_000, intervals: [400, 1_000] })
+      .toBeGreaterThanOrEqual(minRows);
+
+    await expect
+      .poll(async () => {
+        const m = await this.uploadTabDocumentsScrollMetrics();
+        return m.scrollHeight > m.clientHeight + 2;
+      }, { timeout: 20_000, intervals: [500, 1_500] })
+      .toBe(true);
+
+    const firstRow = rows.first();
+    const lastRow = rows.nth(minRows - 1);
+
+    await lastRow.scrollIntoViewIfNeeded();
+    await expect(lastRow).toBeVisible({ timeout: 15_000 });
+
+    await firstRow.scrollIntoViewIfNeeded();
+    await expect(firstRow).toBeVisible({ timeout: 15_000 });
+  }
+
   async expectOversizeBinaryUploadRejected(): Promise<void> {
     await this.ensureUploadTab();
     const hugePath = path.join(tmpdir(), `pw-oversize-${Date.now()}.bin`);
@@ -659,141 +1130,42 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await expect(err).toBeVisible({ timeout: 120000 });
   }
 
-  async expectUploadTabPreviewOpensNewTab(): Promise<void> {
-    await this.ensureUploadTab();
-    const panel = this.uploadTabContentPanel();
-    await panel.waitFor({ state: "visible", timeout: 60_000 });
-    await panel.scrollIntoViewIfNeeded().catch(() => {});
+  /**
+   * UDP-T3824 step 1 — **Preview** opens the selected upload in a new tab.
+   * Uses the shared toolbar below the grid (select row via checkbox first).
+   */
+  async expectUploadTabPreviewOpensNewTab(
+    fileBasename: string = path.basename(DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF),
+  ): Promise<void> {
+    this.logStep(`Expect Upload Tab Preview Opens New Tab (${fileBasename})`);
+    await this.selectUploadTabRowByBasename(fileBasename);
+    const preview = this.uploadTabSharedActionButton("Preview");
+    await expect(preview).toBeVisible({ timeout: 20_000 });
 
-    const rows = panel.locator(".p-fileupload-row, .p-fileupload-files tr, tbody tr").filter({
-      hasText: /\.(pdf|jpg|jpeg|png)/i,
-    });
+    const popupPromise = this.page.waitForEvent("popup", { timeout: 25_000 }).catch(() => null);
+    const pagePromise = this.page.context().waitForEvent("page", { timeout: 12_000 }).catch(() => null);
+    await preview.scrollIntoViewIfNeeded();
+    await preview.click({ timeout: 12_000 });
 
-    const tryPreviewOnRow = async (row: Locator): Promise<boolean> => {
-      const candidates: Locator[] = [
-        row.getByRole("link", { name: /Preview/i }),
-        row.getByRole("button", { name: /Preview/i }),
-        row.locator("a, button").filter({ hasText: /^Preview$/i }),
-        row.locator("[title*='Preview' i], [aria-label*='Preview' i]"),
-        row
-          .locator("i.pi-eye, .pi-eye, .pi-search")
-          .locator("xpath=ancestor::button[1] | ancestor::a[1]"),
-      ];
-      for (const c of candidates) {
-        const el = c.first();
-        if (await el.isVisible({ timeout: 2_000 }).catch(() => false)) {
-          const popupPromise = this.page.waitForEvent("popup", { timeout: 25_000 }).catch(() => null);
-          await el.scrollIntoViewIfNeeded();
-          await el.click({ timeout: 12_000, force: true }).catch(() => {});
-          const popup = await popupPromise;
-          if (popup) {
-            await popup.close().catch(() => {});
-          }
-          return true;
-        }
-      }
-      return false;
-    };
-
-    const n = await rows.count();
-    for (let i = 0; i < Math.min(Math.max(n, 1), 8); i++) {
-      const row = n > 0 ? rows.nth(i) : panel.locator("tr, .p-fileupload-row").first();
-      if (!(await row.isVisible({ timeout: 3_000 }).catch(() => false))) continue;
-      if (await tryPreviewOnRow(row)) {
-        return;
-      }
-    }
-
-    this.logStep(
-      "Upload tab: no Preview control on file rows (skipped new-tab smoke — some builds omit it).",
-    );
+    const popup = (await popupPromise) ?? (await pagePromise);
+    expect(popup, `Preview did not open a new tab for "${fileBasename}"`).toBeTruthy();
+    await popup!.close().catch(() => {});
   }
 
   /**
-   * Upload tab: trigger **Download** for uploaded files.
-   *
-   * Many Standard Quote builds (e.g. OL) use a **shared toolbar** (Preview | Download | Delete) under
-   * the file table — not per-row controls. Duplicate `Download` nodes exist in the DOM (hidden + visible);
-   * prefer **`.last()`** / **visible** on the Upload **tabpanel**. The app may return a file via **XHR**
-   * without a Playwright `download` event — we also accept **popup / new tab** or a **document-like**
-   * HTTP response.
+   * UDP-T3824 step 2 — **Download** saves the selected upload locally.
+   * Shared toolbar pattern (QAT 25.0): checkbox row → Download below grid.
    */
-  async expectUploadTabDownloadStarts(): Promise<void> {
-    await this.ensureUploadTab();
-
-    let strip = this.documentManagementTabView().first();
-    if ((await strip.count()) === 0) {
-      strip = this.page
-        .locator(".p-tabview")
-        .filter({ has: this.page.getByRole("tab", { name: /^Upload$/i }) })
-        .first();
-    }
-    await strip.waitFor({ state: "visible", timeout: 60_000 }).catch(() => {});
-
-    /** Same panel as {@link expectUploadTabPreviewOpensNewTab} — `role=tabpanel` + `Browse Files` can miss the real upload surface. */
-    const panel = this.uploadTabContentPanel();
-    await panel.waitFor({ state: "visible", timeout: 60_000 });
-    await panel.scrollIntoViewIfNeeded().catch(() => {});
-
-    const uploadPanelByRole = strip
-      .getByRole("tabpanel", { name: /^Upload$/i })
-      .or(strip.locator('[role="tabpanel"]').filter({ has: this.browseFilesButton }))
-      .first();
-
-    const fileMarker = /\.(pdf|jpg|jpeg|png)|minimal-upload|exportedPDFFile/i;
-
-    const rowSelector =
-      ".p-fileupload-row, .p-fileupload-file, .p-fileupload-files tr, .p-fileupload-files > div, .p-fileupload-content > div, tbody tr";
-
-    let rows = panel.locator(rowSelector).filter({ hasText: fileMarker });
-    if ((await rows.count()) === 0) {
-      const inStrip = strip.locator(rowSelector).filter({ hasText: fileMarker });
-      if ((await inStrip.count()) > 0) {
-        rows = inStrip;
-      }
-    }
-    if ((await rows.count()) === 0) {
-      const inFileUpload = this.page
-        .locator(".p-fileupload, p-fileupload")
-        .first()
-        .locator(rowSelector)
-        .filter({ hasText: fileMarker });
-      if ((await inFileUpload.count()) > 0) {
-        rows = inFileUpload;
-      } else {
-        rows = this.page.locator(rowSelector).filter({ hasText: fileMarker });
-      }
-    }
-
-    await expect(rows.first()).toBeVisible({ timeout: 60_000 });
-
-    /** Toolbar actions often apply to the **checked** row — select the first uploaded row if needed. */
-    const selectFirstUploadedRowIfNeeded = async (): Promise<void> => {
-      for (const root of [panel, strip]) {
-        const dataRow = root.locator("tbody tr").filter({ hasText: fileMarker }).first();
-        if (!(await dataRow.isVisible({ timeout: 3_000 }).catch(() => false))) {
-          continue;
-        }
-        const box = dataRow.locator(".p-checkbox-box").first();
-        if (!(await box.isVisible({ timeout: 2_000 }).catch(() => false))) {
-          return;
-        }
-        const checked = dataRow.locator(".p-checkbox-box.p-highlight");
-        if (await checked.isVisible({ timeout: 400 }).catch(() => false)) {
-          return;
-        }
-        await box.scrollIntoViewIfNeeded();
-        await box.click({ timeout: 5_000 }).catch(() => {});
-        await this.page.waitForTimeout(200);
-        return;
-      }
-    };
+  async expectUploadTabDownloadStarts(
+    fileBasename: string = path.basename(DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF),
+  ): Promise<void> {
+    this.logStep(`Expect Upload Tab Download Starts (${fileBasename})`);
+    await this.selectUploadTabRowByBasename(fileBasename);
+    const downloadBtn = this.uploadTabSharedActionButton("Download");
+    await expect(downloadBtn).toBeVisible({ timeout: 20_000 });
 
     const responseLooksLikeFilePayload = (res: Response): boolean => {
-      if (!res.ok()) {
-        return false;
-      }
-      if (res.request().method() !== "GET") {
+      if (!res.ok() || res.request().method() !== "GET") {
         return false;
       }
       const ct = (res.headers()["content-type"] || "").toLowerCase();
@@ -801,200 +1173,64 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         return false;
       }
       const cd = (res.headers()["content-disposition"] || "").toLowerCase();
-      const u = res.url().toLowerCase();
       return (
         /application\/pdf|application\/octet-stream|image\/jpeg|image\/png|attachment|filename=/i.test(
           ct + cd,
-        ) || (cd.includes("attachment") && /document|download|file/i.test(u))
+        ) || cd.includes("attachment")
       );
     };
 
-    /**
-     * Playwright: register **waitForEvent** / **waitForResponse** before **click**.
-     * Accept download **or** preview tab **or** XHR file response (no `download` event in some SPAs).
-     * Shorter waits per attempt so probing many controls does not burn the suite timeout.
-     */
-    const clickExpectsDownloadOutcome = async (el: Locator): Promise<boolean> => {
-      const count = await el.count().catch(() => 0);
-      if (count === 0) {
-        return false;
-      }
-      const target = el.first();
-      await target.isVisible({ timeout: 2_000 }).catch(() => {});
-      await target.scrollIntoViewIfNeeded().catch(() => {});
+    const downloadP = this.page.waitForEvent("download", { timeout: 18_000 }).catch(() => null);
+    const popupP = this.page.waitForEvent("popup", { timeout: 8_000 }).catch(() => null);
+    const responseP = this.page
+      .waitForResponse((r) => responseLooksLikeFilePayload(r), { timeout: 18_000 })
+      .catch(() => null);
 
-      const downloadP = this.page.waitForEvent("download", { timeout: 22_000 }).catch(() => null);
-      const popupP = this.page.waitForEvent("popup", { timeout: 12_000 }).catch(() => null);
-      const newPageP = this.page.context().waitForEvent("page", { timeout: 12_000 }).catch(() => null);
-      const responseP = this.page
-        .waitForResponse((r) => responseLooksLikeFilePayload(r), { timeout: 22_000 })
-        .catch(() => null);
+    await downloadBtn.scrollIntoViewIfNeeded();
+    await downloadBtn.click({ timeout: 12_000 });
 
-      await target.click({ timeout: 12_000, force: true }).catch(() => {});
-
-      const d = await downloadP;
-      if (d) {
-        await d.path().catch(() => {});
-        return true;
-      }
-      const pop = await popupP;
-      if (pop) {
-        await pop.close().catch(() => {});
-        return true;
-      }
-      const extra = await newPageP;
-      if (extra) {
-        await extra.close().catch(() => {});
-        return true;
-      }
-      const res = await responseP;
-      if (res) {
-        return true;
-      }
-      return false;
-    };
-
-    await selectFirstUploadedRowIfNeeded();
-
-    /** Shared toolbar / button bar: text **Download**, links, `p-button`, or icon-only. */
-    const tryToolbarDownloadInRoot = async (root: Locator): Promise<boolean> => {
-      const bases: Locator[] = [
-        root.getByRole("button", { name: /^Download$/i }),
-        root.getByRole("link", { name: /^Download$/i }),
-        root.getByRole("menuitem", { name: /^Download$/i }),
-        root.locator("a.p-menuitem-link").filter({ hasText: /^Download$/i }),
-        root.locator("button, a, .p-button, [role='button']").filter({ hasText: /^Download$/i }),
-        root
-          .locator(".p-toolbar button, .p-toolbar a, .p-fileupload-buttonbar button, .p-fileupload-buttonbar a")
-          .filter({ hasText: /Download/i }),
-      ];
-      for (const b of bases) {
-        for (const pick of [
-          b.filter({ visible: true }).last(),
-          b.filter({ visible: true }).first(),
-          b.last(),
-          b.first(),
-        ]) {
-          if (await clickExpectsDownloadOutcome(pick)) {
-            return true;
-          }
-        }
-      }
-      const iconHost = root
-        .locator("i.pi-download, i.pi-cloud-download, .pi-download, [class*='pi-download']")
-        .first()
-        .locator(
-          "xpath=ancestor::button[1] | ancestor::a[1] | ancestor::*[contains(@class,'p-button')][1]",
-        );
-      if (await clickExpectsDownloadOutcome(iconHost)) {
-        return true;
-      }
-      return false;
-    };
-
-    if (await tryToolbarDownloadInRoot(panel)) {
+    const d = await downloadP;
+    if (d) {
+      await d.path().catch(() => {});
       return;
     }
-    if (await tryToolbarDownloadInRoot(strip)) {
+    const pop = await popupP;
+    if (pop) {
+      await pop.close().catch(() => {});
       return;
     }
-    if (await tryToolbarDownloadInRoot(uploadPanelByRole)) {
+    const res = await responseP;
+    if (res) {
       return;
     }
 
-    const tryDownloadFromOverflow = async (row: Locator): Promise<boolean> => {
-      const toggles = [
-        row.locator("button").filter({ has: row.locator(".pi-ellipsis-v, .pi-ellipsis-h") }),
-        row.getByRole("button", { name: /more|actions|menu|options/i }),
-      ];
-      for (const t of toggles) {
-        const btn = t.first();
-        if (!(await btn.isVisible({ timeout: 800 }).catch(() => false))) continue;
-        await btn.scrollIntoViewIfNeeded();
-        await btn.click({ timeout: 5_000 }).catch(() => {});
-        const menuItem = this.page
-          .getByRole("menuitem", { name: /download/i })
-          .or(this.page.locator(".p-menuitem-link, .p-menu a").filter({ hasText: /download/i }))
-          .first();
-        if (await menuItem.isVisible({ timeout: 3_000 }).catch(() => false)) {
-          const ok = await clickExpectsDownloadOutcome(menuItem);
-          await this.page.keyboard.press("Escape").catch(() => {});
-          if (ok) return true;
-        }
-        await this.page.keyboard.press("Escape").catch(() => {});
-      }
-      return false;
-    };
-
-    const candidatesForRow = (row: Locator): Locator[] => [
-      row.locator("a[download]").first(),
-      row.getByRole("link", { name: /download/i }),
-      row.getByRole("button", { name: /download/i }),
-      row.locator("a, button, [role='button']").filter({ hasText: /download/i }),
-      row.locator("[title*='Download' i], [aria-label*='Download' i]"),
-      row.locator("[class*='pi-download']").first(),
-      row
-        .locator(
-          "i.pi-download, .pi-download, i.pi-cloud-download, .pi-cloud-download, i.pi-arrow-circle-down, i.pi-file-export, i.pi-save, .pi-save, i.pi-arrow-down-to-line",
-        )
-        .locator(
-          "xpath=ancestor::button[1] | ancestor::a[1] | ancestor::*[contains(@class,'p-button')][1] | ancestor::*[contains(@class,'mdc-icon-button')][1]",
-        ),
-      row.locator("p-splitButton .p-splitbutton-defaultbutton").first(),
-      row.locator(".p-splitbutton .p-button").first(),
-    ];
-
-    const tryDownloadOnRow = async (row: Locator): Promise<boolean> => {
-      for (const c of candidatesForRow(row)) {
-        if (await clickExpectsDownloadOutcome(c.first())) {
-          return true;
-        }
-      }
-      return tryDownloadFromOverflow(row);
-    };
-
-    const n = await rows.count();
-    for (let i = 0; i < Math.min(Math.max(n, 1), 12); i++) {
-      const row = rows.nth(i);
-      if (!(await row.isVisible({ timeout: 2_000 }).catch(() => false))) continue;
-      if (await tryDownloadOnRow(row)) {
-        return;
-      }
-    }
-
-    throw new Error(
-      "Upload tab: could not start download from file row (no Download control found).",
-    );
+    throw new Error(`Upload tab: Download did not start for "${fileBasename}".`);
   }
 
+  /** UDP-T3824 step 3 — **Delete** removes the selected upload from the grid. */
   async deleteUploadedDocumentTileByBasenameAndExpectRemoved(basename: string): Promise<void> {
-    await this.ensureUploadTab();
+    this.logStep(`Delete Uploaded Document And Expect Removed (${basename})`);
+    await this.selectUploadTabRowByBasename(basename);
+    const deleteBtn = this.uploadTabSharedActionButton("Delete");
+    await expect(deleteBtn).toBeVisible({ timeout: 20_000 });
+
     const escaped = basename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const nameRe = new RegExp(escaped, "i");
+    const row = this.uploadTabDocumentsTable().locator("tbody tr").filter({ hasText: nameRe });
 
-    const tilePreferred = this.page
-      .locator(".p-fileupload-files > div, .p-fileupload-content > div")
-      .filter({ hasText: nameRe })
-      .first();
-    const rowFallback = this.page
-      .locator(".p-fileupload-row, tr, .p-fileupload-file")
-      .filter({ hasText: nameRe })
-      .first();
-
-    const container = (await tilePreferred.isVisible({ timeout: 5_000 }).catch(() => false))
-      ? tilePreferred
-      : rowFallback;
-
-    await expect(container).toBeVisible({ timeout: 60_000 });
-    const deleteBtn = container.locator("button").first();
-    await expect(deleteBtn).toBeVisible({ timeout: 10_000 });
-    await deleteBtn.scrollIntoViewIfNeeded().catch(() => {});
-    await deleteBtn
-      .click({ timeout: 10_000 })
-      .catch(async () => {
-        await deleteBtn.click({ force: true, timeout: 5_000 });
-      });
-    await expect(container).not.toBeVisible({ timeout: 45_000 });
+    await deleteBtn.scrollIntoViewIfNeeded();
+    const deleteResponseP = this.page
+      .waitForResponse(
+        (r) =>
+          /delete|document|upload|attachment|file/i.test(r.url()) &&
+          (r.request().method() === "DELETE" || r.request().method() === "POST"),
+        { timeout: 20_000 },
+      )
+      .catch(() => null);
+    await deleteBtn.click({ timeout: 12_000 });
+    await this.confirmUploadDeleteDialogIfPresent();
+    await deleteResponseP;
+    await expect(row).toHaveCount(0, { timeout: 45_000 });
   }
 
   /**
@@ -1524,18 +1760,54 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     return this.documentManagementTabView();
   }
 
-  /** UDP-T3823 — uploaded documents grid exposes FIS display columns (best-effort per build). */
-  async expectUploadTabUploadedDocumentsGridColumns(): Promise<void> {
+  /**
+   * UDP-T3823 / TC_DOC_014 — Upload tab uploaded-documents grid (display-only, FIS/AF).
+   * QAT 25.0 **Upload** tab renders **Name**, **Loaded On**, **Loaded By**, **Source** (see TC_DOC_014 screenshot).
+   * Zephyr also lists Category + Type; those headers are not on this grid in the current build.
+   */
+  async expectUploadTabUploadedDocumentsGridColumns(
+    filePath: string = DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF,
+  ): Promise<void> {
     this.logStep("Expect Upload Tab Uploaded Documents Grid Columns");
     await this.ensureUploadTab();
     const panel = this.uploadTabContentPanel();
-    const headers = [/Name/i, /Category/i, /Type/i, /Loaded On/i, /Loaded By/i, /Source/i];
-    for (const hdr of headers) {
-      const col = panel
-        .getByRole("columnheader", { name: hdr })
-        .or(panel.locator("th").filter({ hasText: hdr }))
-        .or(this.page.getByText(hdr).first());
-      await expect.soft(col.first()).toBeVisible({ timeout: 20_000 });
+    await panel.waitFor({ state: "visible", timeout: 60_000 });
+    await panel.scrollIntoViewIfNeeded().catch(() => {});
+
+    const table = panel.locator("table").first();
+    await expect(table).toBeVisible({ timeout: 30_000 });
+
+    const headerCell = (label: RegExp): Locator =>
+      table
+        .getByRole("columnheader", { name: label })
+        .or(table.locator("thead th").filter({ hasText: label }));
+
+    for (const hdr of [/Name/i, /Loaded On/i, /Loaded By/i, /Source/i]) {
+      await expect(headerCell(hdr).first()).toBeVisible({ timeout: 20_000 });
+    }
+
+    const basename = path.basename(filePath);
+    const escaped = basename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const row = table.locator("tbody tr").filter({ hasText: new RegExp(escaped, "i") }).first();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    // Name — alphanumeric file name (display-only).
+    await expect(row.getByText(new RegExp(escaped, "i")).first()).toBeVisible({ timeout: 15_000 });
+
+    const rowText = (await row.innerText()).replace(/\s+/g, " ").trim();
+
+    // Loaded On — DD/MM/YYYY (time may be omitted on some builds).
+    expect(rowText).toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/);
+
+    // Loaded By — populated user id from AF (e.g. SIDDHANT.MAGAR).
+    expect(rowText).toMatch(/[A-Za-z][A-Za-z0-9._-]+/);
+
+    // Source — manual upload shows "Uploaded"; e-sign flow shows "Electronically Signed".
+    expect(rowText).toMatch(/\bUploaded\b|\bElectronically Signed\b/);
+
+    // Row actions — shared toolbar below the grid (Preview | Download | Delete).
+    for (const action of ["Preview", "Download", "Delete"] as const) {
+      await expect(this.uploadTabSharedActionButton(action)).toBeVisible({ timeout: 15_000 });
     }
   }
 
