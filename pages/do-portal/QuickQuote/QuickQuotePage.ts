@@ -1309,6 +1309,397 @@ export class DOQuickQuotePage extends BasePage {
     ).toBeVisible({ timeout: 20_000 });
   }
 
+  /** TL / masked currency: blank UI is often `""`, `$0.00`, or `0`. */
+  static isBlankCurrencyDisplay(raw: string): boolean {
+    const t = raw.trim();
+    if (t.length === 0) {
+      return true;
+    }
+    const n = Number.parseFloat(t.replace(/[^0-9.-]/g, ""));
+    return !Number.isFinite(n) || n === 0;
+  }
+
+  /** Deposit / Balloon %: blank, `0`, or `0%`. */
+  static isBlankPercentDisplay(raw: string): boolean {
+    const t = raw.trim().replace(/%/g, "");
+    if (t.length === 0) {
+      return true;
+    }
+    const n = Number.parseFloat(t);
+    return !Number.isFinite(n) || n === 0;
+  }
+
+  /** Cash Price mandatory — defaults blank (`""` or masked `$0.00`). */
+  async expectCashPriceDefaultsBlank(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Cash Price defaults blank");
+    const input =
+      quoteIndex === 0 ? this.cashPriceInput : this.cashPriceInputOnQuote(quoteIndex);
+    await expect
+      .poll(async () => {
+        const raw = (await input.inputValue().catch(() => "")).trim();
+        return DOQuickQuotePage.isBlankCurrencyDisplay(raw);
+      }, { timeout: 25_000 })
+      .toBeTruthy();
+  }
+
+  /** Leave Cash Price unset for validation tests (clear only when a positive amount is shown). */
+  async ensureCashPriceLeftBlank(quoteIndex = 0): Promise<void> {
+    this.logStep("Ensure Cash Price left blank");
+    const input =
+      quoteIndex === 0 ? this.cashPriceInput : this.cashPriceInputOnQuote(quoteIndex);
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    const raw = (await input.inputValue().catch(() => "")).trim();
+    if (!DOQuickQuotePage.isBlankCurrencyDisplay(raw)) {
+      if (quoteIndex === 0) {
+        await this.clearCashPriceField();
+      } else {
+        await this.clearCashPriceFieldOnQuote(quoteIndex);
+      }
+    }
+    await input.press("Tab").catch(() => {});
+  }
+
+  /**
+   * Blank / zero Cash Price on Calculate: Zephyr expects **Please complete**; TL may also show
+   * inline required copy, field error styling, or block **Create Quote**.
+   */
+  async expectBlankCashPriceValidation(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect blank Cash Price validation");
+    const form = this.quoteForm(quoteIndex);
+    const cashInput =
+      quoteIndex === 0 ? this.cashPriceInput : this.cashPriceInputOnQuote(quoteIndex);
+    const validationRx =
+      /Please complete|cannot be blank|must not be blank|this field cannot|field\s+cannot\s+be\s+blank|is required|enter.*cash|cash\s*price.*required|required.*cash|greater than\s*0|must be greater than\s*0|enter a valid amount/i;
+
+    const cashFieldShowsError = async (): Promise<boolean> => {
+      const cashLabel = form.getByText(/^Cash Price/i).first();
+      if (!(await cashLabel.isVisible({ timeout: 800 }).catch(() => false))) {
+        return false;
+      }
+      const fieldBlock = cashLabel.locator(
+        "xpath=ancestor::div[contains(@class,'field') or contains(@class,'col') or contains(@class,'grid')][1]",
+      );
+      if (
+        await fieldBlock
+          .locator(".p-error, small.p-error, .text-danger, .invalid-feedback")
+          .first()
+          .isVisible()
+          .catch(() => false)
+      ) {
+        return true;
+      }
+      return fieldBlock.getByText(validationRx).first().isVisible().catch(() => false);
+    };
+
+    const cashInputInvalid = async (): Promise<boolean> =>
+      cashInput
+        .evaluate((el) => {
+          const inp = el as HTMLInputElement;
+          if (typeof inp.checkValidity === "function" && !inp.checkValidity()) {
+            return true;
+          }
+          let n: Element | null = el;
+          for (let i = 0; i < 12 && n; i++, n = n.parentElement) {
+            const c = n.className?.toString() ?? "";
+            if (/ng-invalid|p-invalid|is-invalid|has-error/i.test(c)) {
+              return true;
+            }
+          }
+          return false;
+        })
+        .catch(() => false);
+
+    await expect
+      .poll(
+        async () => {
+          if (await form.getByText(validationRx).first().isVisible().catch(() => false)) {
+            return true;
+          }
+          if (await this.page.getByText(validationRx).first().isVisible().catch(() => false)) {
+            return true;
+          }
+          if (
+            await this.page
+              .getByRole("dialog")
+              .filter({ hasText: validationRx })
+              .first()
+              .isVisible()
+              .catch(() => false)
+          ) {
+            return true;
+          }
+          if (await cashFieldShowsError()) {
+            return true;
+          }
+          if (await cashInputInvalid()) {
+            return true;
+          }
+          const toast = this.page
+            .locator(".p-toast-message-error, .p-message-error, .p-toast-detail")
+            .filter({ hasText: validationRx });
+          if (await toast.first().isVisible().catch(() => false)) {
+            return true;
+          }
+          const raw = (await cashInput.inputValue().catch(() => "")).trim();
+          const calcDisabled = !(await this.calculateButton.isEnabled().catch(() => false));
+          if (DOQuickQuotePage.isBlankCurrencyDisplay(raw) && calcDisabled) {
+            return true;
+          }
+          return false;
+        },
+        { timeout: 45_000, intervals: [400, 1_000, 2_000] },
+      )
+      .toBeTruthy();
+
+    await expect.soft(this.createQuoteButtonOnPanel(quoteIndex)).toBeHidden({ timeout: 15_000 });
+  }
+
+  /**
+   * TC_QQ_003 / UDP-T4190: Cash Price mandatory. TL often keeps **Calculate** disabled at `$0.00`;
+   * other builds enable **Calculate** and show **Please complete** after click.
+   */
+  async expectCashPriceMandatoryWhenBlank(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Cash Price mandatory when blank");
+    await this.ensureCashPriceLeftBlank(quoteIndex);
+    const calcEnabled = await this.calculateButton.isEnabled().catch(() => false);
+    if (calcEnabled) {
+      await this.clickCalculate();
+      await this.expectBlankCashPriceValidation(quoteIndex);
+      return;
+    }
+    this.logStep("Calculate disabled with blank/zero Cash Price — mandatory guard via disabled CTA");
+    await expect.soft(this.calculateButton).toBeDisabled();
+    await expect.soft(this.createQuoteButtonOnPanel(quoteIndex)).toBeHidden({ timeout: 15_000 });
+  }
+
+  /** PrimeNG Frequency label — not the dropdown trigger button text. */
+  async readFrequencyLabel(): Promise<string> {
+    return await this.readPrimeDropdownLabel(this.frequencyDropdownTrigger);
+  }
+
+  static isBlankFrequencyLabel(label: string): boolean {
+    const t = label.trim();
+    if (t.length === 0) {
+      return true;
+    }
+    return /^(select|choose|--|please select|none)$/i.test(t);
+  }
+
+  /** TC_QQ_008: Frequency defaults from Product/Program after selection. */
+  async expectFrequencyDefaultsFromProgram(): Promise<void> {
+    this.logStep("Expect Frequency defaults from Program");
+    await expect
+      .poll(async () => {
+        const label = await this.readFrequencyLabel();
+        return !DOQuickQuotePage.isBlankFrequencyLabel(label);
+      }, { timeout: 25_000 })
+      .toBeTruthy();
+  }
+
+  async clearFrequencySelection(): Promise<void> {
+    this.logStep("Clear Frequency selection");
+    const host = this.frequencyDropdownTrigger.locator("xpath=ancestor::p-dropdown[1]");
+    const clearIcon = host.locator(
+      ".p-dropdown-clear-icon, .p-select-clear-icon, button.p-dropdown-clear, [data-pc-section='clearicon']",
+    );
+    if (await clearIcon.first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await clearIcon.first().click();
+      await this.dismissQuickQuoteDropdownOverlays();
+      return;
+    }
+
+    const options = await this.listDropdownOptions(this.frequencyDropdownTrigger);
+    const blankOption = options.find((o) => DOQuickQuotePage.isBlankFrequencyLabel(o));
+    if (blankOption !== undefined) {
+      await this.selectFromDropdown(this.frequencyDropdownTrigger, blankOption);
+      return;
+    }
+
+    await this.frequencyDropdownTrigger.click({ timeout: 15_000 });
+    const placeholder = this.page
+      .getByRole("option")
+      .filter({ hasText: /^(--|Select|Choose|Please select)?$/i })
+      .first();
+    if (await placeholder.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await placeholder.click();
+    } else {
+      await this.page.keyboard.press("Escape");
+    }
+    await this.dismissQuickQuoteDropdownOverlays();
+  }
+
+  async ensureFrequencyLeftBlank(): Promise<void> {
+    this.logStep("Ensure Frequency left blank");
+    const label = await this.readFrequencyLabel();
+    if (!DOQuickQuotePage.isBlankFrequencyLabel(label)) {
+      await this.clearFrequencySelection();
+    }
+    await this.frequencyDropdownTrigger.press("Tab").catch(() => {});
+  }
+
+  /**
+   * Blank Frequency on Calculate: Zephyr expects **Please complete**; TL may also show inline
+   * required copy, field error styling, disabled **Calculate**, or block **Create Quote**.
+   */
+  async expectBlankFrequencyValidation(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect blank Frequency validation");
+    const form = this.quoteForm(quoteIndex);
+    const validationRx =
+      /Please complete|cannot be blank|must not be blank|this field cannot|field\s+cannot\s+be\s+blank|is required|select.*frequency|frequency.*required|required.*frequency/i;
+
+    const frequencyFieldShowsError = async (): Promise<boolean> => {
+      const freqLabel = form.getByText(/^Frequency/i).first();
+      if (!(await freqLabel.isVisible({ timeout: 800 }).catch(() => false))) {
+        return false;
+      }
+      const fieldBlock = freqLabel.locator(
+        "xpath=ancestor::div[contains(@class,'field') or contains(@class,'col') or contains(@class,'grid')][1]",
+      );
+      if (
+        await fieldBlock
+          .locator(".p-error, small.p-error, .text-danger, .invalid-feedback")
+          .first()
+          .isVisible()
+          .catch(() => false)
+      ) {
+        return true;
+      }
+      return fieldBlock.getByText(validationRx).first().isVisible().catch(() => false);
+    };
+
+    const frequencyDropdownInvalid = async (): Promise<boolean> =>
+      this.frequencyDropdownTrigger
+        .locator("xpath=ancestor::p-dropdown[1]")
+        .evaluate((el) => {
+          let n: Element | null = el;
+          for (let i = 0; i < 12 && n; i++, n = n.parentElement) {
+            const c = n.className?.toString() ?? "";
+            if (/ng-invalid|p-invalid|is-invalid|has-error/i.test(c)) {
+              return true;
+            }
+          }
+          return false;
+        })
+        .catch(() => false);
+
+    const calculationDidNotComplete = async (): Promise<boolean> => {
+      if (await this.createQuoteButtonOnPanel(quoteIndex).isVisible().catch(() => false)) {
+        return false;
+      }
+      const summaryVisible = await this.calculationSummaryRegion
+        .first()
+        .isVisible({ timeout: 800 })
+        .catch(() => false);
+      if (!summaryVisible) {
+        return true;
+      }
+      const summaryText =
+        (await this.calculationSummaryRegion.first().textContent().catch(() => "")) ?? "";
+      return !/\d/.test(summaryText.replace(/[$,\s]/g, ""));
+    };
+
+    await expect
+      .poll(
+        async () => {
+          if (await form.getByText(validationRx).first().isVisible().catch(() => false)) {
+            return true;
+          }
+          if (await this.page.getByText(validationRx).first().isVisible().catch(() => false)) {
+            return true;
+          }
+          if (
+            await this.page
+              .getByRole("dialog")
+              .filter({ hasText: validationRx })
+              .first()
+              .isVisible()
+              .catch(() => false)
+          ) {
+            return true;
+          }
+          if (await frequencyFieldShowsError()) {
+            return true;
+          }
+          if (await frequencyDropdownInvalid()) {
+            return true;
+          }
+          const toast = this.page
+            .locator(".p-toast-message-error, .p-message-error, .p-toast-detail")
+            .filter({ hasText: validationRx });
+          if (await toast.first().isVisible().catch(() => false)) {
+            return true;
+          }
+          const label = await this.readFrequencyLabel();
+          const calcDisabled = !(await this.calculateButton.isEnabled().catch(() => false));
+          if (DOQuickQuotePage.isBlankFrequencyLabel(label) && calcDisabled) {
+            return true;
+          }
+          if (DOQuickQuotePage.isBlankFrequencyLabel(label) && (await calculationDidNotComplete())) {
+            return true;
+          }
+          return false;
+        },
+        { timeout: 45_000, intervals: [400, 1_000, 2_000] },
+      )
+      .toBeTruthy();
+
+    await expect.soft(this.createQuoteButtonOnPanel(quoteIndex)).toBeHidden({ timeout: 15_000 });
+  }
+
+  /**
+   * TC_QQ_008 / UDP-T4195: Frequency mandatory. TL may keep **Calculate** disabled when blank;
+   * other builds enable **Calculate** and show **Please complete** (or block results) after click.
+   */
+  async expectFrequencyMandatoryWhenBlank(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Frequency mandatory when blank");
+    await this.ensureFrequencyLeftBlank();
+    const calcEnabled = await this.calculateButton.isEnabled().catch(() => false);
+    if (calcEnabled) {
+      await this.clickCalculate();
+      await this.expectBlankFrequencyValidation(quoteIndex);
+      return;
+    }
+    this.logStep("Calculate disabled with blank Frequency — mandatory guard via disabled CTA");
+    await expect.soft(this.calculateButton).toBeDisabled();
+    await expect.soft(this.createQuoteButtonOnPanel(quoteIndex)).toBeHidden({ timeout: 15_000 });
+  }
+
+  /**
+   * TC_QQ_011 / UDP-T4198: after **Reset**, user-entered finance inputs clear (TL often shows `$0.00` not `""`).
+   */
+  async expectUserEnteredFieldsClearedAfterReset(): Promise<void> {
+    this.logStep("Expect user-entered Quick Quote fields cleared after Reset");
+    await expect
+      .poll(async () => {
+        const cash = (await this.cashPriceInput.inputValue().catch(() => "")).trim();
+        return DOQuickQuotePage.isBlankCurrencyDisplay(cash);
+      }, { timeout: 25_000 })
+      .toBeTruthy();
+
+    const depositPct = (await this.depositPercentInput.inputValue().catch(() => "")).trim();
+    expect.soft(DOQuickQuotePage.isBlankPercentDisplay(depositPct)).toBeTruthy();
+
+    const depositDollars = (await this.depositDollarInput.inputValue().catch(() => "")).trim();
+    expect.soft(DOQuickQuotePage.isBlankCurrencyDisplay(depositDollars)).toBeTruthy();
+
+    const balloonPct = (await this.balloonPercentInput.inputValue().catch(() => "")).trim();
+    expect.soft(DOQuickQuotePage.isBlankPercentDisplay(balloonPct)).toBeTruthy();
+
+    await expect.soft(this.createQuoteButton).toBeHidden({ timeout: 15_000 });
+  }
+
+  /** TC_QQ_011: Quick Quote returns to default product/program; entered values cleared. */
+  async expectQuickQuoteResetToDefaultState(productName?: string): Promise<void> {
+    this.logStep("Expect Quick Quote reset to default product/program state");
+    await expect.soft(this.productDropdownTrigger).toBeVisible();
+    if (productName) {
+      const label = await this.readPrimeDropdownLabel(this.productDropdownTrigger);
+      const escaped = productName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect.soft(label).toMatch(new RegExp(escaped, "i"));
+    }
+    await this.expectUserEnteredFieldsClearedAfterReset();
+  }
+
   /**
    * Blank Terms: some builds keep Calculate enabled and show "Please complete" after click;
    * others disable Calculate and show inline copy (e.g. "This field cannot be blank").

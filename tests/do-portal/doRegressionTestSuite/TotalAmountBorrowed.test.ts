@@ -1,7 +1,7 @@
 /**
  * DO Portal — Total Amount Borrowed regression (UDP-T3818–UDP-T3822).
  * Scenario source: Total amt Borrowed.xlsx (Zephyr / Regression 25.0).
- * Product inferred: CSA-C-Assigned (Excel Product column blank; aligned with CSA SQ/QQ regression).
+ * Product: AFV-B-Assigned / Program: AFV - B-Distributor (Total Amount Borrowed + Interest Charge are AFV fields).
  * Auth: shared DO `storageState` via `@fixtures/doPortalTest`.
  */
 
@@ -13,12 +13,17 @@ import {
   DODashboardPage,
   DOQuickQuotePage,
 } from "../../../pages";
-import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 
-const TAB_SQ_PRODUCT = "CSA-C-Assigned";
-const TAB_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
-const TAB_QQ_PROGRAM = "CSA Personal - MV Dealer";
+const AFV_SQ_PRODUCT = "AFV-B-Assigned";
+const AFV_SQ_PROGRAM = "AFV - B-Distributor";
 const TLC_DEALER = "Armstrong Prestige Wellington";
+
+const AFV_VEHICLE = {
+  make: "SUZUKI",
+  model: "IGNIS",
+  variant: "GLX MANUAL 1.2P/ 5MT",
+  year: "2024",
+};
 
 function standardQuoteRoot(page: Page): Locator {
   return page.locator("app-quote-details, app-standard-quote").first();
@@ -29,11 +34,12 @@ function parseMaskedCurrency(raw: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-async function readQuickQuoteLoanAmount(quickQuotePage: DOQuickQuotePage): Promise<number> {
+async function readQuickQuoteBorrowedAmount(quickQuotePage: DOQuickQuotePage): Promise<number> {
   const summary = quickQuotePage.calculationSummaryRegion.first();
   await expect(summary).toBeVisible({ timeout: 30_000 });
   const text = (await summary.innerText()).replace(/\s+/g, " ");
   const patterns = [
+    /Total\s+Amount\s+Borrowed[^$0-9]*\$?\s*([\d,]+(?:\.\d{2})?)/i,
     /Loan\s+Amount[^$0-9]*\$?\s*([\d,]+(?:\.\d{2})?)/i,
     /Amount\s+Financed[^$0-9]*\$?\s*([\d,]+(?:\.\d{2})?)/i,
   ];
@@ -44,7 +50,7 @@ async function readQuickQuoteLoanAmount(quickQuotePage: DOQuickQuotePage): Promi
   return 0;
 }
 
-async function openStandardQuoteFromDashboard(page: Page): Promise<{
+async function openAfVStandardQuoteFromDashboard(page: Page): Promise<{
   dashboardPage: DODashboardPage;
   assetDetailsPage: DOAssetDetailsPage;
 }> {
@@ -54,73 +60,80 @@ async function openStandardQuoteFromDashboard(page: Page): Promise<{
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectCSAproduct();
+  await dashboardPage.selectAssuredFutureValueProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
+  await assetDetailsPage.waitForAssetDetailsStepReady();
   return { dashboardPage, assetDetailsPage };
 }
 
-async function selectCsaProductAndProgram(assetDetailsPage: DOAssetDetailsPage): Promise<void> {
-  await assetDetailsPage.chooseProduct(TAB_SQ_PRODUCT);
-  await assetDetailsPage.chooseProgram(TAB_SQ_PROGRAM);
+async function selectAfVProductOnQuote(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  await assetDetailsPage.chooseProduct(AFV_SQ_PRODUCT);
+  await expect.soft(standardQuoteRoot(page).getByText(AFV_SQ_PRODUCT).first()).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
-async function addMinimalUsedAsset(
+async function selectAfVProductProgramAndAsset(
+  page: Page,
   assetDetailsPage: DOAssetDetailsPage,
-  addAssetPage: DOAddAssetPage,
 ): Promise<void> {
-  await assetDetailsPage.enterAsset("Car and Light Commercial /");
-  await assetDetailsPage.selectCondition("Used");
-  await assetDetailsPage.openAssetInsuranceTradeInSummary();
-  await assetDetailsPage.clickAssetSummaryEditButton();
-  await addAssetPage.enterAssetValue("$20,000");
-  await addAssetPage.selectCondition("Used");
-  await addAssetPage.selectYear("2025");
-  await addAssetPage.enterMake("Toyota");
-  await addAssetPage.enterModel("Hilux");
-  await addAssetPage.enterVariant("Top");
-  await addAssetPage.clickSummitButton();
-  await addAssetPage.clickCrossButton();
+  await selectAfVProductOnQuote(page, assetDetailsPage);
+  await assetDetailsPage.selectVehicleFromAssetTypeModal(AFV_VEHICLE);
+  await assetDetailsPage.waitForAfVCashPricePopulated();
+  const program = await assetDetailsPage.readSelectedProgramLabel();
+  if (!program || !/Distributor/i.test(program)) {
+    await assetDetailsPage.chooseProgram(AFV_SQ_PROGRAM);
+  }
 }
 
-async function prepareCalculableCsaQuote(
+async function prepareCalculableAfVQuote(
+  page: Page,
   assetDetailsPage: DOAssetDetailsPage,
-  addAssetPage: DOAddAssetPage,
+  opts?: { cashPrice?: string; interest?: string; term?: string },
 ): Promise<void> {
-  await addMinimalUsedAsset(assetDetailsPage, addAssetPage);
-  await assetDetailsPage.termsOfFinance("36");
-  await assetDetailsPage.interestRate("9");
+  await selectAfVProductProgramAndAsset(page, assetDetailsPage);
+  await assetDetailsPage.selectConditionInStandardQuote("Used");
+  if (opts?.cashPrice) {
+    await assetDetailsPage.cashPriceOfAsset(opts.cashPrice);
+  }
+  const termVal = (await assetDetailsPage.termsOfFinanceInputField.inputValue().catch(() => "")).trim();
+  if (!termVal || !/\d/.test(termVal)) {
+    await assetDetailsPage.termsOfFinance(opts?.term ?? "36");
+  }
+  await assetDetailsPage.ensureKmAllowanceForAfV();
+  const rate = (await assetDetailsPage.interestRateInputField.inputValue()).trim();
+  if (!rate || !/\d/.test(rate)) {
+    await assetDetailsPage.interestRate(opts?.interest ?? "4");
+  }
+  await assetDetailsPage.enterOriginationReference("TAB-AFV-Ref-01");
   await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
-  await assetDetailsPage.enterOriginationReference("TAB-SQ-Ref-01");
 }
 
-async function completeQuickQuoteForCarryOver(
+async function completeAfVQuickQuoteForCarryOver(
   page: Page,
   quickQuotePage: DOQuickQuotePage,
 ): Promise<number> {
   await quickQuotePage.openQuickQuote();
   await expect.soft(quickQuotePage.quickQuoteRoot).toBeVisible();
-  await quickQuotePage.selectProduct(TAB_SQ_PRODUCT);
+  await quickQuotePage.selectProduct(AFV_SQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-    await quickQuotePage.selectProgram(TAB_QQ_PROGRAM);
-  }
-  await quickQuotePage.selectFrequency("Monthly");
-  await quickQuotePage.enterInterestRatePercent("9");
-  await quickQuotePage.enterTermsMonths("36");
-  await quickQuotePage.enterCashPrice("$20,000");
-  await quickQuotePage.enterDepositPercent("10%");
-  await quickQuotePage.enterBalloonPercent("0");
+  await quickQuotePage.selectVehicleFromAssetTypeModal(AFV_VEHICLE);
+  await quickQuotePage.waitForAfVFieldsAfterAssetSelection();
+  await quickQuotePage.ensureMandatoryAfVFieldsForCalculate();
   await quickQuotePage.clickCalculate();
   await quickQuotePage.expectCreateQuoteVisible();
 
   await expect
-    .poll(async () => await readQuickQuoteLoanAmount(quickQuotePage), { timeout: 45_000 })
+    .poll(async () => await readQuickQuoteBorrowedAmount(quickQuotePage), { timeout: 45_000 })
     .toBeGreaterThan(0);
-  const qqLoanAmount = await readQuickQuoteLoanAmount(quickQuotePage);
+  const qqBorrowedAmount = await readQuickQuoteBorrowedAmount(quickQuotePage);
 
   await quickQuotePage.clickCreateQuote();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
-  return qqLoanAmount;
+  return qqBorrowedAmount;
 }
 
 test.describe("Total Amount Borrowed", () => {
@@ -138,12 +151,12 @@ test.describe("Total Amount Borrowed", () => {
       await dashboardPage.waitForAuthenticatedDashboard();
       await dashboardPage.selectDealer(TLC_DEALER);
 
-      const qqLoanAmount = await completeQuickQuoteForCarryOver(page, quickQuotePage);
+      const qqBorrowedAmount = await completeAfVQuickQuoteForCarryOver(page, quickQuotePage);
       await assetDetailsPage.waitForAssetDetailsStepReady();
       await assetDetailsPage.waitForQuoteLoadersToFinish();
 
       await assetDetailsPage.expectTotalAmountBorrowedReadOnly();
-      await assetDetailsPage.expectTotalAmountBorrowedMatchesAmount(qqLoanAmount);
+      await assetDetailsPage.expectTotalAmountBorrowedMatchesAmount(qqBorrowedAmount);
     },
   );
 
@@ -153,8 +166,8 @@ test.describe("Total Amount Borrowed", () => {
     async ({ page }) => {
       test.setTimeout(900_000);
 
-      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await assetDetailsPage.waitForAssetDetailsStepReady();
+      const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
+      await selectAfVProductOnQuote(page, assetDetailsPage);
       await assetDetailsPage.waitForQuoteLoadersToFinish();
 
       await assetDetailsPage.expectTotalAmountBorrowedReadOnly();
@@ -168,17 +181,22 @@ test.describe("Total Amount Borrowed", () => {
     async ({ page }) => {
       test.setTimeout(1_200_000);
 
-      const addAssetPage = new DOAddAssetPage(page);
-      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await assetDetailsPage.waitForAssetDetailsStepReady();
+      const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
+      await selectAfVProductOnQuote(page, assetDetailsPage);
       await assetDetailsPage.waitForQuoteLoadersToFinish();
 
       await assetDetailsPage.expectTotalAmountBorrowedZero();
-      await selectCsaProductAndProgram(assetDetailsPage);
-      await assetDetailsPage.waitForQuoteLoadersToFinish();
-
-      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.cashPriceOfAsset("$20,000");
+      await selectAfVProductProgramAndAsset(page, assetDetailsPage);
+      await assetDetailsPage.selectConditionInStandardQuote("Used");
+      await assetDetailsPage.ensureKmAllowanceForAfV();
+      const termVal = (await assetDetailsPage.termsOfFinanceInputField.inputValue().catch(() => "")).trim();
+      if (!termVal || !/\d/.test(termVal)) {
+        await assetDetailsPage.termsOfFinance("36");
+      }
+      await assetDetailsPage.interestRate("4");
+      await assetDetailsPage.enterOriginationReference("TAB-AFV-Ref-01");
+      await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
+      await assetDetailsPage.cashPriceOfAsset("$25,000");
 
       const tabBeforeCalculate = await assetDetailsPage.readTotalAmountBorrowed();
       expect.soft(tabBeforeCalculate).toBe(0);
@@ -197,12 +215,11 @@ test.describe("Total Amount Borrowed", () => {
     async ({ page }) => {
       test.setTimeout(1_200_000);
 
-      const addAssetPage = new DOAddAssetPage(page);
-      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await assetDetailsPage.waitForAssetDetailsStepReady();
-      await selectCsaProductAndProgram(assetDetailsPage);
-      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.cashPriceOfAsset("$20,000");
+      const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
+      await prepareCalculableAfVQuote(page, assetDetailsPage, {
+        cashPrice: "$25,000",
+        interest: "4",
+      });
 
       await assetDetailsPage.clickCalculateButton();
       await assetDetailsPage.waitForQuoteLoadersToFinish();
@@ -218,12 +235,11 @@ test.describe("Total Amount Borrowed", () => {
     async ({ page }) => {
       test.setTimeout(1_200_000);
 
-      const addAssetPage = new DOAddAssetPage(page);
-      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await assetDetailsPage.waitForAssetDetailsStepReady();
-      await selectCsaProductAndProgram(assetDetailsPage);
-      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.cashPriceOfAsset("$20,000");
+      const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
+      await prepareCalculableAfVQuote(page, assetDetailsPage, {
+        cashPrice: "$25,000",
+        interest: "4",
+      });
 
       await assetDetailsPage.clickCalculateButton();
       await assetDetailsPage.waitForQuoteLoadersToFinish();
@@ -233,8 +249,7 @@ test.describe("Total Amount Borrowed", () => {
       const tabBefore = await assetDetailsPage.readTotalAmountBorrowed();
       const interestBefore = await assetDetailsPage.readInterestCharge();
 
-      await assetDetailsPage.enterAdditionalFunds("$3,000");
-      await assetDetailsPage.enterAdditionalFundsPurpose("Accessory / equipment upgrade");
+      await assetDetailsPage.cashPriceOfAsset("$30,000");
       await assetDetailsPage.clickCalculateButton();
       await assetDetailsPage.waitForQuoteLoadersToFinish();
 

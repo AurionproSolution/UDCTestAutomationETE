@@ -389,56 +389,14 @@ export class DOAssetDetailsPage extends BasePage {
     term: RegExp;
     frequencyText: RegExp;
     interestRate: RegExp;
+    depositPercent?: RegExp;
+    depositDollars?: RegExp;
+    balloonPercent?: RegExp;
   }): Promise<void> {
     this.logStep("Expect finance carried from Quick Quote");
     const root = this.standardQuoteRoot();
     await expect(this.cashPriceOfAssetInputField).toHaveValue(opts.cashPrice, { timeout: 30_000 });
-    // Term: CSA often uses "Terms of Finance" / PrimeNG dropdown; TLC may use spinbutton. Do not use
-    // /^Term\s*\*?$/ only — that misses "Terms of Finance" and forces a page-global fallback that can
-    // resolve to an empty spinbutton inside Asset/Insurance summary while the real Term is a combobox.
-    const termRowLabel = /^\s*Terms?\s*(of\s+Finance)?\s*\*?\s*$/i;
-    const termRow = root
-      .locator(".p-field, [class*='p-field']")
-      .filter({ has: root.locator("label").filter({ hasText: termRowLabel }) })
-      .first();
-    const termCombo = termRow.getByRole("combobox").first();
-    const termSpin = termRow.getByRole("spinbutton").first();
-    const termRowVisibleMs = 15_000;
-    if (await termCombo.isVisible({ timeout: termRowVisibleMs }).catch(() => false)) {
-      await expect(termCombo).toContainText(opts.term, { timeout: 25_000 });
-    } else if (await termSpin.isVisible({ timeout: termRowVisibleMs }).catch(() => false)) {
-      await expect
-        .poll(async () => termSpin.inputValue(), { timeout: 25_000 })
-        .toMatch(opts.term);
-    } else {
-      const termNumberSpin = root
-        .locator("number")
-        .filter({ hasText: /Term/i })
-        .getByRole("spinbutton")
-        .first();
-      const termNumberInput = root
-        .locator("number")
-        .filter({ hasText: /Term/i })
-        .locator("input[type='number'], input.p-inputtext, input")
-        .first();
-      const termAriaCombo = root.getByRole("combobox", { name: /Term|Terms\s+of\s+Finance/i }).first();
-
-      if (await termAriaCombo.isVisible({ timeout: 8_000 }).catch(() => false)) {
-        await expect(termAriaCombo).toContainText(opts.term, { timeout: 25_000 });
-      } else if (await termNumberSpin.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await expect
-          .poll(async () => termNumberSpin.inputValue(), { timeout: 25_000 })
-          .toMatch(opts.term);
-      } else if (await termNumberInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await expect
-          .poll(async () => termNumberInput.inputValue(), { timeout: 25_000 })
-          .toMatch(opts.term);
-      } else {
-        await expect
-          .poll(async () => this.termsOfFinanceInputField.inputValue(), { timeout: 25_000 })
-          .toMatch(opts.term);
-      }
-    }
+    await this.expectTermCarriedFromQuickQuote(root, opts.term);
     const freqDropdown = root.locator(
       "xpath=.//label[contains(normalize-space(.),'Frequency')]/following::p-dropdown[1]",
     );
@@ -456,6 +414,105 @@ export class DOAssetDetailsPage extends BasePage {
         timeout: 25_000,
       })
       .toMatch(opts.interestRate);
+
+    if (opts.depositPercent) {
+      const depositPctInput = root
+        .locator(
+          "xpath=.//label[starts-with(normalize-space(.), 'Deposit')]/following::input[@id='percent'][1]",
+        )
+        .first();
+      if (await depositPctInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await expect
+          .poll(
+            async () => (await depositPctInput.inputValue()).replace(/%/g, "").trim(),
+            { timeout: 25_000 },
+          )
+          .toMatch(opts.depositPercent);
+      }
+    }
+    if (opts.depositDollars) {
+      const depositAmtInput = root
+        .locator(
+          "xpath=.//label[starts-with(normalize-space(.), 'Deposit')]/following::input[@id='amount'][1]",
+        )
+        .first();
+      if (await depositAmtInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await expect(depositAmtInput).toHaveValue(opts.depositDollars, { timeout: 25_000 });
+      }
+    }
+    if (opts.balloonPercent) {
+      if (await this.balloonPercentInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await expect
+          .poll(
+            async () => (await this.balloonPercentInput.inputValue()).replace(/%/g, "").trim(),
+            { timeout: 25_000 },
+          )
+          .toMatch(opts.balloonPercent);
+      }
+    }
+  }
+
+  /**
+   * Term on Standard Quote: label-scoped only — do not use `/Term/` on combobox `name` (matches Program
+   * e.g. "Term Loan Business - MV Dealer" on TL-B).
+   */
+  private async expectTermCarriedFromQuickQuote(root: Locator, term: RegExp): Promise<void> {
+    const termLabelRx = /^\s*Terms?\s*(of\s+Finance)?\s*\*?\s*$/i;
+    const pollTermValue = async (read: () => Promise<string>): Promise<void> => {
+      await expect.poll(read, { timeout: 25_000 }).toMatch(term);
+    };
+
+    if (await this.termsOfFinanceInputField.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await pollTermValue(() => this.termsOfFinanceInputField.inputValue());
+      return;
+    }
+
+    const termLabel = root.locator("label").filter({ hasText: termLabelRx }).first();
+    const termDropdownCombo = termLabel
+      .locator("xpath=following::p-dropdown[1]")
+      .getByRole("combobox")
+      .first();
+    if (await termDropdownCombo.isVisible({ timeout: 12_000 }).catch(() => false)) {
+      await expect(termDropdownCombo).toContainText(term, { timeout: 25_000 });
+      return;
+    }
+
+    const termRow = root
+      .locator(".p-field, [class*='p-field']")
+      .filter({ has: root.locator("label").filter({ hasText: termLabelRx }) })
+      .first();
+    const termRowCombo = termRow.getByRole("combobox").first();
+    const termRowSpin = termRow.getByRole("spinbutton").first();
+    if (await termRowCombo.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect(termRowCombo).toContainText(term, { timeout: 25_000 });
+      return;
+    }
+    if (await termRowSpin.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await pollTermValue(() => termRowSpin.inputValue());
+      return;
+    }
+
+    const termNumberSpin = root
+      .locator("number")
+      .filter({ has: root.locator("label, span").filter({ hasText: termLabelRx }) })
+      .getByRole("spinbutton")
+      .first();
+    if (await termNumberSpin.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await pollTermValue(() => termNumberSpin.inputValue());
+      return;
+    }
+
+    const termNumberInput = root
+      .locator("number")
+      .filter({ has: root.locator("label, span").filter({ hasText: termLabelRx }) })
+      .locator("input[type='number'], input.p-inputtext, input")
+      .first();
+    if (await termNumberInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await pollTermValue(() => termNumberInput.inputValue());
+      return;
+    }
+
+    throw new Error("Term field not found on Standard Quote for Quick Quote carry-over assertion");
   }
 
   /**
@@ -3780,32 +3837,42 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** **Total Amount Borrowed** (`amount` row, often Payment Summary / finance block). */
   totalAmountBorrowedField(): Locator {
+    const labelRx = /Total\s+Amount\s+Borrowed/i;
     const inSummary = this.paymentSummaryRoot
       .locator("amount")
-      .filter({ hasText: /Total\s+Amount\s+Borrowed/i })
+      .filter({ hasText: labelRx })
       .locator("#amount")
+      .first();
+    const byLabel = this.paymentSummaryRoot
+      .getByText(labelRx)
+      .locator("xpath=following::input[@id='amount'][1]")
       .first();
     const onPage = this.page
       .locator("amount")
-      .filter({ hasText: /Total\s+Amount\s+Borrowed/i })
+      .filter({ hasText: labelRx })
       .locator("#amount")
       .first();
-    return inSummary.or(onPage);
+    return inSummary.or(byLabel).or(onPage);
   }
 
   /** **Interest Charge** (system-calculated from FIS AF; display-only). */
   interestChargeField(): Locator {
+    const labelRx = /Interest\s+Charge/i;
     const inSummary = this.paymentSummaryRoot
       .locator("amount")
-      .filter({ hasText: /Interest\s+Charge/i })
+      .filter({ hasText: labelRx })
       .locator("#amount")
+      .first();
+    const byLabel = this.paymentSummaryRoot
+      .getByText(labelRx)
+      .locator("xpath=following::input[@id='amount'][1]")
       .first();
     const onPage = this.page
       .locator("amount")
-      .filter({ hasText: /Interest\s+Charge/i })
+      .filter({ hasText: labelRx })
       .locator("#amount")
       .first();
-    return inSummary.or(onPage);
+    return inSummary.or(byLabel).or(onPage);
   }
 
   parseDisplayedCurrency(raw: string): number {
