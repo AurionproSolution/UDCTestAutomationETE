@@ -1,6 +1,7 @@
 /**
  * DO Portal — Documentation regression (UDP-T3823–UDP-T3862).
- * Scenario source: Documentation Test cases (1).xlsx (Zephyr / Regression 25.0 / Documentation).
+ * Scenario source: Documentation Test cases (1).xlsx + DocumentationTestCasesRemaining13.xlsx
+ * (Zephyr / Regression 25.0 / Documentation).
  * Auth: shared DO `storageState` via `@fixtures/doPortalTest`.
  */
 
@@ -186,6 +187,53 @@ async function openPostSubmissionUploadStep(page: Page): Promise<DOCustomerQuote
   const post = new DOCustomerQuotePostSubmitPage(page);
   await post.waitForUploadStep();
   return post;
+}
+
+/** Land on Reference Details with a **past** Loan Date (UDP-T3852–UDP-T3857). */
+async function openReferenceDetailsStepWithPastLoanDate(page: Page): Promise<{
+  assetDetailsPage: DOAssetDetailsPage;
+  referenceDetailsPage: DOReferenceDetailsPage;
+}> {
+  const assetDetailsPage = await openStandardQuoteFromDashboard(page);
+  const addAssetPage = new DOAddAssetPage(page);
+  await assetDetailsPage.chooseProduct(CSA_SQ_PRODUCT);
+  await assetDetailsPage.chooseProgram(CSA_SQ_PROGRAM);
+  await addMinimalUsedAsset(assetDetailsPage, addAssetPage);
+  await assetDetailsPage.termsOfFinance("36");
+  await assetDetailsPage.interestRate("9");
+  const pastLoan = DOAssetDetailsPage.pastDateDdMmYyyy(14);
+  await assetDetailsPage.enterLoanDateDdMmYyyy(pastLoan);
+  await assetDetailsPage.enterFirstPaymentDateDdMmYyyy(
+    DOAssetDetailsPage.suggestFirstPaymentDdMmYyyy(pastLoan),
+  );
+  await assetDetailsPage.enterOriginationReference("SQ-DOC-PastLoan");
+  await assetDetailsPage.clickCalculateButton();
+  await assetDetailsPage.clickNextButton();
+  await assetDetailsPage.waitForAddBorrowerButton();
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber("420");
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+  const personal = new DOPersonalDetailsPage(page);
+  await fillValidIndividualPersonalBorrower(personal);
+  await personal.clickNextButton();
+  const address = new DOAddressDetailsPage(page);
+  await fillMinimalAddressContinue(page, address);
+  const emp = new DOEmploymentDetailsPage(page);
+  await fillMinimalEmploymentContinue(emp);
+  const fin = new DOFinancialPositionPage(page);
+  await fillMinimalFinancialContinue(fin);
+  const referenceDetailsPage = new DOReferenceDetailsPage(page);
+  await referenceDetailsPage.waitForReferenceDetailsStep();
+  await referenceDetailsPage.clickAddContactDetails();
+  await referenceDetailsPage.selectContactType("Accountant");
+  await referenceDetailsPage.enterContactFirstName("Alex");
+  await referenceDetailsPage.enterContactLastName("Referee");
+  await referenceDetailsPage.clickAddContactInModal();
+  await referenceDetailsPage.confirmCustomerDetailsCorrect();
+  return { assetDetailsPage, referenceDetailsPage };
 }
 
 test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () => {
@@ -456,8 +504,10 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3850 - TC_DOC_041 Purchase Invoice Displayed in Generated Documents Section",
     { tag: ['@do', '@regression', '@UDP-T3850'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Purchase invoice generated in FIS AF and added to the quote. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.setTimeout(900_000);
+      const post = await openPostSubmissionUploadStep(page);
+      await post.expectPurchaseInvoiceVisibleInGeneratedDocuments();
+      await post.expectGeneratedDocumentsTabColumnHeaders();
     },
   );
 
@@ -465,8 +515,10 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3851 - TC_DOC_042 Purchase Invoice — User Can Preview and Download",
     { tag: ['@do', '@regression', '@UDP-T3851'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Purchase invoice is visible in Generated Documents tab. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.setTimeout(900_000);
+      const post = await openPostSubmissionUploadStep(page);
+      await post.expectPurchaseInvoicePreviewOpensNewTab();
+      await post.expectPurchaseInvoiceDownloadStarts();
     },
   );
 
@@ -474,8 +526,11 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3852 - TC_DOC_043 Loan Date Pop-Up Triggered on Submit When Loan Date Is in the Past",
     { tag: ['@do', '@regression', '@UDP-T3852'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Standard Quote with Loan Date set to a past date. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.setTimeout(900_000);
+      const { assetDetailsPage, referenceDetailsPage } =
+        await openReferenceDetailsStepWithPastLoanDate(page);
+      await referenceDetailsPage.clickSubmitButton();
+      await assetDetailsPage.expectLoanDatePastUpdateDialogVisible();
     },
   );
 
@@ -484,7 +539,10 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3853'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Application in Ready for Documentation state. Loan Date is in the past. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.fixme(
+        true,
+        "Zephyr: Application in Ready for Documentation state with past Loan Date — requires AF workflow transition to Generate Documentation (not automatable from fresh CSA quote in QAT).",
+      );
     },
   );
 
@@ -493,7 +551,10 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3854'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Application in Ready for Documentation state. Loan Date is in the past. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.fixme(
+        true,
+        "Zephyr: Application in Ready for Documentation state with past Loan Date — requires AF workflow Submit path (not automatable from fresh CSA quote in QAT).",
+      );
     },
   );
 
@@ -501,8 +562,15 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3855 - TC_DOC_046 Loan Date Pop-Up — 'Yes' Updates Loan Date to Today and Recalculates Financials",
     { tag: ['@do', '@regression', '@UDP-T3855'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Loan date pop-up is displayed. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.setTimeout(900_000);
+      const { assetDetailsPage, referenceDetailsPage } =
+        await openReferenceDetailsStepWithPastLoanDate(page);
+      await referenceDetailsPage.clickSubmitButton();
+      await assetDetailsPage.expectLoanDatePastUpdateDialogVisible();
+      await assetDetailsPage.clickLoanDatePastDialogButton("Yes");
+      await assetDetailsPage.expectLoanDateIsTodayOrTomorrow();
+      await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
     },
   );
 
@@ -510,8 +578,14 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3856 - TC_DOC_047 Loan Date Pop-Up — 'No' Navigates to Asset Details; Loan Date Field Highlighted Red",
     { tag: ['@do', '@regression', '@UDP-T3856'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Loan date pop-up is displayed. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.setTimeout(900_000);
+      const { assetDetailsPage, referenceDetailsPage } =
+        await openReferenceDetailsStepWithPastLoanDate(page);
+      await referenceDetailsPage.clickSubmitButton();
+      await assetDetailsPage.expectLoanDatePastUpdateDialogVisible();
+      await assetDetailsPage.clickLoanDatePastDialogButton("No");
+      await assetDetailsPage.expectAssetDetailsStepVisible();
+      await assetDetailsPage.expectLoanDatePastFieldErrorHighlighted();
     },
   );
 
@@ -519,8 +593,16 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3857 - TC_DOC_048 Loan Date Pop-Up — 'Close' Returns to Same Screen; Pop-Up Reappears on Next Submit Attempt",
     { tag: ['@do', '@regression', '@UDP-T3857'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Loan date pop-up is displayed. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.setTimeout(900_000);
+      const { assetDetailsPage, referenceDetailsPage } =
+        await openReferenceDetailsStepWithPastLoanDate(page);
+      await referenceDetailsPage.clickSubmitButton();
+      await assetDetailsPage.expectLoanDatePastUpdateDialogVisible();
+      await assetDetailsPage.clickLoanDatePastDialogButton("Close");
+      await expect(assetDetailsPage.loanDatePastUpdateDialog()).toBeHidden({ timeout: 10_000 });
+      await referenceDetailsPage.waitForReferenceDetailsStep();
+      await referenceDetailsPage.clickSubmitButton();
+      await assetDetailsPage.expectLoanDatePastUpdateDialogVisible();
     },
   );
 
@@ -529,7 +611,10 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3858'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Application in Ready for Documentation. Editable fields have been changed and saved. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.fixme(
+        true,
+        "Zephyr: Ready for Documentation + editable field change + AF document re-generation — requires seeded workflow state and AF matrix.",
+      );
     },
   );
 
@@ -538,7 +623,10 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3859'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: A document has been generated. Quote changes made. Document re-generated. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.fixme(
+        true,
+        "Zephyr: Compare document Date & Time before/after re-generation — requires Ready for Documentation workflow and AF-generated documents.",
+      );
     },
   );
 
@@ -547,7 +635,10 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3860'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Application has been submitted. Opened from dashboard application grid. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.fixme(
+        true,
+        "Zephyr: Re-open submitted application from dashboard Quotes grid — requires dashboard grid POM + submitted quote seed (origination ref SQ-DOC-Ref).",
+      );
     },
   );
 
@@ -555,10 +646,13 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3861 - TC_DOC_052 Post Submission — All Fields View Only Except Notes and Document Upload",
     { tag: ['@do', '@regression', '@UDP-T3861'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(900_000);
       const post = await openPostSubmissionUploadStep(page);
+      await post.expectPostSubmissionScreenVisible();
       await post.expectPostSubmissionNotesAndUploadActionable();
-      await post.addNoteAndSubmit('UDP-T3861 automation note — post submission upload check.');
+      await post.addNoteAndSubmit("UDP-T3861 automation note — post submission upload check.");
+      await post.uploadDocument();
+      await post.expectDocumentUploaded();
     },
   );
 
@@ -566,9 +660,11 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3862 - TC_DOC_053 'Next' Button NOT Available in Post Submission Screen",
     { tag: ['@do', '@regression', '@UDP-T3862'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(900_000);
       const post = await openPostSubmissionUploadStep(page);
+      await post.expectPostSubmissionScreenVisible();
       await post.expectPostSubmissionNextButtonHidden();
+      await post.expectPostSubmissionSavePreviousCancelVisible();
     },
   );
 });
