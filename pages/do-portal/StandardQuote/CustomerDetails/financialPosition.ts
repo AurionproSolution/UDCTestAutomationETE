@@ -442,52 +442,6 @@ export class DOFinancialPositionPage extends BasePage {
     await page.keyboard.press("Escape").catch(() => {});
   }
 
-  mortgageRentLiabilityRowLabel(): Locator {
-    return this.liabilitiesCard.getByText(/Mortgage\s*\/\s*Rent/i).first();
-  }
-
-  /**
-   * Infers FIS AF mapping for the **Mortgage / Rent** liability row from control names on
-   * `app-individual-liabilities` (driven by **Residence Type** on Address Details — UDP-T3775).
-   */
-  async getMortgageRentFisMappingTarget(): Promise<"Mortgage" | "Rent" | null> {
-    const card = this.liabilitiesCard;
-    if (!(await card.isVisible({ timeout: 5_000 }).catch(() => false))) {
-      return null;
-    }
-    return card.evaluate((root) => {
-      const fcNames = Array.from(root.querySelectorAll("[formcontrolname]")).map((el) =>
-        (el.getAttribute("formcontrolname") ?? "").toLowerCase(),
-      );
-      const hasMortgageFc = fcNames.some((n) => /mortgage/.test(n) && !/^rent/.test(n));
-      const hasRentFc = fcNames.some((n) => /^rent$|rentamount|rentpayment|rental/.test(n));
-      if (hasMortgageFc && !hasRentFc) return "Mortgage";
-      if (hasRentFc && !hasMortgageFc) return "Rent";
-      if (hasRentFc) return "Rent";
-      if (hasMortgageFc) return "Mortgage";
-
-      const meta = Array.from(root.querySelectorAll("input[name], input[id], [data-fis-field]"))
-        .map((el) => {
-          const name = (el as HTMLInputElement).name ?? "";
-          const id = el.id ?? "";
-          const data = el.getAttribute("data-fis-field") ?? "";
-          return `${name} ${id} ${data}`.toLowerCase();
-        })
-        .join(" ");
-      if (/\bmortgage\b/.test(meta) && !/\brent\b/.test(meta)) return "Mortgage";
-      if (/\brent\b/.test(meta)) return "Rent";
-      return null;
-    });
-  }
-
-  async expectMortgageRentLiabilityMapsToFisField(target: "Mortgage" | "Rent"): Promise<void> {
-    this.logStep(`Expect Mortgage/Rent liability maps to FIS ${target}`);
-    await expect(this.mortgageRentLiabilityRowLabel()).toBeVisible({ timeout: 20_000 });
-    await expect
-      .poll(async () => this.getMortgageRentFisMappingTarget(), { timeout: 25_000 })
-      .toBe(target);
-  }
-
   /** Liabilities — first row: first two `amount` → `#amount` fields (Balance/Limit, then Amount). */
   async fillFirstLiabilityBalanceAndAmount(
     balanceLimit: string,
@@ -512,6 +466,116 @@ export class DOFinancialPositionPage extends BasePage {
     await trigger.waitFor({ state: "visible", timeout: 15000 });
     await trigger.click();
     await this.pickDropdownOption("Monthly");
+  }
+
+  /**
+   * Individual **Liabilities** row (e.g. **Credit Cards**, **Loans**, **Other Liabilities**): two `<amount>#amount`
+   * fields — balance/limit then repayment amount — scoped from the row label (same pattern as {@link fillFirstLiabilityBalanceAndAmount}).
+   */
+  async fillIndividualLiabilityRowBalanceAndAmountByLabel(
+    rowLabelRx: RegExp,
+    balanceLimit: string,
+    amount: string,
+  ): Promise<void> {
+    this.logStep(
+      `Filled liability row (${rowLabelRx.source}): balance/limit ${this.stepValueDisplay(balanceLimit)}, amount ${this.stepValueDisplay(amount)}`,
+    );
+    const card = this.liabilitiesCard;
+    await card.waitFor({ state: "visible", timeout: 30_000 });
+    const anchor = card.getByText(rowLabelRx).first();
+    await anchor.waitFor({ state: "visible", timeout: 20_000 });
+    await anchor.scrollIntoViewIfNeeded();
+    const row = anchor.locator("xpath=ancestor::div[.//amount][1]");
+    const inputs = row.locator("amount").locator("#amount").filter({ visible: true });
+    await this.setCommittedAmount(inputs.nth(0), balanceLimit);
+    await this.setCommittedAmount(inputs.nth(1), amount);
+  }
+
+  /** Liabilities — **Mortgage / Rent** row (first liability): balance/limit + repayment amount. */
+  async fillIndividualMortgageRentLiabilityBalanceAndAmount(
+    balanceLimit: string,
+    amount: string,
+  ): Promise<void> {
+    this.logStep(
+      `Filled mortgage/rent liability: balance/limit ${this.stepValueDisplay(balanceLimit)}, amount ${this.stepValueDisplay(amount)}`,
+    );
+    await this.fillFirstLiabilityBalanceAndAmount(balanceLimit, amount);
+  }
+
+  private residenceTypeToHomeOwnershipRx(residenceType: string): RegExp {
+    const t = residenceType.trim();
+    if (/mortgage/i.test(t)) return /Mortgage/i;
+    if (/rent/i.test(t)) return /Rent(ing)?/i;
+    if (/board/i.test(t)) return /Board(ing)?/i;
+    if (/own|freehold|owner/i.test(t)) return /Own|Freehold|Owner/i;
+    return new RegExp(this.escapeRx(t), "i");
+  }
+
+  private individualHomeOwnershipTypeDisplay(): Locator {
+    const card = this.individualAssetDetailsCard;
+    const byFc = card.locator(`p-dropdown[formcontrolname="assestHomeOwnerType"]`).first();
+    return byFc
+      .locator(".p-dropdown-label, [role='combobox']")
+      .first()
+      .or(
+        card
+          .getByText(/Home Ownership Type/i)
+          .first()
+          .locator("xpath=ancestor::div[.//p-dropdown][1]")
+          .locator(".p-dropdown-label, [role='combobox']")
+          .first(),
+      );
+  }
+
+  private individualMortgageRentLiabilityAmountInputs(): Locator {
+    return this.amountInputsInCard(this.liabilitiesCard);
+  }
+
+  private async expectAmountInputMatches(input: Locator, expected: string): Promise<void> {
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    const actual = this.normalizeAmountDigits(await input.inputValue());
+    const want = this.normalizeAmountDigits(expected);
+    expect(actual).toBe(want);
+  }
+
+  /**
+   * Address **Residence Type** maps to **Home Ownership Type** on Assets and the **Mortgage / Rent** liability row
+   * (UDP-T3775 / UDP-T3762).
+   */
+  async expectIndividualMortgageRentLiabilityMappingForResidenceType(
+    residenceType: string,
+  ): Promise<void> {
+    this.logStep(
+      `Expect mortgage/rent liability mapping for residence type: ${this.stepValueDisplay(residenceType)}`,
+    );
+    await this.liabilitiesCard.waitFor({ state: "visible", timeout: 30_000 });
+    await this.individualAssetDetailsCard.waitFor({ state: "visible", timeout: 30_000 });
+
+    const homeOwnershipRx = this.residenceTypeToHomeOwnershipRx(residenceType);
+    const ownershipDisplay = this.individualHomeOwnershipTypeDisplay();
+    await expect(ownershipDisplay).toBeVisible({ timeout: 20_000 });
+    const ownershipText =
+      ((await ownershipDisplay.textContent()) ??
+        (await ownershipDisplay.getAttribute("aria-label")) ??
+        "").trim();
+    expect(ownershipText).toMatch(homeOwnershipRx);
+
+    await expect(
+      this.liabilitiesCard.getByText(/Mortgage\s*\/\s*Rent|Mortgage|Rent/i).first(),
+    ).toBeVisible({ timeout: 15_000 });
+  }
+
+  /** Re-check **Mortgage / Rent** liability balance/limit and repayment amount after residence-type change. */
+  async expectIndividualMortgageRentLiabilityBalanceAndAmount(
+    balanceLimit: string,
+    amount: string,
+  ): Promise<void> {
+    this.logStep(
+      `Expect mortgage/rent liability: balance/limit ${this.stepValueDisplay(balanceLimit)}, amount ${this.stepValueDisplay(amount)}`,
+    );
+    const fields = this.individualMortgageRentLiabilityAmountInputs();
+    await this.expectAmountInputMatches(fields.nth(0), balanceLimit);
+    await this.expectAmountInputMatches(fields.nth(1), amount);
   }
 
   /** Income details — first row (e.g. Take Home Pay) amount. */
@@ -663,51 +727,6 @@ export class DOFinancialPositionPage extends BasePage {
     ).toBeVisible({ timeout: 15_000 });
   }
 
-  /**
-   * Sole Trader + Business loan purpose — Profit Declaration, Turnover, Balance Information,
-   * Personal Statement of Position (UDP-T3782).
-   */
-  async expectSoleTraderFinancialPositionSectionsVisible(): Promise<void> {
-    this.logStep("Expect Sole Trader Financial Position Sections Visible");
-    await this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 60_000 });
-
-    const profitDeclaration = this.page
-      .locator("app-sole-trade-financial app-sole-trade-profit-declaration")
-      .first()
-      .or(
-        this.soleTradeFinancialRoot.getByText(
-          /Profit Declaration|Did you make a Net Profit|Net Profit last year/i,
-        ),
-      );
-    await expect(profitDeclaration.first()).toBeVisible({ timeout: 30_000 });
-
-    await expect(this.turnoverInformationRoot).toBeVisible({ timeout: 30_000 });
-    await expect(
-      this.turnoverInformationRoot
-        .getByText(/Turnover Information/i)
-        .or(this.soleTradeFinancialRoot.getByText(/Turnover Information/i)),
-    ).toBeVisible({ timeout: 15_000 });
-
-    await expect(this.balanceInformationHost).toBeVisible({ timeout: 30_000 });
-    await expect(
-      this.balanceInformationHost
-        .getByText(/Balance Information/i)
-        .or(this.soleTradeFinancialRoot.getByText(/Balance Information/i)),
-    ).toBeVisible({ timeout: 15_000 });
-
-    const personalStatement = this.page
-      .locator("app-sole-trade-financial app-sole-trade-assets")
-      .first()
-      .or(this.soleTradeFinancialRoot.getByText(/Personal Statement of Position/i));
-    await expect(personalStatement.first()).toBeVisible({ timeout: 30_000 });
-
-    const liabilities = this.page
-      .locator("app-sole-trade-financial app-sole-trade-liabilities")
-      .first()
-      .or(this.soleTradeFinancialRoot.getByText(/^Liabilities$/i));
-    await expect(liabilities.first()).toBeVisible({ timeout: 30_000 });
-  }
-
   /** `app-individual-asset-details` — row that contains `labelRx` and an `<amount>` control. */
   private amountInputInIndividualCardRow(card: Locator, labelRx: RegExp): Locator {
     return card
@@ -733,6 +752,170 @@ export class DOFinancialPositionPage extends BasePage {
     await trigger.waitFor({ state: "visible", timeout: 20_000 });
     await trigger.click({ timeout: 15_000 });
     await this.pickDropdownOption(optionLabel);
+  }
+
+  /**
+   * Individual Assets — open **Home Ownership Type** then dismiss the panel without choosing an option
+   * (observe open/close behaviour; UDP-T3772).
+   */
+  async openAndCloseIndividualHomeOwnershipTypeDropdown(): Promise<void> {
+    this.logStep("Open and close Home Ownership Type dropdown");
+    const card = this.individualAssetDetailsCard;
+    await card.waitFor({ state: "visible", timeout: 30_000 });
+    await card.scrollIntoViewIfNeeded();
+    const byFc = card.locator(`p-dropdown[formcontrolname="assestHomeOwnerType"]`).first();
+    const dd = (await byFc.isVisible({ timeout: 4_000 }).catch(() => false))
+      ? byFc
+      : card.getByText(/Home Ownership Type/i).first().locator("xpath=ancestor::div[.//p-dropdown][1]").locator("p-dropdown").first();
+    const trigger = dd.locator(".p-dropdown-trigger, [aria-label='dropdown trigger']").first();
+    await trigger.waitFor({ state: "visible", timeout: 20_000 });
+    await trigger.click({ timeout: 15_000 });
+    const panel = this.page.locator(".p-dropdown-panel").last();
+    await panel.waitFor({ state: "visible", timeout: 10_000 });
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await panel.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+    await this.page.keyboard.press("Escape").catch(() => {});
+  }
+
+  async fillIndividualHomeValueAmount(value: string): Promise<void> {
+    this.logStep(`Filled individual home value as ${this.stepValueDisplay(value)}`);
+    const card = this.individualAssetDetailsCard;
+    await card.waitFor({ state: "visible", timeout: 30_000 });
+    await card.scrollIntoViewIfNeeded();
+
+    /** Label copy varies; some builds put the amount on the **Home Ownership** row with no “Home Value” text. */
+    const labelRx =
+      /Home\s*Value|Estimated\s+Home|Property\s+Value|Market\s+Value|Current\s+Value|Value\s+of\s+Home/i;
+
+    const homeOwnershipDropdown = async (): Promise<Locator> => {
+      const byFc = card.locator(`p-dropdown[formcontrolname="assestHomeOwnerType"]`).first();
+      if (await byFc.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        return byFc;
+      }
+      return card
+        .getByText(/Home Ownership Type/i)
+        .first()
+        .locator("xpath=ancestor::div[.//p-dropdown][1]")
+        .locator("p-dropdown")
+        .first();
+    };
+
+    const byAmountHost = this.amountInputInIndividualCardRow(card, labelRx);
+
+    /** First `#amount` in document order after the Home Ownership dropdown (same row / next cell on many Webform layouts). */
+    const dd = await homeOwnershipDropdown();
+    await dd.waitFor({ state: "attached", timeout: 15_000 });
+    const byAmountFollowingOwnershipDropdown = dd
+      .locator("xpath=following::input[@id='amount'][1]")
+      .filter({ visible: true });
+    const byAmountPrecedingOwnershipDropdown = dd
+      .locator("xpath=preceding::input[@id='amount'][1]")
+      .filter({ visible: true });
+
+    const byFormControl = card
+      .locator(
+        [
+          'input#amount[formcontrolname="homeValue"]',
+          'input#amount[formcontrolname="estimatedHomeValue"]',
+          'input#amount[formcontrolname="assestHomeValue"]',
+          'input#amount[formcontrolname="estimatedPropertyValue"]',
+          'input#amount[formcontrolname="propertyValue"]',
+          'input#amount[formcontrolname="currentHomeValue"]',
+          'input[formcontrolname="homeValue"]',
+          'input[formcontrolname="estimatedHomeValue"]',
+          'input[formcontrolname="assestHomeValue"]',
+        ].join(","),
+      )
+      .filter({ visible: true })
+      .first();
+
+    const byLabelAncestor = card
+      .getByText(labelRx, { exact: false })
+      .first()
+      .locator("xpath=ancestor::*[.//input[@id='amount']][1]//input[@id='amount']")
+      .filter({ visible: true })
+      .first();
+
+    const byFloatLabel = card
+      .locator("span.p-float-label, label.p-float-label, label")
+      .filter({ hasText: labelRx })
+      .first()
+      .locator("xpath=ancestor::*[.//input[@id='amount']][1]//input[@id='amount']")
+      .filter({ visible: true })
+      .first();
+
+    const byA11y = card.getByRole("textbox", { name: labelRx }).filter({ visible: true }).first();
+
+    for (const cand of [
+      byAmountHost,
+      byAmountFollowingOwnershipDropdown,
+      byAmountPrecedingOwnershipDropdown,
+      byFormControl,
+      byLabelAncestor,
+      byFloatLabel,
+      byA11y,
+    ]) {
+      if ((await cand.count()) === 0) continue;
+      const el = cand.first();
+      if (!(await el.isVisible({ timeout: 4_000 }).catch(() => false))) continue;
+      await this.setCommittedAmount(el, value);
+      return;
+    }
+
+    /** Last resort: first visible `#amount` in the card whose row text is not another known asset line. */
+    const amountInputs = card.locator("input#amount").filter({ visible: true });
+    const total = await amountInputs.count();
+    for (let i = 0; i < total; i++) {
+      const el = amountInputs.nth(i);
+      const rowText = (
+        await el
+          .locator(
+            "xpath=ancestor::div[contains(@class,'grid') or contains(@class,'row') or contains(@class,'p-formgrid') or contains(@class,'p-fluid')][1]",
+          )
+          .innerText()
+          .catch(() => "")
+      ).toLowerCase();
+      if (rowText.includes("vehicle value")) continue;
+      if (rowText.includes("furniture") && rowText.includes("effects")) continue;
+      if (rowText.includes("other financial")) continue;
+      if (
+        rowText.includes("home") ||
+        rowText.includes("ownership") ||
+        (i === 0 && !rowText.includes("vehicle") && !rowText.includes("furniture"))
+      ) {
+        await this.setCommittedAmount(el, value);
+        return;
+      }
+    }
+
+    const currencyOnly = card.locator("input[currencymask]").filter({ visible: true });
+    const nCur = await currencyOnly.count();
+    for (let i = 0; i < nCur; i++) {
+      const el = currencyOnly.nth(i);
+      const rowText = (
+        await el
+          .locator(
+            "xpath=ancestor::div[contains(@class,'grid') or contains(@class,'row') or contains(@class,'p-formgrid') or contains(@class,'p-fluid')][1]",
+          )
+          .innerText()
+          .catch(() => "")
+      ).toLowerCase();
+      if (rowText.includes("vehicle value")) continue;
+      if (rowText.includes("furniture") && rowText.includes("effects")) continue;
+      if (rowText.includes("other financial")) continue;
+      if (
+        rowText.includes("home") ||
+        rowText.includes("ownership") ||
+        (i === 0 && !rowText.includes("vehicle") && !rowText.includes("furniture"))
+      ) {
+        await this.setCommittedAmount(el, value);
+        return;
+      }
+    }
+
+    throw new Error(
+      "Individual assets: could not find a visible Home Value amount input (tried <amount> host, amount after/before Home Ownership dropdown, formControlName, label row, float-label, aria name, row-text scan on #amount and currencymask inputs).",
+    );
   }
 
   async fillIndividualVehicleValueAmount(value: string): Promise<void> {
@@ -1269,6 +1452,39 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   /**
+   * Zephyr **observe**: after **Yes** on “Did you make a Net Profit last year?”, the **Net Profit last year**
+   * amount control should be available (soft; accessible name / DOM vary by build).
+   */
+  async softObserveProfitDeclarationNetProfitAmountFieldVisible(): Promise<void> {
+    this.logStep("Observe Net Profit last year field visible after Yes");
+    const card = await this.resolveProfitDeclarationScope();
+    const field = card
+      .getByRole("textbox", { name: /Net Profit last year/i })
+      .or(card.locator("amount").locator("#amount").first())
+      .or(card.locator("input#amount").first())
+      .first();
+    await expect.soft(field).toBeVisible({ timeout: 20_000 });
+  }
+
+  /**
+   * Zephyr **observe**: after **No**, the net-profit amount entry should be hidden or disabled (soft).
+   */
+  async softObserveProfitDeclarationNetProfitAmountFieldNotEditable(): Promise<void> {
+    this.logStep("Observe Net Profit last year field hidden or disabled after No");
+    const card = await this.resolveProfitDeclarationScope();
+    const field = card
+      .getByRole("textbox", { name: /Net Profit last year/i })
+      .or(card.locator("amount").locator("#amount").first())
+      .or(card.locator("input#amount").first())
+      .first();
+    if (await field.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await expect.soft(field).toBeDisabled({ timeout: 12_000 });
+    } else {
+      await expect.soft(field).toBeHidden({ timeout: 12_000 });
+    }
+  }
+
+  /**
    * After **Next** with empty / invalid business financials, inline errors may appear.
    * With `optional: true`, failures are swallowed (copy and timing vary by product build).
    */
@@ -1316,14 +1532,14 @@ export class DOFinancialPositionPage extends BasePage {
   async fillBusinessNetProfitLastYear(value: string): Promise<void> {
     this.logStep(`Filled business net profit last year as ${this.stepValueDisplay(value)}`);
     await Promise.any([
-    this.businessFinancialRoot.waitFor({ state: "visible", timeout: 60000 }),
-    this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 60000 }),
-  ]).catch(() => {
-    throw new Error(
-      "Financial Position: app-business-financial / app-sole-trade-financial not visible for net profit.",
-    );
-  });
-  const card = await this.resolveProfitDeclarationScope();
+      this.businessFinancialRoot.waitFor({ state: "visible", timeout: 60000 }),
+      this.soleTradeFinancialRoot.waitFor({ state: "visible", timeout: 60000 }),
+    ]).catch(() => {
+      throw new Error(
+        "Financial Position: app-business-financial / app-sole-trade-financial not visible for net profit.",
+      );
+    });
+    const card = await this.resolveProfitDeclarationScope();
   await card.waitFor({ state: "visible", timeout: 20000 });
   await card.evaluate((el: Element) => {
     (el as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });

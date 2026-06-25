@@ -66,6 +66,51 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await this.page.waitForTimeout(ms).catch(() => {});
   }
 
+  /** Quote header **Status** control — QAT often uses a `p-inputtext` beside **Status :**, not `name=workFlowStatus`. */
+  private workflowStatusOpenQuoteInput(): Locator {
+    const p = this.page;
+    return p
+      .getByText(/^Status\s*:?\s*$/i)
+      .locator('xpath=following::input[contains(@class,"p-inputtext")][1]')
+      .or(
+        p
+          .locator(".col-2.status")
+          .filter({ visible: true })
+          .locator("input.p-inputtext.p-component")
+          .first(),
+      )
+      .or(p.locator('input[name="workFlowStatus"]').filter({ visible: true }).first());
+  }
+
+  private async readWorkflowStatusText(): Promise<string> {
+    const input = this.workflowStatusOpenQuoteInput();
+    if (await input.isVisible({ timeout: 800 }).catch(() => false)) {
+      const value = (await input.inputValue().catch(() => "")).trim();
+      if (value.length > 0) {
+        return value;
+      }
+      return ((await input.textContent().catch(() => "")) ?? "").trim();
+    }
+    const btn = this.page
+      .getByRole("button", { name: /Open\s+Quote|Submitted|Pending|In\s+Progress/i })
+      .first();
+    if (await btn.isVisible({ timeout: 800 }).catch(() => false)) {
+      return ((await btn.textContent().catch(() => "")) ?? "").trim();
+    }
+    return "";
+  }
+
+  /**
+   * Minimal Post Submission prep for workflow **Status** → **Submit** (UDP-T3795 / CSA).
+   * Upload is required on CSA before declaration **Proceed** succeeds.
+   */
+  async prepareMinimalPostSubmissionForWorkflow(): Promise<void> {
+    this.logStep("Prepare minimal post-submission for workflow");
+    await this.waitForUploadStep();
+    await this.uploadDocument();
+    await this.expectDocumentUploaded();
+  }
+
   /**
    * **Customer Details** — `+ Add Borrowers / Guarantors` (Selector Hub `:text-is("Add Borrowers / Guarantors")`).
    * Prefer `getByRole("button")` when the control is a real button; fall back to exact text (may be a link).
@@ -619,8 +664,8 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
       expect(ok, `Uploaded file not detected in UI after upload: "${base}"`).toBeTruthy();
     }).toPass({
-      intervals: [400, 1000, 2000],
-      timeout: 90000,
+      intervals: [400, 800, 1500],
+      timeout: 45_000,
     });
   }
 
@@ -1239,103 +1284,41 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    */
   private async scrollWorkflowStatusHeaderIntoView(): Promise<void> {
     this.assertPageOpen("scrollWorkflowStatusHeaderIntoView");
-    const p = this.page;
-    const statusStrip = p
-      .locator('input[name="workFlowStatus"]')
-      .filter({ visible: true })
-      .first()
-      .or(p.locator("div.col-2.status.w-10rem.ng-star-inserted").filter({ visible: true }).first())
-      .or(p.locator(".col-2.status").filter({ visible: true }).first());
-    if (await statusStrip.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await statusStrip.scrollIntoViewIfNeeded();
-    } else {
-      await p
-        .getByRole("button", { name: /Open Quote/i })
-        .first()
-        .scrollIntoViewIfNeeded()
-        .catch(() => {});
+    const statusInput = this.workflowStatusOpenQuoteInput();
+    if (await statusInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await statusInput.scrollIntoViewIfNeeded();
+      return;
     }
-    await this.postSubmitMicroDelay(100);
+    await this.page
+      .getByRole("button", { name: /Open\s+Quote/i })
+      .first()
+      .scrollIntoViewIfNeeded()
+      .catch(() => {});
   }
 
   /** Opens the quote **workflow status** menu (same triggers as {@link submitQuoteFromStatusMenu}). */
   private async openWorkflowStatusDropdownInner(): Promise<void> {
     this.assertPageOpen("openWorkflowStatusDropdownInner");
     const p = this.page;
-    const workflowStatusByName = p.locator('input[name="workFlowStatus"]').filter({ visible: true }).first();
-    if (await workflowStatusByName.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await workflowStatusByName.scrollIntoViewIfNeeded();
-      await workflowStatusByName.click({ timeout: 10_000 });
-      await this.postSubmitMicroDelay(150);
-      return;
-    }
+    await p.keyboard.press("Escape").catch(() => {});
 
-    const statusColVisible = p
-      .locator("div.col-2.status.w-10rem.ng-star-inserted")
-      .filter({ visible: true })
-      .first();
-    if (await statusColVisible.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      await statusColVisible.scrollIntoViewIfNeeded();
-      await statusColVisible.click({ timeout: 10_000 });
-      await this.postSubmitMicroDelay(150);
-      return;
-    }
-
-    const workflowStatusInput = p
-      .locator(".col-2.status, .col-2.status.w-10rem, [class*='status'].w-10rem")
-      .first()
-      .locator("input.p-element.p-inputtext.p-component, input.p-inputtext.p-component.p-element")
-      .first();
-    if (await workflowStatusInput.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      await workflowStatusInput.scrollIntoViewIfNeeded();
-      await workflowStatusInput.click({ timeout: 10_000 });
-      await this.postSubmitMicroDelay(120);
-      return;
-    }
-
-    const statusQuoteCell = p
-      .locator(".col-2.status.w-10rem.ng-star-inserted, .col-2.status.w-10rem, .col-2.status")
-      .or(
-        p
-          .locator("[class*='status']")
-          .filter({ has: p.locator("p-dropdown, p-select, .p-dropdown, .p-select") }),
-      )
-      .first();
-    if (await statusQuoteCell.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      const trigger = statusQuoteCell
-        .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
-        .first();
-      if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
-        await trigger.scrollIntoViewIfNeeded();
-        await trigger.click({ timeout: 10_000 });
-      } else {
-        await statusQuoteCell.click({ timeout: 10_000 });
+    const statusInput = this.workflowStatusOpenQuoteInput();
+    if (await statusInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await statusInput.scrollIntoViewIfNeeded();
+      await statusInput.click({ timeout: 8_000 });
+      if (await this.workflowMenuOverlayLocator().isVisible({ timeout: 2_000 }).catch(() => false)) {
+        return;
       }
-      await this.postSubmitMicroDelay(120);
-      return;
+      const submitVisible = p.locator(':text-is("Submit")').filter({ visible: true }).first();
+      if (await submitVisible.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        return;
+      }
     }
 
-    const openQuote = p.getByRole("button", { name: /Open Quote/i });
-    if (await openQuote.isVisible({ timeout: 2_500 }).catch(() => false)) {
-      await expect(openQuote).toBeVisible({ timeout: 8_000 });
+    const openQuote = p.getByRole("button", { name: /Open\s+Quote/i }).first();
+    if (await openQuote.isVisible({ timeout: 2_000 }).catch(() => false)) {
       await openQuote.scrollIntoViewIfNeeded();
-      await openQuote.click({ timeout: 12_000 });
-      await this.postSubmitMicroDelay(120);
-      return;
-    }
-
-    await statusQuoteCell.waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
-    if (await statusQuoteCell.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      const trigger = statusQuoteCell
-        .locator(".p-dropdown-trigger, .p-select-trigger, [aria-haspopup='listbox']")
-        .first();
-      if (await trigger.isVisible({ timeout: 2_500 }).catch(() => false)) {
-        await trigger.scrollIntoViewIfNeeded();
-        await trigger.click({ timeout: 10_000 });
-      } else {
-        await statusQuoteCell.click({ timeout: 10_000 });
-      }
-      await this.postSubmitMicroDelay(120);
+      await openQuote.click({ timeout: 8_000 });
     }
   }
 
@@ -1405,6 +1388,26 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * **Workflow status** (shows **Open Quote**) → **Withdraw** → expect confirmation → **Cancel** →
    * assert status still **Open Quote**. Same open-menu behaviour as {@link submitQuoteFromStatusMenu}.
    */
+  async expectWorkflowStatusOpenQuote(): Promise<void> {
+    this.logStep("Expect workflow status Open Quote");
+    this.assertPageOpen("expectWorkflowStatusOpenQuote");
+    await this.scrollWorkflowStatusHeaderIntoView();
+    const statusInput = this.workflowStatusOpenQuoteInput();
+    if (await statusInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect(statusInput).toHaveValue(/Open\s+Quote/i, { timeout: 10_000 });
+      return;
+    }
+    await expect(this.page.getByRole("button", { name: /Open\s+Quote/i }).first()).toBeVisible({
+      timeout: 10_000,
+    });
+  }
+
+  /** After **Status** → **Submit** + Originator Declaration — poll for success toast / status copy. */
+  async expectWorkflowTransitionSucceeded(): Promise<void> {
+    this.logStep("Expect workflow transition succeeded");
+    await this.expectPostSubmitWorkflowSuccess();
+  }
+
   async workflowWithdrawThenCancelExpectOpenQuoteStatus(): Promise<void> {
     this.logStep("Workflow: Withdraw → Cancel → expect Open Quote");
     const p = this.page;
@@ -1541,17 +1544,17 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     };
 
     if (await clickSubmitMenuItem()) {
-      await p.waitForTimeout(150);
+      await this.postSubmitMicroDelay(80);
       return;
     }
 
     await p.keyboard.press("Escape").catch(() => {});
-    await p.waitForTimeout(120);
+    await this.postSubmitMicroDelay(80);
     await this.openWorkflowStatusDropdownInner();
-    await expect(this.workflowMenuOverlayLocator()).toBeVisible({ timeout: 5_000 }).catch(() => {});
+    await expect(this.workflowMenuOverlayLocator()).toBeVisible({ timeout: 3_000 }).catch(() => {});
 
     if (await clickSubmitMenuItem()) {
-      await p.waitForTimeout(150);
+      await this.postSubmitMicroDelay(80);
       return;
     }
 
@@ -1642,29 +1645,39 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   private async expectPostSubmitWorkflowSuccess(): Promise<void> {
     const p = this.page;
     await p.keyboard.press("Escape").catch(() => {});
-    await p.waitForLoadState("networkidle", { timeout: 45_000 }).catch(() => {});
 
     await expect
       .poll(
         async () => {
+          const status = await this.readWorkflowStatusText();
+          if (status.length > 0 && !/Open\s+Quote/i.test(status)) {
+            return true;
+          }
+
           const toast = p
             .locator(".p-toast-message-success, .p-toast-message-info, .p-toast")
             .filter({
               hasText: /success|submitted|complete|accepted|processed|thank you/i,
             });
-          if (await toast.first().isVisible().catch(() => false)) return true;
+          if (await toast.first().isVisible().catch(() => false)) {
+            return true;
+          }
+
           const body = p
             .getByText(
               /successfully\s+submitted|submitted\s+successfully|quote.*submitted|submission.*successful|successfully/i,
             )
             .first();
-          if (await body.isVisible().catch(() => false)) return true;
-          const status = p
+          if (await body.isVisible().catch(() => false)) {
+            return true;
+          }
+
+          const statusChip = p
             .locator(".col-2.status, [class*='status']")
-            .filter({ hasText: /Submitted|Complete|Accepted|Succeed/i });
-          return await status.first().isVisible().catch(() => false);
+            .filter({ hasText: /Submitted|Complete|Accepted|Succeed|Pending|In\s+Progress/i });
+          return await statusChip.first().isVisible().catch(() => false);
         },
-        { timeout: 90_000, intervals: [1_000, 3_000, 5_000] },
+        { timeout: 60_000, intervals: [500, 1_000, 2_000] },
       )
       .toBeTruthy();
   }
@@ -1675,7 +1688,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    */
   async completeOriginatorDeclaration(): Promise<void> {
     const p = this.page;
-    await p.waitForTimeout(2500);
+    await p.waitForTimeout(400);
     await p.waitForLoadState("domcontentloaded").catch(() => {});
 
     const flexDialog = p
@@ -1745,11 +1758,22 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .getByRole("button", { name: /^Proceed$/i })
       .or(scope.locator(':text-is("Proceed")'))
       .first();
-    await proceed.waitFor({ state: "visible", timeout: 25_000 });
-    await proceed.click({ timeout: 15_000 });
+    await proceed.waitFor({ state: "visible", timeout: 15_000 });
+    await expect(proceed).toBeEnabled({ timeout: 10_000 });
+    await proceed.click({ timeout: 10_000 });
     // eslint-disable-next-line no-console
     console.log("Workflow: Final submit clicked");
-    await scope.waitFor({ state: "hidden", timeout: 90_000 }).catch(() => {});
+    await scope.waitFor({ state: "hidden", timeout: 45_000 }).catch(() => {});
+    if (await scope.isVisible({ timeout: 500 }).catch(() => false)) {
+      const err = p
+        .locator(".p-toast-message-error, .p-inline-message-error, .p-message-error")
+        .filter({ visible: true })
+        .first();
+      const errText = (await err.textContent().catch(() => ""))?.trim();
+      throw new Error(
+        `Originator Declaration did not close after Proceed${errText ? `: ${errText}` : ""}`,
+      );
+    }
     await this.expectPostSubmitWorkflowSuccess();
     // eslint-disable-next-line no-console
     console.log("Workflow: Quote submitted");

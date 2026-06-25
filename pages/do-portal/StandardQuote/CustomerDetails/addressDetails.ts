@@ -112,10 +112,6 @@ export class DOAddressDetailsPage extends BasePage {
       .locator("div.grid")
       .filter({ has: page.getByText(/Copy primary borrower/i) })
       .first();
-    this.physicalAddressBlock = page
-      .locator("div")
-      .filter({ has: page.locator('input[name="physicalSearchValue"]') })
-      .first();
     this.physicalAddressRoot = page.locator("app-physical-address").first();
     const biz = page.locator("app-business-physical-address").first();
     this.businessPhysicalAddressRoot = biz;
@@ -131,6 +127,21 @@ export class DOAddressDetailsPage extends BasePage {
         ),
       )
       .first();
+
+    /** Visible autocomplete only (avoids hidden PrimeNG / step clones). */
+    this.physicalSearchInput = page
+      .locator('input[name="physicalSearchValue"]')
+      .filter({ visible: true })
+      .first();
+    /**
+     * Host for current physical street / country fields. Never use `div.filter({ has: physicalSearch })` —
+     * the root layout contains that input, so `.first()` resolves to `layout-wrapper` and breaks strict
+     * expectations (e.g. UDP-T3762).
+     */
+    this.physicalAddressBlock = this.physicalSearchInput.locator(
+      "xpath=ancestor::app-physical-address[1] | ancestor::app-business-physical-address[1]",
+    );
+
     this.previousAddressRoot = page.locator("app-previous-address").first();
     this.businessPreviousPhysicalCard = page
       .locator("app-business-address-details")
@@ -178,7 +189,6 @@ export class DOAddressDetailsPage extends BasePage {
       .getByRole("button", { name: "dropdown trigger" })
       .last();
 
-    this.physicalSearchInput = page.locator('input[name="physicalSearchValue"]');
     /** Prefer CSA-B host so “Postal” / “Register” sliders are not confused with other pages. */
     this.reusePostalAddressToggle = biz
       .locator("toggle-checkbox")
@@ -284,6 +294,51 @@ export class DOAddressDetailsPage extends BasePage {
 
   protected stepLogPrefix(): string {
     return "Standard quote — Address details";
+  }
+
+  /** QAT: `.app-loader-overlay` blocks Time at Address and street fields after Personal → Address. */
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const overlay = this.page.locator(".app-loader-overlay").filter({ visible: true });
+      const spinner = this.page
+        .locator(
+          ".app-loader-overlay .p-progressspinner, .app-loader-overlay p-progressspinner",
+        )
+        .filter({ visible: true });
+      const overlayVisible = await overlay.first().isVisible({ timeout: 300 }).catch(() => false);
+      const spinnerVisible = await spinner.first().isVisible({ timeout: 300 }).catch(() => false);
+      if (!overlayVisible && !spinnerVisible) {
+        return;
+      }
+      await this.page.waitForTimeout(250);
+    }
+  }
+
+  /** Fill a single address input — wait for loader, retry on overlay / detach (UDP-T3791). */
+  private async fillAddressFieldResilient(
+    field: Locator,
+    value: string,
+    fieldLabel = "address field",
+  ): Promise<void> {
+    await expect(async () => {
+      await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
+      await field.scrollIntoViewIfNeeded();
+      if (!(await field.isVisible().catch(() => false))) {
+        throw new Error(`${fieldLabel}: not visible`);
+      }
+      await field.fill("", { timeout: 8_000 });
+      await field.fill(value, { timeout: 8_000 });
+      const actual = (await field.inputValue().catch(() => "")).trim();
+      expect(actual, `${fieldLabel} after fill`).toBe(value);
+    }).toPass({ timeout: 90_000, intervals: [400, 800, 1500, 2500] });
+  }
+
+  /** Wait for Address Details shell and no blocking loader before field entry (UDP-T3791). */
+  async waitForAddressStepReadyForInput(): Promise<void> {
+    this.logStep("Wait for Address Details ready for input");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.waitForPhysicalAddressStep();
   }
 
   /**
@@ -654,18 +709,19 @@ export class DOAddressDetailsPage extends BasePage {
       if (
         !(await y.isVisible({ timeout: 2000 }).catch(() => false)) ||
         !(await m.isVisible({ timeout: 2000 }).catch(() => false))
-      )
+      ) {
         return false;
+      }
       if (!(await y.isEnabled().catch(() => true))) return false;
       if (!(await m.isEnabled().catch(() => true))) return false;
-      await y.click();
-      await y.fill("");
-      await y.fill(year);
-      await m.click();
-      await m.fill("");
-      await m.fill(month);
-      await m.press("Tab").catch(() => {});
-      return true;
+      try {
+        await this.fillAddressFieldResilient(y, year, "Time at Address years");
+        await this.fillAddressFieldResilient(m, month, "Time at Address months");
+        await m.press("Tab").catch(() => {});
+        return true;
+      } catch {
+        return false;
+      }
     };
 
     /**
@@ -739,8 +795,8 @@ export class DOAddressDetailsPage extends BasePage {
         (await yCol.isVisible().catch(() => false)) &&
         (await mCol.isVisible().catch(() => false))
       ) {
-        await yCol.fill(year);
-        await mCol.fill(month);
+        await this.fillAddressFieldResilient(yCol, year, "Time at Address years");
+        await this.fillAddressFieldResilient(mCol, month, "Time at Address months");
         return;
       }
     }
@@ -941,103 +997,34 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   /**
-   * SelectorHub: years = `form > div > div:nth-child(4) > text > … > input`;
-   * months = `form > div > div:nth-child(6) > text > … > input` (gen-card physical form).
+   * Time at Address — years + months on the active physical / business address card.
+   * Uses {@link fillYearsMonthsInBlock} (no brittle hub `click()` — loader-safe for UDP-T3791).
    */
   async timeAtAddress(year: string, month: string) {
     this.logStep(
       `Set time at address: years ${this.stepValueDisplay(year)}, months ${this.stepValueDisplay(month)}`,
     );
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+
     const bizRoot = this.businessPhysicalAddressRoot;
     if (await bizRoot.isVisible({ timeout: 5000 }).catch(() => false)) {
       await bizRoot.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-      const yBiz = this.businessPhysicalTimeYearsInput();
-      const mBiz = this.businessPhysicalTimeMonthsInput();
-      const yBizOk = await yBiz.isVisible({ timeout: 6000 }).catch(() => false);
-      const mBizOk = await mBiz.isVisible({ timeout: 6000 }).catch(() => false);
-      if (yBizOk && mBizOk) {
-        await yBiz.click();
-        await yBiz.fill("");
-        await yBiz.fill(year);
-        await mBiz.click();
-        await mBiz.fill("");
-        await mBiz.fill(month);
-        await mBiz.press("Tab").catch(() => {});
-        return;
-      }
       await this.fillYearsMonthsInBlock(bizRoot, year, month);
+      this.logStep(
+        `Time at address complete: years ${this.stepValueDisplay(year)}, months ${this.stepValueDisplay(month)}`,
+      );
       return;
     }
 
     const root = await this.activePhysicalHost();
     await root.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
-
-    // Primary: gen-card Time at Address rows (child(4)=years, child(6)=months — matches recorded SelectorHub path).
-    const yearHubInput = this.physicalTimeAtHubInput(4, root);
-    const monthHubInput = this.physicalTimeAtHubInput(6, root);
-    const yearHubOk = await yearHubInput
-      .isVisible({ timeout: 4000 })
-      .catch(() => false);
-    const monthHubOk = await monthHubInput
-      .isVisible({ timeout: 4000 })
-      .catch(() => false);
-    if (yearHubOk && monthHubOk) {
-      await yearHubInput.click();
-      await yearHubInput.fill("");
-      await yearHubInput.fill(year);
-      await monthHubInput.click();
-      await monthHubInput.fill("");
-      await monthHubInput.fill(month);
-      await monthHubInput.press("Tab").catch(() => {});
-      return;
-    }
-
-    const labelled = root.getByLabel(/Time at Address/i);
-    let n = 0;
-    try {
-      n = await labelled.count();
-    } catch (err) {
-      if (this.page && typeof this.page.isClosed === "function" && this.page.isClosed()) {
-        throw new Error(
-          "Time at Address: page or context was closed before counting labelled inputs",
-        );
-      }
-      // If counting failed for another reason, treat as none found and continue with fallbacks
-      n = 0;
-    }
-    if (n >= 2) {
-      await labelled.nth(0).fill(year);
-      await labelled.nth(1).fill(month);
-      return;
-    }
-
-    const yearHub = root
-      .locator(
-        "form > div > div:nth-child(4) > text > div > div:nth-child(2) > input",
-      )
-      .first();
-    if ((await yearHub.isVisible().catch(() => false)) && n === 1) {
-      await yearHub.fill(year);
-      await labelled.first().fill(month);
-      return;
-    }
-    if ((await yearHub.isVisible().catch(() => false)) && n === 0) {
-      const monthHub = root
-        .locator(
-          "form > div > div:nth-child(6) > text > div > div:nth-child(2) > input",
-        )
-        .first();
-      if (await monthHub.isVisible().catch(() => false)) {
-        await yearHub.fill(year);
-        await monthHub.fill(month);
-        return;
-      }
-    }
-
     const block = (await root.isVisible().catch(() => false))
       ? root
       : this.physicalAddressBlock;
     await this.fillYearsMonthsInBlock(block, year, month);
+    this.logStep(
+      `Time at address complete: years ${this.stepValueDisplay(year)}, months ${this.stepValueDisplay(month)}`,
+    );
   }
 
   /** Underlined gen-text field in the Physical Address card. */
@@ -2664,8 +2651,33 @@ export class DOAddressDetailsPage extends BasePage {
       .catch(() => {});
   }
 
+  /**
+   * Standard Quote Customer Details header stepper — jump to a section (e.g. **Address Details**, **Financial Position**).
+   */
+  async clickCustomerDetailsStepTab(stepLabel: string | RegExp): Promise<void> {
+    const label =
+      typeof stepLabel === "string"
+        ? new RegExp(stepLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+        : stepLabel;
+    this.logStep(`Click Customer Details step tab: ${label.source}`);
+    const root = this.page.locator("app-quote-details, app-standard-quote").first();
+    const tab = root
+      .getByRole("tab", { name: label })
+      .or(root.getByRole("link", { name: label }))
+      .or(root.locator(':text-is("2. Address Details")').filter({ visible: true }))
+      .or(this.page.getByText(label).filter({ visible: true }))
+      .first();
+    await tab.waitFor({ state: "visible", timeout: 30_000 });
+    await tab.scrollIntoViewIfNeeded();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await tab.click({ timeout: 15_000 });
+    await this.page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  }
+
   async clickNextButton() {
     this.logStep("Click Next Button");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     await this.nextButton.scrollIntoViewIfNeeded();
     for (let i = 0; i < 120; i++) {
@@ -2673,6 +2685,7 @@ export class DOAddressDetailsPage extends BasePage {
       await this.page.waitForTimeout(500);
     }
     await this.nextButton.click();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
   }
 
   /**
@@ -2897,46 +2910,6 @@ export class DOAddressDetailsPage extends BasePage {
     }
   }
 
-  /** Individual / Co-Borrower — **Copy Primary Borrower's address?** toggle label (UDP-T3754). */
-  /** Individual co-borrower / guarantor — `<label> Copy primary borrower's address? </label>` + `p-inputswitch`. */
-  copyPrimaryBorrowerAddressToggleLabel(): Locator {
-    return this.page
-      .locator("label")
-      .filter({ hasText: /Copy primary borrower.?s address/i })
-      .first()
-      .or(this.page.getByText(/Copy primary borrower.?s address/i).first());
-  }
-
-  private copyPrimaryBorrowerAddressToggleRow(): Locator {
-    const label = this.copyPrimaryBorrowerAddressToggleLabel();
-    return label
-      .locator("xpath=ancestor::*[.//p-inputswitch or .//*[@role='switch']][1]")
-      .first();
-  }
-
-  async isCopyPrimaryBorrowerAddressToggleVisible(timeoutMs = 8_000): Promise<boolean> {
-    return this.copyPrimaryBorrowerAddressToggleLabel()
-      .isVisible({ timeout: timeoutMs })
-      .catch(() => false);
-  }
-
-  /** Toggle is shown and defaults to **No** (`aria-checked="false"` / switch off). */
-  async expectCopyPrimaryBorrowerAddressToggleDefaultNo(): Promise<void> {
-    this.logStep("Expect Copy Primary Borrower Address Toggle Default No");
-    const label = this.copyPrimaryBorrowerAddressToggleLabel();
-    await expect(label).toBeVisible({ timeout: 20_000 });
-    const row = this.copyPrimaryBorrowerAddressToggleRow();
-    const switchInput = row.locator('input[role="switch"]').first();
-    if (await switchInput.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      await expect(switchInput).toHaveAttribute("aria-checked", "false", { timeout: 12_000 });
-      return;
-    }
-    const slider = row.locator(".p-inputswitch-slider").first();
-    await expect.poll(async () => !(await this.isPrimeSwitchOnFromSliderOrHost(slider)), {
-      timeout: 12_000,
-    }).toBe(true);
-  }
-
   /** Outlined **Save** on Address Details (validates current + previous cards on this step). */
   async clickSaveAddressDetails(): Promise<void> {
     this.logStep("Click Save Address Details");
@@ -2987,9 +2960,11 @@ export class DOAddressDetailsPage extends BasePage {
 
   async waitForPhysicalAddressStep() {
     this.logStep("Wait For Physical Address Step");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
     const soleSearch = this.page
       .locator("app-sole-trade")
       .locator('input[name="physicalSearchValue"]')
+      .filter({ visible: true })
       .first();
     if (await soleSearch.isVisible({ timeout: 8000 }).catch(() => false)) {
       await soleSearch.waitFor({ state: "visible", timeout: 120000 });
@@ -2999,6 +2974,39 @@ export class DOAddressDetailsPage extends BasePage {
       state: "visible",
       timeout: 120000,
     });
+  }
+
+  /** UDP-T3792 — header stepper shows **2. Address Details** after direct tab navigation. */
+  async expectAddressDetailsSectionHeaderVisible(): Promise<void> {
+    this.logStep('Expect "2. Address Details" header visible');
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await expect(this.page.locator(':text-is("2. Address Details")')).toBeVisible({
+      timeout: 30_000,
+    });
+    await this.waitForPhysicalAddressStep();
+  }
+
+  /** UDP-T3791 — **Previous** from Employment lands on Address Details (not Employment / Financial). */
+  async expectAddressDetailsStepVisible(): Promise<void> {
+    this.logStep("Expect Address Details step visible");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.waitForPhysicalAddressStep();
+    const physicalHost = this.page.locator("app-physical-address").filter({ visible: true }).first();
+    await expect(physicalHost).toBeVisible({ timeout: 20_000 });
+    const stepMarker = this.page
+      .locator(':text-is("2. Address Details")')
+      .or(this.page.getByText(/^Physical Address$/i))
+      .or(this.page.getByText(/^Address Details$/i))
+      .first();
+    await expect(stepMarker).toBeVisible({ timeout: 20_000 });
+    await expect(
+      this.page
+        .locator("app-employment-details")
+        .filter({ visible: true })
+        .getByRole("textbox", { name: /Employer Name/i })
+        .filter({ visible: true })
+        .first(),
+    ).not.toBeVisible({ timeout: 10_000 });
   }
 
   // -------------------------------------------------------------------------
