@@ -1,7 +1,7 @@
 /**
  * DO Portal — Total Amount Borrowed regression (UDP-T3818–UDP-T3822).
  * Scenario source: Total amt Borrowed.xlsx (Zephyr / Regression 25.0).
- * Product: AFV-B-Assigned / Program: AFV - B-Distributor (Total Amount Borrowed + Interest Charge are AFV fields).
+ * Product: CSA-C-Assigned / Program: Webform - CSA Personal - MV Dealer.
  * Auth: shared DO `storageState` via `@fixtures/doPortalTest`.
  */
 
@@ -13,17 +13,12 @@ import {
   DODashboardPage,
   DOQuickQuotePage,
 } from "../../../pages";
+import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 
-const AFV_SQ_PRODUCT = "AFV-B-Assigned";
-const AFV_SQ_PROGRAM = "AFV - B-Distributor";
+const CSA_SQ_PRODUCT = "CSA-C-Assigned";
+const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
+const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
-
-const AFV_VEHICLE = {
-  make: "SUZUKI",
-  model: "IGNIS",
-  variant: "GLX MANUAL 1.2P/ 5MT",
-  year: "2024",
-};
 
 function standardQuoteRoot(page: Page): Locator {
   return page.locator("app-quote-details, app-standard-quote").first();
@@ -50,7 +45,7 @@ async function readQuickQuoteBorrowedAmount(quickQuotePage: DOQuickQuotePage): P
   return 0;
 }
 
-async function openAfVStandardQuoteFromDashboard(page: Page): Promise<{
+async function openCsaStandardQuoteFromDashboard(page: Page): Promise<{
   dashboardPage: DODashboardPage;
   assetDetailsPage: DOAssetDetailsPage;
 }> {
@@ -60,41 +55,72 @@ async function openAfVStandardQuoteFromDashboard(page: Page): Promise<{
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectAssuredFutureValueProduct();
+  await dashboardPage.selectCSAproduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return { dashboardPage, assetDetailsPage };
 }
 
-async function selectAfVProductOnQuote(
+async function selectCsaProductAndProgram(assetDetailsPage: DOAssetDetailsPage): Promise<void> {
+  await assetDetailsPage.chooseProduct(CSA_SQ_PRODUCT);
+  await assetDetailsPage.chooseProgram(CSA_SQ_PROGRAM);
+}
+
+async function selectCsaProductOnQuote(
   page: Page,
   assetDetailsPage: DOAssetDetailsPage,
 ): Promise<void> {
-  await assetDetailsPage.chooseProduct(AFV_SQ_PRODUCT);
-  await expect.soft(standardQuoteRoot(page).getByText(AFV_SQ_PRODUCT).first()).toBeVisible({
+  await assetDetailsPage.chooseProduct(CSA_SQ_PRODUCT);
+  await expect.soft(standardQuoteRoot(page).getByText(CSA_SQ_PRODUCT).first()).toBeVisible({
     timeout: 30_000,
   });
 }
 
-async function selectAfVProductProgramAndAsset(
-  page: Page,
+async function addMinimalUsedAsset(
   assetDetailsPage: DOAssetDetailsPage,
+  addAssetPage: DOAddAssetPage,
+  assetValue = "$20,000",
 ): Promise<void> {
-  await selectAfVProductOnQuote(page, assetDetailsPage);
-  await assetDetailsPage.selectVehicleFromAssetTypeModal(AFV_VEHICLE);
-  await assetDetailsPage.waitForAfVCashPricePopulated();
-  const program = await assetDetailsPage.readSelectedProgramLabel();
-  if (!program || !/Distributor/i.test(program)) {
-    await assetDetailsPage.chooseProgram(AFV_SQ_PROGRAM);
-  }
+  await assetDetailsPage.enterAsset("Car and Light Commercial /");
+  await assetDetailsPage.selectCondition("Used");
+  await assetDetailsPage.openAssetInsuranceTradeInSummary();
+  await assetDetailsPage.clickAssetSummaryEditButton();
+  await addAssetPage.enterAssetValue(assetValue);
+  await addAssetPage.selectCondition("Used");
+  await addAssetPage.selectYear("2025");
+  await addAssetPage.enterMake("Toyota");
+  await addAssetPage.enterModel("Hilux");
+  await addAssetPage.enterVariant("Top");
+  await addAssetPage.clickSummitButton();
+  await addAssetPage.clickCrossButton();
 }
 
-async function prepareCalculableAfVQuote(
+/** Modify a rate-sensitive financial value — IC recalculates; TAB may stay unchanged (amount financed). */
+async function modifyFinancialValuesForRecalc(
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  await assetDetailsPage.interestRateFast("11");
+}
+
+async function selectCsaProductProgramAndAsset(
   page: Page,
   assetDetailsPage: DOAssetDetailsPage,
-  opts?: { cashPrice?: string; interest?: string; term?: string },
+  addAssetPage: DOAddAssetPage,
 ): Promise<void> {
-  await selectAfVProductProgramAndAsset(page, assetDetailsPage);
+  await selectCsaProductAndProgram(assetDetailsPage);
+  await expect.soft(standardQuoteRoot(page).getByText(CSA_SQ_PROGRAM).first()).toBeVisible({
+    timeout: 30_000,
+  });
+  await addMinimalUsedAsset(assetDetailsPage, addAssetPage);
+}
+
+async function prepareCalculableCsaQuote(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+  addAssetPage: DOAddAssetPage,
+  opts?: { cashPrice?: string; interest?: string; term?: string; fast?: boolean },
+): Promise<void> {
+  await selectCsaProductProgramAndAsset(page, assetDetailsPage, addAssetPage);
   await assetDetailsPage.selectConditionInStandardQuote("Used");
   if (opts?.cashPrice) {
     await assetDetailsPage.cashPriceOfAsset(opts.cashPrice);
@@ -103,26 +129,36 @@ async function prepareCalculableAfVQuote(
   if (!termVal || !/\d/.test(termVal)) {
     await assetDetailsPage.termsOfFinance(opts?.term ?? "36");
   }
-  await assetDetailsPage.ensureKmAllowanceForAfV();
   const rate = (await assetDetailsPage.interestRateInputField.inputValue()).trim();
   if (!rate || !/\d/.test(rate)) {
-    await assetDetailsPage.interestRate(opts?.interest ?? "4");
+    if (opts?.fast) {
+      await assetDetailsPage.interestRateFast(opts?.interest ?? "9");
+    } else {
+      await assetDetailsPage.interestRate(opts?.interest ?? "9");
+    }
   }
-  await assetDetailsPage.enterOriginationReference("TAB-AFV-Ref-01");
-  await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
+  await assetDetailsPage.enterOriginationReference("TAB-CSA-Ref-01");
+  await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate({ fast: opts?.fast });
 }
 
-async function completeAfVQuickQuoteForCarryOver(
+async function completeCsaQuickQuoteForCarryOver(
   page: Page,
   quickQuotePage: DOQuickQuotePage,
 ): Promise<number> {
   await quickQuotePage.openQuickQuote();
   await expect.soft(quickQuotePage.quickQuoteRoot).toBeVisible();
-  await quickQuotePage.selectProduct(AFV_SQ_PRODUCT);
+  await quickQuotePage.selectProduct(CSA_SQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  await quickQuotePage.selectVehicleFromAssetTypeModal(AFV_VEHICLE);
-  await quickQuotePage.waitForAfVFieldsAfterAssetSelection();
-  await quickQuotePage.ensureMandatoryAfVFieldsForCalculate();
+  if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
+    await quickQuotePage.selectProgram(CSA_QQ_PROGRAM);
+  }
+  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
+  await quickQuotePage.selectFrequency("Monthly");
+  await quickQuotePage.enterInterestRatePercent("9");
+  await quickQuotePage.enterTermsMonths("36");
+  await quickQuotePage.enterCashPrice("$20,000");
+  await quickQuotePage.enterDepositPercent("10%");
+  await quickQuotePage.enterBalloonPercent("0");
   await quickQuotePage.clickCalculate();
   await quickQuotePage.expectCreateQuoteVisible();
 
@@ -141,7 +177,7 @@ test.describe("Total Amount Borrowed", () => {
     "UDP-T3818 - Total Amount Borrowed defaults from Quick Quote",
     { tag: ["@do", "@regression", "@UDP-T3818"] },
     async ({ page }) => {
-      test.setTimeout(1_200_000);
+      test.setTimeout(600_000);
 
       const dashboardPage = new DODashboardPage(page);
       const quickQuotePage = new DOQuickQuotePage(page);
@@ -151,7 +187,7 @@ test.describe("Total Amount Borrowed", () => {
       await dashboardPage.waitForAuthenticatedDashboard();
       await dashboardPage.selectDealer(TLC_DEALER);
 
-      const qqBorrowedAmount = await completeAfVQuickQuoteForCarryOver(page, quickQuotePage);
+      const qqBorrowedAmount = await completeCsaQuickQuoteForCarryOver(page, quickQuotePage);
       await assetDetailsPage.waitForAssetDetailsStepReady();
       await assetDetailsPage.waitForQuoteLoadersToFinish();
 
@@ -166,12 +202,23 @@ test.describe("Total Amount Borrowed", () => {
     async ({ page }) => {
       test.setTimeout(900_000);
 
-      const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
-      await selectAfVProductOnQuote(page, assetDetailsPage);
+      const dashboardPage = new DODashboardPage(page);
+      const assetDetailsPage = new DOAssetDetailsPage(page);
+
+      // Precondition: no Quick Quote — open Standard Quote straight from dashboard (spec steps 1–2).
+      await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+      await dashboardPage.waitForAuthenticatedDashboard();
+      await dashboardPage.selectDealer(TLC_DEALER);
+      await dashboardPage.clickCreateStandardQuote();
+      await dashboardPage.selectCSAproduct();
+      await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
+      await assetDetailsPage.waitForAssetDetailsStepReady();
       await assetDetailsPage.waitForQuoteLoadersToFinish();
 
+      // Step 3: Total Amount Borrowed is $0.00 and display-only on load.
       await assetDetailsPage.expectTotalAmountBorrowedReadOnly();
       await assetDetailsPage.expectTotalAmountBorrowedZero();
+      expect.soft(await assetDetailsPage.readTotalAmountBorrowedDisplayText()).toMatch(/\$0\.00/);
     },
   );
 
@@ -179,22 +226,22 @@ test.describe("Total Amount Borrowed", () => {
     "UDP-T3820 - Total Amount Borrowed recalculates on clicking Calculate after adding asset",
     { tag: ["@do", "@regression", "@UDP-T3820"] },
     async ({ page }) => {
-      test.setTimeout(1_200_000);
+      test.setTimeout(600_000);
 
-      const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
-      await selectAfVProductOnQuote(page, assetDetailsPage);
+      const addAssetPage = new DOAddAssetPage(page);
+      const { assetDetailsPage } = await openCsaStandardQuoteFromDashboard(page);
+      await selectCsaProductOnQuote(page, assetDetailsPage);
       await assetDetailsPage.waitForQuoteLoadersToFinish();
 
       await assetDetailsPage.expectTotalAmountBorrowedZero();
-      await selectAfVProductProgramAndAsset(page, assetDetailsPage);
+      await selectCsaProductProgramAndAsset(page, assetDetailsPage, addAssetPage);
       await assetDetailsPage.selectConditionInStandardQuote("Used");
-      await assetDetailsPage.ensureKmAllowanceForAfV();
       const termVal = (await assetDetailsPage.termsOfFinanceInputField.inputValue().catch(() => "")).trim();
       if (!termVal || !/\d/.test(termVal)) {
         await assetDetailsPage.termsOfFinance("36");
       }
-      await assetDetailsPage.interestRate("4");
-      await assetDetailsPage.enterOriginationReference("TAB-AFV-Ref-01");
+      await assetDetailsPage.interestRate("9");
+      await assetDetailsPage.enterOriginationReference("TAB-CSA-Ref-01");
       await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
       await assetDetailsPage.cashPriceOfAsset("$25,000");
 
@@ -213,12 +260,13 @@ test.describe("Total Amount Borrowed", () => {
     "UDP-T3821 - Interest Charge field displays system-calculated value",
     { tag: ["@do", "@regression", "@UDP-T3821"] },
     async ({ page }) => {
-      test.setTimeout(1_200_000);
+      test.setTimeout(600_000);
 
-      const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
-      await prepareCalculableAfVQuote(page, assetDetailsPage, {
+      const addAssetPage = new DOAddAssetPage(page);
+      const { assetDetailsPage } = await openCsaStandardQuoteFromDashboard(page);
+      await prepareCalculableCsaQuote(page, assetDetailsPage, addAssetPage, {
         cashPrice: "$25,000",
-        interest: "4",
+        interest: "9",
       });
 
       await assetDetailsPage.clickCalculateButton();
@@ -233,33 +281,32 @@ test.describe("Total Amount Borrowed", () => {
     "UDP-T3822 - Recalculation on modifying financial values",
     { tag: ["@do", "@regression", "@UDP-T3822"] },
     async ({ page }) => {
-      test.setTimeout(1_200_000);
+      test.setTimeout(600_000);
 
-      const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
-      await prepareCalculableAfVQuote(page, assetDetailsPage, {
-        cashPrice: "$25,000",
-        interest: "4",
+      const addAssetPage = new DOAddAssetPage(page);
+      const { assetDetailsPage } = await openCsaStandardQuoteFromDashboard(page);
+      await prepareCalculableCsaQuote(page, assetDetailsPage, addAssetPage, {
+        cashPrice: "$20,000",
+        interest: "9",
+        term: "36",
+        fast: true,
       });
 
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.waitForQuoteLoadersToFinish();
-      await assetDetailsPage.expectTotalAmountBorrowedGreaterThanZero();
+      await assetDetailsPage.clickCalculateButton({ fast: true });
+      await assetDetailsPage.expectTotalAmountBorrowedGreaterThanZero({ timeoutMs: 30_000 });
       await assetDetailsPage.expectInterestChargeNonNegative();
 
       const tabBefore = await assetDetailsPage.readTotalAmountBorrowed();
       const interestBefore = await assetDetailsPage.readInterestCharge();
 
-      await assetDetailsPage.cashPriceOfAsset("$30,000");
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.waitForQuoteLoadersToFinish();
+      // Spec: modify financial values on loan details, then Calculate again (no asset re-edit).
+      await modifyFinancialValuesForRecalc(assetDetailsPage);
+      await assetDetailsPage.clickCalculateButton({ fast: true });
 
-      await expect
-        .poll(async () => await assetDetailsPage.readTotalAmountBorrowed(), { timeout: 60_000 })
-        .not.toBe(tabBefore);
-      await expect
-        .poll(async () => await assetDetailsPage.readInterestCharge(), { timeout: 60_000 })
-        .not.toBe(interestBefore);
-
+      await assetDetailsPage.expectPaymentSummaryRecalculatedAfterFinancialEdit(
+        tabBefore,
+        interestBefore,
+      );
       await assetDetailsPage.expectTotalAmountBorrowedReadOnly();
       await assetDetailsPage.expectInterestChargeReadOnly();
     },

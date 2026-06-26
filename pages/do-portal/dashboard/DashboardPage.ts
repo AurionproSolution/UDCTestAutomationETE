@@ -317,4 +317,93 @@ export class DODashboardPage extends BasePage {
     const action = this.quickActions.locator(`text=${actionName}`);
     await this.clickElement(action);
   }
+
+  /** Dealer dashboard listing → **Activated Loans** view (SIT: grid is on home; switch via listing-type combobox). */
+  async navigateToDealerListingActiveLoans(): Promise<void> {
+    this.logStep("Navigate To Dealer Listing Active Loans");
+    await this.waitForAppLoaderOverlayGone(120_000);
+
+    const listingType = this.page
+      .getByRole("combobox", { name: /^(Quote|Listing|Loan)$/i })
+      .first();
+    if (await listingType.isVisible({ timeout: 15_000 }).catch(() => false)) {
+      await listingType.click({ timeout: 10_000 });
+      const activated = this.page
+        .getByRole("option", { name: /Activated Loans|Active Loans/i })
+        .first();
+      if (await activated.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await activated.click({ timeout: 10_000 });
+        await this.waitForAppLoaderOverlayGone(60_000);
+        return;
+      }
+      await this.page.keyboard.press("Escape").catch(() => {});
+    }
+
+    const listingLink = this.page
+      .getByRole("link", { name: /Dealer Listing/i })
+      .or(this.page.getByRole("button", { name: /Dealer Listing/i }))
+      .or(this.sideMenu.getByText(/Dealer Listing/i))
+      .first();
+    if (await listingLink.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await listingLink.click({ timeout: 20_000 });
+      await this.waitForAppLoaderOverlayGone(60_000);
+    }
+    await this.waitForLoadingComplete(30_000);
+  }
+
+  /** Dealer dashboard → open an existing Standard Quote by Quote ID from the listing grid. */
+  async openStandardQuoteByQuoteId(quoteId: string): Promise<void> {
+    const id = quoteId.trim();
+    if (!id) {
+      throw new Error("openStandardQuoteByQuoteId: quoteId is required.");
+    }
+
+    this.logStep(`Open Standard Quote By Quote ID ${id}`);
+    await this.waitForAppLoaderOverlayGone(30_000);
+
+    const quoteLink = this.page
+      .locator(`:text-is("${id}")`)
+      .or(this.page.getByText(id, { exact: true }))
+      .first();
+    await expect(quoteLink).toBeVisible({ timeout: 45_000 });
+    await quoteLink.scrollIntoViewIfNeeded();
+    await quoteLink.click({ timeout: 20_000 });
+
+    await expect(
+      this.page.locator("app-quote-details, app-standard-quote").first(),
+    ).toBeVisible({ timeout: 120_000 });
+    this.log(`Opened Standard Quote ${id}.`);
+  }
+
+  /** Search the dealer listing grid and open **Create Settlement Quote** for a loan row. */
+  async clickCreateSettlementQuoteForLoan(regoOrVin: string): Promise<void> {
+    this.logStep(`Click Create Settlement Quote For Loan ${regoOrVin}`);
+    const search = this.page
+      .getByRole("textbox", { name: /Search Quote|Search Loan|Search/i })
+      .first();
+    if (await search.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await search.fill(regoOrVin);
+      const viewBtn = this.page.getByRole("button", { name: /^View$/i }).first();
+      if (await viewBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await viewBtn.click({ timeout: 15_000 });
+        await this.waitForAppLoaderOverlayGone(60_000);
+      }
+    }
+
+    const row = this.tableRows.filter({ hasText: new RegExp(regoOrVin, "i") }).first();
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    const rowCheckbox = row.locator('input[type="checkbox"]').first();
+    if (await rowCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await rowCheckbox.check({ force: true });
+    }
+
+    const bulkAction = this.page
+      .getByText("Create Settlement Quote", { exact: true })
+      .or(this.page.getByRole("button", { name: /Create Settlement Quote/i }))
+      .or(this.page.getByRole("link", { name: /Create Settlement Quote/i }))
+      .first();
+    await bulkAction.scrollIntoViewIfNeeded();
+    await bulkAction.click({ force: true, timeout: 20_000 });
+    await this.waitForAppLoaderOverlayGone(90_000);
+  }
 }

@@ -66,18 +66,16 @@ async function selectTlProductAndProgram(
   await quickQuotePage.selectProduct(TL_QQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
   if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-    await quickQuotePage.programDropdownTrigger.click();
-    await expect.soft(page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
-    const exact = page.getByRole("option", { name: TL_QQ_PROGRAM, exact: true });
-    if (await exact.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await exact.click();
-    } else {
+    await quickQuotePage.selectProgram(TL_QQ_PROGRAM).catch(async () => {
+      await quickQuotePage.programDropdownTrigger.click();
+      await expect.soft(page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
       const termLoan = page.getByRole("option").filter({ hasText: /Term Loan/i }).first();
       await termLoan.click({ timeout: 10_000 });
-    }
-    await page.keyboard.press("Escape");
+      await page.keyboard.press("Escape");
+    });
   }
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
+  await quickQuotePage.waitForLoadingComplete();
 }
 
 async function fillMandatoryPaymentFields(quickQuotePage: DOQuickQuotePage): Promise<void> {
@@ -85,6 +83,15 @@ async function fillMandatoryPaymentFields(quickQuotePage: DOQuickQuotePage): Pro
   await quickQuotePage.enterInterestRatePercent("9");
   await quickQuotePage.enterTermsMonths("36");
   await quickQuotePage.enterCashPrice("$20,000");
+}
+
+async function fillAllTlQuickQuoteFields(quickQuotePage: DOQuickQuotePage): Promise<void> {
+  await quickQuotePage.enterCashPrice("$25,000");
+  await quickQuotePage.enterDepositPercent("15%");
+  await quickQuotePage.enterBalloonPercent("10%");
+  await quickQuotePage.selectFrequency("Monthly");
+  await quickQuotePage.enterInterestRatePercent("11.5");
+  await quickQuotePage.enterTermsMonths("48");
 }
 
 async function calculateTlQuickQuote(quickQuotePage: DOQuickQuotePage): Promise<void> {
@@ -103,35 +110,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       await selectTlProductAndProgram(page, quickQuotePage);
-
-      await expect.soft(quickQuotePage.calculateForDropdownTrigger).toBeVisible();
-      await expect.soft(quickQuotePage.cashPriceInput).toBeVisible();
-      await expect.soft(quickQuotePage.cashPriceInput).toHaveValue("");
-      await expect.soft(quickQuotePage.depositPercentInput).toBeVisible();
-      await expect.soft(quickQuotePage.depositDollarInput).toBeVisible();
-      await expect.soft(quickQuotePage.interestRatePercentInput).toBeVisible();
-      const termsAsDropdown = await quickQuotePage.termsMonthsDropdownTrigger
-        .isVisible({ timeout: 30_000 })
-        .catch(() => false);
-      const termsAsInput =
-        !termsAsDropdown &&
-        (await quickQuotePage.termsMonthsInput.isVisible({ timeout: 15_000 }).catch(() => false));
-      await expect.soft(termsAsDropdown || termsAsInput).toBe(true);
-      await expect.soft(quickQuotePage.frequencyDropdownTrigger).toBeVisible();
-      await expect.soft(quickQuotePage.balloonPercentInput).toBeVisible();
-      await expect.soft(quickQuotePage.balloonDollarInput).toBeVisible();
-
-      const rate = (await quickQuotePage.interestRatePercentInput.inputValue().catch(() => "")).trim();
-      if (rate.length > 0) {
-        expect.soft(/\d/.test(rate)).toBeTruthy();
-      }
-      const term = await readSelectedTermMonths(quickQuotePage);
-      if (term.length > 0) {
-        expect.soft(/\d+/.test(term)).toBeTruthy();
-      }
-      if (await quickQuotePage.paymentAmountInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
-        expect.soft(await quickQuotePage.paymentAmountInputIsReadOnly()).toBeTruthy();
-      }
+      await quickQuotePage.expectTlQuickQuoteInitialFieldLayout();
     },
   );
 
@@ -374,9 +353,18 @@ test.describe("Quick Quote - TL @do @regression", () => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       await selectTlProductAndProgram(page, quickQuotePage);
-      await calculateTlQuickQuote(quickQuotePage);
+
+      await fillAllTlQuickQuoteFields(quickQuotePage);
+      await quickQuotePage.clickCalculate();
+      await quickQuotePage.expectCreateQuoteVisible();
+
+      const cashBeforeReset = (await quickQuotePage.cashPriceInput.inputValue().catch(() => "")).trim();
+      expect.soft(parseCurrency(cashBeforeReset)).toBeGreaterThan(0);
+
       await quickQuotePage.clickReset();
-      await quickQuotePage.expectQuickQuoteResetToDefaultState(TL_QQ_PRODUCT);
+      await quickQuotePage.expectQuickQuoteResetToDefaultState({
+        clearedProductProgram: true,
+      });
     },
   );
 
@@ -387,44 +375,27 @@ test.describe("Quick Quote - TL @do @regression", () => {
       test.setTimeout(600_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       await selectTlProductAndProgram(page, quickQuotePage);
-      const programLabel = await quickQuotePage.readSelectedProgramLabel();
       await calculateTlQuickQuote(quickQuotePage);
-
-      const cashPrice = (await quickQuotePage.cashPriceInput.inputValue().catch(() => "")).trim();
-      const term = (await quickQuotePage.readTermsMonthsValue()).trim();
-      const depositPct = (await quickQuotePage.depositPercentInput.inputValue().catch(() => ""))
-        .replace(/%/g, "")
-        .trim();
-      const depositDollars = (await quickQuotePage.depositDollarInput.inputValue().catch(() => "")).trim();
-      const balloonPct = (await quickQuotePage.balloonPercentInput.inputValue().catch(() => ""))
-        .replace(/%/g, "")
-        .trim();
-      const rate = (await quickQuotePage.interestRatePercentInput.inputValue().catch(() => "")).trim();
 
       await quickQuotePage.clickCreateQuote();
       const standardRoot = page.locator("app-quote-details, app-standard-quote").first();
       await expect.soft(standardRoot).toBeVisible({ timeout: 120_000 });
-      await expect.soft(page.getByText(/Term Loan|TL/i).first()).toBeVisible();
+      await expect.soft(page.getByText(/Term Loan|TL-B/i).first()).toBeVisible();
 
       const assetDetailsPage = new DOAssetDetailsPage(page);
       await assetDetailsPage.waitForAssetDetailsStepReady();
-      if (programLabel.length > 0) {
-        await assetDetailsPage.expectProductProgramCarriedFromQuickQuote(
-          TL_QQ_PRODUCT,
-          programLabel,
-        );
-      }
+      await assetDetailsPage.expectProductProgramCarriedFromQuickQuote(
+        TL_QQ_PRODUCT,
+        TL_QQ_PROGRAM,
+      );
       await assetDetailsPage.expectFinanceCarriedFromQuickQuote({
-        cashPrice: new RegExp(cashPrice.replace(/[$,]/g, "") || "20000"),
-        term: new RegExp(term.replace(/\D/g, "") || "36"),
+        cashPrice: /20[, ]?000|20000/,
+        term: /36/,
         frequencyText: /Monthly/i,
-        interestRate: new RegExp(rate.replace(/[^\d.]/g, "") || "9"),
-        depositPercent: depositPct.length > 0 ? new RegExp(depositPct) : /10/,
-        depositDollars:
-          depositDollars.length > 0
-            ? new RegExp(depositDollars.replace(/[$,]/g, ""))
-            : /2[, ]?000|2000/,
-        balloonPercent: balloonPct.length > 0 ? new RegExp(balloonPct) : /^0$/,
+        interestRate: /9/,
+        depositPercent: /10/,
+        depositDollars: /2[, ]?000|2000/,
+        balloonPercent: /^0(\.0+)?$/,
       });
     },
   );

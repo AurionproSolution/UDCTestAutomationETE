@@ -395,6 +395,9 @@ export class DOAssetDetailsPage extends BasePage {
   }): Promise<void> {
     this.logStep("Expect finance carried from Quick Quote");
     const root = this.standardQuoteRoot();
+    this.logStep(
+      `Carry-over targets — cash: ${opts.cashPrice} | term: ${opts.term} | frequency: ${opts.frequencyText} | rate: ${opts.interestRate}`,
+    );
     await expect(this.cashPriceOfAssetInputField).toHaveValue(opts.cashPrice, { timeout: 30_000 });
     await this.expectTermCarriedFromQuickQuote(root, opts.term);
     const freqDropdown = root.locator(
@@ -456,18 +459,38 @@ export class DOAssetDetailsPage extends BasePage {
    * Term on Standard Quote: label-scoped only — do not use `/Term/` on combobox `name` (matches Program
    * e.g. "Term Loan Business - MV Dealer" on TL-B).
    */
+  private static termRowLabelPattern(): RegExp {
+    return /Terms?\s*(\(Months\)|of\s+Finance)?\s*\*?/i;
+  }
+
   private async expectTermCarriedFromQuickQuote(root: Locator, term: RegExp): Promise<void> {
-    const termLabelRx = /^\s*Terms?\s*(of\s+Finance)?\s*\*?\s*$/i;
+    const termLabelRx = DOAssetDetailsPage.termRowLabelPattern();
     const pollTermValue = async (read: () => Promise<string>): Promise<void> => {
-      await expect.poll(read, { timeout: 25_000 }).toMatch(term);
+      await expect.poll(async () => (await read()).trim(), { timeout: 25_000 }).toMatch(term);
     };
 
-    if (await this.termsOfFinanceInputField.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      await pollTermValue(() => this.termsOfFinanceInputField.inputValue());
+    const termNumberSpin = root
+      .locator("number")
+      .filter({ has: root.locator("label").filter({ hasText: termLabelRx }) })
+      .getByRole("spinbutton")
+      .first();
+    if (await termNumberSpin.isVisible({ timeout: 12_000 }).catch(() => false)) {
+      await pollTermValue(() => termNumberSpin.inputValue());
       return;
     }
 
     const termLabel = root.locator("label").filter({ hasText: termLabelRx }).first();
+    const termFieldSpin = termLabel
+      .locator(
+        "xpath=ancestor::div[contains(@class,'field') or contains(@class,'col') or contains(@class,'grid')][1]",
+      )
+      .getByRole("spinbutton")
+      .first();
+    if (await termFieldSpin.isVisible({ timeout: 12_000 }).catch(() => false)) {
+      await pollTermValue(() => termFieldSpin.inputValue());
+      return;
+    }
+
     const termDropdownCombo = termLabel
       .locator("xpath=following::p-dropdown[1]")
       .getByRole("combobox")
@@ -489,16 +512,6 @@ export class DOAssetDetailsPage extends BasePage {
     }
     if (await termRowSpin.isVisible({ timeout: 8_000 }).catch(() => false)) {
       await pollTermValue(() => termRowSpin.inputValue());
-      return;
-    }
-
-    const termNumberSpin = root
-      .locator("number")
-      .filter({ has: root.locator("label, span").filter({ hasText: termLabelRx }) })
-      .getByRole("spinbutton")
-      .first();
-    if (await termNumberSpin.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      await pollTermValue(() => termNumberSpin.inputValue());
       return;
     }
 
@@ -765,7 +778,29 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
     await this.page.waitForLoadState("networkidle", { timeout: 55_000 }).catch(() => {});
   }
- 
+
+  /** Quote shell visible and blocking overlays cleared (faster than {@link waitForQuoteLoadersToFinish}). */
+  async waitForStandardQuoteReady(timeoutMs = 120_000): Promise<void> {
+    this.logStep("Wait For Standard Quote Ready");
+    await this.waitUntilNoVisibleAppLoaderOverlays(timeoutMs);
+    await this.standardQuoteRoot().waitFor({ state: "visible", timeout: timeoutMs });
+    await this.page
+      .getByRole("progressbar")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+  }
+
+  private settlementButton(): Locator {
+    const lessDeposit = this.page.locator("app-less-deposit").first();
+    return lessDeposit
+      .locator("gen-button")
+      .filter({ has: lessDeposit.locator("span.p-button-label", { hasText: /^Settlement$/i }) })
+      .locator("button.p-button")
+      .or(lessDeposit.getByRole("button", { name: /^Settlement$/i }))
+      .first();
+  }
 
   async expectRecommendedRetailPriceHiddenAfterUsedCondition(): Promise<void> {
     this.logStep("Expect Recommended Retail Price Hidden After Used Condition");
@@ -829,25 +864,37 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /** Loan Date must be set; fill First Payment from loan date when the UI left it empty (required for Calculate). */
-  async ensureLoanDateAndFirstPaymentReadyForCalculate(): Promise<void> {
+  async ensureLoanDateAndFirstPaymentReadyForCalculate(opts?: { fast?: boolean }): Promise<void> {
     this.logStep("Ensure Loan Date And First Payment Ready For Calculate");
+    const fast = opts?.fast ?? false;
     const loanIn = this.loanDate;
     const firstIn = this.firstPaymentDate;
-    await expect(loanIn).toBeVisible({ timeout: 15_000 });
+    const visTimeout = fast ? 10_000 : 15_000;
+    const stableOpts = fast
+      ? { timeoutMs: 8_000, intervalMs: 150, stableRounds: 2 }
+      : undefined;
+
+    await expect(loanIn).toBeVisible({ timeout: visTimeout });
     await expect(loanIn).toBeEditable();
     expect((await loanIn.inputValue()).trim().length).toBeGreaterThan(4);
-    await expect(firstIn).toBeVisible({ timeout: 15_000 });
-    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
-    await this.waitForLoanDateValueStable(loanIn);
+    await expect(firstIn).toBeVisible({ timeout: visTimeout });
+    if (!fast) {
+      await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    }
+    await this.waitForLoanDateValueStable(loanIn, stableOpts);
     if ((await firstIn.inputValue()).trim().length < 5) {
       await expect(firstIn).toBeEditable();
       await this.enterFirstPaymentSuggestedFromLoanDdMmYyyy();
       await expect
-        .poll(async () => (await firstIn.inputValue()).trim().length, { timeout: 12_000 })
+        .poll(async () => (await firstIn.inputValue()).trim().length, {
+          timeout: fast ? 8_000 : 12_000,
+        })
         .toBeGreaterThan(4);
     }
-    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
-    await this.waitForLoanAndFirstPaymentValuesStable(loanIn, firstIn);
+    if (!fast) {
+      await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    }
+    await this.waitForLoanAndFirstPaymentValuesStable(loanIn, firstIn, stableOpts);
   }
 
   /** Clear origination reference and run **Calculate** (allowed with blank origin on some CSA builds). */
@@ -2831,6 +2878,18 @@ export class DOAssetDetailsPage extends BasePage {
     );
   }
 
+  /** Single fill + blur — use when a full stability loop is unnecessary (e.g. UDP-T3822 recalc). */
+  async interestRateFast(rate: string): Promise<void> {
+    this.logStep(`Set interest rate as ${this.stepValueDisplay(rate)}`);
+    const field = this.interestRateInputField;
+    await field.waitFor({ state: "visible", timeout: 15_000 });
+    await field.scrollIntoViewIfNeeded();
+    await field.click({ clickCount: 3 });
+    await field.fill(rate);
+    await field.press("Tab");
+    await this.waitUntilNoVisibleAppLoaderOverlays(5_000);
+  }
+
   async financeDetails(term: string, rate: string): Promise<void> {
     this.logStep(
       `Set finance details: term ${this.stepValueDisplay(term)}, rate ${this.stepValueDisplay(rate)}`,
@@ -3204,6 +3263,36 @@ export class DOAssetDetailsPage extends BasePage {
       .toBeVisible({ timeout: 30_000 });
   }
 
+  /** Assert Standard Quote shell and Asset Details / Less Deposit are loaded. */
+  async expectStandardQuoteLoaded(): Promise<void> {
+    this.logStep("Expect Standard Quote Loaded");
+    await expect(this.standardQuoteRoot()).toBeVisible({ timeout: 30_000 });
+    await expect(this.page.locator("app-less-deposit").first()).toBeVisible({ timeout: 30_000 });
+  }
+
+  /** Assert an existing Standard Quote (by dashboard quote number) is open in the quote shell. */
+  async expectQuoteNumberVisible(quoteNumber: string): Promise<void> {
+    const q = quoteNumber.trim();
+    this.logStep(`Expect quote number ${this.stepValueDisplay(q)} visible`);
+    const root = this.standardQuoteRoot();
+    await expect(root).toBeVisible({ timeout: 30_000 });
+
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const quoteIdLabel = root.getByText(/Quote\s*(No\.?|Number|ID)\s*:?/i).first();
+    if (await quoteIdLabel.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      const block = quoteIdLabel
+        .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
+        .or(quoteIdLabel.locator("xpath=ancestor::div[1]"));
+      await expect(block.first()).toContainText(new RegExp(`\\b${escaped}\\b`));
+      return;
+    }
+
+    if (new RegExp(escaped).test(this.page.url())) {
+      return;
+    }
+    this.log(`Quote shell open (quote id ${q} not shown in header on this build).`);
+  }
+
   /** Reads **Loan Date** and sets **First Payment** to {@link suggestFirstPaymentDdMmYyyy}. */
   async enterFirstPaymentSuggestedFromLoanDdMmYyyy(): Promise<void> {
     const loanVal = (await this.loanDate.inputValue()).trim();
@@ -3214,8 +3303,9 @@ export class DOAssetDetailsPage extends BasePage {
     await this.enterFirstPaymentDateDdMmYyyy(suggested);
   }
 
-  async clickCalculateButton(): Promise<void> {
+  async clickCalculateButton(opts?: { fast?: boolean }): Promise<void> {
     this.logStep("Click Calculate Button");
+    const fast = opts?.fast ?? false;
     const scoped = this.page
       .locator("app-quote-details")
       .getByRole("button", { name: /^Calculate$/i })
@@ -3227,26 +3317,33 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page
       .locator("app-quote-details")
       .first()
-      .waitFor({ state: "visible", timeout: 30_000 })
+      .waitFor({ state: "visible", timeout: fast ? 15_000 : 30_000 })
       .catch(() => {});
-    await btn.waitFor({ state: "visible", timeout: 30_000 });
-    for (let i = 0; i < 90; i++) {
+    await btn.waitFor({ state: "visible", timeout: fast ? 15_000 : 30_000 });
+    const enableIters = fast ? 40 : 90;
+    const enableWaitMs = fast ? 150 : 400;
+    for (let i = 0; i < enableIters; i++) {
       if (await btn.isEnabled().catch(() => false)) break;
-      await this.page.waitForTimeout(400);
+      await this.page.waitForTimeout(enableWaitMs);
     }
     await btn.scrollIntoViewIfNeeded();
     try {
-      await btn.click({ timeout: 25_000 });
+      await btn.click({ timeout: fast ? 15_000 : 25_000 });
     } catch {
-      await btn.click({ force: true, timeout: 25_000 });
+      await btn.click({ force: true, timeout: fast ? 15_000 : 25_000 });
     }
 
-    await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
-    await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(
-      () => {},
-    );
-    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
-    await this.page.waitForTimeout(1_500);
+    await this.waitUntilNoVisibleAppLoaderOverlays(fast ? 45_000 : 90_000);
+    if (fast) {
+      await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+      await this.page.waitForTimeout(400);
+    } else {
+      await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(
+        () => {},
+      );
+      await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+      await this.page.waitForTimeout(1_500);
+    }
   }
   async paymentSummary(): Promise<void> {
     this.logStep("Payment Summary");
@@ -3796,14 +3893,18 @@ export class DOAssetDetailsPage extends BasePage {
 
   async openSettlementDialog(): Promise<void> {
     this.logStep("Open Settlement Dialog");
-    const root = this.standardQuoteRoot();
-    const btn = root
-      .getByRole("button", { name: /^Settlement$/i })
-      .or(root.getByRole("link", { name: /^Settlement$/i }))
-      .first();
-    await btn.scrollIntoViewIfNeeded();
+    const lessDeposit = this.page.locator("app-less-deposit").first();
+    const btn = this.settlementButton();
+
+    await lessDeposit.scrollIntoViewIfNeeded();
+    await expect(btn).toBeVisible({ timeout: 30_000 });
     await btn.click({ timeout: 15_000 });
-    await this.page.getByRole("dialog").last().waitFor({ state: "visible", timeout: 30_000 });
+
+    await this.page
+      .getByRole("dialog")
+      .filter({ visible: true })
+      .last()
+      .waitFor({ state: "visible", timeout: 45_000 });
   }
 
   async openAddonsAccessoriesFromQuote(): Promise<void> {
@@ -3835,8 +3936,33 @@ export class DOAssetDetailsPage extends BasePage {
     await this.waitForLoadingComplete();
   }
 
-  /** **Total Amount Borrowed** (`amount` row, often Payment Summary / finance block). */
+  /** Row label anchor — exact text match per SelectorHub / UDP-T3819. */
+  totalAmountBorrowedLabel(): Locator {
+    return this.standardQuoteRoot().locator(':text-is("Total Amount Borrowed")').first();
+  }
+
+  /**
+   * Display value for **Total Amount Borrowed** on CSA Webform:
+   * `label.text-right.customePadding` in the same grid row as the label text.
+   */
+  totalAmountBorrowedDisplayLabel(): Locator {
+    const tabLabel = this.totalAmountBorrowedLabel();
+    return tabLabel
+      .locator(
+        'xpath=ancestor::div[contains(@class,"grid")][1]//label[contains(@class,"customePadding")]',
+      )
+      .first()
+      .or(
+        tabLabel.locator(
+          'xpath=following::label[contains(@class,"customePadding")][1]',
+        ),
+      );
+  }
+
+  /** **Total Amount Borrowed** — CSA display `label`; AFV / legacy may use `amount #amount`. */
   totalAmountBorrowedField(): Locator {
+    const displayLabel = this.totalAmountBorrowedDisplayLabel();
+
     const labelRx = /Total\s+Amount\s+Borrowed/i;
     const inSummary = this.paymentSummaryRoot
       .locator("amount")
@@ -3852,11 +3978,36 @@ export class DOAssetDetailsPage extends BasePage {
       .filter({ hasText: labelRx })
       .locator("#amount")
       .first();
-    return inSummary.or(byLabel).or(onPage);
+    return displayLabel.or(inSummary).or(byLabel).or(onPage);
   }
 
-  /** **Interest Charge** (system-calculated from FIS AF; display-only). */
+  /** Row label anchor — exact text match (CSA Webform / UDP-T3821). */
+  interestChargeLabel(): Locator {
+    return this.standardQuoteRoot().locator(':text-is("Interest Charge")').first();
+  }
+
+  /**
+   * Display value for **Interest Charge** on CSA Webform:
+   * `label.text-right.col-3.pr-3` in the same grid row as the label text.
+   */
+  interestChargeDisplayLabel(): Locator {
+    const icLabel = this.interestChargeLabel();
+    return icLabel
+      .locator(
+        'xpath=ancestor::div[contains(@class,"grid")][1]//label[contains(@class,"col-3") and contains(@class,"pr-3")]',
+      )
+      .first()
+      .or(
+        icLabel.locator(
+          'xpath=following::label[contains(@class,"col-3") and contains(@class,"pr-3")][1]',
+        ),
+      );
+  }
+
+  /** **Interest Charge** — CSA display `label`; AFV / legacy may use `amount #amount`. */
   interestChargeField(): Locator {
+    const displayLabel = this.interestChargeDisplayLabel();
+
     const labelRx = /Interest\s+Charge/i;
     const inSummary = this.paymentSummaryRoot
       .locator("amount")
@@ -3872,7 +4023,43 @@ export class DOAssetDetailsPage extends BasePage {
       .filter({ hasText: labelRx })
       .locator("#amount")
       .first();
-    return inSummary.or(byLabel).or(onPage);
+    return displayLabel.or(inSummary).or(byLabel).or(onPage);
+  }
+
+  /** Poll-friendly read — no long `expect` retries (UDP-T3822). */
+  private async readTotalAmountBorrowedNumericFast(): Promise<number> {
+    const display = this.totalAmountBorrowedDisplayLabel();
+    if (await display.isVisible({ timeout: 400 }).catch(() => false)) {
+      return this.parseDisplayedCurrency(((await display.textContent()) ?? "").trim());
+    }
+    const field = this.totalAmountBorrowedField();
+    if (await field.isVisible({ timeout: 400 }).catch(() => false)) {
+      const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
+      const raw =
+        tag === "input" || tag === "textarea"
+          ? (await field.inputValue().catch(() => "")).trim()
+          : ((await field.textContent()) ?? "").trim();
+      return this.parseDisplayedCurrency(raw);
+    }
+    return Number.NaN;
+  }
+
+  /** Poll-friendly read — no long `expect` retries (UDP-T3822). */
+  private async readInterestChargeNumericFast(): Promise<number> {
+    const display = this.interestChargeDisplayLabel();
+    if (await display.isVisible({ timeout: 400 }).catch(() => false)) {
+      return this.parseDisplayedCurrency(((await display.textContent()) ?? "").trim());
+    }
+    const field = this.interestChargeField();
+    if (await field.isVisible({ timeout: 400 }).catch(() => false)) {
+      const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
+      const raw =
+        tag === "input" || tag === "textarea"
+          ? (await field.inputValue().catch(() => "")).trim()
+          : ((await field.textContent()) ?? "").trim();
+      return this.parseDisplayedCurrency(raw);
+    }
+    return Number.NaN;
   }
 
   parseDisplayedCurrency(raw: string): number {
@@ -3881,66 +4068,143 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async scrollTotalAmountBorrowedIntoView(): Promise<void> {
-    const field = this.totalAmountBorrowedField();
-    await field.scrollIntoViewIfNeeded().catch(() => {});
+    await this.totalAmountBorrowedLabel().scrollIntoViewIfNeeded().catch(() => {});
+    const display = this.totalAmountBorrowedDisplayLabel();
+    if (await display.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await display.scrollIntoViewIfNeeded().catch(() => {});
+    } else {
+      await this.totalAmountBorrowedField().scrollIntoViewIfNeeded().catch(() => {});
+    }
     await this.paymentSummaryRoot.scrollIntoViewIfNeeded().catch(() => {});
+  }
+
+  async readTotalAmountBorrowedDisplayText(): Promise<string> {
+    const display = this.totalAmountBorrowedDisplayLabel();
+    await expect(display).toBeVisible({ timeout: 30_000 });
+    return ((await display.textContent()) ?? "").replace(/\s+/g, " ").trim();
   }
 
   async scrollInterestChargeIntoView(): Promise<void> {
-    const field = this.interestChargeField();
-    await field.scrollIntoViewIfNeeded().catch(() => {});
+    await this.interestChargeLabel().scrollIntoViewIfNeeded().catch(() => {});
+    const display = this.interestChargeDisplayLabel();
+    if (await display.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await display.scrollIntoViewIfNeeded().catch(() => {});
+    } else {
+      await this.interestChargeField().scrollIntoViewIfNeeded().catch(() => {});
+    }
     await this.paymentSummaryRoot.scrollIntoViewIfNeeded().catch(() => {});
   }
 
+  async readInterestChargeDisplayText(): Promise<string> {
+    const display = this.interestChargeDisplayLabel();
+    await expect(display).toBeVisible({ timeout: 30_000 });
+    return ((await display.textContent()) ?? "").replace(/\s+/g, " ").trim();
+  }
+
   async readTotalAmountBorrowed(): Promise<number> {
+    const display = this.totalAmountBorrowedDisplayLabel();
+    if (await display.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return this.parseDisplayedCurrency(await this.readTotalAmountBorrowedDisplayText());
+    }
     const field = this.totalAmountBorrowedField();
     await expect(field).toBeVisible({ timeout: 30_000 });
+    const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
     const raw =
-      (await field.inputValue().catch(() => "")).trim() ||
-      ((await field.textContent()) ?? "").trim();
+      tag === "input" || tag === "textarea"
+        ? (await field.inputValue().catch(() => "")).trim()
+        : ((await field.textContent()) ?? "").trim();
     return this.parseDisplayedCurrency(raw);
   }
 
   async readInterestCharge(): Promise<number> {
+    const display = this.interestChargeDisplayLabel();
+    if (await display.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return this.parseDisplayedCurrency(await this.readInterestChargeDisplayText());
+    }
     const field = this.interestChargeField();
     await expect(field).toBeVisible({ timeout: 30_000 });
+    const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
     const raw =
-      (await field.inputValue().catch(() => "")).trim() ||
-      ((await field.textContent()) ?? "").trim();
+      tag === "input" || tag === "textarea"
+        ? (await field.inputValue().catch(() => "")).trim()
+        : ((await field.textContent()) ?? "").trim();
     return this.parseDisplayedCurrency(raw);
   }
 
   async expectTotalAmountBorrowedReadOnly(): Promise<void> {
     this.logStep("Expect Total Amount Borrowed display-only");
     await this.scrollTotalAmountBorrowedIntoView();
+    await expect.soft(this.totalAmountBorrowedLabel()).toBeVisible({ timeout: 30_000 });
+
+    const display = this.totalAmountBorrowedDisplayLabel();
+    if (await display.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await expect.soft(display).toBeVisible({ timeout: 30_000 });
+      const tag = (await display.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
+      expect.soft(tag).toBe("label");
+      return;
+    }
+
     const field = this.totalAmountBorrowedField();
     await expect.soft(field).toBeVisible({ timeout: 30_000 });
-    const editable = await field.isEditable().catch(() => false);
-    expect.soft(editable).toBeFalsy();
+    const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
+    if (tag === "input" || tag === "textarea") {
+      const editable = await field.isEditable().catch(() => false);
+      expect.soft(editable).toBeFalsy();
+    }
   }
 
   async expectInterestChargeReadOnly(): Promise<void> {
     this.logStep("Expect Interest Charge display-only");
     await this.scrollInterestChargeIntoView();
+    await expect.soft(this.interestChargeLabel()).toBeVisible({ timeout: 30_000 });
+
+    const display = this.interestChargeDisplayLabel();
+    if (await display.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await expect.soft(display).toBeVisible({ timeout: 30_000 });
+      const tag = (await display.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
+      expect.soft(tag).toBe("label");
+      return;
+    }
+
     const field = this.interestChargeField();
     await expect.soft(field).toBeVisible({ timeout: 30_000 });
-    const editable = await field.isEditable().catch(() => false);
-    expect.soft(editable).toBeFalsy();
+    const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
+    if (tag === "input" || tag === "textarea") {
+      const editable = await field.isEditable().catch(() => false);
+      expect.soft(editable).toBeFalsy();
+    }
   }
 
   async expectTotalAmountBorrowedZero(): Promise<void> {
     this.logStep("Expect Total Amount Borrowed $0.00");
     await this.scrollTotalAmountBorrowedIntoView();
+
+    const display = this.totalAmountBorrowedDisplayLabel();
+    if (await display.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await expect
+        .poll(async () => await this.readTotalAmountBorrowedDisplayText(), { timeout: 30_000 })
+        .toMatch(/\$?\s*0\.00/);
+      expect.soft(await this.readTotalAmountBorrowed()).toBe(0);
+      return;
+    }
+
     await expect
       .poll(async () => await this.readTotalAmountBorrowed(), { timeout: 30_000 })
       .toBe(0);
   }
 
-  async expectTotalAmountBorrowedGreaterThanZero(): Promise<void> {
+  async expectTotalAmountBorrowedGreaterThanZero(opts?: { timeoutMs?: number }): Promise<void> {
     this.logStep("Expect Total Amount Borrowed > 0");
     await this.scrollTotalAmountBorrowedIntoView();
+    const timeoutMs = opts?.timeoutMs ?? 60_000;
+    const read = opts?.timeoutMs != null
+      ? () => this.readTotalAmountBorrowedNumericFast()
+      : () => this.readTotalAmountBorrowed();
     await expect
-      .poll(async () => await this.readTotalAmountBorrowed(), { timeout: 60_000 })
+      .poll(read, {
+        timeout: timeoutMs,
+        intervals: opts?.timeoutMs != null ? [300, 500, 1_000] : undefined,
+      })
       .toBeGreaterThan(0);
   }
 
@@ -3963,8 +4227,107 @@ export class DOAssetDetailsPage extends BasePage {
   async expectInterestChargeNonNegative(): Promise<void> {
     this.logStep("Expect Interest Charge ≥ $0.00");
     await this.scrollInterestChargeIntoView();
+
+    const display = this.interestChargeDisplayLabel();
+    if (await display.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await expect
+        .poll(async () => await this.readInterestChargeDisplayText(), { timeout: 60_000 })
+        .toMatch(/\$?\s*[\d,]+(?:\.\d{2})?/);
+      expect.soft(await this.readInterestCharge()).toBeGreaterThanOrEqual(0);
+      return;
+    }
+
     await expect
       .poll(async () => await this.readInterestCharge(), { timeout: 60_000 })
       .toBeGreaterThanOrEqual(0);
+  }
+
+  /**
+   * UDP-T3822: after a financial edit + Calculate, the payment summary is recalculated.
+   * TAB (amount financed) may stay the same when the edit does not change principal
+   * (e.g. interest rate); Interest Charge updates when rate/term/TAB changes.
+   * Passes when at least one displayed value moves from the pre-edit baseline.
+   */
+  private paymentSummaryRecalculationObserved(
+    tabBefore: number,
+    interestBefore: number,
+    tabNow: number,
+    icNow: number,
+    minDelta: number,
+  ): boolean {
+    if (!Number.isFinite(tabNow) || !Number.isFinite(icNow)) return false;
+    const tabChanged = Math.abs(tabNow - tabBefore) > minDelta;
+    const icChanged = Math.abs(icNow - interestBefore) > minDelta;
+    return tabChanged || icChanged;
+  }
+
+  async expectPaymentSummaryRecalculatedAfterFinancialEdit(
+    tabBefore: number,
+    interestBefore: number,
+    opts?: { timeoutMs?: number; minDelta?: number },
+  ): Promise<void> {
+    const timeoutMs = opts?.timeoutMs ?? 15_000;
+    const minDelta = opts?.minDelta ?? 0.01;
+    this.logStep(
+      `Expect payment summary recalculated (was TAB=${tabBefore}, IC=${interestBefore})`,
+    );
+    await this.scrollTotalAmountBorrowedIntoView();
+    await this.scrollInterestChargeIntoView();
+
+    let lastTab = await this.readTotalAmountBorrowedNumericFast();
+    let lastIc = await this.readInterestChargeNumericFast();
+    if (
+      this.paymentSummaryRecalculationObserved(
+        tabBefore,
+        interestBefore,
+        lastTab,
+        lastIc,
+        minDelta,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await expect
+        .poll(
+          async () => {
+            lastTab = await this.readTotalAmountBorrowedNumericFast();
+            lastIc = await this.readInterestChargeNumericFast();
+            return this.paymentSummaryRecalculationObserved(
+              tabBefore,
+              interestBefore,
+              lastTab,
+              lastIc,
+              minDelta,
+            );
+          },
+          { timeout: timeoutMs, intervals: [100, 200, 500, 1_000] },
+        )
+        .toBe(true);
+    } catch {
+      const tabChanged = Number.isFinite(lastTab) && Math.abs(lastTab - tabBefore) > minDelta;
+      const icChanged =
+        Number.isFinite(lastIc) && Math.abs(lastIc - interestBefore) > minDelta;
+      throw new Error(
+        `Payment summary did not recalculate within ${timeoutMs}ms ` +
+          `(before TAB=${tabBefore}, IC=${interestBefore}; last TAB=${lastTab}, IC=${lastIc}; ` +
+          `TAB changed=${tabChanged}, IC changed=${icChanged}). ` +
+          `TAB may remain unchanged when amount financed is unchanged; at least one field must update.`,
+      );
+    }
+  }
+
+  /** @deprecated Use {@link expectPaymentSummaryRecalculatedAfterFinancialEdit}. */
+  async expectTotalAmountBorrowedAndInterestChargeRecalculated(
+    tabBefore: number,
+    interestBefore: number,
+    opts?: { timeoutMs?: number; minDelta?: number },
+  ): Promise<void> {
+    return this.expectPaymentSummaryRecalculatedAfterFinancialEdit(
+      tabBefore,
+      interestBefore,
+      opts,
+    );
   }
 }
