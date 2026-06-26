@@ -7,6 +7,22 @@
 import { Locator, Page, expect } from "@playwright/test";
 import { BasePage } from "../../common/BasePage";
 
+export type DOQuickQuoteResetExpectation = {
+  /** CSA-style: product stays selected after Reset. */
+  productName?: string;
+  programName?: string;
+  financeBaseline?: {
+    rate?: string;
+    term?: string;
+    frequency?: string;
+  };
+  /**
+   * TL-style: Reset clears Product/Program to the QQ open placeholder (`--Select--`)
+   * and collapses the finance panel.
+   */
+  clearedProductProgram?: boolean;
+};
+
 export type DOQuickQuoteData = {
   product: string;
   program: string;
@@ -250,12 +266,24 @@ export class DOQuickQuotePage extends BasePage {
     this.leasePaymentDisplay = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Lease Payment')]/following::label[1]",
     );
-    this.paymentDisplay = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::label[1]",
-    );
-    this.paymentAmountInput = this.quickQuoteForm.locator(
-      "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::input[1]",
-    );
+    this.paymentDisplay = this.quickQuoteForm
+      .locator(
+        "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::label[1]",
+      )
+      .or(
+        this.quickQuoteForm.locator(
+          "xpath=.//*[normalize-space(.)='Payment' or starts-with(normalize-space(.), 'Payment')][not(contains(., 'Lease'))][not(contains(., 'Calculate'))]/following-sibling::*[1]",
+        ),
+      );
+    this.paymentAmountInput = this.quickQuoteForm
+      .locator(
+        "xpath=.//*[normalize-space(.)='Payment' or starts-with(normalize-space(.), 'Payment')][not(contains(., 'Lease'))][not(contains(., 'Calculate'))]/following-sibling::input[not(@currencymask)][1]",
+      )
+      .or(
+        this.quickQuoteForm.locator(
+          "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::input[not(@currencymask)][1]",
+        ),
+      );
     this.checkDisableCheckbox = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'checkDisable')]/preceding::p-checkbox[1]"
     );
@@ -1496,6 +1524,101 @@ export class DOQuickQuotePage extends BasePage {
       .toBeTruthy();
   }
 
+  /**
+   * TC_QQ_001TL / UDP-T4188: TL Quick Quote mirrors CSA field layout after product + program selection.
+   */
+  async expectTlQuickQuoteInitialFieldLayout(): Promise<void> {
+    this.logStep("Expect TL Quick Quote initial field layout (CSA QQ behaviour)");
+
+    await expect
+      .poll(async () => {
+        const label = await this.readCalculateForOnQuote(0);
+        return /Payment/i.test(label);
+      }, { timeout: 25_000 })
+      .toBeTruthy();
+
+    const calcForDropdownVisible = await this.calculateForDropdownTrigger
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
+    if (calcForDropdownVisible) {
+      const hostCls =
+        (await this.calculateForDropdownHost.getAttribute("class").catch(() => "")) ?? "";
+      if (hostCls.includes("p-disabled")) {
+        await expect.soft(this.calculateForDropdownTrigger).toBeDisabled();
+      }
+    }
+
+    await expect.soft(this.cashPriceInput).toBeVisible({ timeout: 25_000 });
+    await this.expectCashPriceDefaultsBlank();
+
+    await expect.soft(this.depositPercentInput).toBeVisible();
+    await expect.soft(this.depositDollarInput).toBeVisible();
+    const depositPct = (await this.depositPercentInput.inputValue().catch(() => "")).trim();
+    expect.soft(DOQuickQuotePage.isBlankPercentDisplay(depositPct)).toBeTruthy();
+    const depositDollars = (await this.depositDollarInput.inputValue().catch(() => "")).trim();
+    expect.soft(DOQuickQuotePage.isBlankCurrencyDisplay(depositDollars)).toBeTruthy();
+
+    await expect.soft(this.interestRatePercentInput).toBeVisible();
+    await expect
+      .poll(async () => {
+        const rate = (await this.interestRatePercentInput.inputValue().catch(() => "")).trim();
+        return rate.length > 0 && /\d/.test(rate);
+      }, { timeout: 25_000 })
+      .toBeTruthy();
+
+    await expect
+      .poll(async () => {
+        const dropdownVisible = await this.termsMonthsDropdownTrigger
+          .isVisible({ timeout: 1_000 })
+          .catch(() => false);
+        const inputVisible =
+          !dropdownVisible &&
+          (await this.termsMonthsInput.isVisible({ timeout: 1_000 }).catch(() => false));
+        return dropdownVisible || inputVisible;
+      }, { timeout: 25_000 })
+      .toBeTruthy();
+    await expect
+      .poll(async () => {
+        const term = await this.readTermsMonthsValue();
+        return term.length > 0 && /\d+/.test(term);
+      }, { timeout: 25_000 })
+      .toBeTruthy();
+
+    await expect.soft(this.frequencyDropdownTrigger).toBeVisible();
+    await this.expectFrequencyDefaultsFromProgram();
+
+    await expect.soft(this.balloonPercentInput).toBeVisible();
+    await expect.soft(this.balloonDollarInput).toBeVisible();
+    const balloonPct = (await this.balloonPercentInput.inputValue().catch(() => "")).trim();
+    expect.soft(DOQuickQuotePage.isBlankPercentDisplay(balloonPct)).toBeTruthy();
+    const balloonDollars = (await this.balloonDollarInput.inputValue().catch(() => "")).trim();
+    expect.soft(DOQuickQuotePage.isBlankCurrencyDisplay(balloonDollars)).toBeTruthy();
+
+    await this.expectPaymentDisplayedAndNotEditable();
+  }
+
+  /** Payment is a static display (TL) or a read-only input — not the Cash Price `currencymask` field. */
+  async expectPaymentDisplayedAndNotEditable(): Promise<void> {
+    this.logStep("Expect Payment displayed and not editable");
+    const displayVisible = await this.paymentDisplay.isVisible({ timeout: 5_000 }).catch(() => false);
+    if (displayVisible) {
+      await expect.soft(this.paymentDisplay).toBeVisible();
+      return;
+    }
+
+    const paymentInputVisible = await this.paymentAmountInput
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false);
+    if (paymentInputVisible) {
+      expect.soft(await this.paymentAmountInputIsReadOnly()).toBeTruthy();
+      return;
+    }
+
+    await expect
+      .soft(this.quickQuoteForm.getByText(/^Payment$/i).first())
+      .toBeVisible({ timeout: 10_000 });
+  }
+
   async clearFrequencySelection(): Promise<void> {
     this.logStep("Clear Frequency selection");
     const host = this.frequencyDropdownTrigger.locator("xpath=ancestor::p-dropdown[1]");
@@ -1666,9 +1789,30 @@ export class DOQuickQuotePage extends BasePage {
 
   /**
    * TC_QQ_011 / UDP-T4198: after **Reset**, user-entered finance inputs clear (TL often shows `$0.00` not `""`).
+   * When TL Reset clears Product/Program, the finance panel hides — do not read stale hidden inputs.
    */
   async expectUserEnteredFieldsClearedAfterReset(): Promise<void> {
     this.logStep("Expect user-entered Quick Quote fields cleared after Reset");
+    await this.logQuickQuoteResetState();
+
+    await expect.soft(this.createQuoteButton).toBeHidden({ timeout: 15_000 });
+
+    const product = await this.readPrimeDropdownLabel(this.productDropdownTrigger);
+    const productUnselected = DOQuickQuotePage.isUnselectedDropdownLabel(product);
+    const cashVisible = await this.cashPriceInput.isVisible({ timeout: 3_000 }).catch(() => false);
+
+    if (productUnselected) {
+      this.logStep(
+        "Product/Program cleared to placeholder after Reset — finance panel collapsed; user-entered values no longer displayed",
+      );
+      return;
+    }
+
+    if (!cashVisible) {
+      this.logStep("Cash Price field not visible after Reset — finance panel collapsed");
+      return;
+    }
+
     await expect
       .poll(async () => {
         const cash = (await this.cashPriceInput.inputValue().catch(() => "")).trim();
@@ -1685,19 +1829,135 @@ export class DOQuickQuotePage extends BasePage {
     const balloonPct = (await this.balloonPercentInput.inputValue().catch(() => "")).trim();
     expect.soft(DOQuickQuotePage.isBlankPercentDisplay(balloonPct)).toBeTruthy();
 
-    await expect.soft(this.createQuoteButton).toBeHidden({ timeout: 15_000 });
+    const balloonDollars = (await this.balloonDollarInput.inputValue().catch(() => "")).trim();
+    expect.soft(DOQuickQuotePage.isBlankCurrencyDisplay(balloonDollars)).toBeTruthy();
+
+    await expect
+      .poll(async () => {
+        const payment = (await this.readPaymentDisplayValue()).trim();
+        return DOQuickQuotePage.isBlankCurrencyDisplay(payment);
+      }, { timeout: 25_000 })
+      .toBeTruthy();
+  }
+
+  async logQuickQuoteResetState(): Promise<void> {
+    const product = await this.readPrimeDropdownLabel(this.productDropdownTrigger);
+    const program = await this.readSelectedProgramLabel();
+    const cashVisible = await this.cashPriceInput.isVisible({ timeout: 1_000 }).catch(() => false);
+    const cash = cashVisible
+      ? (await this.cashPriceInput.inputValue().catch(() => "")).trim()
+      : "(hidden)";
+    const payment = (await this.readPaymentDisplayValue()).trim() || "(blank)";
+    const paymentInputVisible = await this.paymentAmountInput
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    const paymentReadOnly = paymentInputVisible
+      ? await this.paymentAmountInputIsReadOnly().catch(() => false)
+      : "n/a";
+    this.logStep(
+      `Reset snapshot — product: "${product}" | program: "${program}" | cash: "${cash}" | payment: "${payment}" | paymentInput visible: ${paymentInputVisible} readonly: ${paymentReadOnly}`,
+    );
+  }
+
+  static isUnselectedDropdownLabel(label: string): boolean {
+    const t = label.trim();
+    if (t.length === 0) {
+      return true;
+    }
+    return /^--\s*select\s*--$/i.test(t) || /^select$/i.test(t) || /^choose/i.test(t);
+  }
+
+  async readPaymentDisplayValue(): Promise<string> {
+    const displayVisible = await this.paymentDisplay.isVisible({ timeout: 1_000 }).catch(() => false);
+    if (displayVisible) {
+      return (await this.paymentDisplay.innerText().catch(() => "")).trim();
+    }
+    const inputVisible = await this.paymentAmountInput.isVisible({ timeout: 1_000 }).catch(() => false);
+    if (inputVisible) {
+      return (await this.paymentAmountInput.inputValue().catch(() => "")).trim();
+    }
+    return "";
+  }
+
+  /** After Reset, program-default rate / term / frequency are restored (not user overrides). */
+  async expectFinanceBaselineRestored(baseline: {
+    rate?: string;
+    term?: string;
+    frequency?: string;
+  }): Promise<void> {
+    this.logStep("Expect finance fields restored to program baseline after Reset");
+    if (baseline.term) {
+      const expectedTerm = baseline.term.replace(/\D/g, "");
+      await expect
+        .poll(async () => {
+          const term = (await this.readTermsMonthsValue()).replace(/\D/g, "");
+          return term.length > 0 && term === expectedTerm;
+        }, { timeout: 25_000 })
+        .toBeTruthy();
+    }
+    if (baseline.frequency) {
+      const freqRx = new RegExp(
+        baseline.frequency.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        "i",
+      );
+      await expect
+        .poll(async () => {
+          const label = await this.readFrequencyLabel();
+          return label.length > 0 && freqRx.test(label);
+        }, { timeout: 25_000 })
+        .toBeTruthy();
+    }
+    if (baseline.rate) {
+      const expectedRate = DOQuickQuotePage.normalizePercentValue(baseline.rate);
+      await expect
+        .poll(async () => {
+          const rate = (await this.interestRatePercentInput.inputValue().catch(() => "")).trim();
+          const actual = DOQuickQuotePage.normalizePercentValue(rate);
+          return Number.isFinite(actual) && Math.abs(actual - expectedRate) < 0.01;
+        }, { timeout: 25_000 })
+        .toBeTruthy();
+    }
+  }
+
+  static normalizePercentValue(raw: string): number {
+    const n = Number.parseFloat(raw.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(n) ? n : Number.NaN;
   }
 
   /** TC_QQ_011: Quick Quote returns to default product/program; entered values cleared. */
-  async expectQuickQuoteResetToDefaultState(productName?: string): Promise<void> {
+  async expectQuickQuoteResetToDefaultState(
+    expectation?: string | DOQuickQuoteResetExpectation,
+  ): Promise<void> {
     this.logStep("Expect Quick Quote reset to default product/program state");
+    const opts: DOQuickQuoteResetExpectation =
+      typeof expectation === "string" ? { productName: expectation } : (expectation ?? {});
+
     await expect.soft(this.productDropdownTrigger).toBeVisible();
-    if (productName) {
-      const label = await this.readPrimeDropdownLabel(this.productDropdownTrigger);
-      const escaped = productName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      expect.soft(label).toMatch(new RegExp(escaped, "i"));
+    await expect.soft(this.programDropdownTrigger).toBeVisible();
+    await this.logQuickQuoteResetState();
+
+    const product = await this.readPrimeDropdownLabel(this.productDropdownTrigger);
+    const program = await this.readSelectedProgramLabel();
+
+    if (opts.clearedProductProgram) {
+      expect.soft(DOQuickQuotePage.isUnselectedDropdownLabel(product)).toBeTruthy();
+      expect.soft(DOQuickQuotePage.isUnselectedDropdownLabel(program)).toBeTruthy();
+    } else {
+      if (opts.productName) {
+        const escaped = opts.productName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        expect.soft(product).toMatch(new RegExp(escaped, "i"));
+      }
+      if (opts.programName) {
+        const escaped = opts.programName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        expect.soft(program).toMatch(new RegExp(escaped, "i"));
+      }
     }
+
     await this.expectUserEnteredFieldsClearedAfterReset();
+
+    if (!opts.clearedProductProgram && opts.financeBaseline) {
+      await this.expectFinanceBaselineRestored(opts.financeBaseline);
+    }
   }
 
   /**

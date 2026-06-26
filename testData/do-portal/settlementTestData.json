@@ -1,0 +1,38 @@
+{
+  "dealer": "Armstrong Prestige Wellington",
+  "products": {
+    "csa": { "product": "CSA-C-Assigned", "program": "Webform - CSA Personal - MV Dealer" },
+    "tl": { "product": "TL-B-Assigned", "program": "Term Loan Business - MV Dealer" },
+    "afv": { "product": "AFV-B-Assigned" },
+    "fl": { "product": "Finance Lease - Business Asg", "program": "Finance Lease Business - MV Dealer" },
+    "ol": { "product": "Operating Lease - Business Asg", "program": "Operating Lease Business - MV Dealer" }
+  },
+  "loanLookup": {
+    "validRegoSameDealer": "BAGGED",
+    "validVinSameDealer": "",
+    "validRegoDifferentDealer": "",
+    "validVinDifferentDealer": "",
+    "invalidRegoOrVin": "ZZZZ99",
+    "arrearsRegoOrVin": "",
+    "afvActivatedLoanRegoOrVin": "",
+    "consumerLoanRegoOrVin": "",
+    "businessLoanRegoOrVin": "BAGGED",
+    "refinanceLoanRegoOrVin": "",
+    "cciRefundZeroLoanRegoOrVin": "",
+    "commissionClawbackLoanRegoOrVin": ""
+  },
+  "dealerListing": {
+    "activatedLoanRegoOrVin": "BAGGED",
+    "secondSettlementRegoOrVin": ""
+  },
+  "existingQuotes": {
+    "settlementFromAssetDetails": "2361"
+  },
+  "fieldSamples": {
+    "validRego": "BAGGED",
+    "validRegoMax6Alphanumeric": "ABC123",
+    "invalidRegoSpecialChars": "AB@#12",
+    "validVin": "1HGBH41JXMN109186",
+    "invalidVinSpecialChars": "VIN-123@ABC"
+  }
+}

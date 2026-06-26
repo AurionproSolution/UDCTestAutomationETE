@@ -160,12 +160,11 @@ export class DOAddAssetPage extends BasePage {
     await input.scrollIntoViewIfNeeded();
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     const digits = this.normalizeAssetValueDigits(value);
-    await input.click({ timeout: 30_000 });
-    await input.press("Control+A");
+    await input.click({ clickCount: 3, timeout: 30_000 });
     await input.press("Backspace");
     await input.pressSequentially(digits, { delay: 35 });
     await input.press("Tab");
-    await this.page.waitForTimeout(400);
+    await this.page.waitForTimeout(300);
   }
   async selectCondition(condition: string): Promise<void> {
     this.logStep(`Selected condition: ${this.stepValueDisplay(condition)}`);
@@ -351,7 +350,12 @@ export class DOAddAssetPage extends BasePage {
     await this.clickSummitButton();
   }
   async clickCrossButton(): Promise<void> {
+    const visible = await this.crossButton.isVisible({ timeout: 5_000 }).catch(() => false);
+    if (!visible) {
+      this.logStep("Add Asset dialog already closed after Submit — skip close (cross)");
+      return;
+    }
     this.logStep("Clicked close (cross) on Add Asset");
-    await this.crossButton.click();
+    await this.crossButton.click({ timeout: 15_000 });
   }
 }
