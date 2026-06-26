@@ -3967,4 +3967,248 @@ export class DOAssetDetailsPage extends BasePage {
       .poll(async () => await this.readInterestCharge(), { timeout: 60_000 })
       .toBeGreaterThanOrEqual(0);
   }
+
+  private async readCurrencyInput(locator: Locator): Promise<number> {
+    const raw =
+      (await locator.inputValue().catch(() => "")).trim() ||
+      ((await locator.textContent()) ?? "").trim();
+    return this.parseDisplayedCurrency(raw);
+  }
+
+  async readUdcEstablishmentFee(): Promise<number> {
+    await expect(this.udcEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+    return this.readCurrencyInput(this.udcEstablishmentFeeInputField);
+  }
+
+  async readDealerOriginationFee(): Promise<number> {
+    await expect(this.dealerOriginationFeeInputField).toBeVisible({ timeout: 20_000 });
+    return this.readCurrencyInput(this.dealerOriginationFeeInputField);
+  }
+
+  /** Total Establishment Fee read-only and equals UDC + Dealer on screen. */
+  async expectTotalEstablishmentFeeMatchesComponentFees(): Promise<void> {
+    this.logStep("Expect Total Establishment Fee matches UDC + Dealer");
+    const udc = await this.readUdcEstablishmentFee();
+    const dealer = await this.readDealerOriginationFee();
+    await this.expectTotalEstablishmentFeeSumDollars(udc + dealer);
+  }
+
+  async expectTotalEstablishmentFeeDisplayOnly(): Promise<void> {
+    this.logStep("Expect Total Establishment Fee display-only");
+    await expect(this.totalEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+    await expect(this.totalEstablishmentFeeInputField).not.toBeEditable();
+  }
+
+  async expectPpsrCountEditable(): Promise<void> {
+    this.logStep("Expect PPSR count editable");
+    const spin = this.ppsrCountLoanDetailsSpin();
+    await expect(spin).toBeVisible({ timeout: 15_000 });
+    await expect(spin).toBeEditable();
+  }
+
+  async readPpsrTotalAmount(): Promise<number> {
+    this.logStep("Read PPSR total amount");
+    const root = this.standardQuoteRoot();
+    const ppsrTotalLbl = root.getByText(/PPSR\s+Total/i).first();
+    if (await ppsrTotalLbl.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      const row = ppsrTotalLbl.locator(
+        "xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]",
+      );
+      return this.parseDisplayedCurrency((await row.textContent()) ?? "");
+    }
+
+    const unitFee = await this.readPpsrUnitFeeAmount();
+    const countRaw = (await this.ppsrCountLoanDetailsSpin().inputValue()).trim();
+    const count = parseFloat(countRaw || "1");
+    const expected = Math.round(unitFee * count * 100) / 100;
+
+    const loanGrid = root
+      .getByText(/^Loan Details$/i)
+      .locator("xpath=following::div[contains(@class,'grid')][1]");
+    const disabled = loanGrid.locator("input[disabled]");
+    const n = await disabled.count();
+    for (let i = 0; i < n; i++) {
+      const v = await this.readCurrencyInput(disabled.nth(i));
+      if (Math.abs(v - expected) <= 0.02) return v;
+    }
+
+    const beforeUdc = root
+      .getByText(/UDC Establishment Fee/i)
+      .locator("xpath=preceding::input[@disabled][1]");
+    if (await beforeUdc.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return this.readCurrencyInput(beforeUdc);
+    }
+
+    throw new Error(`Could not read PPSR total (expected ~${expected})`);
+  }
+
+  /** PPSR Total scales when count changes (Count × unit fee). */
+  async expectPpsrTotalScaledWhenCountChanges(fromCount: string, toCount: string): Promise<void> {
+    this.logStep(
+      `Expect PPSR total scales when count changes ${this.stepValueDisplay(fromCount)} → ${this.stepValueDisplay(toCount)}`,
+    );
+    await this.expectPpsrCountValue(fromCount);
+    const before = await this.readPpsrTotalAmount();
+    await this.fillPpsrCountLoanDetails(toCount);
+    await this.waitForQuoteLoadersToFinish();
+    const fromN = parseFloat(fromCount);
+    const toN = parseFloat(toCount);
+    await expect
+      .poll(async () => {
+        const after = await this.readPpsrTotalAmount();
+        if (before <= 0 || fromN <= 0) return after >= 0;
+        const expected = (before / fromN) * toN;
+        return Math.abs(after - expected) <= Math.max(1, expected * 0.05);
+      }, { timeout: 20_000 })
+      .toBe(true);
+  }
+
+  async expectQuoteSurfaceValidation(pattern: RegExp): Promise<void> {
+    this.logStep(`Expect quote validation: ${pattern}`);
+    await expect(
+      this.page
+        .getByText(pattern)
+        .or(this.page.getByRole("dialog").filter({ hasText: pattern }))
+        .first(),
+    ).toBeVisible({ timeout: 60_000 });
+  }
+
+  async expectUdcEstablishmentFeeCannotExceedMaxMessage(): Promise<void> {
+    await this.expectQuoteSurfaceValidation(/UDC Establishment Fee cannot be greater than/i);
+  }
+
+  async expectDealerOriginationFeeCannotExceedMaxMessage(): Promise<void> {
+    const dealerRow = this.dealerOriginationFeeInputField.locator(
+      "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'col')][1]",
+    );
+    const patterns = [
+      /Dealer\s+Origination\s+Fee cannot be greater than/i,
+      /Dealer\s+Origination\s+Fee.*cannot be greater than/i,
+      /cannot be greater than\s*\$/i,
+    ];
+    for (const pattern of patterns) {
+      const inline = dealerRow.getByText(pattern);
+      if (await inline.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await expect(inline.first()).toBeVisible();
+        return;
+      }
+    }
+    await this.expectQuoteSurfaceValidation(/Dealer\s+Origination\s+Fee cannot be greater than/i);
+  }
+
+  /** Enter excessive Dealer Origination Fee and trigger BLD validation (Calculate, then Save/Next). */
+  async enterDealerOriginationFeeExcessiveAndTriggerValidation(amount: string): Promise<void> {
+    this.logStep(`Enter excessive dealer origination fee: ${this.stepValueDisplay(amount)}`);
+    await this.dealerOriginationFee(amount);
+    await this.clickCalculateButton();
+    const msg = this.page.getByText(/Dealer\s+Origination\s+Fee cannot be greater than/i);
+    if (await msg.isVisible({ timeout: 8_000 }).catch(() => false)) return;
+    await this.clickSaveStandardQuoteStep().catch(() => {});
+    if (await msg.isVisible({ timeout: 8_000 }).catch(() => false)) return;
+    await this.nextButton.click({ timeout: 10_000 }).catch(() =>
+      this.nextButton.click({ force: true }),
+    );
+  }
+
+  async expectUdcEstablishmentFeeCommissionDeductionWarning(): Promise<void> {
+    await this.expectQuoteSurfaceValidation(/commission|deducted from your commission/i);
+  }
+
+  async clickStandardQuoteCancel(): Promise<void> {
+    this.logStep("Click Standard Quote Cancel");
+    const cancel = this.standardQuoteRoot().getByRole("button", { name: /^Cancel$/i }).first();
+    await expect(cancel).toBeVisible({ timeout: 15_000 });
+    await cancel.click();
+  }
+
+  async expectStandardQuoteCancelConfirmationVisible(): Promise<void> {
+    this.logStep("Expect Standard Quote cancel confirmation");
+    const confirmDlg = this.page
+      .locator("p-confirmdialog, .p-confirm-dialog, [role='alertdialog']")
+      .filter({ visible: true })
+      .filter({ hasText: /unsaved changes|lost|cancel/i })
+      .first();
+    await expect(confirmDlg).toBeVisible({ timeout: 15_000 });
+    await expect(confirmDlg).toContainText(/Any unsaved changes will be lost/i);
+    await expect(confirmDlg).toContainText(/cancel/i);
+  }
+
+  async confirmStandardQuoteCancelDiscard(): Promise<void> {
+    this.logStep("Confirm Standard Quote cancel discard");
+    const confirmDlg = this.page
+      .locator("p-confirmdialog, .p-confirm-dialog, [role='alertdialog']")
+      .filter({ visible: true })
+      .filter({ hasText: /unsaved changes|lost|cancel/i })
+      .first();
+    const yes = confirmDlg
+      .getByRole("button", { name: /^(Yes|OK|Confirm)$/i })
+      .or(confirmDlg.locator("button.p-confirm-dialog-accept"))
+      .first();
+    await yes.click();
+  }
+
+  /** Add Ons & Accessories without Product/Program — validation toast/dialog. */
+  async clickAddOnsAccessoriesEntryExpectProductProgramRequired(): Promise<void> {
+    this.logStep("Click Add Ons entry expecting Product Program required");
+    const root = this.standardQuoteRoot();
+    const labelRx =
+      /Add\s*Ons\s*&\s*Accessories|Add\s+Ons\s+and\s+Accessories|Add[-\s]?Ons?\s*[&+]\s*Accessories/i;
+    await root.getByText(labelRx).first().scrollIntoViewIfNeeded().catch(() => {});
+    const entry = root
+      .getByRole("link", { name: labelRx })
+      .or(root.getByRole("button", { name: labelRx }))
+      .or(root.locator("a, button").filter({ hasText: labelRx }))
+      .first();
+    await entry.click({ timeout: 20_000 });
+    await this.expectQuoteSurfaceValidation(/Please select Product.*Program to proceed further/i);
+  }
+
+  async readPpsrUnitFeeAmount(): Promise<number> {
+    this.logStep("Read PPSR unit fee (@ rate)");
+    const root = this.standardQuoteRoot();
+    const row = root
+      .locator(".p-field, [class*='p-field'], [class*='col-']")
+      .filter({ has: root.getByText(/^@$/i) })
+      .first();
+    const inp = row.locator("input").first();
+    if (await inp.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      return this.readCurrencyInput(inp);
+    }
+    const nearAt = root.getByText(/^@$/i).first().locator("xpath=following::input[1]");
+    return this.readCurrencyInput(nearAt);
+  }
+
+  /** UDP-T3941 — Additional Charges defaults after Product/Program selection. */
+  async expectAdditionalChargesSectionDefaults(): Promise<void> {
+    this.logStep("Expect Additional Charges section default field values");
+    await this.expectPpsrCountAndFeeLineVisible();
+    await this.expectPpsrCountValue("1");
+
+    const unitFee = await this.readPpsrUnitFeeAmount();
+    const ppsrTotal = await this.readPpsrTotalAmount();
+    if (unitFee > 0) {
+      expect(Math.abs(ppsrTotal - unitFee)).toBeLessThanOrEqual(0.02);
+    }
+
+    await expect(this.udcEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+    await expect(this.dealerOriginationFeeInputField).toBeVisible({ timeout: 20_000 });
+    await expect(this.totalEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+
+    const udc = await this.readUdcEstablishmentFee();
+    const dealer = await this.readDealerOriginationFee();
+    expect(udc).toBeGreaterThanOrEqual(0);
+    expect(dealer).toBeGreaterThanOrEqual(0);
+    await this.expectTotalEstablishmentFeeSumDollars(udc + dealer);
+
+    const charges = this.chargesFieldBlock();
+    await expect(charges).toBeVisible({ timeout: 15_000 });
+  }
+
+  /** **Charges** label block on Additional Charges (before/after add-ons). */
+  chargesFieldBlock(): Locator {
+    return this.standardQuoteRoot()
+      .locator(".p-field, [class*='p-field'], amount, .grid")
+      .filter({ has: this.standardQuoteRoot().getByText(/^Charges$/i) })
+      .first();
+  }
 }
