@@ -92,7 +92,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       return ((await input.textContent().catch(() => "")) ?? "").trim();
     }
     const btn = this.page
-      .getByRole("button", { name: /Open\s+Quote|Submitted|Pending|In\s+Progress/i })
+      .getByRole("button", { name: /Open\s+Quote|Submitted|Assessment|Pending|In\s+Progress/i })
       .first();
     if (await btn.isVisible({ timeout: 800 }).catch(() => false)) {
       return ((await btn.textContent().catch(() => "")) ?? "").trim();
@@ -263,6 +263,19 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       }
       await this.page.waitForTimeout(200);
     }
+   * Full CSA post-submission prep before **Status** → **Submit** (matches CSAC sanity):
+   * upload → generate **Customer Quote - Basic** → note, then workflow submit.
+   */
+  async preparePostSubmissionForWorkflowSubmit(
+    noteText = "Workflow automation — submit readiness.",
+  ): Promise<void> {
+    this.logStep("Prepare post-submission for workflow submit");
+    await this.prepareMinimalPostSubmissionForWorkflow();
+    await this.openDocumentsTab();
+    await this.selectCustomerQuoteBasicRow();
+    await this.clickDownload();
+    await this.confirmDocumentParameters();
+    await this.addNoteAndSubmit(noteText);
   }
 
   /**
@@ -1661,6 +1674,17 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       if (await submitVisible.isVisible({ timeout: 1_000 }).catch(() => false)) {
         return;
       }
+      const selectBtn = p
+        .locator('input[name="workFlowStatus"]')
+        .locator("xpath=ancestor::p-inputgroup[1]")
+        .getByRole("button", { name: /^Select$/i })
+        .first();
+      if (await selectBtn.isVisible({ timeout: 1_500 }).catch(() => false)) {
+        await selectBtn.click({ timeout: 8_000 });
+        if (await this.workflowMenuOverlayLocator().isVisible({ timeout: 2_000 }).catch(() => false)) {
+          return;
+        }
+      }
     }
 
     const openQuote = p.getByRole("button", { name: /Open\s+Quote|Ready\s+for\s+Documentation/i }).first();
@@ -1673,11 +1697,25 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   private workflowMenuOverlayLocator(): Locator {
     return this.page
       .locator(
-        ".p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
+        ".textSelectOP, .p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
       )
       .filter({ visible: true })
       .filter({ hasText: /Submit|Withdraw|Generate\s+Documentation/i })
       .first();
+  }
+
+  /** Withdraw confirmation (`p-dialog.loan-date-dialog`). */
+  private withdrawConfirmationDialog(): Locator {
+    return this.page
+      .locator("p-dialog.loan-date-dialog .p-dialog")
+      .filter({ visible: true })
+      .first()
+      .or(
+        this.page
+          .getByRole("dialog")
+          .filter({ hasText: /withdraw this quote/i })
+          .first(),
+      );
   }
 
   private async clickWorkflowMenuItemByRegex(
@@ -1762,11 +1800,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     this.assertPageOpen("workflowWithdrawThenCancelExpectOpenQuoteStatus");
     await p.keyboard.press("Escape").catch(() => {});
     await this.scrollWorkflowStatusHeaderIntoView();
-    // eslint-disable-next-line no-console
-    console.log("Workflow: Open Quote");
     await this.openWorkflowStatusDropdownInner();
-    // eslint-disable-next-line no-console
-    console.log("Workflow dropdown opened");
     await expect(this.workflowMenuOverlayLocator())
       .toBeVisible({ timeout: 6_000 })
       .catch(() => {});
@@ -1778,30 +1812,17 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .or(p.getByText(/^Withdraw$/i).first());
 
     await expect(withdrawOption).toBeVisible({ timeout: 10_000 });
-    // eslint-disable-next-line no-console
-    console.log("Withdraw visible:", await withdrawOption.isVisible().catch(() => false));
-
     await withdrawOption.click({ force: true, timeout: 10_000 });
-    // eslint-disable-next-line no-console
-    console.log("Withdraw clicked");
-
     await this.postSubmitMicroDelay(150);
 
-    const confirmDlg = p
-      .locator("p-confirmdialog, .p-confirm-dialog")
-      .filter({ visible: true })
-      .filter({ hasText: /Withdraw|withdraw|sure|confirm|certain/i })
-      .first()
-      .or(p.getByRole("dialog").filter({ visible: true }).filter({ hasText: /Withdraw/i }).first());
+    const confirmDlg = this.withdrawConfirmationDialog();
     await expect(confirmDlg).toBeVisible({ timeout: 15_000 });
 
-    const cancelBtn = confirmDlg
-      .getByRole("button", { name: /^Cancel$/i })
-      .or(confirmDlg.locator("button.p-confirm-dialog-reject").first())
+    const noGoBackBtn = confirmDlg
+      .getByRole("button", { name: /No,\s*Go back/i })
+      .or(confirmDlg.locator("button.no-btn").first())
       .first();
-    await cancelBtn.click({ timeout: 12_000 });
-    // eslint-disable-next-line no-console
-    console.log("Workflow: Withdraw cancelled");
+    await noGoBackBtn.click({ timeout: 12_000 });
     await confirmDlg.waitFor({ state: "hidden", timeout: 20_000 }).catch(() => {});
     await p.keyboard.press("Escape").catch(() => {});
 
@@ -1990,15 +2011,36 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   /** Poll for success toast/copy/status after Originator Declaration **Proceed** (or lone **Proceed**). */
+  private async waitForPostSubmitLoaderGone(timeoutMs = 120_000): Promise<void> {
+    const p = this.page;
+    const loaders = p.locator(
+      ".p-progress-spinner, .p-blockui, progressbar, .p-progressbar, .p-progressbar-indeterminate",
+    );
+    const n = await loaders.count();
+    for (let i = 0; i < n; i++) {
+      await loaders
+        .nth(i)
+        .waitFor({ state: "hidden", timeout: timeoutMs })
+        .catch(() => {});
+    }
+    await p.waitForTimeout(500);
+  }
+
+  /** Poll for success toast/copy/status after Originator Declaration **Proceed** (or lone **Proceed**). */
   private async expectPostSubmitWorkflowSuccess(): Promise<void> {
     const p = this.page;
     await p.keyboard.press("Escape").catch(() => {});
+    await this.waitForPostSubmitLoaderGone();
 
     await expect
       .poll(
         async () => {
           const status = await this.readWorkflowStatusText();
-          if (status.length > 0 && !/Open\s+Quote/i.test(status)) {
+          if (
+            status.length > 0 &&
+            !/Open\s+Quote/i.test(status) &&
+            /Submitted|Assessment|Credit Hold|Ready|Documentation|Awaiting|Pending|In\s+Progress/i.test(status)
+          ) {
             return true;
           }
 
@@ -2022,12 +2064,33 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
           const statusChip = p
             .locator(".col-2.status, [class*='status']")
-            .filter({ hasText: /Submitted|Complete|Accepted|Succeed|Pending|In\s+Progress/i });
-          return await statusChip.first().isVisible().catch(() => false);
+            .filter({
+              hasText: /Submitted|Assessment|Complete|Accepted|Succeed|Pending|In\s+Progress/i,
+            });
+          if (await statusChip.first().isVisible().catch(() => false)) {
+            return true;
+          }
+
+          const err = p
+            .locator(".p-toast-message-error, .p-inline-message-error, .p-message-error")
+            .filter({ visible: true })
+            .first();
+          if (await err.isVisible().catch(() => false)) {
+            const errText = ((await err.textContent().catch(() => "")) ?? "").trim();
+            throw new Error(`Quote submit failed: ${errText || "unknown portal error"}`);
+          }
+
+          return false;
         },
-        { timeout: 60_000, intervals: [500, 1_000, 2_000] },
+        { timeout: 120_000, intervals: [500, 1_000, 2_000] },
       )
-      .toBeTruthy();
+      .toBeTruthy()
+      .catch(async () => {
+        const status = await this.readWorkflowStatusText();
+        throw new Error(
+          `Workflow status did not transition after submit (last status: "${status || "unknown"}").`,
+        );
+      });
   }
 
   /**
@@ -2089,14 +2152,60 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       return;
     }
 
-    const boxes = scope.locator(".p-checkbox-box, [data-pc-section='checkbox']");
-    const n = await boxes.count();
-    const limit = Math.min(2, n);
-    for (let i = 0; i < limit; i++) {
-      const box = boxes.nth(i);
-      if (await box.isVisible().catch(() => false)) {
-        await box.scrollIntoViewIfNeeded();
-        await box.click();
+    const content = scope.locator(".p-dialog-content, [data-pc-section='content']").first().or(scope);
+    const hosts = content.locator("p-checkbox");
+    const hostCount = await hosts.count();
+    const tickDeclarationCheckbox = async (host: Locator): Promise<void> => {
+      const visibleBox = host.locator("div.p-checkbox-box:visible").first();
+      await visibleBox.waitFor({ state: "visible", timeout: 15_000 });
+      await visibleBox.scrollIntoViewIfNeeded();
+      await visibleBox.evaluate((el) =>
+        (el as HTMLElement).scrollIntoView({ block: "center", inline: "nearest" }),
+      );
+
+      const isChecked = async (): Promise<boolean> => {
+        const visual = await host
+          .locator(".p-checkbox-box.p-checkbox-checked, .p-checkbox-box.p-highlight")
+          .first()
+          .isVisible({ timeout: 1_500 })
+          .catch(() => false);
+        if (visual) return true;
+        const input = host.locator('input[type="checkbox"]').first();
+        return input.isChecked().catch(() => false);
+      };
+
+      if (await isChecked()) return;
+
+      await visibleBox.click({ timeout: 10_000 });
+      if (await isChecked()) return;
+
+      await visibleBox.click({ force: true, timeout: 10_000 });
+      if (await isChecked()) return;
+
+      const input = host.locator('input[type="checkbox"]').first();
+      await input.check({ force: true }).catch(() => {});
+      await expect.poll(isChecked, { timeout: 8_000 }).toBeTruthy();
+    };
+
+    if (hostCount >= 2) {
+      for (let i = 0; i < 2; i++) {
+        await tickDeclarationCheckbox(hosts.nth(i));
+        await p.waitForTimeout(150);
+      }
+    } else {
+      const boxes = scope.locator(".p-checkbox-box:visible");
+      const n = await boxes.count();
+      const limit = Math.min(2, n);
+      for (let i = 0; i < limit; i++) {
+        const box = boxes.nth(i);
+        const host = box.locator("xpath=ancestor::p-checkbox[1]");
+        if ((await host.count()) > 0) {
+          await tickDeclarationCheckbox(host);
+        } else {
+          await box.scrollIntoViewIfNeeded();
+          await box.click({ timeout: 10_000, force: true });
+        }
+        await p.waitForTimeout(150);
       }
     }
     // eslint-disable-next-line no-console
@@ -2107,10 +2216,11 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .or(scope.locator(':text-is("Proceed")'))
       .first();
     await proceed.waitFor({ state: "visible", timeout: 15_000 });
-    await expect(proceed).toBeEnabled({ timeout: 10_000 });
+    await expect(proceed).toBeEnabled({ timeout: 30_000 });
     await proceed.click({ timeout: 10_000 });
     // eslint-disable-next-line no-console
     console.log("Workflow: Final submit clicked");
+    await this.waitForPostSubmitLoaderGone();
     await scope.waitFor({ state: "hidden", timeout: 45_000 }).catch(() => {});
     if (await scope.isVisible({ timeout: 500 }).catch(() => false)) {
       const err = p
@@ -3369,6 +3479,64 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await expect(save).toBeVisible({ timeout: 20_000 });
     await expect(previous).toBeVisible({ timeout: 20_000 });
     await expect(cancel).toBeVisible({ timeout: 20_000 });
+  /** UDP-T3861 / UDP-T3862 — active Post Submission shell. */
+  private postSubmissionRoot(): Locator {
+    return this.page.locator("app-customer-quote-post-submit, app-post-submission").first();
+  }
+
+  /** UDP-T3861 / UDP-T3862 — Post Submission step is visible and customer fields are read-only. */
+  async expectPostSubmissionScreenVisible(): Promise<void> {
+    this.logStep("Expect Post Submission Screen Visible");
+    await this.waitForUploadStep();
+    await expect(this.page.getByText(/Post Submission/i).first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      this.postSubmissionRoot().or(this.documentManagementTabView()).first(),
+    ).toBeVisible({ timeout: 30_000 });
+    await this.expectPostSubmissionFieldsViewOnlyExceptNotesAndUpload();
+  }
+
+  /**
+   * UDP-T3861 — borrower/customer sections are view-only; Notes and Upload remain actionable.
+   */
+  async expectPostSubmissionFieldsViewOnlyExceptNotesAndUpload(): Promise<void> {
+    this.logStep("Expect Post Submission fields view-only except notes and upload");
+    const post = this.postSubmissionRoot();
+    if (await post.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      const readOnlyMarkers = post.locator(
+        "input[disabled], textarea[disabled], input[readonly], textarea[readonly], .p-disabled",
+      );
+      await expect.soft(readOnlyMarkers.first()).toBeVisible({ timeout: 20_000 });
+    }
+    await expect.soft(this.addNewNotesButton).toBeVisible({ timeout: 15_000 });
+    await expect.soft(this.browseFilesButton).toBeVisible({ timeout: 15_000 });
+  }
+
+  /** Quote footer PrimeNG buttons (Save / Previous / Cancel) — same chrome as Customer Details steps. */
+  private footerPrimeButton(label: RegExp): Locator {
+    return this.page
+      .locator("button.p-button.p-component")
+      .filter({ has: this.page.locator("span.p-button-label", { hasText: label }) })
+      .filter({ visible: true })
+      .last();
+  }
+
+  /** UDP-T3862 — Save / Previous / Cancel remain on Post Submission (no Next). */
+  async expectPostSubmissionSavePreviousCancelVisible(): Promise<void> {
+    this.logStep("Expect Post Submission Save Previous Cancel Visible");
+    await this.waitForUploadStep();
+    await expect.soft(this.footerPrimeButton(/^Save$/)).toBeVisible({ timeout: 15_000 });
+    await expect
+      .soft(
+        this.footerPrimeButton(/^Previous$/).or(
+          this.page.getByRole("button", { name: /Previous|Back/i }).last(),
+        ),
+      )
+      .toBeVisible({ timeout: 15_000 });
+    await expect
+      .soft(
+        this.footerPrimeButton(/^Cancel$/).or(this.page.getByRole("button", { name: /^Cancel$/i }).last()),
+      )
+      .toBeVisible({ timeout: 15_000 });
   }
 
   /** UDP-T3862 — **Next** is not available on Post Submission. */
@@ -3377,6 +3545,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await this.waitForUploadStep();
     const nextInPost = this.postSubmissionHost().getByRole("button", { name: /^Next$/i });
     await expect(nextInPost).toHaveCount(0, { timeout: 10_000 });
+    await expect(this.footerPrimeButton(/^Next$/)).toHaveCount(0, { timeout: 10_000 });
   }
 
   /** UDP-T3861 — Notes and Upload remain actionable in Post Submission. */
@@ -3385,6 +3554,74 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await this.waitForUploadStep();
     await expect(this.addNewNotesButton).toBeEnabled({ timeout: 30_000 });
     await expect(this.browseFilesButton).toBeVisible({ timeout: 30_000 });
+  }
+
+  /** UDP-T3865 — workflow status control visible on current quote step. */
+  async expectWorkflowStatusControlVisible(): Promise<void> {
+    this.logStep("Expect Workflow Status Control Visible");
+    await this.scrollWorkflowStatusHeaderIntoView();
+    const statusInput = this.workflowStatusOpenQuoteInput();
+    if (await statusInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect(statusInput).toBeVisible();
+      return;
+    }
+    await expect(this.page.getByRole("button", { name: /Open\s+Quote|Submitted|Assessment|Credit Hold/i }).first()).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  /** Read masked portal workflow status from quote header. */
+  async readPortalWorkflowStatus(): Promise<string> {
+    return this.readWorkflowStatusText();
+  }
+
+  /** UDP-T3881 — Dealer Declaration must not show while portal validations fail. */
+  async expectDealerDeclarationNotVisible(): Promise<void> {
+    this.logStep("Expect Dealer Declaration Not Visible");
+    const decl = this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Declaration|Originator Declaration|Dealer Declaration/i });
+    await expect(decl).toHaveCount(0, { timeout: 8_000 });
+  }
+
+  /** UDP-T3882 — Proceed disabled until declaration checkboxes ticked. */
+  async expectDeclarationProceedDisabledUntilConfirmed(): Promise<void> {
+    this.logStep("Expect Declaration Proceed Disabled Until Confirmed");
+    const dlg = this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Declaration|Originator Declaration|Dealer Declaration/i })
+      .first();
+    await expect(dlg).toBeVisible({ timeout: 60_000 });
+    const proceed = dlg.getByRole("button", { name: /^Proceed$/i }).first();
+    await expect(proceed).toBeDisabled({ timeout: 15_000 });
+  }
+
+  /** UDP-T3870 — API connectivity failure message. */
+  async expectApiSubmitErrorMessage(): Promise<void> {
+    this.logStep("Expect API Submit Error Message");
+    await expect(
+      this.page.getByText(/There was an error submitting your request/i).first(),
+    ).toBeVisible({ timeout: 60_000 });
+  }
+
+  /** UDP-T3871 — concurrent update conflict. */
+  async expectQuoteUpdateFailedConcurrentEditMessage(): Promise<void> {
+    this.logStep("Expect Quote Update Failed Concurrent Edit");
+    await expect(
+      this.page.getByText(/Quote Update Failed.*another user/i).first(),
+    ).toBeVisible({ timeout: 45_000 });
+  }
+
+  /** UDP-T3880 — withdraw confirmation copy and actions. */
+  async expectWithdrawConfirmationVisible(): Promise<void> {
+    this.logStep("Expect Withdraw Confirmation Visible");
+    const dlg = this.withdrawConfirmationDialog();
+    await expect(dlg).toBeVisible({ timeout: 20_000 });
+    await expect(dlg).toContainText(/Are you sure you want to withdraw this quote/i);
+    await expect(dlg).toContainText(/Expired Listing/i);
+    await expect(dlg).toContainText(/Do you want to continue/i);
+    await expect(dlg.getByRole("button", { name: /No,\s*Go back/i })).toBeVisible();
+    await expect(dlg.getByRole("button", { name: /Yes,\s*Cancel/i })).toBeVisible();
   }
 
   /** UDP-T3852+ — loan date in the past confirmation dialog (Submit / Generate Documentation). */
