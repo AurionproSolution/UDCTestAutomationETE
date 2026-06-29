@@ -317,4 +317,180 @@ export class DODashboardPage extends BasePage {
     const action = this.quickActions.locator(`text=${actionName}`);
     await this.clickElement(action);
   }
+
+  /** Dashboard quote list (`app-quote-list` / `gen-table#quote-list`). */
+  private quotesListingRoot(): Locator {
+    return this.page.locator("app-quote-list").first();
+  }
+
+  /** Scroll to the embedded **Quotes** grid on the dealer dashboard. */
+  async openQuotesAndApplications(): Promise<void> {
+    this.logStep("Open Quotes And Applications");
+    await this.waitForAppLoaderOverlayGone(120_000);
+    const quoteList = this.quotesListingRoot();
+    await expect(quoteList).toBeVisible({ timeout: 60_000 });
+    await quoteList.scrollIntoViewIfNeeded();
+    await expect(this.quotesGridTable()).toBeVisible({ timeout: 30_000 });
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+  }
+
+  /** PrimeNG quotes table on dashboard (`#quote-list` / `pn_id_*-table`). */
+  quotesGridTable(): Locator {
+    const root = this.quotesListingRoot();
+    return root
+      .locator("gen-table#quote-list table.p-datatable-table")
+      .first()
+      .or(root.locator("table.p-datatable-table").first())
+      .or(this.page.locator("gen-table#quote-list table.p-datatable-table").first());
+  }
+
+  /** **Search Quote** filter above the dashboard grid. */
+  quotesGridSearchInput(): Locator {
+    return this.quotesListingRoot()
+      .locator('input[placeholder="Search Quote"]')
+      .first()
+      .or(this.page.locator('app-quote-list input[placeholder="Search Quote"]').first());
+  }
+
+  /** **View** applies search + date filters on the quote list. */
+  quotesGridViewButton(): Locator {
+    return this.quotesListingRoot()
+      .getByRole("button", { name: /^View$/i })
+      .first();
+  }
+
+  /** Quote-type dropdown (active **Quote** vs expired listing). */
+  quotesGridTypeDropdown(): Locator {
+    return this.quotesListingRoot().locator("p-dropdown").first().getByRole("combobox");
+  }
+
+  /** Filter grid by origination reference or quote id, then click **View**. */
+  async searchQuotesGrid(query: string): Promise<void> {
+    this.logStep(`Search Quotes Grid: ${this.stepValueDisplay(query)}`);
+    const search = this.quotesGridSearchInput();
+    await expect(search).toBeVisible({ timeout: 30_000 });
+    await search.fill(query);
+    const viewBtn = this.quotesGridViewButton();
+    if (await viewBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await viewBtn.click({ timeout: 15_000 });
+    } else {
+      await search.press("Enter").catch(() => {});
+    }
+    await this.waitForAppLoaderOverlayGone(60_000);
+    await this.page.waitForTimeout(500);
+  }
+
+  /** Row in quotes grid matching origination ref or quote id. */
+  quoteGridRowByReference(referenceOrQuoteId: string): Locator {
+    const escaped = referenceOrQuoteId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return this.quotesGridTable()
+      .locator("tbody tr")
+      .filter({ hasText: new RegExp(escaped, "i") })
+      .first();
+  }
+
+  /** Read a column cell value for a quote row (header text match). */
+  async readQuoteGridColumnForRow(
+    row: Locator,
+    columnHeader: RegExp,
+  ): Promise<string> {
+    const table = this.quotesGridTable();
+    const headers = table.locator("thead th");
+    const count = await headers.count();
+    let colIndex = -1;
+    for (let i = 0; i < count; i++) {
+      const text = ((await headers.nth(i).innerText()) ?? "").replace(/\s+/g, " ").trim();
+      if (columnHeader.test(text)) {
+        colIndex = i;
+        break;
+      }
+    }
+    if (colIndex < 0) {
+      const rowText = ((await row.innerText()) ?? "").replace(/\s+/g, " ").trim();
+      return rowText;
+    }
+    return ((await row.locator("td").nth(colIndex).innerText()) ?? "").replace(/\s+/g, " ").trim();
+  }
+
+  /** UDP-T3867 / T3891 — **Assigned To** column for a quote row. */
+  async expectQuoteGridAssignedTo(
+    referenceOrQuoteId: string,
+    expected: string | null,
+  ): Promise<void> {
+    this.logStep(`Expect Quote Grid Assigned To: ${expected ?? "(empty)"}`);
+    const row = this.quoteGridRowByReference(referenceOrQuoteId);
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    const assigned = await this.readQuoteGridColumnForRow(row, /Assigned\s*To/i);
+    if (expected === null || expected === "") {
+      expect(assigned).toMatch(/^(—|-|N\/A|)$/i);
+      return;
+    }
+    expect(assigned).toContain(expected);
+  }
+
+  /** UDP-T3873+ — dashboard **Workflow Status** column. */
+  async expectQuoteGridWorkflowStatus(
+    referenceOrQuoteId: string,
+    expectedStatus: RegExp | string,
+  ): Promise<void> {
+    this.logStep(`Expect Quote Grid Workflow Status: ${String(expectedStatus)}`);
+    const row = this.quoteGridRowByReference(referenceOrQuoteId);
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    const status = await this.readQuoteGridColumnForRow(row, /Workflow\s*Status|Status/i);
+    if (expectedStatus instanceof RegExp) {
+      expect(status).toMatch(expectedStatus);
+      return;
+    }
+    expect(status).toContain(expectedStatus);
+  }
+
+  /** Open quote from grid by clicking the blue **Quote ID** cell. */
+  async openQuoteFromGridByReference(referenceOrQuoteId: string): Promise<void> {
+    this.logStep(`Open Quote From Grid: ${this.stepValueDisplay(referenceOrQuoteId)}`);
+    await this.searchQuotesGrid(referenceOrQuoteId);
+    const row = this.quoteGridRowByReference(referenceOrQuoteId);
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    const quoteIdCell = row
+      .locator("div.cursor-pointer.text-primary")
+      .filter({ hasText: new RegExp(referenceOrQuoteId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") })
+      .first()
+      .or(row.getByRole("link").first())
+      .or(row.locator("a[href*='standard-quote']").first());
+    await quoteIdCell.click({ timeout: 30_000 });
+    await this.waitForAppLoaderOverlayGone(120_000);
+    await expect(
+      this.page.locator("app-quote-details, app-standard-quote").first(),
+    ).toBeVisible({ timeout: 120_000 });
+  }
+
+  /** Switch quote-type dropdown from **Quote** to **Expired** listing. */
+  async openExpiredQuotesListing(): Promise<void> {
+    this.logStep("Open Expired Quotes Listing");
+    await this.openQuotesAndApplications();
+    const typeDropdown = this.quotesGridTypeDropdown();
+    await expect(typeDropdown).toBeVisible({ timeout: 30_000 });
+    await typeDropdown.click({ timeout: 15_000 });
+    const expiredOption = this.page
+      .getByRole("option", { name: /Expired/i })
+      .first();
+    await expect(expiredOption).toBeVisible({ timeout: 15_000 });
+    await expiredOption.click({ timeout: 15_000 });
+    const viewBtn = this.quotesGridViewButton();
+    if (await viewBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await viewBtn.click({ timeout: 15_000 });
+    }
+    await this.waitForAppLoaderOverlayGone(60_000);
+  }
+
+  /** Open quote by direct edit URL when quoteId is known (seed catalog). */
+  async openQuoteById(quoteId: string): Promise<void> {
+    this.logStep(`Open Quote By Id: ${quoteId}`);
+    const base = this.page.url().replace(/\/dealer\/?.*$/i, "/dealer");
+    const url = `${base}/standard-quote/edit/${quoteId}`;
+    await this.page.goto(url);
+    await this.waitForAppLoaderOverlayGone(120_000);
+    await expect(
+      this.page.locator("app-quote-details, app-standard-quote").first(),
+    ).toBeVisible({ timeout: 120_000 });
+  }
 }

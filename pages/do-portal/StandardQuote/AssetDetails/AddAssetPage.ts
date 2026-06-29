@@ -1,4 +1,4 @@
-import { Locator, Page } from "@playwright/test";
+import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
 /** Visible `text` host + `#text` input for Add Asset wizard fields (avoids hidden template rows). */
@@ -6,7 +6,7 @@ function addAssetTextField(page: Page, label: string): Locator {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return page
     .locator("text")
-    .filter({ hasText: new RegExp(`^\\s*${escaped}\\s*$`, "i") })
+    .filter({ hasText: new RegExp(`^\\s*${escaped}\\s*\\*?\\s*$`, "i") })
     .locator("#text")
     .filter({ visible: true })
     .first();
@@ -194,7 +194,13 @@ export class DOAddAssetPage extends BasePage {
     await input.waitFor({ state: "visible", timeout: 15_000 });
     await input.click();
     await input.fill(model);
-    await input.press("Tab");
+    const option = this.page.getByRole("option", { name: new RegExp(model, "i") }).first();
+    if (await option.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await option.click({ timeout: 8_000 });
+    } else {
+      await input.press("Tab");
+    }
+    await expect(input).toHaveValue(new RegExp(model, "i"), { timeout: 8_000 });
   }
   async enterVariant(variant: string): Promise<void> {
     this.logStep(`Entered variant as ${this.stepValueDisplay(variant)}`);

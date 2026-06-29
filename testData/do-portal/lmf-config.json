@@ -1,0 +1,20 @@
+{
+  "description": "LMF regression (UDP-T3932–UDP-T3940). Override dealers via LMF_AUTHORISED_DEALER / LMF_UNAUTHORISED_DEALER env.",
+  "authorisedDealer": "Armstrong Prestige Wellington",
+  "unauthorisedDealer": "Armstrong Prestige - Audi",
+  "lmfConfigured": {
+    "product": "CSA-C-Assigned",
+    "program": "Webform - CSA Personal - MV Dealer"
+  },
+  "lmfZeroConfigured": {
+    "product": "Finance Lease - Business Asg",
+    "program": "Finance Lease Business - MV Dealer",
+    "note": "QAT program with no LMF in AF; override via LMF_ZERO_PRODUCT / LMF_ZERO_PROGRAM if needed."
+  },
+  "quickQuote": {
+    "product": "CSA-C-Assigned",
+    "program": "CSA Personal - MV Dealer",
+    "standardQuoteProgram": "MYUDC-C-CSA- Assigned MV",
+    "note": "QQ Create Quote lands on Webform (Waive LMF hidden). Re-select standardQuoteProgram on SQ for authorised waive UI."
+  }
+}
