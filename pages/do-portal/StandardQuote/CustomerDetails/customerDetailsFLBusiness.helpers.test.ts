@@ -5,7 +5,7 @@
  * product/program, or dashboard product picker with CSA).
  */
 
-import { DO_DEALER_STANDARD_QUOTE_URL } from "@config/env";
+import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../../config/env";
 import type { Locator, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { DODashboardPage } from "../../dashboard/DashboardPage";

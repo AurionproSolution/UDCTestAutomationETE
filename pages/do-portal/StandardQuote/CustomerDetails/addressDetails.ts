@@ -741,6 +741,18 @@ export class DOAddressDetailsPage extends BasePage {
 
     // PrimeNG time row: physical + CSA-B + trust address hosts use the same widgets.
     if (isPreviousCard || isPhysicalHost || isBusinessPhysicalHost || isTrustAddressHost) {
+      if (isPhysicalHost) {
+        const hubYear = this.physicalTimeAtHubInput(4, block);
+        const hubMonth = this.physicalTimeAtHubInput(6, block);
+        if (await fillPair(hubYear, hubMonth)) return;
+      }
+
+      if (isBusinessPhysicalHost) {
+        const bizYear = this.businessPhysicalTimeYearsInput();
+        const bizMonth = this.businessPhysicalTimeMonthsInput();
+        if (await fillPair(bizYear, bizMonth)) return;
+      }
+
       const timeRow = block
         .locator("div, section, form")
         .filter({ has: block.getByText(/Time at Address/i) })
@@ -1010,6 +1022,16 @@ export class DOAddressDetailsPage extends BasePage {
     if (await bizRoot.isVisible({ timeout: 5000 }).catch(() => false)) {
       await bizRoot.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
       await this.fillYearsMonthsInBlock(bizRoot, year, month);
+      this.logStep(
+        `Time at address complete: years ${this.stepValueDisplay(year)}, months ${this.stepValueDisplay(month)}`,
+      );
+      return;
+    }
+
+    const physicalBlock = this.physicalAddressBlock;
+    if (await physicalBlock.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await physicalBlock.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      await this.fillYearsMonthsInBlock(physicalBlock, year, month);
       this.logStep(
         `Time at address complete: years ${this.stepValueDisplay(year)}, months ${this.stepValueDisplay(month)}`,
       );

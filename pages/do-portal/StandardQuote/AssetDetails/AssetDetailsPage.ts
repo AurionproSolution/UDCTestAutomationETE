@@ -3263,6 +3263,41 @@ export class DOAssetDetailsPage extends BasePage {
       .toBeVisible({ timeout: 30_000 });
   }
 
+  /** Standard Quote header stepper — jump to a section (e.g. **Asset Details**, **Post Submission**). */
+  async clickStandardQuoteStepTab(stepLabel: string | RegExp): Promise<void> {
+    const label =
+      typeof stepLabel === "string"
+        ? new RegExp(stepLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+        : stepLabel;
+    this.logStep(`Click Standard Quote step tab: ${label.source}`);
+    const root = this.standardQuoteRoot();
+    const tab = root
+      .getByRole("tab", { name: label })
+      .or(root.getByRole("link", { name: label }))
+      .or(this.page.getByText(label).filter({ visible: true }))
+      .first();
+    await tab.waitFor({ state: "visible", timeout: 30_000 });
+    await tab.scrollIntoViewIfNeeded();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await tab.click({ timeout: 15_000 });
+    await this.page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  }
+
+  /** UDP-T3860 — Standard Quote reopens on **Asset Details**; Post Submission UI is not displayed. */
+  async expectAssetDetailsStepActiveNotPostSubmission(): Promise<void> {
+    this.logStep("Expect Asset Details Step Active Not Post Submission");
+    await this.expectStandardQuoteLoaded();
+    await this.expectAssetDetailsStepVisible();
+    await expect(this.page.locator("app-less-deposit").first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      this.page.locator("app-customer-quote-post-submit, app-post-submission").first(),
+    ).toHaveCount(0, { timeout: 10_000 });
+    await expect(this.page.locator(':text-is("Browse Files")').first()).toHaveCount(0, {
+      timeout: 10_000,
+    });
+  }
+
   /** Assert Standard Quote shell and Asset Details / Less Deposit are loaded. */
   async expectStandardQuoteLoaded(): Promise<void> {
     this.logStep("Expect Standard Quote Loaded");

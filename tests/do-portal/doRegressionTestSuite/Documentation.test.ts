@@ -6,8 +6,8 @@
  */
 
 import { expect, test } from "@fixtures/doPortalTest";
-import path from "path";
 import type { Page } from "@playwright/test";
+import path from "path";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAddressDetailsPage,
@@ -18,13 +18,83 @@ import {
   DOFinancialPositionPage,
   DOReferenceDetailsPage,
 } from "../../../pages";
-import { DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF } from "../../../pages/do-portal/StandardQuote/CustomerDetails/customerQuotePostSubmit";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF } from "../../../pages/do-portal/StandardQuote/CustomerDetails/customerQuotePostSubmit";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
+import settlementData from "../../../testData/do-portal/settlementTestData.json";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
 const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
+/** Existing open Standard Quote on QAT (Settlement regression seed — UDP-T3860 Scenario 2). */
+const DOC_OPEN_QUOTE_ID = settlementData.existingQuotes.settlementFromAssetDetails;
+/** Seeded application in **Ready for Documentation** (UDP-T3859) — opened from dashboard QID search. */
+const DOC_READY_FOR_DOCUMENTATION_QID =
+  settlementData.existingQuotes.readyForDocumentationApplication?.trim() || "2442";
+
+/** Navigate to **Post Submission** document strip when QID opens on an earlier step. */
+async function navigateExistingApplicationToPostSubmission(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+  post: DOCustomerQuotePostSubmitPage,
+): Promise<void> {
+  const creditTab = page.getByRole("tab", {
+    name: /Credit Conditions|Additional Approval Conditions/i,
+  });
+  const documentsTab = page.getByRole("tab", { name: /^Documents$/i });
+  const uploadTab = page.getByRole("tab", { name: /^Upload$/i });
+  const onPostSubmission =
+    (await creditTab.isVisible({ timeout: 3_000 }).catch(() => false)) ||
+    (await documentsTab.isVisible({ timeout: 2_000 }).catch(() => false)) ||
+    (await uploadTab.isVisible({ timeout: 2_000 }).catch(() => false)) ||
+    (await page
+      .locator("app-customer-quote-post-submit, app-post-submission")
+      .first()
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false));
+
+  if (!onPostSubmission) {
+    await assetDetailsPage.clickStandardQuoteStepTab(/Post Submission/i);
+  }
+  await post.expectReopenedPostSubmissionDocumentStripVisible();
+}
+
+async function openExistingPostSubmissionFromDashboardQid(
+  page: Page,
+): Promise<DOCustomerQuotePostSubmitPage> {
+  const dashboardPage = await openDealerDashboard(page);
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  const assetDetailsPage = new DOAssetDetailsPage(page);
+
+  await dashboardPage.openReadyForDocumentationApplicationFromListing(DOC_READY_FOR_DOCUMENTATION_QID);
+  await expect(page.locator("app-quote-details, app-standard-quote").first()).toBeVisible({
+    timeout: 120_000,
+  });
+  await navigateExistingApplicationToPostSubmission(page, assetDetailsPage, post);
+  return post;
+}
+/** Generated Documents row exercised by UDP-T3859 timestamp re-generation. */
+const DOC_REGEN_DOCUMENT_NAME = /Customer Quote\s*-\s*Basic/i;
+
+/**
+ * Existing application → **Post Submission** → **Generated Documents** tab (UDP-T3837 / UDP-T3859).
+ * Reopens seeded QID from dashboard — no new quote or submit workflow.
+ */
+async function openExistingGeneratedDocumentsFromDashboard(
+  page: Page,
+): Promise<DOCustomerQuotePostSubmitPage> {
+  const post = await openExistingPostSubmissionFromDashboardQid(page);
+  await post.openDocumentsTab();
+  return post;
+}
+
+async function openDealerDashboard(page: Page): Promise<DODashboardPage> {
+  const dashboardPage = new DODashboardPage(page);
+  await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+  await dashboardPage.waitForAuthenticatedDashboard();
+  await dashboardPage.selectDealer(TLC_DEALER);
+  return dashboardPage;
+}
 
 async function openStandardQuoteFromDashboard(page: Page): Promise<DOAssetDetailsPage> {
   const dashboardPage = new DODashboardPage(page);
@@ -40,20 +110,36 @@ async function openStandardQuoteFromDashboard(page: Page): Promise<DOAssetDetail
   return assetDetailsPage;
 }
 
+/** Last calendar year — paired with **Used** to satisfy year/condition submit rules. */
+function complianceAssetManufactureYear(): string {
+  return String(new Date().getFullYear() - 1);
+}
+
 async function addMinimalUsedAsset(
   assetDetailsPage: DOAssetDetailsPage,
   addAssetPage: DOAddAssetPage,
 ): Promise<void> {
+  const year = complianceAssetManufactureYear();
   await assetDetailsPage.enterAsset("Car and Light Commercial /");
   await assetDetailsPage.selectCondition("Used");
   await assetDetailsPage.openAssetInsuranceTradeInSummary();
   await assetDetailsPage.clickAssetSummaryEditButton();
   await addAssetPage.enterAssetValue("$20,000");
   await addAssetPage.selectCondition("Used");
-  await addAssetPage.selectYear("2025");
+  await addAssetPage.selectYear(year);
   await addAssetPage.enterMake("Toyota");
   await addAssetPage.enterModel("Hilux");
   await addAssetPage.enterVariant("Top");
+  await addAssetPage.enterRegoNO("TG08BP5123");
+  await addAssetPage.enterVIN("1HGCM82633A004352");
+  await addAssetPage.enterOdometer("50000");
+  await addAssetPage.enterColour("Black");
+  await addAssetPage.enterSerialNO("0999944477");
+  await addAssetPage.enterEngineNO("1133445588");
+  await addAssetPage.enterCCRating("5");
+  await addAssetPage.chooseMotivePower("Petrol");
+  await addAssetPage.chooseCountryRegistered("New Zealand");
+  await addAssetPage.chooseAssetLocation("North Island");
   await addAssetPage.clickSummitButton();
   await addAssetPage.clickCrossButton();
 }
@@ -84,14 +170,61 @@ async function fillValidIndividualPersonalBorrower(p: DOPersonalDetailsPage): Pr
   await p.chooseLicenceType("Full Licence");
   await p.chooseCountryOfIssue("New Zealand");
   await p.enterLicenceNumber("AB123456");
-  await p.enterVersionNumber("244");
+  await p.enterVersionNumber("001");
   await p.chooseNewZealandResident("Yes");
   await p.chooseCountryOfBirth("New Zealand");
   await p.chooseCountryOfCitizenship("New Zealand");
 }
 
-async function fillMinimalAddressContinue(page: Page, address: DOAddressDetailsPage): Promise<void> {
-  await address.waitForPhysicalAddressStep();
+async function navigatePersonalToAddressDetailsStep(
+  page: Page,
+  personal: DOPersonalDetailsPage,
+  address: DOAddressDetailsPage,
+): Promise<void> {
+  await personal.clickNextButton();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const onAddress = await page
+      .locator('input[name="physicalSearchValue"], app-physical-address')
+      .filter({ visible: true })
+      .first()
+      .isVisible({ timeout: 25_000 })
+      .catch(() => false);
+    if (onAddress) {
+      await address.waitForPhysicalAddressStep();
+      await address.waitForAddressStepReadyForInput();
+      return;
+    }
+    const stillOnPersonal = await page
+      .locator("app-personal-details")
+      .filter({ visible: true })
+      .first()
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false);
+    if (stillOnPersonal && attempt < 2) {
+      await personal.clickNextButton();
+      continue;
+    }
+    await page
+      .locator(".app-loader-overlay")
+      .filter({ visible: true })
+      .first()
+      .waitFor({ state: "hidden", timeout: 90_000 })
+      .catch(() => {});
+  }
+  await address.waitForAddressStepReadyForInput();
+}
+
+async function fillMinimalAddressContinue(
+  page: Page,
+  address: DOAddressDetailsPage,
+  personal?: DOPersonalDetailsPage,
+): Promise<void> {
+  if (personal) {
+    await navigatePersonalToAddressDetailsStep(page, personal, address);
+  } else {
+    await address.waitForPhysicalAddressStep();
+    await address.waitForAddressStepReadyForInput();
+  }
   await address.timeAtAddress("5", "0");
   await address.enterStreetNumber("123");
   await address.enterStreetName("Main Street");
@@ -99,36 +232,52 @@ async function fillMinimalAddressContinue(page: Page, address: DOAddressDetailsP
   await address.chooseCountry("New Zealand");
   await address.selectResidenceType("Boarding");
   await address.clickReuseForPostalAddressToggle();
+  await address.fillPreviousPhysicalRequiredIfPresent({
+    years: "1",
+    months: "1",
+    streetNumber: "45",
+    streetName: "Queen Street",
+    city: "Wellington",
+    country: "New Zealand",
+  });
   await address.clickSaveAddressDetails();
   await address.clickNextButton();
 }
 
 async function fillMinimalEmploymentContinue(emp: DOEmploymentDetailsPage): Promise<void> {
   await emp.waitForEmploymentDetailsStep();
+  await emp.turnOffEmploymentDetailsChanged();
   await emp.enterCurrentEmployerName("Acme Finance Ltd");
   await emp.selectCurrentOccupation("Accountant");
   await emp.selectCurrentEmploymentType("Full Time Employed");
-  await emp.enterCurrentTimeWithEmployer("3", "0");
+  // ≥ 3 years — avoids Previous Employment; single **Current** record after Save.
+  await emp.enterCurrentTimeWithEmployer("4", "0");
+  await emp.clickSaveEmploymentDetails();
+  await emp.turnOffEmploymentDetailsChanged();
   await emp.clickNextButton();
 }
 
+/** Consumer CSA individual Financial Position (aligned with `CSAcAssigned.test.ts`). */
 async function fillMinimalFinancialContinue(fin: DOFinancialPositionPage): Promise<void> {
   await fin.waitForFinancialPositionStep();
-  await fin.selectIndividualHomeOwnershipType("Mortgage");
-  await fin.fillIndividualVehicleValueAmount("$18,000.00");
-  await fin.fillFirstLiabilityBalanceAndAmount("$500,000.00", "$2,500.00");
+  await fin.fillFirstLiabilityBalanceAndAmount("$500000.00", "$2500.00");
   await fin.setFirstLiabilityRowFrequencyMonthly();
-  await fin.fillFirstIncomeAmount("$5,000.00");
-  await fin.setTakeHomePayFrequencyMonthly();
-  await fin.fillExpenditureAmountByLabel(/Council Rates/i, "$220.00");
-  await fin.setExpenditureRowFrequencyMonthlyByLabel(/Council Rates/i);
+  await fin.fillFirstIncomeAmount("$5000.00");
+  await fin.setIncomeFrequencyMonthly();
+  await fin.selectIncomeLikelyToDecreaseNo();
+  await fin.fillFirstExpenditureAmount("$200.00");
+  await fin.setExpenditureFrequencyMonthly();
+  await fin.selectEssentialOutgoingTypeLifestyle();
   await fin.fillEssentialOutgoingAmount("$150.00");
   await fin.setEssentialOutgoingFrequencyMonthly();
   await fin.clickNextButton();
 }
 
-/** Land on Customer Details (personal step) — for UDP-T3844 tab visibility. */
-async function openCustomerDetailsBeforeSubmit(page: Page): Promise<DOCustomerQuotePostSubmitPage> {
+/** CSA quote through Personal Details (borrower added, not yet submitted). */
+async function openCsaQuoteThroughPersonalDetails(page: Page): Promise<{
+  personal: DOPersonalDetailsPage;
+  post: DOCustomerQuotePostSubmitPage;
+}> {
   const assetDetailsPage = await openStandardQuoteFromDashboard(page);
   const addAssetPage = new DOAddAssetPage(page);
   await assetDetailsPage.chooseProduct(CSA_SQ_PRODUCT);
@@ -146,31 +295,16 @@ async function openCustomerDetailsBeforeSubmit(page: Page): Promise<DOCustomerQu
   await assetDetailsPage.clickAddNewCustomerButton();
   const personal = new DOPersonalDetailsPage(page);
   await fillValidIndividualPersonalBorrower(personal);
-  return new DOCustomerQuotePostSubmitPage(page);
+  return { personal, post: new DOCustomerQuotePostSubmitPage(page) };
 }
 
-/** CSA-C-Assigned individual borrower through Reference submit → Post Submission Upload. */
-async function openPostSubmissionUploadStep(page: Page): Promise<DOCustomerQuotePostSubmitPage> {
-  const assetDetailsPage = await openStandardQuoteFromDashboard(page);
-  const addAssetPage = new DOAddAssetPage(page);
-  await assetDetailsPage.chooseProduct(CSA_SQ_PRODUCT);
-  await assetDetailsPage.chooseProgram(CSA_SQ_PROGRAM);
-  await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
-  await assetDetailsPage.clickCalculateButton();
-  await assetDetailsPage.enterOriginationReference("SQ-DOC-Ref");
-  await assetDetailsPage.clickNextButton();
-  await assetDetailsPage.waitForAddBorrowerButton();
-  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-  await assetDetailsPage.searchByDropdownClick();
-  await assetDetailsPage.selectUDCSelectOption();
-  await assetDetailsPage.enterUDCCustomerNumber("420");
-  await assetDetailsPage.clickSearchButton();
-  await assetDetailsPage.clickAddNewCustomerButton();
-  const personal = new DOPersonalDetailsPage(page);
-  await fillValidIndividualPersonalBorrower(personal);
-  await personal.clickNextButton();
+/** Complete Address → Reference and submit to Post Submission. */
+async function completeCustomerDetailsAndSubmitToPostSubmission(
+  page: Page,
+  personal: DOPersonalDetailsPage,
+): Promise<DOCustomerQuotePostSubmitPage> {
   const address = new DOAddressDetailsPage(page);
-  await fillMinimalAddressContinue(page, address);
+  await fillMinimalAddressContinue(page, address, personal);
   const emp = new DOEmploymentDetailsPage(page);
   await fillMinimalEmploymentContinue(emp);
   const fin = new DOFinancialPositionPage(page);
@@ -183,9 +317,46 @@ async function openPostSubmissionUploadStep(page: Page): Promise<DOCustomerQuote
   await ref.enterContactLastName("Referee");
   await ref.clickAddContactInModal();
   await ref.confirmCustomerDetailsCorrect();
-  await ref.clickSubmitButton();
+  await ref.advanceFromReferenceDetailsToPostSubmission();
   const post = new DOCustomerQuotePostSubmitPage(page);
   await post.waitForUploadStep();
+  return post;
+}
+
+/** CSA Post Submission: upload → Next → submit application → Credit Conditions tab (UDP-T3845+). */
+async function openPostSubmissionWithCreditConditionsTab(
+  page: Page,
+): Promise<DOCustomerQuotePostSubmitPage> {
+  const post = await openPostSubmissionUploadStep(page);
+  await post.uploadAdvanceAndSubmitApplication();
+  await post.expectCreditConditionsTabVisible();
+  return post;
+}
+
+/**
+ * Existing Post Submission application with **Credit Conditions** tab (UDP-T3846–T3849).
+ * Reopens seeded QID from dashboard → **Post Submission** — no new quote or submit workflow.
+ */
+async function openExistingPostSubmissionWithCreditConditionsTab(
+  page: Page,
+): Promise<DOCustomerQuotePostSubmitPage> {
+  const post = await openExistingPostSubmissionFromDashboardQid(page);
+  await post.expectCreditConditionsTabVisible();
+  return post;
+}
+
+/** CSA-C-Assigned individual borrower through Reference submit → Post Submission Upload. */
+async function openPostSubmissionUploadStep(page: Page): Promise<DOCustomerQuotePostSubmitPage> {
+  const { personal } = await openCsaQuoteThroughPersonalDetails(page);
+  return completeCustomerDetailsAndSubmitToPostSubmission(page, personal);
+}
+
+/**
+ * Post Submission with **cancelled e-sign** precondition (reuses {@link DOCustomerQuotePostSubmitPage.initiateAndCancelElectronicSigningFlow}).
+ */
+async function openPostSubmissionWithCancelledEsign(page: Page): Promise<DOCustomerQuotePostSubmitPage> {
+  const post = await openPostSubmissionUploadStep(page);
+  await post.initiateAndCancelElectronicSigningFlow({ borrowerName: "Liza Marie Doe" });
   return post;
 }
 
@@ -218,9 +389,8 @@ async function openReferenceDetailsStepWithPastLoanDate(page: Page): Promise<{
   await assetDetailsPage.clickAddNewCustomerButton();
   const personal = new DOPersonalDetailsPage(page);
   await fillValidIndividualPersonalBorrower(personal);
-  await personal.clickNextButton();
   const address = new DOAddressDetailsPage(page);
-  await fillMinimalAddressContinue(page, address);
+  await fillMinimalAddressContinue(page, address, personal);
   const emp = new DOEmploymentDetailsPage(page);
   await fillMinimalEmploymentContinue(emp);
   const fin = new DOFinancialPositionPage(page);
@@ -375,7 +545,25 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3836'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Manually generated document exists. User generates a new version. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      const post = await openExistingGeneratedDocumentsFromDashboard(page);
+      const doc = DOC_REGEN_DOCUMENT_NAME;
+
+      await post.generateCustomerQuoteBasicDocument();
+      await post.expectGeneratedDocumentsRowCountByDocumentName(doc, 1);
+      const beforeTimestamp = await post.readGeneratedDocumentDateTimeWhenReady(doc);
+      const beforeAudit = await post.auditGeneratedDocumentRegenerationState(doc);
+      post.log(
+        `[UDP-T3836] before regeneration — timestamp="${beforeTimestamp}", rows=${beforeAudit.rowCount}, historyIcon=${beforeAudit.historyIconVisible}`,
+      );
+
+      await post.generateCustomerQuoteBasicDocument();
+
+      const afterTimestamp = await post.expectManuallyGeneratedHistoricalVersionReplacedInPortal(
+        doc,
+        beforeTimestamp,
+      );
+      expect(afterTimestamp).not.toBe(beforeTimestamp);
+      await post.expectGeneratedDocumentsRowCountByDocumentName(doc, 1);
     },
   );
 
@@ -384,7 +572,28 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3837'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Generated documents tab. One or more documents selected. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      const post = await openExistingGeneratedDocumentsFromDashboard(page);
+
+      const rowCount = await post.countGeneratedDocumentsRows();
+      if (rowCount < 1) {
+        test.skip(
+          true,
+          "UDP-T3837: No generated documents in the grid — cannot validate Preview tab behaviour.",
+        );
+      }
+
+      await post.setGeneratedDocumentsRowSelection([0]);
+      await post.expectGeneratedDocumentsPreviewOpensTabs(1);
+
+      if (rowCount < 2) {
+        test.skip(
+          true,
+          "UDP-T3837: Fewer than two generated documents — cannot validate multi-selection Preview tabs.",
+        );
+      }
+
+      await post.setGeneratedDocumentsRowSelection([0, 1]);
+      await post.expectGeneratedDocumentsPreviewOpensTabs(2);
     },
   );
 
@@ -440,8 +649,16 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3843 - TC_DOC_034 E-Sign Cancelled — Unsigned Documents in Documents Tab Only",
     { tag: ['@do', '@regression', '@UDP-T3843'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: E-sign process has been cancelled. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.setTimeout(900_000);
+      const post = await openPostSubmissionWithCancelledEsign(page);
+
+      // Step 1–2: Generated Documents — unsigned docs remain; e-sign status Cancelled.
+      await post.expectGeneratedDocumentsTabEsignStatusCancelled();
+      await post.expectGeneratedDocumentsTabColumnHeaders();
+
+      // Step 3–4: Uploads — no electronically signed copies after cancellation.
+      await post.ensureUploadTab();
+      await post.expectUploadTabNoElectronicallySignedDocuments();
     },
   );
 
@@ -449,9 +666,20 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3844 - TC_DOC_035 Credit Conditions Tab Only Available in Post Submission (Not Customer Details)",
     { tag: ['@do', '@regression', '@UDP-T3844'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
-      const post = await openCustomerDetailsBeforeSubmit(page);
+      test.setTimeout(900_000);
+      const { personal, post } = await openCsaQuoteThroughPersonalDetails(page);
+
+      // Step 1–2: Customer Details — Credit Conditions tab must not appear.
       await post.expectCreditConditionsTabHidden();
+
+      // Step 3–5: Complete mandatory sections and submit to Post Submission.
+      const postSubmission = await completeCustomerDetailsAndSubmitToPostSubmission(page, personal);
+
+      // CSA: Reference **Next** → Customer Details upload entry; upload → footer **Next** → Post Submission.
+      await postSubmission.uploadAndAdvanceToFullPostSubmission();
+
+      // Step 6: Post Submission — Credit Conditions tab is now available.
+      await postSubmission.expectCreditConditionsTabVisible();
     },
   );
 
@@ -460,7 +688,17 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3845'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Application submitted. In Post Submission. Open credit advice workflow. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      const post = await openExistingPostSubmissionWithCreditConditionsTab(page);
+
+      const conditions = await post.readCreditConditionsMandatoryIndicatorAudit();
+      if (conditions.length === 0) {
+        test.skip(
+          true,
+          "UDP-T3845: No Credit Conditions returned from AF — cannot validate grid column layout.",
+        );
+      }
+
+      await post.expectCreditConditionsTabTwoColumnsOnly();
     },
   );
 
@@ -487,7 +725,46 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3848'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Credit Conditions tab with a mix of mandatory and optional conditions. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      const post = await openExistingPostSubmissionWithCreditConditionsTab(page);
+      await post.openCreditConditionsTab();
+
+      const rows = await post.readCreditConditionsMandatoryIndicatorAudit();
+      if (rows.length === 0) {
+        test.skip(
+          true,
+          "UDP-T3848: No Credit Conditions returned from AF — cannot validate mandatory asterisk indicators.",
+        );
+      }
+
+      const mandatoryRows = rows.filter((row) => row.mandatoryIndicatorPresent);
+      const optionalRows = rows.filter((row) => !row.mandatoryIndicatorPresent);
+
+      if (mandatoryRows.length === 0) {
+        test.skip(
+          true,
+          "UDP-T3848: AF returned no mandatory Credit Conditions — cannot validate asterisk on mandatory items.",
+        );
+      }
+      if (optionalRows.length === 0) {
+        test.skip(
+          true,
+          "UDP-T3848: AF returned no optional Credit Conditions — cannot confirm optional items omit the asterisk.",
+        );
+      }
+
+      for (const row of mandatoryRows) {
+        expect(row.conditionText.length, "Mandatory condition text should be populated").toBeGreaterThan(0);
+        expect(row.mandatoryIndicatorPresent, `Mandatory condition must show *: "${row.conditionText}"`).toBe(
+          true,
+        );
+      }
+
+      for (const row of optionalRows) {
+        expect(
+          row.mandatoryIndicatorPresent,
+          `Optional condition must not show mandatory *: "${row.conditionText}"`,
+        ).toBe(false);
+      }
     },
   );
 
@@ -496,7 +773,17 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3849'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Credit Conditions tab visible with conditions displayed. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      const post = await openExistingPostSubmissionWithCreditConditionsTab(page);
+
+      const conditions = await post.readCreditConditionsMandatoryIndicatorAudit();
+      if (conditions.length === 0) {
+        test.skip(
+          true,
+          "UDP-T3849: No Credit Conditions returned from AF — cannot validate view-only dealer access.",
+        );
+      }
+
+      await post.expectCreditConditionsTabViewOnlyForDealer();
     },
   );
 
@@ -522,6 +809,7 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     },
   );
 
+  
   test(
     "UDP-T3852 - TC_DOC_043 Loan Date Pop-Up Triggered on Submit When Loan Date Is in the Past",
     { tag: ['@do', '@regression', '@UDP-T3852'] },
@@ -623,10 +911,48 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3859'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(
-        true,
-        "Zephyr: Compare document Date & Time before/after re-generation — requires Ready for Documentation workflow and AF-generated documents.",
+      const dashboardPage = await openDealerDashboard(page);
+      const postSubmission = new DOCustomerQuotePostSubmitPage(page);
+      const assetDetailsPage = new DOAssetDetailsPage(page);
+
+      await dashboardPage.openReadyForDocumentationApplicationFromListing(
+        DOC_READY_FOR_DOCUMENTATION_QID,
       );
+
+      await postSubmission.expectReopenedPostSubmissionDocumentStripVisible();
+      await postSubmission.expectWorkflowStatusReadyForDocumentation();
+      await postSubmission.expectGeneratedDocumentsTabColumnHeaders();
+
+      const originalTimestamp =
+        await postSubmission.readGeneratedDocumentDateTime(DOC_REGEN_DOCUMENT_NAME);
+      expect(originalTimestamp.length).toBeGreaterThan(0);
+      const originalMs =
+        DOCustomerQuotePostSubmitPage.parseGeneratedDocumentDateTimeMs(originalTimestamp);
+
+      await assetDetailsPage.clickStandardQuoteStepTab(/Asset\s*Details/i);
+      await assetDetailsPage.expectAssetDetailsStepVisible();
+      const regenRef = `SQ-DOC-3859-${Date.now().toString().slice(-8)}`;
+      await assetDetailsPage.enterOriginationReference(regenRef);
+      await assetDetailsPage.clickSaveStandardQuoteStep();
+      await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+      await postSubmission.clickPostSubmissionStepTab();
+      await postSubmission.advanceToReadyForDocumentationViaGenerateDocumentationIfRequired();
+      await postSubmission.expectWorkflowStatusReadyForDocumentation();
+
+      await postSubmission.generateCustomerQuoteBasicDocument();
+
+      const updatedTimestamp =
+        await postSubmission.expectGeneratedDocumentTimestampUpdatedAfterRegeneration(
+          DOC_REGEN_DOCUMENT_NAME,
+          originalTimestamp,
+        );
+
+      expect(updatedTimestamp).not.toBe(originalTimestamp);
+      const updatedMs =
+        DOCustomerQuotePostSubmitPage.parseGeneratedDocumentDateTimeMs(updatedTimestamp);
+      expect(updatedMs).toBeGreaterThan(originalMs);
     },
   );
 
@@ -635,10 +961,19 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3860'] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(
-        true,
-        "Zephyr: Re-open submitted application from dashboard Quotes grid — requires dashboard grid POM + submitted quote seed (origination ref SQ-DOC-Ref).",
-      );
+      const dashboardPage = await openDealerDashboard(page);
+      const postSubmission = new DOCustomerQuotePostSubmitPage(page);
+      const assetDetailsPage = new DOAssetDetailsPage(page);
+
+      // Scenario 1 — Submitted Application → Post Submission (reuse existing listing row).
+      await dashboardPage.openSubmittedApplicationFromListing();
+      await postSubmission.expectOpenedDirectlyInPostSubmissionFromDashboard();
+
+      // Scenario 2 — Open Quote (not submitted) → Asset Details (quote 2361).
+      await openDealerDashboard(page);
+      await dashboardPage.openOpenQuoteFromListing(DOC_OPEN_QUOTE_ID);
+      await assetDetailsPage.expectQuoteNumberVisible(DOC_OPEN_QUOTE_ID);
+      await assetDetailsPage.expectAssetDetailsStepActiveNotPostSubmission();
     },
   );
 
