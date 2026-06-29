@@ -1103,6 +1103,254 @@ export class DOAssetDetailsPage extends BasePage {
     ).toBeVisible({ timeout: 25_000 });
   }
 
+  /** `app-less-deposit` — Waive LMF checkbox and related trade/settlement rows. */
+  lessDepositRoot(): Locator {
+    return this.page.locator("app-less-deposit").first();
+  }
+
+  /** PrimeNG **Waive LMF** host (Less Deposit, below Total Amount Borrowed). */
+  waiveLmfCheckboxHost(): Locator {
+    const less = this.lessDepositRoot();
+    return less
+      .locator("p-checkbox")
+      .filter({ hasText: /Waive\s+LMF/i })
+      .first()
+      .or(
+        this.standardQuoteRoot()
+          .locator("p-checkbox")
+          .filter({ hasText: /Waive\s+LMF/i })
+          .first(),
+      );
+  }
+
+  /** Visible **Waive LMF** checkbox box (PrimeNG). */
+  waiveLmfCheckboxBox(): Locator {
+    return this.waiveLmfCheckboxHost().locator("div.p-checkbox-box").first();
+  }
+
+  /** Label + `$` sibling in finance totals, with `amount/#amount` fallback. */
+  private financeSummaryLabelValueField(label: string): Locator {
+    const root = this.standardQuoteRoot();
+    const displayValue = root
+      .locator(
+        `xpath=.//*[normalize-space(.)="${label}"]/following-sibling::*[contains(., "$")][1]`,
+      )
+      .first();
+    const amountInput = root
+      .locator("amount")
+      .filter({ hasText: new RegExp(label.replace(/\s+/g, "\\s+"), "i") })
+      .locator("#amount")
+      .first();
+    return displayValue.or(amountInput).first();
+  }
+
+  /** **Loan Maintenance Fee** (totals block or `amount` row). */
+  loanMaintenanceFeeField(): Locator {
+    return this.financeSummaryLabelValueField("Loan Maintenance Fee");
+  }
+
+  /** **Payment Amount** (instalment) from Payment Summary. */
+  paymentAmountField(): Locator {
+    const labelRx = /Payment\s+Amount/i;
+    return this.paymentSummaryRoot
+      .locator("amount")
+      .filter({ hasText: labelRx })
+      .locator("#amount")
+      .first()
+      .or(
+        this.paymentSummaryRoot
+          .getByText(labelRx)
+          .locator("xpath=following::input[@id='amount'][1]")
+          .first(),
+      );
+  }
+
+  /** **Total Amount to Repay** from Payment Summary. */
+  totalAmountToRepayField(): Locator {
+    const labelRx = /Total\s+Amount\s+to\s+Repay/i;
+    return this.paymentSummaryRoot
+      .locator("amount")
+      .filter({ hasText: labelRx })
+      .locator("#amount")
+      .first()
+      .or(
+        this.paymentSummaryRoot
+          .getByText(labelRx)
+          .locator("xpath=following::input[@id='amount'][1]")
+          .first(),
+      );
+  }
+
+  async scrollLessDepositIntoView(): Promise<void> {
+    await this.lessDepositRoot().scrollIntoViewIfNeeded().catch(() => {});
+    await this.totalAmountBorrowedField().scrollIntoViewIfNeeded().catch(() => {});
+  }
+
+  async readLoanMaintenanceFee(): Promise<number> {
+    const field = this.loanMaintenanceFeeField();
+    await this.standardQuoteRoot().getByText(/Loan\s+Maintenance\s+Fee/i).first().scrollIntoViewIfNeeded().catch(() => {});
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    return this.readCurrencyInput(field);
+  }
+
+  async readPaymentAmount(): Promise<number> {
+    const field = this.paymentAmountField();
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    const raw =
+      (await field.inputValue().catch(() => "")).trim() ||
+      ((await field.textContent()) ?? "").trim();
+    return this.parseDisplayedCurrency(raw);
+  }
+
+  async readTotalAmountToRepay(): Promise<number> {
+    const field = this.totalAmountToRepayField();
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    const raw =
+      (await field.inputValue().catch(() => "")).trim() ||
+      ((await field.textContent()) ?? "").trim();
+    return this.parseDisplayedCurrency(raw);
+  }
+
+  private async isPrimeCheckboxChecked(host: Locator): Promise<boolean> {
+    const visual = await host
+      .locator(".p-checkbox-box.p-checkbox-checked, .p-checkbox-box.p-highlight")
+      .first()
+      .isVisible({ timeout: 1_500 })
+      .catch(() => false);
+    if (visual) return true;
+    const input = host.locator('input[type="checkbox"]').first();
+    return input.isChecked().catch(() => false);
+  }
+
+  /** Tick **Waive LMF** when visible and authorised. */
+  async setWaiveLmfChecked(checked: boolean): Promise<void> {
+    this.logStep(`Set Waive LMF checked: ${checked}`);
+    const host = this.waiveLmfCheckboxHost();
+    const box = this.waiveLmfCheckboxBox();
+    await expect
+      .poll(async () => box.isVisible().catch(() => false), { timeout: 60_000 })
+      .toBe(true);
+    await box.scrollIntoViewIfNeeded();
+    const isChecked = await this.isPrimeCheckboxChecked(host);
+    if (isChecked === checked) return;
+
+    await box.click({ timeout: 10_000 });
+    if ((await this.isPrimeCheckboxChecked(host)) !== checked) {
+      await box.click({ force: true, timeout: 10_000 });
+    }
+    if ((await this.isPrimeCheckboxChecked(host)) !== checked) {
+      const input = host.locator('input[type="checkbox"]').first();
+      if (checked) {
+        await input.check({ force: true });
+      } else {
+        await input.uncheck({ force: true });
+      }
+    }
+    await expect.poll(async () => this.isPrimeCheckboxChecked(host), { timeout: 8_000 }).toBe(checked);
+  }
+
+  async expectWaiveLmfCheckboxVisibleAndEnabled(): Promise<void> {
+    this.logStep("Expect Waive LMF Checkbox Visible And Enabled");
+    await this.scrollLessDepositIntoView();
+    await expect
+      .poll(async () => this.waiveLmfCheckboxBox().isVisible().catch(() => false), {
+        timeout: 60_000,
+      })
+      .toBe(true);
+    const host = this.waiveLmfCheckboxHost();
+    const box = this.waiveLmfCheckboxBox();
+    await expect(box).toBeVisible();
+    const disabled = await host
+      .locator(".p-checkbox.p-disabled, .p-checkbox-disabled")
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    expect(disabled).toBeFalsy();
+    const input = host.locator('input[type="checkbox"]').first();
+    if (await input.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await expect(input).toBeEnabled();
+    }
+  }
+
+  /** Unauthorised dealer: hidden or disabled/read-only. */
+  async expectWaiveLmfCheckboxHiddenOrDisabled(): Promise<void> {
+    this.logStep("Expect Waive LMF Checkbox Hidden Or Disabled");
+    await this.scrollLessDepositIntoView();
+    const host = this.waiveLmfCheckboxHost();
+    const visible = await host.isVisible({ timeout: 8_000 }).catch(() => false);
+    if (!visible) return;
+
+    const disabledClass = await host
+      .locator(".p-checkbox.p-disabled, .p-checkbox-disabled")
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
+    const input = host.locator('input[type="checkbox"]').first();
+    const inputDisabled =
+      (await input.isVisible({ timeout: 1_000 }).catch(() => false)) &&
+      (await input.isDisabled().catch(() => false));
+    expect(disabledClass || inputDisabled).toBeTruthy();
+  }
+
+  async expectWaiveLmfCheckboxUnchecked(): Promise<void> {
+    this.logStep("Expect Waive LMF Checkbox Unchecked");
+    await this.scrollLessDepositIntoView();
+    const host = this.waiveLmfCheckboxHost();
+    await expect(host).toBeVisible({ timeout: 25_000 });
+    expect(await this.isPrimeCheckboxChecked(host)).toBe(false);
+  }
+
+  async expectLoanMaintenanceFeeDisplayOnly(): Promise<void> {
+    this.logStep("Expect Loan Maintenance Fee Display Only");
+    const root = this.standardQuoteRoot();
+    const amountInput = root
+      .locator("amount")
+      .filter({ hasText: /Loan\s+Maintenance\s+Fee/i })
+      .locator("#amount")
+      .first();
+    if (await amountInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect(amountInput).toBeDisabled();
+      return;
+    }
+    const field = this.loanMaintenanceFeeField();
+    await expect(field).toBeVisible({ timeout: 25_000 });
+    const editable = await field.isEditable().catch(() => false);
+    expect(editable).toBeFalsy();
+  }
+
+  async expectLoanMaintenanceFeeGreaterThanZero(): Promise<void> {
+    this.logStep("Expect Loan Maintenance Fee Greater Than Zero");
+    await expect
+      .poll(async () => this.readLoanMaintenanceFee(), { timeout: 60_000 })
+      .toBeGreaterThan(0);
+  }
+
+  async expectLoanMaintenanceFeeZero(): Promise<void> {
+    this.logStep("Expect Loan Maintenance Fee Zero");
+    await expect.poll(async () => this.readLoanMaintenanceFee(), { timeout: 30_000 }).toBe(0);
+  }
+
+  async expectWaiveLmfInLessDepositBelowTotalBorrowed(): Promise<void> {
+    this.logStep("Expect Waive LMF In Less Deposit Below Total Borrowed");
+    await this.scrollTotalAmountBorrowedIntoView();
+    await expect(this.totalAmountBorrowedField()).toBeVisible({ timeout: 25_000 });
+    await this.scrollLessDepositIntoView();
+    await expect
+      .poll(async () => this.waiveLmfCheckboxBox().isVisible().catch(() => false), {
+        timeout: 60_000,
+      })
+      .toBe(true);
+    await expect(this.waiveLmfCheckboxBox()).toBeVisible();
+  }
+
+  /** After **Waive LMF**, payment schedule should not list timed LMF fee rows. */
+  async expectPaymentScheduleExcludesLmfFeeRows(): Promise<void> {
+    this.logStep("Expect Payment Schedule Excludes LMF Fee Rows");
+    const scope = this.paymentScheduleContentScope();
+    const lmfRows = scope
+      .locator("tbody tr")
+      .filter({ hasText: /LMF|Loan\s+Maintenance|Maintenance\s+Fee/i });
+    await expect(lmfRows).toHaveCount(0, { timeout: 15_000 });
+  }
+
   /**
    * Set interest % on the Finance **Interest Rate** field without the Finance-Lease stability cap ({@link interestRate}).
    * Use for CSA when observing brand / hierarchy behaviour after edits.
@@ -3961,105 +4209,12 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** **Total Amount Borrowed** — CSA display `label`; AFV / legacy may use `amount #amount`. */
   totalAmountBorrowedField(): Locator {
-    const displayLabel = this.totalAmountBorrowedDisplayLabel();
-
-    const labelRx = /Total\s+Amount\s+Borrowed/i;
-    const inSummary = this.paymentSummaryRoot
-      .locator("amount")
-      .filter({ hasText: labelRx })
-      .locator("#amount")
-      .first();
-    const byLabel = this.paymentSummaryRoot
-      .getByText(labelRx)
-      .locator("xpath=following::input[@id='amount'][1]")
-      .first();
-    const onPage = this.page
-      .locator("amount")
-      .filter({ hasText: labelRx })
-      .locator("#amount")
-      .first();
-    return displayLabel.or(inSummary).or(byLabel).or(onPage);
-  }
-
-  /** Row label anchor — exact text match (CSA Webform / UDP-T3821). */
-  interestChargeLabel(): Locator {
-    return this.standardQuoteRoot().locator(':text-is("Interest Charge")').first();
-  }
-
-  /**
-   * Display value for **Interest Charge** on CSA Webform:
-   * `label.text-right.col-3.pr-3` in the same grid row as the label text.
-   */
-  interestChargeDisplayLabel(): Locator {
-    const icLabel = this.interestChargeLabel();
-    return icLabel
-      .locator(
-        'xpath=ancestor::div[contains(@class,"grid")][1]//label[contains(@class,"col-3") and contains(@class,"pr-3")]',
-      )
-      .first()
-      .or(
-        icLabel.locator(
-          'xpath=following::label[contains(@class,"col-3") and contains(@class,"pr-3")][1]',
-        ),
-      );
+    return this.financeSummaryLabelValueField("Total Amount Borrowed");
   }
 
   /** **Interest Charge** — CSA display `label`; AFV / legacy may use `amount #amount`. */
   interestChargeField(): Locator {
-    const displayLabel = this.interestChargeDisplayLabel();
-
-    const labelRx = /Interest\s+Charge/i;
-    const inSummary = this.paymentSummaryRoot
-      .locator("amount")
-      .filter({ hasText: labelRx })
-      .locator("#amount")
-      .first();
-    const byLabel = this.paymentSummaryRoot
-      .getByText(labelRx)
-      .locator("xpath=following::input[@id='amount'][1]")
-      .first();
-    const onPage = this.page
-      .locator("amount")
-      .filter({ hasText: labelRx })
-      .locator("#amount")
-      .first();
-    return displayLabel.or(inSummary).or(byLabel).or(onPage);
-  }
-
-  /** Poll-friendly read — no long `expect` retries (UDP-T3822). */
-  private async readTotalAmountBorrowedNumericFast(): Promise<number> {
-    const display = this.totalAmountBorrowedDisplayLabel();
-    if (await display.isVisible({ timeout: 400 }).catch(() => false)) {
-      return this.parseDisplayedCurrency(((await display.textContent()) ?? "").trim());
-    }
-    const field = this.totalAmountBorrowedField();
-    if (await field.isVisible({ timeout: 400 }).catch(() => false)) {
-      const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
-      const raw =
-        tag === "input" || tag === "textarea"
-          ? (await field.inputValue().catch(() => "")).trim()
-          : ((await field.textContent()) ?? "").trim();
-      return this.parseDisplayedCurrency(raw);
-    }
-    return Number.NaN;
-  }
-
-  /** Poll-friendly read — no long `expect` retries (UDP-T3822). */
-  private async readInterestChargeNumericFast(): Promise<number> {
-    const display = this.interestChargeDisplayLabel();
-    if (await display.isVisible({ timeout: 400 }).catch(() => false)) {
-      return this.parseDisplayedCurrency(((await display.textContent()) ?? "").trim());
-    }
-    const field = this.interestChargeField();
-    if (await field.isVisible({ timeout: 400 }).catch(() => false)) {
-      const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
-      const raw =
-        tag === "input" || tag === "textarea"
-          ? (await field.inputValue().catch(() => "")).trim()
-          : ((await field.textContent()) ?? "").trim();
-      return this.parseDisplayedCurrency(raw);
-    }
-    return Number.NaN;
+    return this.financeSummaryLabelValueField("Interest Charge");
   }
 
   parseDisplayedCurrency(raw: string): number {
@@ -4572,5 +4727,36 @@ export class DOAssetDetailsPage extends BasePage {
       .locator(".p-field, [class*='p-field'], amount, .grid")
       .filter({ has: this.standardQuoteRoot().getByText(/^Charges$/i) })
       .first();
+  }
+
+  /** UDP-T3872 — Save before Calculate shows **Please click "Calculate"**. */
+  async expectPleaseClickCalculateDialog(): Promise<void> {
+    this.logStep("Expect Please Click Calculate Dialog");
+    const dlg = this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Please click\s*["']?Calculate["']?/i })
+      .or(this.page.getByText(/Please click\s*["']?Calculate["']?/i))
+      .first();
+    await expect(dlg).toBeVisible({ timeout: 20_000 });
+  }
+
+  /** UDP-T3876 — key asset fields editable in Open Quote. */
+  async expectOpenQuoteAssetFieldsEditable(): Promise<void> {
+    this.logStep("Expect Open Quote Asset Fields Editable");
+    await expect(this.interestRateInputField).toBeEditable({ timeout: 20_000 });
+    const origRef = this.standardQuoteRoot()
+      .locator('input[formControlName="originationReference"], input[name="originationReference"]')
+      .first();
+    await expect(origRef).toBeEditable({ timeout: 20_000 });
+  }
+
+  /** UDP-T3884+ — fields read-only (disabled / greyed) on quote surface. */
+  async expectQuoteSurfaceViewOnly(): Promise<void> {
+    this.logStep("Expect Quote Surface View Only");
+    const root = this.standardQuoteRoot();
+    const disabled = root.locator(
+      "input[disabled], textarea[disabled], .p-disabled input, .p-disabled textarea",
+    );
+    await expect(disabled.first()).toBeVisible({ timeout: 30_000 });
   }
 }

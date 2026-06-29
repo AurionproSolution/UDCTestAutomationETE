@@ -318,92 +318,179 @@ export class DODashboardPage extends BasePage {
     await this.clickElement(action);
   }
 
-  /** Dealer dashboard listing → **Activated Loans** view (SIT: grid is on home; switch via listing-type combobox). */
-  async navigateToDealerListingActiveLoans(): Promise<void> {
-    this.logStep("Navigate To Dealer Listing Active Loans");
-    await this.waitForAppLoaderOverlayGone(120_000);
-
-    const listingType = this.page
-      .getByRole("combobox", { name: /^(Quote|Listing|Loan)$/i })
-      .first();
-    if (await listingType.isVisible({ timeout: 15_000 }).catch(() => false)) {
-      await listingType.click({ timeout: 10_000 });
-      const activated = this.page
-        .getByRole("option", { name: /Activated Loans|Active Loans/i })
-        .first();
-      if (await activated.isVisible({ timeout: 8_000 }).catch(() => false)) {
-        await activated.click({ timeout: 10_000 });
-        await this.waitForAppLoaderOverlayGone(60_000);
-        return;
-      }
-      await this.page.keyboard.press("Escape").catch(() => {});
-    }
-
-    const listingLink = this.page
-      .getByRole("link", { name: /Dealer Listing/i })
-      .or(this.page.getByRole("button", { name: /Dealer Listing/i }))
-      .or(this.sideMenu.getByText(/Dealer Listing/i))
-      .first();
-    if (await listingLink.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      await listingLink.click({ timeout: 20_000 });
-      await this.waitForAppLoaderOverlayGone(60_000);
-    }
-    await this.waitForLoadingComplete(30_000);
+  /** Dashboard quote list (`app-quote-list` / `gen-table#quote-list`). */
+  private quotesListingRoot(): Locator {
+    return this.page.locator("app-quote-list").first();
   }
 
-  /** Dealer dashboard → open an existing Standard Quote by Quote ID from the listing grid. */
-  async openStandardQuoteByQuoteId(quoteId: string): Promise<void> {
-    const id = quoteId.trim();
-    if (!id) {
-      throw new Error("openStandardQuoteByQuoteId: quoteId is required.");
-    }
+  /** Scroll to the embedded **Quotes** grid on the dealer dashboard. */
+  async openQuotesAndApplications(): Promise<void> {
+    this.logStep("Open Quotes And Applications");
+    await this.waitForAppLoaderOverlayGone(120_000);
+    const quoteList = this.quotesListingRoot();
+    await expect(quoteList).toBeVisible({ timeout: 60_000 });
+    await quoteList.scrollIntoViewIfNeeded();
+    await expect(this.quotesGridTable()).toBeVisible({ timeout: 30_000 });
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+  }
 
-    this.logStep(`Open Standard Quote By Quote ID ${id}`);
-    await this.waitForAppLoaderOverlayGone(30_000);
+  /** PrimeNG quotes table on dashboard (`#quote-list` / `pn_id_*-table`). */
+  quotesGridTable(): Locator {
+    const root = this.quotesListingRoot();
+    return root
+      .locator("gen-table#quote-list table.p-datatable-table")
+      .first()
+      .or(root.locator("table.p-datatable-table").first())
+      .or(this.page.locator("gen-table#quote-list table.p-datatable-table").first());
+  }
 
-    const quoteLink = this.page
-      .locator(`:text-is("${id}")`)
-      .or(this.page.getByText(id, { exact: true }))
+  /** **Search Quote** filter above the dashboard grid. */
+  quotesGridSearchInput(): Locator {
+    return this.quotesListingRoot()
+      .locator('input[placeholder="Search Quote"]')
+      .first()
+      .or(this.page.locator('app-quote-list input[placeholder="Search Quote"]').first());
+  }
+
+  /** **View** applies search + date filters on the quote list. */
+  quotesGridViewButton(): Locator {
+    return this.quotesListingRoot()
+      .getByRole("button", { name: /^View$/i })
       .first();
-    await expect(quoteLink).toBeVisible({ timeout: 45_000 });
-    await quoteLink.scrollIntoViewIfNeeded();
-    await quoteLink.click({ timeout: 20_000 });
+  }
 
+  /** Quote-type dropdown (active **Quote** vs expired listing). */
+  quotesGridTypeDropdown(): Locator {
+    return this.quotesListingRoot().locator("p-dropdown").first().getByRole("combobox");
+  }
+
+  /** Filter grid by origination reference or quote id, then click **View**. */
+  async searchQuotesGrid(query: string): Promise<void> {
+    this.logStep(`Search Quotes Grid: ${this.stepValueDisplay(query)}`);
+    const search = this.quotesGridSearchInput();
+    await expect(search).toBeVisible({ timeout: 30_000 });
+    await search.fill(query);
+    const viewBtn = this.quotesGridViewButton();
+    if (await viewBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await viewBtn.click({ timeout: 15_000 });
+    } else {
+      await search.press("Enter").catch(() => {});
+    }
+    await this.waitForAppLoaderOverlayGone(60_000);
+    await this.page.waitForTimeout(500);
+  }
+
+  /** Row in quotes grid matching origination ref or quote id. */
+  quoteGridRowByReference(referenceOrQuoteId: string): Locator {
+    const escaped = referenceOrQuoteId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return this.quotesGridTable()
+      .locator("tbody tr")
+      .filter({ hasText: new RegExp(escaped, "i") })
+      .first();
+  }
+
+  /** Read a column cell value for a quote row (header text match). */
+  async readQuoteGridColumnForRow(
+    row: Locator,
+    columnHeader: RegExp,
+  ): Promise<string> {
+    const table = this.quotesGridTable();
+    const headers = table.locator("thead th");
+    const count = await headers.count();
+    let colIndex = -1;
+    for (let i = 0; i < count; i++) {
+      const text = ((await headers.nth(i).innerText()) ?? "").replace(/\s+/g, " ").trim();
+      if (columnHeader.test(text)) {
+        colIndex = i;
+        break;
+      }
+    }
+    if (colIndex < 0) {
+      const rowText = ((await row.innerText()) ?? "").replace(/\s+/g, " ").trim();
+      return rowText;
+    }
+    return ((await row.locator("td").nth(colIndex).innerText()) ?? "").replace(/\s+/g, " ").trim();
+  }
+
+  /** UDP-T3867 / T3891 — **Assigned To** column for a quote row. */
+  async expectQuoteGridAssignedTo(
+    referenceOrQuoteId: string,
+    expected: string | null,
+  ): Promise<void> {
+    this.logStep(`Expect Quote Grid Assigned To: ${expected ?? "(empty)"}`);
+    const row = this.quoteGridRowByReference(referenceOrQuoteId);
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    const assigned = await this.readQuoteGridColumnForRow(row, /Assigned\s*To/i);
+    if (expected === null || expected === "") {
+      expect(assigned).toMatch(/^(—|-|N\/A|)$/i);
+      return;
+    }
+    expect(assigned).toContain(expected);
+  }
+
+  /** UDP-T3873+ — dashboard **Workflow Status** column. */
+  async expectQuoteGridWorkflowStatus(
+    referenceOrQuoteId: string,
+    expectedStatus: RegExp | string,
+  ): Promise<void> {
+    this.logStep(`Expect Quote Grid Workflow Status: ${String(expectedStatus)}`);
+    const row = this.quoteGridRowByReference(referenceOrQuoteId);
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    const status = await this.readQuoteGridColumnForRow(row, /Workflow\s*Status|Status/i);
+    if (expectedStatus instanceof RegExp) {
+      expect(status).toMatch(expectedStatus);
+      return;
+    }
+    expect(status).toContain(expectedStatus);
+  }
+
+  /** Open quote from grid by clicking the blue **Quote ID** cell. */
+  async openQuoteFromGridByReference(referenceOrQuoteId: string): Promise<void> {
+    this.logStep(`Open Quote From Grid: ${this.stepValueDisplay(referenceOrQuoteId)}`);
+    await this.searchQuotesGrid(referenceOrQuoteId);
+    const row = this.quoteGridRowByReference(referenceOrQuoteId);
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    const quoteIdCell = row
+      .locator("div.cursor-pointer.text-primary")
+      .filter({ hasText: new RegExp(referenceOrQuoteId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") })
+      .first()
+      .or(row.getByRole("link").first())
+      .or(row.locator("a[href*='standard-quote']").first());
+    await quoteIdCell.click({ timeout: 30_000 });
+    await this.waitForAppLoaderOverlayGone(120_000);
     await expect(
       this.page.locator("app-quote-details, app-standard-quote").first(),
     ).toBeVisible({ timeout: 120_000 });
-    this.log(`Opened Standard Quote ${id}.`);
   }
 
-  /** Search the dealer listing grid and open **Create Settlement Quote** for a loan row. */
-  async clickCreateSettlementQuoteForLoan(regoOrVin: string): Promise<void> {
-    this.logStep(`Click Create Settlement Quote For Loan ${regoOrVin}`);
-    const search = this.page
-      .getByRole("textbox", { name: /Search Quote|Search Loan|Search/i })
+  /** Switch quote-type dropdown from **Quote** to **Expired** listing. */
+  async openExpiredQuotesListing(): Promise<void> {
+    this.logStep("Open Expired Quotes Listing");
+    await this.openQuotesAndApplications();
+    const typeDropdown = this.quotesGridTypeDropdown();
+    await expect(typeDropdown).toBeVisible({ timeout: 30_000 });
+    await typeDropdown.click({ timeout: 15_000 });
+    const expiredOption = this.page
+      .getByRole("option", { name: /Expired/i })
       .first();
-    if (await search.isVisible({ timeout: 10_000 }).catch(() => false)) {
-      await search.fill(regoOrVin);
-      const viewBtn = this.page.getByRole("button", { name: /^View$/i }).first();
-      if (await viewBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await viewBtn.click({ timeout: 15_000 });
-        await this.waitForAppLoaderOverlayGone(60_000);
-      }
+    await expect(expiredOption).toBeVisible({ timeout: 15_000 });
+    await expiredOption.click({ timeout: 15_000 });
+    const viewBtn = this.quotesGridViewButton();
+    if (await viewBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await viewBtn.click({ timeout: 15_000 });
     }
+    await this.waitForAppLoaderOverlayGone(60_000);
+  }
 
-    const row = this.tableRows.filter({ hasText: new RegExp(regoOrVin, "i") }).first();
-    await expect(row).toBeVisible({ timeout: 45_000 });
-    const rowCheckbox = row.locator('input[type="checkbox"]').first();
-    if (await rowCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await rowCheckbox.check({ force: true });
-    }
-
-    const bulkAction = this.page
-      .getByText("Create Settlement Quote", { exact: true })
-      .or(this.page.getByRole("button", { name: /Create Settlement Quote/i }))
-      .or(this.page.getByRole("link", { name: /Create Settlement Quote/i }))
-      .first();
-    await bulkAction.scrollIntoViewIfNeeded();
-    await bulkAction.click({ force: true, timeout: 20_000 });
-    await this.waitForAppLoaderOverlayGone(90_000);
+  /** Open quote by direct edit URL when quoteId is known (seed catalog). */
+  async openQuoteById(quoteId: string): Promise<void> {
+    this.logStep(`Open Quote By Id: ${quoteId}`);
+    const base = this.page.url().replace(/\/dealer\/?.*$/i, "/dealer");
+    const url = `${base}/standard-quote/edit/${quoteId}`;
+    await this.page.goto(url);
+    await this.waitForAppLoaderOverlayGone(120_000);
+    await expect(
+      this.page.locator("app-quote-details, app-standard-quote").first(),
+    ).toBeVisible({ timeout: 120_000 });
   }
 }
