@@ -511,14 +511,28 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectCsaProductAndProgram(page, assetDetailsPage);
-      await clickSearchAndAddAsset(page);
 
-      const dlg = await searchAddAssetDialog(page);
-      await selectSearchAddAssetMode(page, /Dealer Inventory/i);
-      await clickSearchInSearchAddAssetDialog(page);
+      // Asset & Insurance Summary → + Search & Add Asset → Search Asset dialog.
+      await assetDetailsPage.openAssetInsuranceTradeInSummary();
+      await clickSearchAndAddAssetFromInsuranceSummary(page);
 
-      const validation = page.getByText(/Please complete at least one selection|at least one/i);
-      await expect.soft(validation.first()).toBeVisible({ timeout: 20_000 });
+      const dlg = page.getByRole("dialog", { name: /Search Asset/i });
+      await expect(dlg).toBeVisible({ timeout: 30_000 });
+
+      await dlg
+        .getByRole("radio", { name: /Dealer Inventory/i })
+        .check({ force: true })
+        .catch(async () => {
+          await dlg.locator("label.p-radiobutton-label").filter({ hasText: /^Dealer Inventory$/i }).click();
+        });
+
+      await dlg.getByRole("button", { name: /^Search$/i }).click({ timeout: 15_000 });
+
+      const validation = page
+        .locator(".p-toast-message-error, .p-toast-message-warn, .p-toast, [role='alert']")
+        .filter({ hasText: /Please complete at least one selection/i })
+        .or(page.getByText(/Please complete at least one selection/i));
+      await expect(validation.first()).toBeVisible({ timeout: 20_000 });
     },
   );
 
