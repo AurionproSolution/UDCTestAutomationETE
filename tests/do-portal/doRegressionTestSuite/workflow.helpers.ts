@@ -197,6 +197,7 @@ export async function fillMinimalFinancialContinue(fin: DOFinancialPositionPage)
   await fin.setFirstLiabilityRowFrequencyMonthly();
   await fin.fillFirstIncomeAmount("$5,000.00");
   await fin.setTakeHomePayFrequencyMonthly();
+  await fin.selectIncomeLikelyToDecreaseNo().catch(() => {});
   await fin.fillExpenditureAmountByLabel(/Council Rates/i, "$220.00");
   await fin.setExpenditureRowFrequencyMonthlyByLabel(/Council Rates/i);
   await fin.fillEssentialOutgoingAmount("$150.00");
@@ -264,6 +265,7 @@ export async function openPostSubmissionWithPastLoanDate(
   await fillMinimalEmploymentContinue(emp);
   const fin = new DOFinancialPositionPage(page);
   await fillMinimalFinancialContinue(fin);
+  await navigateToBorrowerSummaryIfAvailable(page);
   const ref = new DOReferenceDetailsPage(page);
   await ref.waitForReferenceDetailsStep();
   await ref.clickAddContactDetails();
@@ -272,10 +274,24 @@ export async function openPostSubmissionWithPastLoanDate(
   await ref.enterContactLastName("Referee");
   await ref.clickAddContactInModal();
   await ref.confirmCustomerDetailsCorrect();
-  await ref.clickSubmitButton();
+  await ref.advanceFromReferenceDetailsToPostSubmission();
   const post = new DOCustomerQuotePostSubmitPage(page);
   await post.waitForUploadStep();
   return post;
+}
+
+/** Webform CSA — Reference may sit behind Borrower Summary after Financial **Next**. */
+async function navigateToBorrowerSummaryIfAvailable(page: Page): Promise<void> {
+  const root = standardQuoteRoot(page);
+  const byRole = root
+    .getByRole("button", { name: /^Borrower\s+Summary$/i })
+    .or(root.getByRole("link", { name: /^Borrower\s+Summary$/i }))
+    .or(root.getByRole("tab", { name: /^Borrower\s+Summary$/i }))
+    .first();
+  if (await byRole.isVisible({ timeout: 6_000 }).catch(() => false)) {
+    await byRole.click({ timeout: 15_000 });
+    await page.waitForTimeout(400);
+  }
 }
 
 /** Full CSA individual through Reference submit → Post Submission Upload. */
@@ -304,6 +320,7 @@ export async function openPostSubmissionFromFreshQuote(
   await fillMinimalEmploymentContinue(emp);
   const fin = new DOFinancialPositionPage(page);
   await fillMinimalFinancialContinue(fin);
+  await navigateToBorrowerSummaryIfAvailable(page);
   const ref = new DOReferenceDetailsPage(page);
   await ref.waitForReferenceDetailsStep();
   await ref.clickAddContactDetails();
@@ -312,7 +329,7 @@ export async function openPostSubmissionFromFreshQuote(
   await ref.enterContactLastName("Referee");
   await ref.clickAddContactInModal();
   await ref.confirmCustomerDetailsCorrect();
-  await ref.clickSubmitButton();
+  await ref.advanceFromReferenceDetailsToPostSubmission();
   const post = new DOCustomerQuotePostSubmitPage(page);
   await post.waitForUploadStep();
   return post;

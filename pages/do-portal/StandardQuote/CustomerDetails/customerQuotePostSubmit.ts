@@ -32,7 +32,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.browseFilesButton = page.locator(':text-is("Browse Files")');
+    this.browseFilesButton = page.getByRole("button", { name: /^Browse Files$/i });
     this.confirmButton = page.locator(':text-is("Confirm")');
     this.addNewNotesButton = page.locator(':text-is("Add New Notes")');
     this.noteTextarea = page.locator(

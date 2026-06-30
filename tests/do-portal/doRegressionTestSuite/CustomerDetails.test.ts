@@ -6,16 +6,18 @@
 
 import { expect, test } from "@fixtures/doPortalTest";
 import type { Locator, Page } from "@playwright/test";
-import { openFlBusinessStandardQuoteAndReachFinancialPosition } from "pages/do-portal/StandardQuote/CustomerDetails/customerDetailsFLBusiness.helpers.test";
+import { openFinanceLeaseBusinessAsgToAddBorrowerStep, openFlBusinessStandardQuoteAndReachFinancialPosition } from "pages/do-portal/StandardQuote/CustomerDetails/customerDetailsFLBusiness.helpers.test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAddressDetailsPage,
   DOAssetDetailsPage,
+  DOBusinessDetailsPage,
   DOCustomerQuotePostSubmitPage,
   DODashboardPage,
   DOEmploymentDetailsPage,
   DOFinancialPositionPage,
   DOReferenceDetailsPage,
+  DOSoleTraderDetailsPage,
   DOTrustDetailsPage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
@@ -26,8 +28,13 @@ const TLC_DEALER = "Armstrong Prestige Wellington";
 /** Default Originator Reference for Customer Details suite (`prepareCalculableCsaQuote` + post-Calculate replenish). */
 const CSA_CUSTOMER_DETAILS_ORIG_REF = "SQ-CSA-CD-Ref";
 
-/** Optional: UDC customer number that exists in FIS AF for search / selection scenarios. */
-const EXISTING_UDC_CUSTOMER_NUMBER = process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "";
+/** QAT Individual customer for search / FIS pre-population (UDP-T3714, T3720, T3743). Override via `UDC_EXISTING_CUSTOMER_NUMBER`. */
+const EXISTING_UDC_CUSTOMER_NUMBER =
+  process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "1183304";
+
+/** QAT Business customer for FIS pre-population (UDP-T3750). Override via `UDC_EXISTING_BUSINESS_CUSTOMER_NUMBER`. */
+const EXISTING_UDC_BUSINESS_CUSTOMER_NUMBER =
+  process.env.UDC_EXISTING_BUSINESS_CUSTOMER_NUMBER?.trim() || "1183317";
 
 function standardQuoteRoot(page: Page): Locator {
   return page.locator("app-quote-details, app-standard-quote").first();
@@ -130,6 +137,152 @@ async function openAddNewIndividualPersonal(
   await assetDetailsPage.clickSearchButton();
   await assetDetailsPage.clickAddNewCustomerButton();
   return new DOPersonalDetailsPage(assetDetailsPage.page);
+}
+
+/** Finance Lease Business Asg → **Add New Customer** (Business) → Business Details (UDP-T3746–T3749). */
+async function openAddNewBusinessDetailsStep(page: Page): Promise<DOBusinessDetailsPage> {
+  const assetDetailsPage = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  const dlg = await waitForSearchCustomerDialog(page);
+  const businessBox = searchTypeRadioHost(dlg, /Business/i).locator(".p-radiobutton-box").first();
+  if (await businessBox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await businessBox.click({ force: true });
+  } else {
+    await searchTypeRadioInput(dlg, "business").check({ force: true });
+  }
+  await expectSearchTypeRadioChecked(dlg, "business");
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber("999999999999");
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+  const biz = new DOBusinessDetailsPage(page);
+  await biz.waitForBusinessDetailsStep();
+  return biz;
+}
+
+/** Finance Lease Business Asg → search **Business** by UDC → select FIS party → Business Details. */
+async function openExistingBusinessFromFisSearch(page: Page): Promise<DOBusinessDetailsPage> {
+  const assetDetailsPage = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  const dlg = await waitForSearchCustomerDialog(page);
+  const businessBox = searchTypeRadioHost(dlg, /Business/i).locator(".p-radiobutton-box").first();
+  if (await businessBox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await businessBox.click({ force: true });
+  } else {
+    await searchTypeRadioInput(dlg, "business").check({ force: true });
+  }
+  await expectSearchTypeRadioChecked(dlg, "business");
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_BUSINESS_CUSTOMER_NUMBER);
+  await assetDetailsPage.clickSearchButton();
+  await clickAddOnBorrowerSearchResult(page, EXISTING_UDC_BUSINESS_CUSTOMER_NUMBER);
+  const biz = new DOBusinessDetailsPage(page);
+  await biz.waitForBusinessDetailsStep();
+  return biz;
+}
+
+type BusinessFieldOverrides = {
+  tradingName?: string | null;
+  registeredCompanyNumber?: string | null;
+  nzBusinessNumber?: string | null;
+  gstNumber?: string | null;
+};
+
+async function fillMinimalValidBusinessDetails(
+  biz: DOBusinessDetailsPage,
+  overrides: BusinessFieldOverrides = {},
+  opts: { bootstrap?: boolean } = {},
+): Promise<void> {
+  const bootstrap = opts.bootstrap !== false;
+  if (bootstrap) {
+    await biz.selectOrganisationType("Incorporated Body");
+    await biz.fillBusinessDescription("Automation — Business Details regression sample.");
+    await biz.selectPrimaryNatureOfBusiness("0113 Vegetable Growing");
+    await biz.selectSourceOfWealth("Business Activity");
+    await biz.enterTimeInBusiness("5", "3");
+    await biz.enterBusinessAreaCode("9");
+    await biz.enterBusinessPhoneNumber("0211234567");
+    await biz.enterBusinessEmail("biz.regression@example.com");
+  }
+
+  await biz.enterLegalName("Test Legal Entity Ltd");
+
+  if (overrides.tradingName === null) await biz.clearTradingName();
+  else await biz.enterTradingName(overrides.tradingName ?? "Test Trading");
+
+  if (overrides.registeredCompanyNumber === null) await biz.clearRegisteredCompanyNumber();
+  else await biz.enterRegisteredCompanyNumber(overrides.registeredCompanyNumber ?? "1234567");
+
+  if (overrides.nzBusinessNumber === null) await biz.clearNzBusinessNumber();
+  else await biz.enterNzBusinessNumber(overrides.nzBusinessNumber ?? "9429031234567");
+
+  if (overrides.gstNumber === null) await biz.clearGstNumber();
+  else await biz.enterGstNumber(overrides.gstNumber ?? "123456789");
+}
+
+async function triggerBusinessFieldValidation(biz: DOBusinessDetailsPage): Promise<void> {
+  await biz.clickSaveBusinessDetails();
+}
+
+async function expectBusinessFieldMessage(
+  biz: DOBusinessDetailsPage,
+  patterns: RegExp[],
+): Promise<void> {
+  const root = biz.businessRoot;
+  let matcher = root.getByText(patterns[0]);
+  for (let i = 1; i < patterns.length; i++) {
+    matcher = matcher.or(root.getByText(patterns[i]));
+  }
+  await expect(matcher.first()).toBeVisible({ timeout: 20_000 });
+}
+
+const REGISTERED_COMPANY_REQUIRED = [
+  /Registered Company Number.{0,30}(is required|required|cannot be blank)/i,
+  /Registered company number is required/i,
+  /Company Number is required/i,
+  /NZ Company Number is required/i,
+  /Please enter.*(Registered Company|Company Number|NZ Company)/i,
+];
+
+const REGISTERED_COMPANY_INVALID = [
+  /Registered company number cannot be greater than 7 digits/i,
+  /Registered Company Number.{0,40}(incorrect format|invalid format)/i,
+  /Registered company number.{0,40}(incorrect|invalid|numeric)/i,
+  /If > 7/i,
+];
+
+const NZBN_REQUIRED = [
+  /(New Zealand Business Number|NZ Business Number|NZBN).{0,30}(is required|required|cannot be blank)/i,
+  /New Zealand business number is required/i,
+  /Please enter.*(New Zealand Business|NZBN|NZ Business)/i,
+];
+
+const NZBN_INVALID = [
+  /Business No cannot be greater than 13 digits/i,
+  /(New Zealand|NZ) business number cannot be greater than 13 digits/i,
+  /(New Zealand Business Number|NZBN|NZ Business Number).{0,40}(incorrect format|invalid format)/i,
+  /(New Zealand|NZ) business number.{0,40}(incorrect|invalid|numeric)/i,
+  /Business No.{0,40}(incorrect|invalid|numeric)/i,
+  /max(imum)?\s*13/i,
+];
+
+const GST_REQUIRED = [
+  /GST [Nn]umber.{0,30}(is required|required|cannot be blank)/i,
+  /Please enter.*GST/i,
+];
+
+const GST_INVALID = [
+  /GST number cannot be greater than 9 digits/i,
+  /GST Number.{0,40}(incorrect format|invalid format)/i,
+  /GST number.{0,40}(incorrect|invalid|numeric)/i,
+  /max(imum)?\s*9/i,
+];
+
+async function gstNumberMarkedRequired(biz: DOBusinessDetailsPage): Promise<boolean> {
+  const text = (await biz.businessRoot.getByText(/^GST Number/i).first().textContent().catch(() => "")) ?? "";
+  return text.includes("*");
 }
 
 async function fillValidIndividualPersonalBorrower(p: DOPersonalDetailsPage): Promise<void> {
@@ -398,15 +551,609 @@ async function returnToReferenceOrSummaryForPartyObserve(page: Page): Promise<vo
   await navigateToBorrowerSummaryIfAvailable(page);
 }
 
+function createNewCopyToPreviousAddressLabel(page: Page): Locator {
+  return page.getByText(/Create new and copy to previous\s*Address/i).first();
+}
+
+function employmentDetailsChangedLabel(page: Page): Locator {
+  return page.getByText(/Have the Employment Details Changed\??/i).first();
+}
+
+async function expectPrimeSwitchNearLabelDefaultsToNo(page: Page, label: Locator): Promise<void> {
+  await expect(label).toBeVisible({ timeout: 30_000 });
+  const row = label.locator(
+    "xpath=ancestor::div[.//p-inputswitch or .//span[contains(@class,'p-inputswitch')]][1]",
+  );
+  const host = row.locator("p-inputswitch").first();
+  if (await host.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const checked = await host.evaluate((el) => el.classList.contains("p-inputswitch-checked"));
+    expect(checked).toBe(false);
+    return;
+  }
+  const switchInput = row.locator("p-inputswitch input[type='checkbox']").first();
+  if (await switchInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await expect(switchInput).not.toBeChecked();
+  }
+}
+
+async function openExistingIndividualOnAddressStep(page: Page): Promise<DOAddressDetailsPage> {
+  if (!EXISTING_UDC_CUSTOMER_NUMBER) {
+    throw new Error("Set UDC_EXISTING_CUSTOMER_NUMBER for existing-customer address flows.");
+  }
+  const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
+  await assetDetailsPage.clickSearchButton();
+  await clickAddOnBorrowerSearchResult(page, EXISTING_UDC_CUSTOMER_NUMBER);
+  const personal = new DOPersonalDetailsPage(page);
+  await expect(personal.personalDetailsRoot).toBeVisible({ timeout: 120_000 });
+  await personal.clickNextButton();
+  const address = new DOAddressDetailsPage(page);
+  await address.waitForPhysicalAddressStep();
+  return address;
+}
+
+async function openExistingIndividualOnEmploymentStep(page: Page): Promise<DOEmploymentDetailsPage> {
+  const address = await openExistingIndividualOnAddressStep(page);
+  await address.clickNextButton();
+  const employment = new DOEmploymentDetailsPage(page);
+  await employment.waitForEmploymentDetailsStep();
+  return employment;
+}
+
+async function openNewIndividualOnEmploymentStep(page: Page): Promise<DOEmploymentDetailsPage> {
+  const personal = await openAddNewIndividualPersonal(await openStandardQuoteOnCustomerDetailsStep(page));
+  await fillValidIndividualPersonalBorrower(personal);
+  await personal.clickNextButton();
+  const address = new DOAddressDetailsPage(page);
+  await fillMinimalAddressContinue(page, address);
+  const employment = new DOEmploymentDetailsPage(page);
+  await employment.waitForEmploymentDetailsStep();
+  return employment;
+}
+
+/** Finance Lease Business Asg → Add New Individual (Sole Trader) → Address Details (UDP-T3763). */
+async function openSoleTraderOnAddressStep(page: Page): Promise<DOAddressDetailsPage> {
+  const assetDetailsPage = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  await post.selectSearchCustomerIndividualType();
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber("999999999999");
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+
+  const sole = new DOSoleTraderDetailsPage(page);
+  const personal = new DOPersonalDetailsPage(page);
+  await sole.waitForSoleTraderBusinessDetailsStep();
+  await sole.enterTradingName("UDP-T3763 Trading");
+  await sole.enterGstNumber("12345678");
+  await sole.fillBusinessDescription("Automation — Sole Trader address regression.");
+  await sole.selectPrimaryNatureOfBusiness("0113 Vegetable Growing");
+  await sole.enterTimeInBusiness("5", "3");
+  await personal.chooseTitle("Dame");
+  await personal.enterFirstName("Liza");
+  await personal.enterMiddleName("Marie");
+  await personal.enterLastName("Doe");
+  await personal.chooseGender("Female");
+  await sole.enterDateOfBirth("01/01/1980");
+  await personal.chooseMarritalStatus("Married");
+  await personal.chooseNoOfDependents("0");
+  await sole.enterBusinessAreaCode("9");
+  await sole.enterBusinessPhoneNumber("0211234567");
+  await sole.enterBusinessEmail("sole.trader@example.com");
+  await personal.chooseLicenceType("Full Licence");
+  await personal.chooseCountryOfIssue("New Zealand");
+  await personal.enterLicenceNumber("AB123456");
+  await personal.enterVersionNumber("244");
+  await personal.chooseNewZealandResident("Yes");
+  await personal.chooseCountryOfBirth("New Zealand");
+  await personal.chooseCountryOfCitizenship("New Zealand");
+  await sole.clickNextButton();
+
+  const address = new DOAddressDetailsPage(page);
+  await address.waitForPhysicalAddressStep();
+  return address;
+}
+
+async function addCoBorrowerIndividualFromPostSubmit(page: Page): Promise<void> {
+  const personal = await openAddNewIndividualFromPostSubmit(page);
+  const coBorrowerSelected = await selectCustomerRoleIfAvailable(page, /^Co[\s-]*Borrower$/i);
+  expect(coBorrowerSelected).toBe(true);
+  await fillValidSecondIndividualPersonalBorrower(personal);
+  await personal.clickSavePersonalDetails();
+  await personal.clickNextButton().catch(() => {});
+
+  const address = new DOAddressDetailsPage(page);
+  if (await address.physicalSearchInput.isVisible({ timeout: 20_000 }).catch(() => false)) {
+    await address.timeAtAddress("3", "0");
+    await address.enterStreetNumber("456");
+    await address.enterStreetName("CoBorrower Street");
+    await address.enterCity("Auckland");
+    await address.chooseCountry("New Zealand");
+    await address.selectResidenceType("Boarding");
+    await address.clickReuseForPostalAddressToggle();
+    await address.clickSaveAddressDetails();
+  }
+}
+
+async function deletePartyRowByName(
+  page: Page,
+  namePattern: RegExp,
+  rolePattern?: RegExp,
+): Promise<void> {
+  const root = standardQuoteRoot(page);
+  let row = root.locator("tr, [role='row'], .p-datatable-row, li, section").filter({
+    hasText: namePattern,
+  });
+  if (rolePattern) {
+    row = row.filter({ hasText: rolePattern });
+  }
+  const targetRow = row.first();
+  await expect(targetRow).toBeVisible({ timeout: 60_000 });
+
+  const deleteBtn = targetRow
+    .getByRole("button", { name: /Delete|Remove/i })
+    .or(targetRow.locator("button, a, [role='button']").filter({ hasText: /Delete|Remove/i }))
+    .or(targetRow.locator(".pi-trash, .fa-trash, [class*='trash']").locator("xpath=ancestor::button[1]"));
+  if (await deleteBtn.first().isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await deleteBtn.first().click({ timeout: 20_000 });
+  } else {
+    await targetRow.getByRole("button").last().click({ timeout: 20_000 });
+  }
+
+  const confirm = page.getByRole("button", { name: /^(Yes|Confirm|OK|Delete)$/i }).first();
+  if (await confirm.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await confirm.click({ timeout: 15_000 });
+  }
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+}
+
 function customerSearchDialog(page: Page): Locator {
   return page
-    .getByRole("dialog")
-    .filter({ has: page.getByRole("button", { name: /^Search$/i }) })
+    .locator('[role="dialog"]')
+    .filter({ has: page.locator("app-search-customer") })
     .last();
 }
 
+function searchCustomerRoot(dlg: Locator): Locator {
+  return dlg.locator("app-search-customer").first();
+}
+
+function searchTypeRadioInput(
+  dlg: Locator,
+  value: "individual" | "business" | "trust",
+): Locator {
+  return searchCustomerRoot(dlg).locator(
+    `input[type="radio"][name="searchCustomer"][value="${value}"]`,
+  );
+}
+
+function searchTypeRadioHost(dlg: Locator, label: RegExp): Locator {
+  return searchCustomerRoot(dlg).locator("p-radiobutton").filter({ hasText: label }).first();
+}
+
+/** PrimeNG Search Type radios — prefer hidden `input[name="searchCustomer"]`, then radiobutton box. */
 function searchTypeRadio(page: Page, label: RegExp): Locator {
-  return customerSearchDialog(page).getByRole("radio", { name: label });
+  const dlg = customerSearchDialog(page);
+  let value: "individual" | "business" | "trust" = "trust";
+  if (/individual/i.test(String(label))) value = "individual";
+  else if (/business/i.test(String(label))) value = "business";
+  return searchTypeRadioInput(dlg, value).or(
+    searchTypeRadioHost(dlg, label).locator(".p-radiobutton-box").first(),
+  );
+}
+
+async function waitForSearchCustomerDialog(page: Page): Promise<Locator> {
+  const dlg = customerSearchDialog(page);
+  await expect(dlg).toBeVisible({ timeout: 60_000 });
+  await expect(searchCustomerRoot(dlg)).toBeVisible({ timeout: 30_000 });
+  await expect(dlg.getByText(/Search Type/i).first()).toBeVisible({ timeout: 30_000 });
+  return dlg;
+}
+
+/** UDC search navigates to **Borrower Result** cards (not the search dialog or a datatable). */
+async function waitForBorrowerSearchResult(
+  page: Page,
+  udcCustomerNumber: string,
+): Promise<void> {
+  await page
+    .waitForURL(/borrower-search-result/i, { timeout: 90_000 })
+    .catch(() => {});
+  await expect
+    .soft(page.getByText(udcCustomerNumber, { exact: false }).first())
+    .toBeVisible({ timeout: 90_000 });
+  await expect.soft(page.getByText(/UDC Customer Number/i).first()).toBeVisible({
+    timeout: 15_000,
+  });
+}
+
+async function clickAddOnBorrowerSearchResult(
+  page: Page,
+  udcCustomerNumber: string,
+): Promise<void> {
+  await waitForBorrowerSearchResult(page, udcCustomerNumber);
+  const resultCard = page
+    .locator("div, section, article")
+    .filter({ hasText: udcCustomerNumber })
+    .filter({ hasText: /UDC Customer Number/i })
+    .last();
+  const addBtn = resultCard
+    .getByRole("button", { name: /^Add$/i })
+    .or(page.getByRole("button", { name: /^Add$/i }).first());
+  await addBtn.first().click({ timeout: 30_000 });
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+}
+
+/** Individual borrower through Reference Submit → Upload (then add Trust as second party). */
+async function addPrimaryIndividualBorrowerForTrustTests(page: Page): Promise<void> {
+  const p = await openAddNewIndividualPersonal(await openStandardQuoteOnCustomerDetailsStep(page));
+  await fillValidIndividualPersonalBorrower(p);
+  await p.clickNextButton();
+  const a = new DOAddressDetailsPage(page);
+  await fillMinimalAddressContinue(page, a);
+  await fillMinimalCsaEmploymentContinue(page);
+  const fin = new DOFinancialPositionPage(page);
+  await fillMinimalCsaIndividualFinancialPosition(fin);
+  await fin.clickNextButton();
+  const ref = new DOReferenceDetailsPage(page);
+  await ref.waitForReferenceDetailsStep();
+  await ref.clickAddContactDetails();
+  await ref.selectContactType("Accountant");
+  await ref.enterContactFirstName("Alex");
+  await ref.enterContactLastName("Referee");
+  await ref.clickAddContactInModal();
+  await ref.confirmCustomerDetailsCorrect();
+  await ref.advanceFromReferenceDetailsToPostSubmission();
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  await post.waitForUploadStep();
+  const borrowerRow = page.locator("tr, div, li, section").filter({ hasText: /Liza Marie Doe/i }).first();
+  await expect(borrowerRow).toBeVisible({ timeout: 60_000 });
+  await expect(borrowerRow).toContainText(/Borrower/i);
+}
+
+function customerRoleDropdownTrigger(page: Page): Locator {
+  return page
+    .locator("label")
+    .filter({ hasText: /Customer Role/i })
+    .first()
+    .locator(
+      "xpath=following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+    );
+}
+
+function customerRoleDropdownTriggerInRoot(root: Locator): Locator {
+  return root
+    .locator("label")
+    .filter({ hasText: /Customer Role/i })
+    .first()
+    .locator(
+      "xpath=following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+    );
+}
+
+async function resolveCustomerRoleDropdownTrigger(page: Page, scope: Locator): Promise<Locator> {
+  const scoped = customerRoleDropdownTriggerInRoot(scope);
+  if (await scoped.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    return scoped;
+  }
+  return customerRoleDropdownTrigger(page);
+}
+
+/** Opens Customer Role dropdown on Business Details and asserts listed options. */
+async function expectCustomerRoleDropdownShowsRoles(
+  page: Page,
+  scope: Locator,
+  expectedRolePatterns: RegExp[],
+  opts?: { absentRolePatterns?: RegExp[] },
+): Promise<void> {
+  const roleTrig = await resolveCustomerRoleDropdownTrigger(page, scope);
+  await expect(roleTrig).toBeVisible({ timeout: 15_000 });
+  await roleTrig.click();
+
+  const listbox = page.getByRole("listbox").filter({ visible: true }).last();
+  const panel = page.locator(".p-dropdown-panel").filter({ visible: true }).last();
+  const optionsRoot = (await listbox.isVisible({ timeout: 2_000 }).catch(() => false))
+    ? listbox
+    : panel;
+  await expect(optionsRoot).toBeVisible({ timeout: 10_000 });
+
+  for (const rolePattern of expectedRolePatterns) {
+    await expect(optionsRoot.getByRole("option", { name: rolePattern }).first()).toBeVisible({
+      timeout: 10_000,
+    });
+  }
+  if (opts?.absentRolePatterns) {
+    for (const rolePattern of opts.absentRolePatterns) {
+      await expect(optionsRoot.getByRole("option", { name: rolePattern })).toHaveCount(0);
+    }
+  }
+
+  await page.keyboard.press("Escape");
+}
+
+async function advanceBusinessBorrowerFromBusinessDetailsToUpload(
+  page: Page,
+  biz: DOBusinessDetailsPage,
+): Promise<void> {
+  await fillMinimalValidBusinessDetails(biz);
+  await biz.clickNextButton();
+
+  const address = new DOAddressDetailsPage(page);
+  await address.waitForPhysicalAddressStep();
+  await address.timeAtAddress("1", "1");
+  await address.enterStreetNumber("123");
+  await address.enterStreetName("Main Street");
+  await address.enterCity("Wellington");
+  await address.chooseCountry("New Zealand");
+  await address.clickReuseForPostalAddressToggle();
+  await page.waitForTimeout(400);
+  await address.ensureReuseForRegisterAddressYes();
+  await address.ensureOverseasAddressNoIfPreviousPhysicalVisible();
+  await address.fillPreviousPhysicalRequiredIfPresent({
+    years: "1",
+    months: "1",
+    streetNumber: "45",
+    streetName: "Queen Street",
+    city: "Wellington",
+    country: "New Zealand",
+  });
+  await address.clickNextButton();
+
+  const fin = new DOFinancialPositionPage(page);
+  await fin.waitForFinancialPositionStep();
+  await fin.selectBusinessNetProfitLastYearNo();
+  await fin.clickNextButton();
+
+  const ref = new DOReferenceDetailsPage(page);
+  await ref.waitForReferenceDetailsStep();
+  await ref.clickAddContactDetails();
+  await ref.selectContactType("Accountant");
+  await ref.enterContactFirstName("Alex");
+  await ref.enterContactLastName("Referee");
+  await ref.clickAddContactInModal();
+  await ref.confirmCustomerDetailsCorrect();
+  await ref.advanceFromReferenceDetailsToPostSubmission();
+
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  await post.waitForUploadStep();
+  const borrowerRow = page
+    .locator("tr, div, li, section")
+    .filter({ hasText: /Test Legal Entity Ltd|Test Trading/i })
+    .first();
+  await expect(borrowerRow).toBeVisible({ timeout: 60_000 });
+  await expect(borrowerRow).toContainText(/Borrower/i);
+}
+
+/** After primary Business borrower exists — Post Submission **Add Borrowers / Guarantors** → Business → Add New. */
+async function openAddNewBusinessFromPostSubmit(page: Page): Promise<DOBusinessDetailsPage> {
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  await post.clickAddBorrowersOrGuarantorsButton();
+  const dlg = await waitForSearchCustomerDialog(page);
+  const businessBox = searchTypeRadioHost(dlg, /Business/i).locator(".p-radiobutton-box").first();
+  if (await businessBox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await businessBox.click({ force: true });
+  } else {
+    await searchTypeRadioInput(dlg, "business").check({ force: true });
+  }
+  await expectSearchTypeRadioChecked(dlg, "business");
+  const assetDetailsPage = new DOAssetDetailsPage(page);
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber("999999999999");
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+  const biz = new DOBusinessDetailsPage(page);
+  await biz.waitForBusinessDetailsStep();
+  return biz;
+}
+
+/** After primary Individual exists — Post Submission **Add Borrowers / Guarantors** → Individual → Add New. */
+async function openAddNewIndividualFromPostSubmit(page: Page): Promise<DOPersonalDetailsPage> {
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  await post.clickAddBorrowersOrGuarantorsButton();
+  const dlg = await waitForSearchCustomerDialog(page);
+  await expectSearchTypeRadioChecked(dlg, "individual");
+  const assetDetailsPage = new DOAssetDetailsPage(page);
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber("999999999999");
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+  const personalPage = new DOPersonalDetailsPage(page);
+  await expect(personalPage.personalDetailsRoot).toBeVisible({ timeout: 120_000 });
+  return personalPage;
+}
+
+async function fillValidSecondIndividualPersonalBorrower(p: DOPersonalDetailsPage): Promise<void> {
+  await p.chooseTitle("Mr");
+  await p.enterFirstName("John");
+  await p.enterMiddleName("Alan");
+  await p.enterLastName("Smith");
+  await p.chooseGender("Male");
+  await p.enterDateOfBirth("15/06/1985");
+  await p.chooseMarritalStatus("Single");
+  await p.chooseNoOfDependents("0");
+  await p.enterMobileNumber("0219876543");
+  await p.enterEmail("john.smith@example.com");
+  await p.chooseLicenceType("Full Licence");
+  await p.chooseCountryOfIssue("New Zealand");
+  await p.enterLicenceNumber("CD654321");
+  await p.enterVersionNumber("512");
+  await p.chooseNewZealandResident("Yes");
+  await p.chooseCountryOfBirth("New Zealand");
+  await p.chooseCountryOfCitizenship("New Zealand");
+}
+
+async function selectCustomerRoleIfAvailable(page: Page, rolePattern: RegExp): Promise<boolean> {
+  const roleTrig = customerRoleDropdownTrigger(page);
+  if (!(await roleTrig.isVisible({ timeout: 15_000 }).catch(() => false))) {
+    return false;
+  }
+  await roleTrig.click();
+  const opt = page.getByRole("option", { name: rolePattern }).first();
+  const visible = await opt.isVisible({ timeout: 5_000 }).catch(() => false);
+  if (!visible) {
+    await page.keyboard.press("Escape");
+    return false;
+  }
+  const disabled = await opt
+    .evaluate((el) => {
+      return (
+        el.classList.contains("p-disabled") ||
+        el.getAttribute("aria-disabled") === "true" ||
+        el.hasAttribute("disabled")
+      );
+    })
+    .catch(() => true);
+  if (disabled) {
+    await page.keyboard.press("Escape");
+    return false;
+  }
+  await opt.click();
+  return true;
+}
+
+async function countPrimaryBorrowerPartiesOnQuote(page: Page): Promise<number> {
+  const roleBadges = page.getByText(/^Borrower$/i);
+  let count = 0;
+  const n = await roleBadges.count();
+  for (let i = 0; i < n; i++) {
+    const badge = roleBadges.nth(i);
+    if (!(await badge.isVisible().catch(() => false))) {
+      continue;
+    }
+    const container = badge
+      .locator("xpath=ancestor::tr[1] | ancestor::li[1] | ancestor::section[1]")
+      .first();
+    const text = (await container.textContent({ timeout: 2_000 }).catch(() => "")) ?? "";
+    if (/Co[\s-]*Borrower/i.test(text)) {
+      continue;
+    }
+    count++;
+  }
+  return count;
+}
+
+async function secondBorrowerValidationVisible(page: Page, personal: DOPersonalDetailsPage): Promise<boolean> {
+  const patterns = [
+    /only one borrower/i,
+    /one borrower.{0,40}(permitted|allowed)/i,
+    /borrower.{0,40}(permitted|allowed).{0,20}one/i,
+    /maximum.{0,20}borrower/i,
+  ];
+  const roots = [
+    page.locator(".p-toast, .p-toast-message, [role='alert'], .p-message, .p-inline-message"),
+    personal.personalDetailsRoot,
+  ];
+  for (const root of roots) {
+    for (const pattern of patterns) {
+      const msg = root.getByText(pattern).first();
+      if (await msg.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Attempt to add a second party with Customer Role = Borrower.
+ * Returns `true` when a second primary Borrower appears on the quote (test should fail).
+ */
+async function attemptAddSecondCustomerAsBorrower(page: Page): Promise<boolean> {
+  const beforeCount = await countPrimaryBorrowerPartiesOnQuote(page);
+  const personal = await openAddNewIndividualFromPostSubmit(page);
+  const borrowerRoleSelected = await selectCustomerRoleIfAvailable(page, /^Borrower$/i);
+
+  if (!borrowerRoleSelected) {
+    return false;
+  }
+
+  await fillValidSecondIndividualPersonalBorrower(personal);
+  await personal.clickSavePersonalDetails();
+  if (await secondBorrowerValidationVisible(page, personal)) {
+    return false;
+  }
+
+  await personal.clickNextButton().catch(() => {});
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+
+  if (await secondBorrowerValidationVisible(page, personal)) {
+    return false;
+  }
+
+  const secondBorrowerRow = page
+    .locator("tr, div, li, section")
+    .filter({ hasText: /John Alan Smith|John Smith/i })
+    .first();
+  if (await secondBorrowerRow.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    const rowText = (await secondBorrowerRow.textContent()) ?? "";
+    if (/\bBorrower\b/i.test(rowText) && !/Co[\s-]*Borrower/i.test(rowText)) {
+      return true;
+    }
+  }
+
+  const afterCount = await countPrimaryBorrowerPartiesOnQuote(page);
+  return afterCount > beforeCount;
+}
+
+/** After primary Individual exists — Post Submission **Add Borrowers / Guarantors** → Trust → Add New. */
+async function openAddNewTrustCustomer(page: Page): Promise<DOTrustDetailsPage> {
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  await post.clickAddBorrowersOrGuarantorsButton();
+  const dlg = await waitForSearchCustomerDialog(page);
+  const trustBox = searchTypeRadioHost(dlg, /Trust/i).locator(".p-radiobutton-box").first();
+  if (await trustBox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await trustBox.click({ force: true });
+  } else {
+    await searchTypeRadioInput(dlg, "trust").check({ force: true });
+  }
+  await expectSearchTypeRadioChecked(dlg, "trust");
+  const assetDetailsPage = new DOAssetDetailsPage(page);
+  await assetDetailsPage.searchByDropdownClick();
+  await assetDetailsPage.selectUDCSelectOption();
+  await assetDetailsPage.enterUDCCustomerNumber("999999999999");
+  await assetDetailsPage.clickSearchButton();
+  await assetDetailsPage.clickAddNewCustomerButton();
+  const trustPage = new DOTrustDetailsPage(page);
+  await trustPage.waitForTrustDetailsStep();
+  return trustPage;
+}
+
+async function expectSearchTypeRadioChecked(
+  dlg: Locator,
+  value: "individual" | "business" | "trust",
+): Promise<void> {
+  const input = searchTypeRadioInput(dlg, value);
+  await expect(input).toBeChecked({ timeout: 20_000 });
+  const host = searchCustomerRoot(dlg).locator(`p-radiobutton:has(input[value="${value}"])`).first();
+  await expect(
+    host
+      .locator('[data-pc-section="root"].p-radiobutton-checked, .p-radiobutton-box.p-highlight')
+      .first(),
+  ).toBeVisible({ timeout: 10_000 });
+}
+
+async function expectSearchTypeBusinessDisabledForConsumer(dlg: Locator): Promise<void> {
+  const root = searchCustomerRoot(dlg);
+  const individualInput = searchTypeRadioInput(dlg, "individual");
+  const businessInput = searchTypeRadioInput(dlg, "business");
+  const businessHost = root.locator('p-radiobutton:has(input[value="business"])').first();
+
+  await expect(individualInput).toBeChecked({ timeout: 10_000 });
+  await expect(businessInput).not.toBeChecked();
+  await expect(businessHost).toBeVisible({ timeout: 10_000 });
+
+  const businessBox = businessHost.locator(".p-radiobutton-box").first();
+  if (await businessBox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await businessBox.click({ force: true, timeout: 5_000 }).catch(() => {});
+  }
+  await expect(individualInput).toBeChecked();
+  await expect(businessInput).not.toBeChecked();
 }
 
   
@@ -436,15 +1183,11 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       test.setTimeout(600_000);
       const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
       await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      const dlg = customerSearchDialog(page);
-      await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
-      const ind = searchTypeRadio(page, /Individual/i).first();
-      await expect.soft(ind).toBeVisible({ timeout: 20_000 });
-      await expect.soft(ind).toBeChecked();
-      const biz = searchTypeRadio(page, /Business/i).first();
-      if (await biz.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await expect.soft(biz).toBeDisabled();
-      }
+      const dlg = await waitForSearchCustomerDialog(page);
+
+      await expectSearchTypeRadioChecked(dlg, "individual");
+      await expectSearchTypeBusinessDisabledForConsumer(dlg);
+      await expect.soft(searchTypeRadioInput(dlg, "trust")).toBeAttached({ timeout: 10_000 });
     },
   );
 
@@ -501,9 +1244,9 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       await assetDetailsPage.clickAddBorrowerorGuarantorButton();
       await assetDetailsPage.searchByDropdownClick();
       await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber("420");
+      await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
       await assetDetailsPage.clickSearchButton();
-      await expect.soft(customerSearchDialog(page)).toBeVisible();
+      await waitForBorrowerSearchResult(page, EXISTING_UDC_CUSTOMER_NUMBER);
     },
   );
 
@@ -590,10 +1333,7 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       await assetDetailsPage.selectUDCSelectOption();
       await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
       await assetDetailsPage.clickSearchButton();
-      const row = page.locator("table tbody tr, .p-datatable-tbody tr").filter({ hasText: /.+/ }).first();
-      await row.click({ timeout: 30_000 }).catch(async () => {
-        await page.getByRole("row").nth(1).click();
-      });
+      await clickAddOnBorrowerSearchResult(page, EXISTING_UDC_CUSTOMER_NUMBER);
       await expect.soft(page.locator("app-personal-details").first()).toBeVisible({ timeout: 120_000 });
     },
   );
@@ -601,9 +1341,14 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3721 - Only One Borrower Can Be Added",
     { tag: ["@do", "@regression", "@UDP-T3721"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Requires completing first borrower then asserting second Borrower role is blocked — extend when UI rule is mapped to a stable locator.");
+      await addPrimaryIndividualBorrowerForTrustTests(page);
+      const secondBorrowerAdded = await attemptAddSecondCustomerAsBorrower(page);
+      expect(
+        secondBorrowerAdded,
+        "Only one Borrower is permitted per quote — second Borrower must be blocked.",
+      ).toBe(false);
     },
   );
 
@@ -939,9 +1684,7 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
       await assetDetailsPage.selectUDCSelectOption();
       await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
       await assetDetailsPage.clickSearchButton();
-      await page.locator("table tbody tr").first().click({ timeout: 30_000 }).catch(async () => {
-        await page.getByRole("row").nth(1).click();
-      });
+      await clickAddOnBorrowerSearchResult(page, EXISTING_UDC_CUSTOMER_NUMBER);
       const p = new DOPersonalDetailsPage(page);
       await expect.soft(await p.firstNameInput.inputValue().catch(() => "x")).toMatch(/\S/);
     },
@@ -959,54 +1702,123 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3745 - Customer Role - Valid Values for Business",
     { tag: ["@do", "@regression", "@UDP-T3745"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business customer role values — requires Business loan-purpose program (see UDP-T3711).");
+      const biz = await openAddNewBusinessDetailsStep(page);
+      await expect(biz.businessRoot).toBeVisible({ timeout: 60_000 });
+
+      // First business customer on quote — only Borrower is offered (one Borrower per quote).
+      await expectCustomerRoleDropdownShowsRoles(page, biz.businessRoot, [/^Borrower$/i], {
+        absentRolePatterns: [/^Co[\s-]*Borrower$/i, /^Guarantor$/i],
+      });
+      await expect(page.getByRole("combobox", { name: /^Borrower$/i }).first()).toBeVisible({
+        timeout: 10_000,
+      });
+
+      await advanceBusinessBorrowerFromBusinessDetailsToUpload(page, biz);
+
+      const secondBiz = await openAddNewBusinessFromPostSubmit(page);
+      await expectCustomerRoleDropdownShowsRoles(
+        page,
+        secondBiz.businessRoot,
+        [/^Co[\s-]*Borrower$/i, /^Guarantor$/i],
+        { absentRolePatterns: [/^Borrower$/i] },
+      );
     },
   );
 
   test(
     "UDP-T3746 - Trading Name - Non - Mandatory; Max 100 Chars",
     { tag: ["@do", "@regression", "@UDP-T3746"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business Trading Name optional — requires Business customer path.");
+      const biz = await openAddNewBusinessDetailsStep(page);
+      await fillMinimalValidBusinessDetails(biz, { tradingName: null });
+      await triggerBusinessFieldValidation(biz);
+      await expect
+        .soft(biz.businessRoot.getByText(/Trading Name.{0,30}(is required|required)/i))
+        .toHaveCount(0, { timeout: 5_000 });
+      await biz.enterTradingName("Acme Trading Co");
+      await expect.soft(biz.tradingNameInput()).toHaveValue("Acme Trading Co");
+      const maxTradingName = "T".repeat(100);
+      await biz.enterTradingName(maxTradingName);
+      await expect.soft(biz.tradingNameInput()).toHaveValue(maxTradingName);
     },
   );
 
   test(
     "UDP-T3747 - Registered Company Number - Mandatory; Max 7 Digits",
     { tag: ["@do", "@regression", "@UDP-T3747"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business Registered Company Number — requires Business customer path.");
+      const biz = await openAddNewBusinessDetailsStep(page);
+      await fillMinimalValidBusinessDetails(biz, { registeredCompanyNumber: null });
+      await triggerBusinessFieldValidation(biz);
+      await expectBusinessFieldMessage(biz, REGISTERED_COMPANY_REQUIRED);
+      await fillMinimalValidBusinessDetails(biz, { registeredCompanyNumber: "12345678" }, { bootstrap: false });
+      await triggerBusinessFieldValidation(biz);
+      await expectBusinessFieldMessage(biz, REGISTERED_COMPANY_INVALID);
+      await fillMinimalValidBusinessDetails(biz, { registeredCompanyNumber: "ABCDEFG" }, { bootstrap: false });
+      await triggerBusinessFieldValidation(biz);
+      await expectBusinessFieldMessage(biz, REGISTERED_COMPANY_INVALID);
     },
   );
 
   test(
     "UDP-T3748 - NZ Business Number (NZBN) - Mandatory; Max 13 Digits",
     { tag: ["@do", "@regression", "@UDP-T3748"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business NZBN — requires Business customer path.");
+      const biz = await openAddNewBusinessDetailsStep(page);
+      await fillMinimalValidBusinessDetails(biz, { nzBusinessNumber: null });
+      await triggerBusinessFieldValidation(biz);
+      await expectBusinessFieldMessage(biz, NZBN_REQUIRED);
+      await fillMinimalValidBusinessDetails(biz, { nzBusinessNumber: "1".repeat(14) }, { bootstrap: false });
+      await triggerBusinessFieldValidation(biz);
+      await expectBusinessFieldMessage(biz, NZBN_INVALID);
+      await fillMinimalValidBusinessDetails(biz, { nzBusinessNumber: "ABCDEFGHIJKLM" }, { bootstrap: false });
+      await triggerBusinessFieldValidation(biz);
+      await expectBusinessFieldMessage(biz, NZBN_INVALID);
     },
   );
 
   test(
     "UDP-T3749 - GST Number - Mandatory; Max 9 Digits",
     { tag: ["@do", "@regression", "@UDP-T3749"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Business GST — requires Business customer path.");
+      const biz = await openAddNewBusinessDetailsStep(page);
+      await fillMinimalValidBusinessDetails(biz, { gstNumber: null });
+      await triggerBusinessFieldValidation(biz);
+      if (await gstNumberMarkedRequired(biz)) {
+        await expectBusinessFieldMessage(biz, GST_REQUIRED);
+      } else {
+        await expect
+          .soft(biz.businessRoot.getByText(GST_REQUIRED[0]).or(biz.businessRoot.getByText(GST_REQUIRED[1])))
+          .toHaveCount(0, { timeout: 3_000 });
+      }
+      await fillMinimalValidBusinessDetails(biz, { gstNumber: "1".repeat(10) }, { bootstrap: false });
+      await triggerBusinessFieldValidation(biz);
+      await expectBusinessFieldMessage(biz, GST_INVALID);
     },
   );
 
   test(
     "UDP-T3750 - Existing Business Customer - Pre - Populated from FIS AF",
     { tag: ["@do", "@regression", "@UDP-T3750"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Existing Business from FIS — requires Business program + UDC business search data.");
+      if (!EXISTING_UDC_BUSINESS_CUSTOMER_NUMBER) {
+        test.skip(true, "Set UDC_EXISTING_BUSINESS_CUSTOMER_NUMBER for FIS business pre-population check.");
+      }
+      const biz = await openExistingBusinessFromFisSearch(page);
+      await expect.soft(await biz.legalNameInput().inputValue().catch(() => "x")).toMatch(/\S/);
+      await expect
+        .soft(await biz.tradingNameInput().inputValue().catch(() => ""))
+        .toMatch(/\S/);
+      await expect
+        .soft(await biz.registeredCompanyNumberInput().inputValue().catch(() => ""))
+        .toMatch(/\d/);
     },
   );
 
@@ -1015,26 +1827,15 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
     { tag: ["@do", "@regression", "@UDP-T3751"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      const trust = searchTypeRadio(page, /Trust/i).first();
-      if (!(await trust.isVisible({ timeout: 10_000 }).catch(() => false))) {
-        test.skip(true, "Trust search type not available.");
-      }
-      await trust.check({ force: true });
-      await assetDetailsPage.clickAddNewCustomerButton();
-      const trustPage = new DOTrustDetailsPage(page);
-      await trustPage.waitForTrustDetailsStep();
+      await addPrimaryIndividualBorrowerForTrustTests(page);
+      const trustPage = await openAddNewTrustCustomer(page);
       await trustPage.selectTrustTypeFirstAvailableOption();
       await trustPage.selectPrimaryNatureOfTrustFirstAvailableOption();
       await trustPage.clearTrustName();
-      await trustPage.clearRegisteredNumber();
-      await trustPage.enterGstNumber("xx");
-      await trustPage.clearTimeInTrust();
-      await trustPage.clearBusinessPhone();
-      await trustPage.clearContactEmail();
       await trustPage.clickSaveTrustDetails();
-      await trustPage.expectTrustDetailsValidationWithDropdownsSelected();
+      await expect.soft(page.getByText(/Trust Name is required/i).first()).toBeVisible({
+        timeout: 25_000,
+      });
     },
   );
 
@@ -1043,20 +1844,15 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
     { tag: ["@do", "@regression", "@UDP-T3752"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      const trust = searchTypeRadio(page, /Trust/i).first();
-      if (!(await trust.isVisible({ timeout: 10_000 }).catch(() => false))) {
-        test.skip(true, "Trust search type not available.");
-      }
-      await trust.check({ force: true });
-      await assetDetailsPage.clickAddNewCustomerButton();
-      const trustPage = new DOTrustDetailsPage(page);
-      await trustPage.waitForTrustDetailsStep();
+      await addPrimaryIndividualBorrowerForTrustTests(page);
+      const trustPage = await openAddNewTrustCustomer(page);
       await trustPage.touchTrustTypeDropdownWithoutSelection();
-      await trustPage.touchPrimaryNatureOfTrustDropdownWithoutSelection();
       await trustPage.clickSaveTrustDetails();
-      await expect.soft(page.getByText(/Primary Nature of Trust is required/i).first()).toBeVisible({ timeout: 25_000 });
+      await expect.soft(page.getByText(/Trust Type is required/i).first()).toBeVisible({
+        timeout: 25_000,
+      });
+      await trustPage.openTrustTypeDropdown();
+      await trustPage.expectTrustTypeDropdownHasOptions();
     },
   );
 
@@ -1090,9 +1886,22 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3756 - Create New and Copy to Previous Address - Existing Customers Only",
     { tag: ["@do", "@regression", "@UDP-T3756"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Create New and Copy to Previous Address — existing customer only.");
+      const personal = await openAddNewIndividualPersonal(await openStandardQuoteOnCustomerDetailsStep(page));
+      await fillValidIndividualPersonalBorrower(personal);
+      await personal.clickNextButton();
+      const addressNew = new DOAddressDetailsPage(page);
+      await addressNew.waitForPhysicalAddressStep();
+      await expect(createNewCopyToPreviousAddressLabel(page)).toHaveCount(0);
+
+      if (!EXISTING_UDC_CUSTOMER_NUMBER) {
+        test.skip(true, "Set UDC_EXISTING_CUSTOMER_NUMBER for existing-customer address slider check.");
+      }
+      await openExistingIndividualOnAddressStep(page);
+      const existingLabel = createNewCopyToPreviousAddressLabel(page);
+      await expect(existingLabel).toBeVisible({ timeout: 30_000 });
+      await expectPrimeSwitchNearLabelDefaultsToNo(page, existingLabel);
     },
   );
 
@@ -1208,18 +2017,35 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3763 - Sole Trader Address - Individual Business Customer",
     { tag: ["@do", "@regression", "@UDP-T3763"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Sole trader address — requires Individual + Business loan purpose program.");
+      const address = await openSoleTraderOnAddressStep(page);
+      await expect(address.soleTradePhysicalRoot).toBeVisible({ timeout: 60_000 });
+      await expect.soft(address.physicalSearchInput).toBeVisible({ timeout: 30_000 });
+      await address.enterStreetNumber("123");
+      await address.enterStreetName("Main Street");
+      await address.enterCity("Wellington");
+      await address.chooseCountry("New Zealand");
+      await address.timeAtAddress("1", "1");
+      await address.selectResidenceType("Boarding");
     },
   );
 
   test(
     "UDP-T3764 - Have Employment Details Changed Slider - Existing Customers Only",
     { tag: ["@do", "@regression", "@UDP-T3764"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Employment details changed slider — existing customer / FIS only.");
+      await openNewIndividualOnEmploymentStep(page);
+      await expect(employmentDetailsChangedLabel(page)).toHaveCount(0);
+
+      if (!EXISTING_UDC_CUSTOMER_NUMBER) {
+        test.skip(true, "Set UDC_EXISTING_CUSTOMER_NUMBER for existing-customer employment slider check.");
+      }
+      await openExistingIndividualOnEmploymentStep(page);
+      const changedLabel = employmentDetailsChangedLabel(page);
+      await expect(changedLabel).toBeVisible({ timeout: 30_000 });
+      await expectPrimeSwitchNearLabelDefaultsToNo(page, changedLabel);
     },
   );
 
@@ -1727,18 +2553,54 @@ test.describe("DO Portal — Standard Quote Customer Details (Zephyr UDP-T3709�
   test(
     "UDP-T3787 - Borrower Summary - Remove Customer",
     { tag: ["@do", "@regression", "@UDP-T3787"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Borrower summary remove — needs Co-Borrower on quote.");
+      await addPrimaryIndividualBorrowerForTrustTests(page);
+      await addCoBorrowerIndividualFromPostSubmit(page);
+
+      const coBorrowerRow = page
+        .locator("tr, div, li, section")
+        .filter({ hasText: /John Alan Smith|John Smith/i })
+        .first();
+      await expect(coBorrowerRow).toBeVisible({ timeout: 60_000 });
+      await expect(coBorrowerRow).toContainText(/Co[\s-]*Borrower/i);
+
+      await deletePartyRowByName(page, /John Alan Smith|John Smith/i, /Co[\s-]*Borrower/i);
+      await expect(coBorrowerRow).toBeHidden({ timeout: 30_000 });
+
+      const primaryRow = page
+        .locator("tr, div, li, section")
+        .filter({ hasText: /Liza Marie Doe/i })
+        .first();
+      await expect(primaryRow).toBeVisible({ timeout: 30_000 });
+      await expect(primaryRow).toContainText(/Borrower/i);
     },
   );
 
   test(
     "UDP-T3788 - Borrower Summary - Navigate to Next Step",
     { tag: ["@do", "@regression", "@UDP-T3788"] },
-    async ({ page: _page }) => {
+    async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Borrower summary next step — needs reference / post-submit entry.");
+      const personal = await openAddNewIndividualPersonal(await openStandardQuoteOnCustomerDetailsStep(page));
+      await fillValidIndividualPersonalBorrower(personal);
+      await personal.clickNextButton();
+      const address = new DOAddressDetailsPage(page);
+      await fillMinimalAddressContinue(page, address);
+      await fillMinimalCsaEmploymentContinue(page);
+      const fin = new DOFinancialPositionPage(page);
+      await fillMinimalCsaIndividualFinancialPosition(fin);
+      await fin.clickNextButton();
+
+      await navigateToBorrowerSummaryIfAvailable(page);
+      await softExpectBorrowerSummaryShowsPrimaryBorrower(page);
+
+      await page.getByRole("button", { name: /^Next$/i }).last().click({ timeout: 30_000 });
+      const ref = new DOReferenceDetailsPage(page);
+      await ref.waitForReferenceDetailsStep();
+      await expect.soft(ref.addContactDetailsButton.or(ref.submitButton).first()).toBeVisible({
+        timeout: 60_000,
+      });
     },
   );
 
