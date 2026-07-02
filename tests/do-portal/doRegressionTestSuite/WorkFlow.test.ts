@@ -8,7 +8,7 @@
 import { expect, test } from "@fixtures/doPortalTest";
 import { existsSync } from "fs";
 import path from "path";
-import { doPortalAuthFile } from "../../../playwright/do-portal-auth.helper";
+import { getDoPortalAuthFile } from "../../../playwright/do-portal-auth.helper";
 import {
   CSA_SQ_PRODUCT,
   CSA_SQ_PROGRAM,
@@ -36,13 +36,43 @@ test.describe("Workflow - CSA @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3863"] },
     async ({ page }) => {
       test.setTimeout(900_000);
-      const seeds = ["WF-SUBMITTED", "WF-SUBMITTED-CONTRACT-ACTIVE", "WF-SUBMITTED-EXECUTE-CREDIT"];
-      for (const seedId of seeds) {
-        const { post, seed } = await openWorkflowSeed(page, seedId);
-        const status = await post.readPortalWorkflowStatus();
-        expect(status).toMatch(/Submitted/i);
-        expect(status).not.toMatch(/Contract Active|Execute Credit/i);
-      }
+      const origRef = `SQ-WF-T3863-${Date.now()}`;
+
+      // Step 1 — Build CSA quote from dashboard and submit through workflow declaration.
+      const post = await openPostSubmissionFromFreshQuote(page, origRef);
+      await post.expectWorkflowStatusOpenQuote();
+      const statusBeforeSubmit = await post.readPortalWorkflowStatus();
+      expect(statusBeforeSubmit).toMatch(/Open\s+Quote/i);
+
+      await post.preparePostSubmissionForWorkflowSubmit(
+        "UDP-T3863 — TC_WF_001 verify workflow status changes after portal submit.",
+      );
+      const responsePromise = page
+        .waitForResponse(
+          (r) => r.url().includes("/api/") && r.request().method() === "POST",
+          { timeout: 120_000 },
+        )
+        .catch(() => null);
+      await post.submitQuoteThroughWorkflowDeclaration();
+      await responsePromise;
+      await post.expectWorkflowTransitionSucceeded();
+
+      // Step 2 — Workflow status must change off Open Quote; portal shows masked label only.
+      await expect
+        .poll(async () => post.readPortalWorkflowStatus(), { timeout: 120_000 })
+        .not.toMatch(/Open\s+Quote/i);
+
+      const statusAfterSubmit = await post.readPortalWorkflowStatus();
+      expect(statusAfterSubmit.length).toBeGreaterThan(0);
+      // TC_WF_001: dealers must not see underlying AF states such as Contract Active / Execute Credit BRs.
+      expect(statusAfterSubmit).not.toMatch(/Contract Active|Execute Credit/i);
+      // QAT may land on Submitted or advance quickly to Assessment (e.g. Assessment Q) — both are masked portal views.
+      expect(statusAfterSubmit).toMatch(/Submitted|Assessment/i);
+
+      const dashboard = await openDashboard(page);
+      await dashboard.openQuotesAndApplications();
+      await dashboard.searchQuotesGrid(origRef);
+      await dashboard.expectQuoteGridWorkflowStatus(origRef, /Submitted|Assessment/i);
     },
   );
 
@@ -174,7 +204,7 @@ test.describe("Workflow - CSA @do @regression", () => {
       test.setTimeout(900_000);
       const seed = getWorkflowSeed("WF-CONCURRENT-EDIT");
       const quoteId = resolveSeedQuoteId(seed);
-      const contextB = await page.context().browser()!.newContext({ storageState: doPortalAuthFile });
+      const contextB = await page.context().browser()!.newContext({ storageState: getDoPortalAuthFile() });
       const pageB = await contextB.newPage();
       const assetA = new DOAssetDetailsPage(page);
       const assetB = new DOAssetDetailsPage(pageB);

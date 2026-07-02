@@ -3,7 +3,7 @@
  * Supports DO, RSS, and CSS portals across multiple environments
  */
 
-export type Environment = "dev" | "qat" | "uat" | "prod";
+export type Environment = "dev" | "qat" | "sit" | "uat" | "prod";
 export type Portal = "do" | "rss" | "css";
 
 interface PortalConfig {
@@ -54,6 +54,23 @@ const environments: Record<Environment, EnvironmentConfig> = {
       name: "CSS Portal - QAT",
     },
   },
+  sit: {
+    do: {
+      baseUrl: "https://udc-test.fiscloudservices.com/SITDOPortal/",
+      apiUrl: "https://udc-test.fiscloudservices.com",
+      name: "DO Portal - SIT",
+    },
+    rss: {
+      baseUrl: "https://rss-qat.udc.com",
+      apiUrl: "https://api-rss-qat.udc.com",
+      name: "RSS Portal - SIT",
+    },
+    css: {
+      baseUrl: "https://css-qat.udc.com",
+      apiUrl: "https://api-css-qat.udc.com",
+      name: "CSS Portal - SIT",
+    },
+  },
   uat: {
     do: {
       baseUrl: "https://do-uat.udc.com",
@@ -90,12 +107,19 @@ const environments: Record<Environment, EnvironmentConfig> = {
   },
 };
 
-// Get current environment from env variable or default to 'qat'
-export const CURRENT_ENV: Environment = (process.env.TEST_ENV as Environment) || "qat";
+// Resolve active environment at call time (not module import) so TEST_ENV from CLI/IDE is honored.
+export function getCurrentEnv(): Environment {
+  const env = process.env.TEST_ENV as Environment | undefined;
+  if (env && env in environments) return env;
+  return "qat";
+}
+
+/** @deprecated Prefer {@link getCurrentEnv} for dynamic resolution. */
+export const CURRENT_ENV: Environment = getCurrentEnv();
 
 // Get portal config for current environment
 export function getPortalConfig(portal: Portal): PortalConfig {
-  return environments[CURRENT_ENV][portal];
+  return environments[getCurrentEnv()][portal];
 }
 
 // Get specific portal URLs

@@ -9,6 +9,7 @@ import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
+  DOCustomerDetailsPage,
   DODashboardPage,
   DOQuickQuotePage,
 } from "../../../pages";
@@ -1020,14 +1021,15 @@ test.describe("Standard Quote - TL @do @regression", () => {
       await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
       await assetDetailsPage.clickCalculateButton();
       await assetDetailsPage.clickNextButton();
-      await assetDetailsPage.waitForAddBorrowerButton();
-      const addBtnVisible = await assetDetailsPage.addBorrowerorGuarantorButton
+      const customerDetailsPage = new DOCustomerDetailsPage(page);
+      await customerDetailsPage.waitForAddBorrowerButton();
+      const addBtnVisible = await customerDetailsPage.addBorrowersOrGuarantorsButton
         .isVisible()
         .catch(() => false);
       const personalVisible = await page.locator("app-personal-details").isVisible().catch(() => false);
       expect.soft(addBtnVisible || personalVisible).toBeTruthy();
       if (addBtnVisible) {
-        await expect.soft(assetDetailsPage.addBorrowerorGuarantorButton).toBeVisible();
+        await expect.soft(customerDetailsPage.addBorrowersOrGuarantorsButton).toBeVisible();
       }
     },
   );

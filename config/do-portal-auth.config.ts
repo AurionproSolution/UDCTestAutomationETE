@@ -4,13 +4,23 @@
  * Override via env vars when discovery metadata differs per environment.
  */
 
-import { DO_BASE_URL } from "./env";
+import { DO_BASE_URL, getCurrentEnv } from "./env";
 
-/** Playwright storageState path (shared with do-portal-auth.helper). */
-export const DO_PORTAL_AUTH_FILE_REL = "playwright/.auth/do-portal.json";
+/** Playwright storageState path for the active TEST_ENV. */
+export function getDoPortalAuthFileRel(): string {
+  return `playwright/.auth/do-portal.${getCurrentEnv()}.json`;
+}
 
-/** Non-secret metadata written after MFA login (storage key names, token URL). */
-export const DO_PORTAL_AUTH_META_FILE_REL = "playwright/.auth/do-portal-auth-meta.json";
+/** Non-secret metadata path for the active TEST_ENV. */
+export function getDoPortalAuthMetaFileRel(): string {
+  return `playwright/.auth/do-portal-auth-meta.${getCurrentEnv()}.json`;
+}
+
+/** @deprecated Use {@link getDoPortalAuthFileRel}(). */
+export const DO_PORTAL_AUTH_FILE_REL = getDoPortalAuthFileRel();
+
+/** @deprecated Use {@link getDoPortalAuthMetaFileRel}(). */
+export const DO_PORTAL_AUTH_META_FILE_REL = getDoPortalAuthMetaFileRel();
 
 /** Default keepalive interval — refresh before 20 min JWT expiry. */
 export const DO_PORTAL_KEEPALIVE_INTERVAL_MS = Number(
@@ -94,7 +104,11 @@ export function doPortalAuthOrigins(): string[] {
 
 export interface DoPortalAuthMeta {
   discoveredAt: string;
-  /** ISO timestamp when MFA login last saved do-portal.json. */
+  /** TEST_ENV value when this session was saved (e.g. sit, qat). */
+  testEnv?: string;
+  /** DO portal base URL for this session. */
+  portalBaseUrl?: string;
+  /** ISO timestamp when MFA login last saved storage state. */
   sessionSavedAt?: string;
   /** ISO timestamp from JWT iat. */
   accessTokenIssuedAt?: string;

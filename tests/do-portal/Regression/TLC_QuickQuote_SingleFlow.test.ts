@@ -6,7 +6,7 @@
 
 import { expect, test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
-import { DOAssetDetailsPage, DOCustomerQuotePostSubmitPage, DODashboardPage, DOQuickQuotePage, DOReferenceDetailsPage } from "../../../pages";
+import { DOAssetDetailsPage, DOCustomerDetailsPage, DOCustomerQuotePostSubmitPage, DODashboardPage, DOQuickQuotePage, DOReferenceDetailsPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
 import { DOEmploymentDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/employmentDetails";
@@ -456,13 +456,11 @@ test(
 
     await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
     await assetDetailsPage.clickNextButton();
-    await assetDetailsPage.waitForAddBorrowerButton();
-    await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-    await assetDetailsPage.searchByDropdownClick();
-    await assetDetailsPage.selectUDCSelectOption();
-    await assetDetailsPage.enterUDCCustomerNumber("420");
-    await assetDetailsPage.clickSearchButton();
-    await assetDetailsPage.clickAddNewCustomerButton();
+    const customerDetailsPage = new DOCustomerDetailsPage(page);
+    await customerDetailsPage.waitForAddBorrowerButton();
+    await customerDetailsPage.clickAddBorrowersOrGuarantors();
+    await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+    await customerDetailsPage.clickAddNewCustomerButton();
     const personalDetailsPage = new DOPersonalDetailsPage(page);
     const addressDetailsPage = new DOAddressDetailsPage(page);
     // Leave required fields unset / empty, then **Save** — expect inline validation (see screenshot).
@@ -661,11 +659,8 @@ test(
 
     // await customerQuotePostSubmitPage.clickAddBorrowersOrGuarantorsButton();
     // await customerQuotePostSubmitPage.selectSearchCustomerTrustType(); 
-    // await assetDetailsPage.searchByDropdownClick();
-    // await assetDetailsPage.selectUDCSelectOption();
-    // await assetDetailsPage.enterUDCCustomerNumber("420");
-    // await assetDetailsPage.clickSearchButton();
-    // await assetDetailsPage.clickAddNewCustomerButton();
+    // await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+    // await customerDetailsPage.clickAddNewCustomerButton();
 
     // // Trust (new customer): select dropdowns only; leave Trust Name / Registered Number / phone / email empty; invalid GST.
     // const trustDetailsPage = new DOTrustDetailsPage(page);

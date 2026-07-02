@@ -20,6 +20,8 @@
     "test:all-portals": "npx playwright test --project=do-portal-chromium --project=rss-portal-chromium --project=css-portal-chromium",
     "test:env:dev": "cross-env TEST_ENV=dev npx playwright test",
     "test:env:qat": "cross-env TEST_ENV=qat npx playwright test",
+    "test:env:sit": "cross-env TEST_ENV=sit npx playwright test",
+    "test:do:sit": "cross-env TEST_ENV=sit npx playwright test --project=do-portal-chromium",
     "test:env:uat": "cross-env TEST_ENV=uat npx playwright test",
     "test:env:prod": "cross-env TEST_ENV=prod npx playwright test",
     "report": "npx playwright show-report my-report",

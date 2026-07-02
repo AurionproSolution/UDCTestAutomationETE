@@ -4,6 +4,8 @@ import { tmpdir } from "os";
 import path from "path";
 import { BasePage } from "../../../common";
 import { DOFinancialPositionPage } from "./financialPosition";
+import { DOCustomerDetailsPage } from "./customerDetailsPage";
+import { DOSearchCustomerDialog } from "./searchCustomerDialog";
 
 /** Default PDF used on Customer Details after Reference submit (Upload tab). */
 export const DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF = path.join(
@@ -30,10 +32,16 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   readonly noteTextarea: Locator;
   readonly noteSubmitButton: Locator;
   readonly proceedButton: Locator;
+  private readonly customerDetails: DOCustomerDetailsPage;
+  private readonly searchCustomer: DOSearchCustomerDialog;
 
   constructor(page: Page) {
     super(page);
-    this.browseFilesButton = page.locator(':text-is("Browse Files")');
+    this.customerDetails = new DOCustomerDetailsPage(page);
+    this.searchCustomer = this.customerDetails.searchCustomer;
+    this.browseFilesButton = page
+      .getByRole("button", { name: /^Browse Files$/i })
+      .or(page.locator(':text-is("Browse Files")'));
     this.confirmButton = page.locator(':text-is("Confirm")');
     this.addNewNotesButton = page.locator(':text-is("Add New Notes")');
     this.noteTextarea = page.locator(
@@ -44,16 +52,20 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   /**
-   * **Search Customer** modal (same host as {@link DOAssetDetailsPage} borrower search).
+   * **Customer Details** — `+ Add Borrowers / Guarantors`.
+   * @see {@link DOCustomerDetailsPage.clickAddBorrowersOrGuarantors}
    */
-  private searchCustomerDialog(): Locator {
-    return this.page
-      .getByRole("dialog")
-      .filter({ has: this.page.getByRole("button", { name: /^Search$/i }) })
-      .last();
+  async clickAddBorrowersOrGuarantorsButton(): Promise<void> {
+    await this.customerDetails.clickAddBorrowersOrGuarantors();
   }
 
-  /** Fail fast with a clear message instead of `waitForTimeout: Target page … has been closed`. */
+  /**
+   * In **Search Customer**, set search type to **Individual**.
+   * @see {@link DOSearchCustomerDialog.selectIndividualType}
+   */
+  async selectSearchCustomerIndividualType(): Promise<void> {
+    await this.searchCustomer.selectIndividualType();
+  }
   private assertPageOpen(step: string): void {
     if (this.page.isClosed()) {
       throw new Error(
@@ -280,68 +292,6 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await this.clickDownload();
     await this.confirmDocumentParameters();
     await this.addNoteAndSubmit(noteText);
-  }
-
-  /**
-   * **Customer Details** — `+ Add Borrowers / Guarantors` (Selector Hub `:text-is("Add Borrowers / Guarantors")`).
-   * Prefer `getByRole("button")` when the control is a real button; fall back to exact text (may be a link).
-   */
-  async clickAddBorrowersOrGuarantorsButton(): Promise<void> {
-    const byRole = this.page.getByRole("button", {
-      name: /Add Borrowers\s*\/\s*Guarantors/i,
-    });
-    const byTextIs = this.page.locator(':text-is("Add Borrowers / Guarantors")');
-    const byTextLoose = this.page.getByText(/^\+\s*Add Borrowers\s*\/\s*Guarantors$/i);
-
-    let target: Locator | null = null;
-    if (await byRole.isVisible({ timeout: 3000 }).catch(() => false)) {
-      target = byRole;
-    } else if (await byTextIs.isVisible({ timeout: 3000 }).catch(() => false)) {
-      target = byTextIs;
-    } else if (await byTextLoose.isVisible({ timeout: 2000 }).catch(() => false)) {
-      target = byTextLoose;
-    } else {
-      target = this.page
-        .getByText("Add Borrowers / Guarantors", { exact: false })
-        .first();
-    }
-
-    await target.waitFor({ state: "visible", timeout: 120000 });
-    await target.scrollIntoViewIfNeeded();
-    await target.click({ timeout: 30000 });
-    await this.searchCustomerDialog().waitFor({ state: "visible", timeout: 60000 });
-  }
-
-  /**
-   * In **Search Customer**, set search type to **Individual** (first radio: Individual | Business | Trust).
-   * Prefers accessible name; falls back to PrimeNG box or Selector Hub xpath on first `p-radiobutton`.
-   */
-  async selectSearchCustomerIndividualType(): Promise<void> {
-    const dialog = this.searchCustomerDialog();
-    await dialog.waitFor({ state: "visible", timeout: 60000 });
-
-    const byRole = dialog.getByRole("radio", { name: /^Individual$/i });
-    if (await byRole.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await byRole.click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(300);
-      return;
-    }
-
-    const box = dialog
-      .locator("p-radiobutton")
-      .filter({ hasText: /^Individual$/i })
-      .locator(".p-radiobutton-box")
-      .first();
-    if (await box.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await box.click({ timeout: 15000, force: true });
-      await this.page.waitForTimeout(300);
-      return;
-    }
-
-    await dialog
-      .locator("xpath=.//p-radiobutton[1]//div[1]//div[1]")
-      .click({ timeout: 15000, force: true });
-    await this.page.waitForTimeout(300);
   }
 
   /**

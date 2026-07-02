@@ -517,18 +517,17 @@ test.describe("Quick Quote - CSA @do @regression", () => {
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       await selectCsaProductAndProgram(page, quickQuotePage);
 
-      const frequencyLabel = await quickQuotePage.frequencyDropdownTrigger.textContent();
-      if (frequencyLabel?.trim()) {
+      const frequencyLabel = await quickQuotePage.readFrequencyLabel();
+      if (!DOQuickQuotePage.isBlankFrequencyLabel(frequencyLabel)) {
+        // Program supplies a default frequency (e.g. Monthly).
         expect.soft(frequencyLabel.trim().length).toBeGreaterThan(0);
       } else {
-        await quickQuotePage.clearTermsMonths(0);
+        // No program default — Frequency stays blank; mandatory on Calculate.
         await quickQuotePage.enterCashPrice("$20,000");
         await quickQuotePage.enterInterestRatePercent("9");
         await quickQuotePage.enterTermsMonths("36");
-        if (await quickQuotePage.calculateButton.isEnabled().catch(() => false)) {
-          await quickQuotePage.clickCalculate();
-        }
-        await quickQuotePage.expectPleaseCompleteInForm(0);
+        await quickQuotePage.ensureFrequencyLeftBlank();
+        await quickQuotePage.expectFrequencyMandatoryWhenBlank(0);
       }
     },
   );

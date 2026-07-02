@@ -39,6 +39,27 @@ Cursor runs **one** subagent at a time, invoked by the user. You **coordinate** 
 
 When in doubt, skim `config/env.ts` and one existing test under the target portal for import and setup patterns.
 
+## DO Portal — Standard Quote wizard POM map
+
+When routing or reviewing **DO Standard Quote** / **Customer Details** work, map UI to the **wizard step**, not the navigation path used to get there.
+
+| Wizard step | Page object | Path under `pages/do-portal/` |
+|-------------|-------------|-------------------------------|
+| Asset Details (step 1) | `DOAssetDetailsPage` | `StandardQuote/AssetDetails/AssetDetailsPage.ts` |
+| Customer Details shell (step 2) | `DOCustomerDetailsPage` | `StandardQuote/CustomerDetails/customerDetailsPage.ts` |
+| **Search Customer** modal | `DOSearchCustomerDialog` | `StandardQuote/CustomerDetails/searchCustomerDialog.ts` |
+| Personal / Address / Employment / FP / Reference / Trust / Business | `DOPersonalDetailsPage`, `DOAddressDetailsPage`, … | `StandardQuote/CustomerDetails/*.ts` |
+| Post submission | `DOCustomerQuotePostSubmitPage` | `StandardQuote/CustomerDetails/customerQuotePostSubmit.ts` |
+
+**Rules for specialists (Test Case Writer, Generator, Healer):**
+
+- On **Customer Details** (borrowers grid, **Add Borrowers / Guarantors**, customer search): use `DOCustomerDetailsPage` and `customerDetailsPage.searchCustomer` (`DOSearchCustomerDialog`).
+- Do **not** add new Customer Details or Search Customer actions on `DOAssetDetailsPage`; methods there are **legacy delegates** only.
+- Name instances by responsibility: `customerDetailsPage` on step 2 — not `assetDetailsPage` after **Next** from Asset Details.
+- Example helper pattern: `openStandardQuoteOnCustomerDetailsStep` in `tests/do-portal/doRegressionTestSuite/CustomerDetails.test.ts`.
+
+Exported from `pages/do-portal/index.ts` (barrel: `pages/`).
+
 ## The four specialist subagents (when to use / when not to)
 
 | Subagent | Use for | Do not use for |

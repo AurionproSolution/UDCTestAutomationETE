@@ -15,6 +15,13 @@ export interface LoginCredentials {
 export interface LoginTestData {
   validUsers: LoginCredentials[];
   invalidUsers: InvalidLoginData[];
+  /** Optional per-environment credential overrides (e.g. `sit`). */
+  environments?: Record<string, LoginUsers>;
+}
+
+export interface LoginUsers {
+  validUsers: LoginCredentials[];
+  invalidUsers: InvalidLoginData[];
 }
 
 export interface InvalidLoginData extends LoginCredentials {

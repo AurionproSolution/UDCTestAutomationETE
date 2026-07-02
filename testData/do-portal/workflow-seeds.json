@@ -1,0 +1,277 @@
+{
+  "description": "Pre-positioned QAT quotes for Workflow regression (UDP-T3863–UDP-T3922). Fill quoteId after AF provisions each seed, or set env WF_SEED_<SEEDID>_QUOTE_ID (hyphens → underscores).",
+  "dealer": "Armstrong Prestige Wellington",
+  "defaultProduct": "CSA-C-Assigned",
+  "defaultProgram": "Webform - CSA Personal - MV Dealer",
+  "seeds": [
+    {
+      "seedId": "WF-SUBMITTED",
+      "quoteId": "",
+      "originationReference": "SQ-WF-SUBMITTED-01",
+      "portalMaskedStatus": "Submitted",
+      "afUnderlyingState": "Submitted",
+      "dashboardWorkflowStatus": "Submitted",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3863", "UDP-T3867", "UDP-T3871"]
+    },
+    {
+      "seedId": "WF-SUBMITTED-CONTRACT-ACTIVE",
+      "quoteId": "",
+      "originationReference": "SQ-WF-SUBMITTED-CA-01",
+      "portalMaskedStatus": "Submitted",
+      "afUnderlyingState": "Contract Active",
+      "dashboardWorkflowStatus": "Submitted",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3863"]
+    },
+    {
+      "seedId": "WF-SUBMITTED-EXECUTE-CREDIT",
+      "quoteId": "",
+      "originationReference": "SQ-WF-SUBMITTED-EC-01",
+      "portalMaskedStatus": "Submitted",
+      "afUnderlyingState": "Execute Credit",
+      "dashboardWorkflowStatus": "Submitted",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3863"]
+    },
+    {
+      "seedId": "WF-REFERRED",
+      "quoteId": "",
+      "originationReference": "SQ-WF-REFERRED-01",
+      "portalMaskedStatus": "Referred",
+      "afUnderlyingState": "Referred",
+      "dashboardWorkflowStatus": "Referred",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3874"]
+    },
+    {
+      "seedId": "WF-ASSESSMENT-Q",
+      "quoteId": "",
+      "originationReference": "SQ-WF-ASSESSMENT-Q-01",
+      "portalMaskedStatus": "Assessment",
+      "afUnderlyingState": "Assessment",
+      "dashboardWorkflowStatus": "Assessment",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3875", "UDP-T3884", "UDP-T3885", "UDP-T3920"]
+    },
+    {
+      "seedId": "WF-ASSESSMENT-ERROR",
+      "quoteId": "",
+      "originationReference": "SQ-WF-ASSESSMENT-ERR-01",
+      "portalMaskedStatus": "Assessment",
+      "afUnderlyingState": "Assessment Error",
+      "dashboardWorkflowStatus": "Assessment",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3886"]
+    },
+    {
+      "seedId": "WF-INTERNAL-HOLD",
+      "quoteId": "",
+      "originationReference": "SQ-WF-INTERNAL-HOLD-01",
+      "portalMaskedStatus": "Internal Hold",
+      "afUnderlyingState": "Internal Hold",
+      "dashboardWorkflowStatus": "Internal Hold",
+      "assignedToUdcUser": "REPLACE_WITH_UDC_USER_NAME",
+      "tests": ["UDP-T3867", "UDP-T3887", "UDP-T3888"]
+    },
+    {
+      "seedId": "WF-ESCALATED-CAD",
+      "quoteId": "",
+      "originationReference": "SQ-WF-ESCALATED-CAD-01",
+      "portalMaskedStatus": "Escalated to CAD",
+      "afUnderlyingState": "Escalated to CAD",
+      "dashboardWorkflowStatus": "Escalated to CAD",
+      "assignedToUdcUser": "REPLACE_WITH_UDC_USER_NAME",
+      "tests": ["UDP-T3889"]
+    },
+    {
+      "seedId": "WF-CREDIT-HOLD",
+      "quoteId": "",
+      "originationReference": "SQ-WF-CREDIT-HOLD-01",
+      "portalMaskedStatus": "Credit Hold",
+      "afUnderlyingState": "Credit Hold",
+      "dashboardWorkflowStatus": "Credit Hold",
+      "assignedToUdcUser": "REPLACE_WITH_UDC_USER_NAME",
+      "tests": ["UDP-T3890", "UDP-T3891", "UDP-T3892", "UDP-T3921"]
+    },
+    {
+      "seedId": "WF-PERFORMING-ASSESSMENT",
+      "quoteId": "",
+      "originationReference": "SQ-WF-PERF-ASSESS-01",
+      "portalMaskedStatus": "Performing Assessment",
+      "afUnderlyingState": "Performing Assessment",
+      "dashboardWorkflowStatus": "Performing Assessment",
+      "assignedToUdcUser": "REPLACE_WITH_UDC_USER_NAME",
+      "tests": ["UDP-T3867"]
+    },
+    {
+      "seedId": "WF-PERFORMING-SETTLEMENT",
+      "quoteId": "",
+      "originationReference": "SQ-WF-PERF-SETTLE-01",
+      "portalMaskedStatus": "Performing Settlement",
+      "afUnderlyingState": "Performing Settlement",
+      "dashboardWorkflowStatus": "Performing Settlement",
+      "assignedToUdcUser": "REPLACE_WITH_UDC_USER_NAME",
+      "tests": ["UDP-T3867", "UDP-T3903"]
+    },
+    {
+      "seedId": "WF-PERFORMING-FINAL",
+      "quoteId": "",
+      "originationReference": "SQ-WF-PERF-FINAL-01",
+      "portalMaskedStatus": "Performing Final",
+      "afUnderlyingState": "Performing Final",
+      "dashboardWorkflowStatus": "Performing Final",
+      "assignedToUdcUser": "REPLACE_WITH_UDC_USER_NAME",
+      "tests": ["UDP-T3904"]
+    },
+    {
+      "seedId": "WF-RFD-CSA",
+      "quoteId": "",
+      "originationReference": "SQ-WF-RFD-CSA-01",
+      "portalMaskedStatus": "Ready for Documentation",
+      "afUnderlyingState": "Approved",
+      "dashboardWorkflowStatus": "Approved",
+      "assignedToUdcUser": null,
+      "approvedValues": {
+        "cashPrice": 30000,
+        "interestRate": 11.95,
+        "cashDeposit": 2000,
+        "totalCharges": 1500,
+        "waiveLmfChecked": false,
+        "termMonths": 36,
+        "termMin": 12,
+        "termMax": 60
+      },
+      "tests": ["UDP-T3866", "UDP-T3896", "UDP-T3897", "UDP-T3900", "UDP-T3901", "UDP-T3914", "UDP-T3915", "UDP-T3916", "UDP-T3917", "UDP-T3918", "UDP-T3922"]
+    },
+    {
+      "seedId": "WF-RFD-CSA-50K",
+      "quoteId": "",
+      "originationReference": "SQ-WF-RFD-CSA-50K",
+      "portalMaskedStatus": "Ready for Documentation",
+      "afUnderlyingState": "Approved",
+      "dashboardWorkflowStatus": "Approved",
+      "assignedToUdcUser": null,
+      "approvedValues": {
+        "cashPrice": 50000,
+        "interestRate": 11.95,
+        "cashDeposit": 2000,
+        "totalCharges": 1500,
+        "waiveLmfChecked": false,
+        "termMonths": 36
+      },
+      "tests": ["UDP-T3898"]
+    },
+    {
+      "seedId": "WF-RFD-GENERATE-DOCS",
+      "quoteId": "",
+      "originationReference": "SQ-WF-RFD-GENDOC-01",
+      "portalMaskedStatus": "Ready for Documentation",
+      "afUnderlyingState": "Approved",
+      "dashboardWorkflowStatus": "Approved",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3899"]
+    },
+    {
+      "seedId": "WF-DOCS-AVAILABLE",
+      "quoteId": "",
+      "originationReference": "SQ-WF-DOCS-AVAIL-01",
+      "portalMaskedStatus": "Documentation Available",
+      "afUnderlyingState": "Documentation Available",
+      "dashboardWorkflowStatus": "Documentation Available",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3905", "UDP-T3906"]
+    },
+    {
+      "seedId": "WF-AWAITING-SETTLEMENT",
+      "quoteId": "",
+      "originationReference": "SQ-WF-AWAIT-SETTLE-01",
+      "portalMaskedStatus": "Awaiting Settlement",
+      "afUnderlyingState": "Awaiting Settlement",
+      "dashboardWorkflowStatus": "Awaiting Settlement",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3907"]
+    },
+    {
+      "seedId": "WF-SETTLEMENT-HOLD",
+      "quoteId": "",
+      "originationReference": "SQ-WF-SETTLE-HOLD-01",
+      "portalMaskedStatus": "Settlement Hold",
+      "afUnderlyingState": "Settlement Hold",
+      "dashboardWorkflowStatus": "Settlement Hold",
+      "assignedToUdcUser": "REPLACE_WITH_UDC_USER_NAME",
+      "tests": ["UDP-T3908"]
+    },
+    {
+      "seedId": "WF-DECLINED",
+      "quoteId": "",
+      "originationReference": "SQ-WF-DECLINED-01",
+      "portalMaskedStatus": "Declined",
+      "afUnderlyingState": "Declined",
+      "dashboardWorkflowStatus": "Declined",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3909"]
+    },
+    {
+      "seedId": "WF-END-DECLINE",
+      "quoteId": "",
+      "originationReference": "SQ-WF-END-DECLINE-01",
+      "portalMaskedStatus": "End Decline",
+      "afUnderlyingState": "End Decline",
+      "dashboardWorkflowStatus": "End Decline",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3910"]
+    },
+    {
+      "seedId": "WF-EXPIRED",
+      "quoteId": "",
+      "originationReference": "SQ-WF-EXPIRED-01",
+      "portalMaskedStatus": "Expired",
+      "afUnderlyingState": "Expired",
+      "dashboardWorkflowStatus": "Expired",
+      "assignedToUdcUser": null,
+      "listing": "expired",
+      "tests": ["UDP-T3911"]
+    },
+    {
+      "seedId": "WF-WITHDRAWN",
+      "quoteId": "",
+      "originationReference": "SQ-WF-WITHDRAWN-01",
+      "portalMaskedStatus": "Withdrawn",
+      "afUnderlyingState": "Withdrawn",
+      "dashboardWorkflowStatus": "Withdrawn",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3912"]
+    },
+    {
+      "seedId": "WF-PAID-OUT",
+      "quoteId": "",
+      "originationReference": "SQ-WF-PAID-OUT-01",
+      "portalMaskedStatus": "Paid Out",
+      "afUnderlyingState": "Paid Out",
+      "dashboardWorkflowStatus": "Paid Out",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3913"]
+    },
+    {
+      "seedId": "WF-CONTACT-UDC-01",
+      "quoteId": "",
+      "originationReference": "SQ-WF-CONTACT-UDC-01",
+      "portalMaskedStatus": "Contact UDC",
+      "afUnderlyingState": "Contact UDC",
+      "dashboardWorkflowStatus": "Contact UDC",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3914"]
+    },
+    {
+      "seedId": "WF-CONCURRENT-EDIT",
+      "quoteId": "",
+      "originationReference": "SQ-WF-CONCURRENT-01",
+      "portalMaskedStatus": "Open Quote",
+      "afUnderlyingState": "Open Quote",
+      "dashboardWorkflowStatus": "Quote",
+      "assignedToUdcUser": null,
+      "tests": ["UDP-T3871"]
+    }
+  ]
+}
