@@ -4,6 +4,7 @@
  */
  
 import { expect, Locator, Page } from "@playwright/test";
+import speakeasy from "speakeasy";
 import { DO_BASE_URL } from "../../../config/env";
 import { CommonUtils } from "../../../utils/commonUtils";
 import { BasePage } from "../../common/BasePage";
@@ -117,6 +118,64 @@ export class DOLoginPage extends BasePage {
     await p.waitForLoadState("domcontentloaded").catch(() => {});
     return (await this.resolveIdpUsernameField(p)) !== null;
   }
+
+  private otpInputs(p: Page): Locator {
+    return p.locator(
+      [
+        "input.otp-input",
+        "input[name*='otp' i]",
+        "input[id*='otp' i]",
+        "input[autocomplete='one-time-code']",
+      ].join(", "),
+    );
+  }
+
+  private async fillTotpIfPrompted(surface: Page, totpSecret?: string): Promise<void> {
+    const otpInputs = this.otpInputs(surface);
+    const firstVisible = await otpInputs
+      .first()
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false);
+    if (!firstVisible) return;
+
+    if (!totpSecret) {
+      throw new Error(
+        "SIT OTP prompt detected, but DO_PORTAL_TOTP_SECRET is not set. Set it in your environment and retry.",
+      );
+    }
+
+    const otp = speakeasy.totp({
+      secret: totpSecret,
+      encoding: "base32",
+      step: 30,
+      digits: 6,
+    });
+
+    this.log("SIT OTP prompt detected; entering generated TOTP.");
+    const count = await otpInputs.count();
+    const visibleInputs: Locator[] = [];
+    for (let i = 0; i < count; i++) {
+      const input = otpInputs.nth(i);
+      if (await input.isVisible({ timeout: 500 }).catch(() => false)) {
+        visibleInputs.push(input);
+      }
+    }
+
+    if (visibleInputs.length > 1) {
+      const digits = otp.split("");
+      for (let index = 0; index < digits.length && index < visibleInputs.length; index++) {
+        await visibleInputs[index].focus();
+        await surface.keyboard.type(digits[index]);
+      }
+      await surface.waitForTimeout(500);
+      return;
+    }
+
+    const target = visibleInputs[0] ?? otpInputs.first();
+    await target.focus();
+    await target.fill(otp);
+    await surface.waitForTimeout(500);
+  }
  
   /**
    * After **Login with FIS**, the IdP form may be on this tab or a new one; the opener can close.
@@ -158,7 +217,11 @@ export class DOLoginPage extends BasePage {
   /**
    * Login with credentials
    */
-  async login(username: string, password: string): Promise<void> {
+  async login(
+    username: string,
+    password: string,
+    options?: { totpSecret?: string },
+  ): Promise<void> {
     this.log(`Logging in as: ${username}`);
     this.log("Clicking Login with FIS button");
     await this.clickElement(this.loginWithFisButton, 90_000);
@@ -187,6 +250,7 @@ export class DOLoginPage extends BasePage {
     await passwordInput.waitFor({ state: "visible", timeout: 30_000 });
     await utils.fill(passwordInput, password);
     this.log("Entered password (value not logged).");
+    await this.fillTotpIfPrompted(surface, options?.totpSecret);
  
     // Blur so Angular/async validators can run and enable Sign in
     await passwordInput.press("Tab");
@@ -231,9 +295,12 @@ export class DOLoginPage extends BasePage {
   async loginWithTestData(testData: {
     username: string;
     password: string;
+    totpSecret?: string;
   }): Promise<void> {
     this.logStep("Login with test data");
-    await this.login(testData.username, testData.password);
+    await this.login(testData.username, testData.password, {
+      totpSecret: testData.totpSecret,
+    });
   }
  
   /**

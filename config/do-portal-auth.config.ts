@@ -96,6 +96,16 @@ export function doPortalOAuthClientId(): string | undefined {
   return undefined;
 }
 
+/**
+ * Base32 TOTP secret used for automated MFA during headed DO login.
+ * SIT-only by design: for other environments this returns `undefined`.
+ */
+export function doPortalTotpSecret(): string | undefined {
+  if (getCurrentEnv() !== "sit") return undefined;
+  const fromEnv = process.env.DO_PORTAL_TOTP_SECRET?.trim();
+  return fromEnv || undefined;
+}
+
 /** Origins that may hold auth tokens (portal base + dealer path). */
 export function doPortalAuthOrigins(): string[] {
   const base = DO_BASE_URL().replace(/\/$/, "");

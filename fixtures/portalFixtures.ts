@@ -4,6 +4,7 @@
  */
 
 import { test as base, Page } from '@playwright/test';
+import { doPortalTotpSecret } from '../config/do-portal-auth.config';
 import { DO_DEALER_STANDARD_QUOTE_URL } from '../config/env';
 import {
   refreshAccessToken,
@@ -87,7 +88,10 @@ export const test = base.extend<PortalFixtures>({
       } else if (process.env.ALLOW_DO_MFA_RELOGIN === '1') {
         const loginPage = new DOLoginPage(page);
         await loginPage.navigate();
-        await loginPage.loginWithTestData(getDoPortalLoginData().validUsers[0]);
+        await loginPage.loginWithTestData({
+          ...getDoPortalLoginData().validUsers[0],
+          totpSecret: doPortalTotpSecret(),
+        });
         await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
         await dashboardPage.waitForAuthenticatedDashboard();
       } else {
@@ -166,7 +170,10 @@ export async function getAuthenticatedPage(page: Page, portal: PortalType): Prom
         } else if (process.env.ALLOW_DO_MFA_RELOGIN === '1') {
           const loginPage = new DOLoginPage(page);
           await loginPage.navigate();
-          await loginPage.loginWithTestData(getDoPortalLoginData().validUsers[0]);
+          await loginPage.loginWithTestData({
+            ...getDoPortalLoginData().validUsers[0],
+            totpSecret: doPortalTotpSecret(),
+          });
           await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
           await dashboardPage.waitForAuthenticatedDashboard();
         } else {

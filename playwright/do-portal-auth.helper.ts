@@ -7,6 +7,7 @@
 import { chromium, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
+import { doPortalTotpSecret } from "../config/do-portal-auth.config";
 import { DO_BASE_URL, DO_DEALER_STANDARD_QUOTE_URL, getCurrentEnv } from "../config/env";
 import { DOLoginPage } from "../pages";
 import { getDoPortalLoginData } from "../testData/do-portal/doLoginData";
@@ -44,6 +45,7 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
   const loginData = getDoPortalLoginData();
   const env = getCurrentEnv();
   const baseUrl = DO_BASE_URL();
+  const totpSecret = doPortalTotpSecret();
 
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
   attachTokenDiscoveryListeners(page);
@@ -54,7 +56,10 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
 
   const loginPage = new DOLoginPage(page);
   await loginPage.navigate(baseUrl);
-  await loginPage.loginWithTestData(loginData.validUsers[0]);
+  await loginPage.loginWithTestData({
+    ...loginData.validUsers[0],
+    totpSecret,
+  });
   await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
   await page.waitForLoadState("domcontentloaded");
   logTestStep(`Saving DO portal storage state to ${authFile}`);

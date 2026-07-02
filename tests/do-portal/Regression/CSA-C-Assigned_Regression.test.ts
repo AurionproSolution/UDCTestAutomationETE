@@ -295,6 +295,8 @@ test(
 
     // Reuse for Postal Addresss → Yes (click once if toggle starts on No)
     await addressDetailsPage.clickReuseForPostalAddressToggle();
+    // SIT compatibility: Ensure Postal Address has Country set even when reusing Physical Address
+    await addressDetailsPage.ensurePostalAddressCountryIfVisible("New Zealand");
     await addressDetailsPage.clickSaveAddressDetails();
 
     // Previous Physical Address — explicit empty required fields when section exists, then **Save** / assert.
@@ -317,6 +319,10 @@ test(
       city: "Wellington",
       country: "New Zealand",
     });
+
+    // SIT compatibility: Ensure Address Details validation is cleared before proceeding
+    // This prevents the confirmation checkbox from being disabled on Reference Details
+    await addressDetailsPage.expectAddressDetailsStepperNoValidationError(10_000);
 
     await addressDetailsPage.clickNextButton();
     const employmentDetailsPage = new DOEmploymentDetailsPage(page);
@@ -1084,7 +1090,7 @@ test(
     await expect(lizaRow).toContainText(/Borrower/i);
     await customerQuotePostSubmitPage.clickAddBorrowersOrGuarantorsButton();
     await customerQuotePostSubmitPage.selectSearchCustomerTrustType();
-    const customerDetailsPage = new DOCustomerDetailsPage(page);
+    // Reuse customerDetailsPage from earlier in TCC003 scope (declared at line 888)
     await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
     await customerDetailsPage.clickAddNewCustomerButton();
     const trustDetailsPage = new DOTrustDetailsPage(page);
