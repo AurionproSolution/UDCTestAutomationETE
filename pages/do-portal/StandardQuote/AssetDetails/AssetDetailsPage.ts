@@ -2,6 +2,12 @@ import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common/BasePage";
 import { DOCustomerDetailsPage } from "../CustomerDetails/customerDetailsPage";
 
+export type DOEditPaymentScheduleSegmentSnapshot = {
+  number: string;
+  type: string;
+  amount: string;
+};
+
 export class DOAssetDetailsPage extends BasePage {
   readonly dialogBox: Locator;
   readonly originationRefInput: Locator;
@@ -46,6 +52,8 @@ export class DOAssetDetailsPage extends BasePage {
   readonly balloonAmountInput: Locator;
   readonly balloonPercentInput: Locator;
   readonly balloonFixedCheckbox: Locator;
+  /** Readonly quote header workflow **Status** (`input[name="workFlowStatus"]`). */
+  readonly workflowStatusInput: Locator;
   private readonly customerDetails: DOCustomerDetailsPage;
 
   constructor(page: Page) {
@@ -78,17 +86,19 @@ export class DOAssetDetailsPage extends BasePage {
       .getByRole("textbox", { name: /Cash Price of Asset/i })
       .first();
     const rrpLabel = /Recommended\s+Retail\s+Price/i;
-    // Float labels may sit outside the `col-6` wrapper; prefer ARIA name, then label text + `#amount`.
-    this.recommendedRetailPriceInput = page
-      .getByRole("textbox", { name: rrpLabel })
+    // Structural locators only — do NOT use getByRole(textbox, name: RRP): CSA builds concatenate
+    // adjacent float labels into Cash Price a11y name ("Cash Price… Recommended Retail Price @ UDC…").
+    this.recommendedRetailPriceInput = quoteHost
+      .locator("amount")
+      .filter({ hasText: rrpLabel })
+      .locator("#amount")
       .or(
-        page
-          .getByText(rrpLabel)
+        quoteHost
+          .getByText(rrpLabel, { exact: true })
           .locator(
             "xpath=ancestor::div[contains(@class,'col-')][1]//input[@id='amount']",
           ),
       )
-      .or(page.locator("amount").filter({ hasText: rrpLabel }).locator("#amount"))
       .first();
     this.PPSRCount = page.locator("app-quote-details").getByRole("spinbutton");
     this.udcEstablishmentFeeInputField = page
@@ -199,7 +209,9 @@ export class DOAssetDetailsPage extends BasePage {
       .locator("amount")
       .filter({ hasText: /Balloon\s+Amount/i })
       .first();
-    this.balloonAmountInput = balloonAmountHost.locator("#amount").first();
+    this.balloonAmountInput = balloonAmountHost
+      .locator('input[currencymask][id="amount"]')
+      .first();
     // Balloon **%** uses PrimeNG `id="percent"` on that row. Do not use `//percentage//input[…spinbutton…]` —
     // the same grid can contain other `p-inputnumber` spinbuttons (e.g. under `<number>`), which breaks strict mode.
     this.balloonPercentInput = balloonAmountHost
@@ -213,14 +225,17 @@ export class DOAssetDetailsPage extends BasePage {
         ).first(),
       );
     this.balloonFixedCheckbox = paymentSummary
-      .getByRole("checkbox", { name: /^Fixed$/i })
+      .locator("p-checkbox")
+      .filter({ has: paymentSummary.locator(':text-is("Fixed")') })
+      .locator('input[type="checkbox"]')
+      .first()
       .or(
         paymentSummary
-          .locator("p-checkbox")
-          .filter({ hasText: /^Fixed$/i })
-          .locator('input[type="checkbox"]'),
-      )
-      .first();
+          .locator(':text-is("Fixed")')
+          .locator("xpath=ancestor::p-checkbox[1]//input[@type='checkbox']")
+          .first(),
+      );
+    this.workflowStatusInput = page.locator('input[name="workFlowStatus"]');
   }
 
   protected stepLogPrefix(): string {
@@ -700,6 +715,51 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
+   * After pricing/async refresh, a field value can flicker blank or NaN. Wait until
+   * `isValid(snapshot)` is true and the snapshot is unchanged for `stableRounds` reads.
+   * Same pattern as Loan Date / Interest Rate stability handling.
+   */
+  private async waitForFieldValueStable(
+    readSnapshot: () => Promise<string>,
+    isValid: (snapshot: string) => boolean,
+    opts?: {
+      timeoutMs?: number;
+      intervalMs?: number;
+      stableRounds?: number;
+      label?: string;
+    },
+  ): Promise<string> {
+    const timeoutMs = opts?.timeoutMs ?? 20_000;
+    const intervalMs = opts?.intervalMs ?? 200;
+    const needRounds = opts?.stableRounds ?? 2;
+    const label = opts?.label ?? "field";
+    const deadline = Date.now() + timeoutMs;
+    let prev = "";
+    let stable = 0;
+    while (Date.now() < deadline) {
+      const snap = (await readSnapshot()).trim();
+      if (isValid(snap) && snap === prev) {
+        stable += 1;
+        if (stable >= needRounds) {
+          this.logStep(`${label} stable: "${snap}" (${needRounds} consecutive reads)`);
+          return snap;
+        }
+      } else if (isValid(snap)) {
+        stable = 1;
+        prev = snap;
+      } else {
+        stable = 0;
+        prev = "";
+      }
+      await this.page.waitForTimeout(intervalMs);
+    }
+    const last = (await readSnapshot()).trim();
+    throw new Error(
+      `${label} did not stabilize within ${timeoutMs}ms (last read: "${last}").`,
+    );
+  }
+
+  /**
    * After pricing/async refresh, **Loan Date** can flicker. Wait until the displayed value
    * is unchanged for several consecutive reads (fast when already stable).
    */
@@ -707,25 +767,10 @@ export class DOAssetDetailsPage extends BasePage {
     loanIn: Locator,
     opts?: { timeoutMs?: number; intervalMs?: number; stableRounds?: number },
   ): Promise<void> {
-    const timeoutMs = opts?.timeoutMs ?? 20_000;
-    const intervalMs = opts?.intervalMs ?? 200;
-    const needRounds = opts?.stableRounds ?? 3;
-    const deadline = Date.now() + timeoutMs;
-    let prev = "";
-    let stable = 0;
-    while (Date.now() < deadline) {
-      const loanTrim = (await loanIn.inputValue()).trim();
-      if (loanTrim.length > 4 && loanTrim === prev) {
-        stable += 1;
-        if (stable >= needRounds) return;
-      } else {
-        stable = loanTrim.length > 4 ? 1 : 0;
-        prev = loanTrim;
-      }
-      await this.page.waitForTimeout(intervalMs);
-    }
-    throw new Error(
-      `Loan Date did not stabilize within ${timeoutMs}ms (last read: "${(await loanIn.inputValue()).trim()}").`,
+    await this.waitForFieldValueStable(
+      async () => (await loanIn.inputValue()).trim(),
+      (loanTrim) => loanTrim.length > 4,
+      { ...opts, label: "Loan Date" },
     );
   }
 
@@ -761,23 +806,37 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
-  async expectRecommendedRetailPriceHiddenAfterUsedCondition(): Promise<void> {
-    this.logStep("Expect Recommended Retail Price Hidden After Used Condition");
+  async expectRecommendedRetailPriceVisibleAfterNewCondition(): Promise<void> {
+    this.logStep("Expect Recommended Retail Price Visible After New Condition");
     await this.waitForQuoteLoadersToFinish();
-    await this.page.waitForTimeout(2_000);
- 
-    await this.dealerOriginationFeeInputField.scrollIntoViewIfNeeded();
-    await this.page.mouse.wheel(0, 700);
-    await this.page.waitForTimeout(1_000);
- 
-    // Match UDP-T3657 / `recommendedRetailPriceInput` only. A broad `getByText(RRP)` stays visible
-    // (e.g. label in layout/summary) while the amount field is hidden for Used — that caused visibleCount 1.
+    await this.scrollRecommendedRetailPriceIntoView();
     await expect
       .poll(
         async () => {
           const n = await this.recommendedRetailPriceInput.count();
+          if (n === 0) return false;
+          return await this.recommendedRetailPriceInput.first().isVisible().catch(() => false);
+        },
+        { timeout: 20_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(true);
+  }
+
+  async expectRecommendedRetailPriceHiddenAfterUsedCondition(): Promise<void> {
+    this.logStep("Expect Recommended Retail Price Hidden After Used Condition");
+    await this.waitForQuoteLoadersToFinish();
+    await this.cashPriceOfAssetInputField.scrollIntoViewIfNeeded();
+
+    const rrpBlock = this.standardQuoteRoot()
+      .locator("amount")
+      .filter({ hasText: /Recommended\s+Retail\s+Price/i });
+
+    await expect
+      .poll(
+        async () => {
+          const n = await rrpBlock.count();
           if (n === 0) return true;
-          return !(await this.recommendedRetailPriceInput.first().isVisible().catch(() => false));
+          return !(await rrpBlock.first().isVisible().catch(() => false));
         },
         { timeout: 20_000, intervals: [500, 1_000, 2_000] },
       )
@@ -792,33 +851,14 @@ export class DOAssetDetailsPage extends BasePage {
     firstIn: Locator,
     opts?: { timeoutMs?: number; intervalMs?: number; stableRounds?: number },
   ): Promise<void> {
-    const timeoutMs = opts?.timeoutMs ?? 20_000;
-    const intervalMs = opts?.intervalMs ?? 200;
-    const needRounds = opts?.stableRounds ?? 3;
-    const deadline = Date.now() + timeoutMs;
-    let prev = "";
-    let stable = 0;
-    while (Date.now() < deadline) {
-      const loanTrim = (await loanIn.inputValue()).trim();
-      const firstTrim = (await firstIn.inputValue()).trim();
-      const snapshot = `${loanTrim}\0${firstTrim}`;
-      const bothOk = loanTrim.length > 4 && firstTrim.length > 4;
-      if (bothOk && snapshot === prev) {
-        stable += 1;
-        if (stable >= needRounds) return;
-      } else if (bothOk) {
-        stable = 1;
-        prev = snapshot;
-      } else {
-        stable = 0;
-        prev = "";
-      }
-      await this.page.waitForTimeout(intervalMs);
-    }
-    const loanTrim = (await loanIn.inputValue()).trim();
-    const firstTrim = (await firstIn.inputValue()).trim();
-    throw new Error(
-      `Loan Date / First Payment did not stabilize within ${timeoutMs}ms (loan="${loanTrim}", first="${firstTrim}").`,
+    await this.waitForFieldValueStable(
+      async () =>
+        `${(await loanIn.inputValue()).trim()}\0${(await firstIn.inputValue()).trim()}`,
+      (snapshot) => {
+        const [loanTrim, firstTrim] = snapshot.split("\0");
+        return loanTrim.length > 4 && firstTrim.length > 4;
+      },
+      { ...opts, label: "Loan Date / First Payment" },
     );
   }
 
@@ -1342,6 +1382,133 @@ export class DOAssetDetailsPage extends BasePage {
     }
   }
 
+  /** Brand/Asset card **Edit** control on Asset Details (`.brand-edit-btn` or pencil icon). */
+  brandEditButton(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .locator("button.brand-edit-btn, a.brand-edit-btn, [role='button'].brand-edit-btn")
+      .or(
+        root
+          .getByRole("button", { name: /^Edit$/i })
+          .filter({ has: root.locator("i.pi-pencil, i.pi-pen-to-square, .fa-pen-to-square") }),
+      )
+      .or(root.getByText(/Edit\s*brand/i));
+  }
+
+  /** Brand Selection dialog opened from the asset card **Edit** control. */
+  brandSelectionDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ has: this.page.locator('input[name="brandSelection"]') })
+      .last();
+  }
+
+  /** Hidden native input — scope only; do not assert visible or call `.check()`. */
+  private brandSelectionRadioInputAtIndex(index: number): Locator {
+    const brandId = `BrandName${index}`;
+    return this.brandSelectionDialog().locator(
+      `input[name="brandSelection"][id="${brandId}"]`,
+    );
+  }
+
+  /** Visible PrimeNG radio box for a brand row. */
+  brandSelectionRadioBoxAtIndex(index: number): Locator {
+    return this.brandSelectionRadioInputAtIndex(index)
+      .locator("xpath=ancestor::p-radiobutton[1]")
+      .locator(".p-radiobutton-box");
+  }
+
+  /** Single click target for a brand — `label.brand-logo-box[for="BrandName{n}"]`. */
+  private brandSelectionClickTargetAtIndex(index: number): Locator {
+    const brandId = `BrandName${index}`;
+    return this.brandSelectionDialog().locator(`label.brand-logo-box[for="${brandId}"]`);
+  }
+
+  brandSelectionAddButton(): Locator {
+    return this.brandSelectionDialog().locator(':text-is("Add")');
+  }
+
+  private async brandSelectionVisibleTileCount(): Promise<number> {
+    const dialog = this.brandSelectionDialog();
+    const logoLabels = await dialog.locator("label.brand-logo-box").count();
+    if (logoLabels >= 2) {
+      return logoLabels;
+    }
+    return dialog.locator(".p-radiobutton-box").filter({ visible: true }).count();
+  }
+
+  /** Click **Edit** on the brand/asset card and wait for the Brand Selection dialog. */
+  async openBrandSelectionDialog(): Promise<void> {
+    this.logStep("Open Brand Selection dialog");
+    const edit = this.brandEditButton();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await expect(edit).toBeVisible({ timeout: 15_000 });
+    await expect(edit).toBeEnabled({ timeout: 15_000 });
+    await edit.scrollIntoViewIfNeeded();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await expect(edit).toBeVisible({ timeout: 15_000 });
+    await expect(edit).toBeEnabled({ timeout: 15_000 });
+    await edit.click({ timeout: 15_000 });
+    const dialog = this.brandSelectionDialog();
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await expect
+      .poll(async () => await this.brandSelectionVisibleTileCount(), {
+        timeout: 30_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBeGreaterThanOrEqual(2);
+    await expect(this.brandSelectionClickTargetAtIndex(0)).toBeVisible({ timeout: 15_000 });
+  }
+
+  /** Select a brand by clicking `label.brand-logo-box[for="BrandName{n}"]`. */
+  async selectBrandSelectionRadioAtIndex(index: number): Promise<void> {
+    this.logStep(`Select brand at index ${index}`);
+    const target = this.brandSelectionClickTargetAtIndex(index);
+    await expect(target).toBeVisible({ timeout: 15_000 });
+    await target.scrollIntoViewIfNeeded();
+    await target.click({ timeout: 15_000 });
+    await this.expectBrandSelectionRadioCheckedAtIndex(index);
+  }
+
+  async expectBrandSelectionRadioCheckedAtIndex(index: number): Promise<void> {
+    this.logStep(`Expect brand selected at index ${index}`);
+    await expect(this.brandSelectionRadioBoxAtIndex(index)).toHaveClass(/p-highlight/, {
+      timeout: 10_000,
+    });
+  }
+
+  async expectBrandSelectionRadioNotCheckedAtIndex(index: number): Promise<void> {
+    this.logStep(`Expect brand not selected at index ${index}`);
+    await expect(this.brandSelectionRadioBoxAtIndex(index)).not.toHaveClass(/p-highlight/);
+  }
+
+  /** Confirm brand selection in the dialog (**Add**). */
+  async clickBrandSelectionAddButton(): Promise<void> {
+    this.logStep("Click Brand Selection Add");
+    const add = this.brandSelectionAddButton();
+    await expect(add).toBeVisible({ timeout: 15_000 });
+    await add.click({ timeout: 15_000 });
+  }
+
+  private async countSelectedBrandOptions(): Promise<number> {
+    return this.brandSelectionDialog()
+      .locator(".p-radiobutton-box.p-highlight")
+      .filter({ visible: true })
+      .count();
+  }
+
+  /** Exactly one brand remains selected (single-selection behaviour). */
+  async expectExactlyOneBrandSelected(): Promise<void> {
+    this.logStep("Expect exactly one brand selected");
+    await expect
+      .poll(async () => await this.countSelectedBrandOptions(), {
+        timeout: 15_000,
+        intervals: [200, 500, 1_000],
+      })
+      .toBe(1);
+  }
+
   /** Interest Rate control is editable (program may still re-price on Calculate). */
   async expectInterestRateEditable(): Promise<void> {
     this.logStep("Expect Interest Rate Editable");
@@ -1382,6 +1549,21 @@ export class DOAssetDetailsPage extends BasePage {
         .or(root.getByText(altWording))
         .first(),
     ).toBeVisible({ timeout: 25_000 });
+  }
+
+  /**
+   * UDP-T3663 — term above program max after **Calculate**: validation under **Term**; calculation blocked.
+   * Expects copy such as `Term must not be greater than 120.`
+   */
+  async expectTermExceedsProgramMaxValidation(programMaxTerm = 120): Promise<void> {
+    this.logStep(`Expect term must not be greater than ${programMaxTerm} validation`);
+    await this.expectTermCannotExceedProgramMaxMessageBelowTermField();
+    const root = this.standardQuoteRoot();
+    const maxPattern = new RegExp(
+      `Term\\s+(?:must\\s+not\\s+be|cannot\\s+be)\\s+greater\\s+than\\s+${programMaxTerm}\\b`,
+      "i",
+    );
+    await expect(root.getByText(maxPattern).first()).toBeVisible({ timeout: 25_000 });
   }
 
   /**
@@ -1445,79 +1627,286 @@ export class DOAssetDetailsPage extends BasePage {
     const pct = (await this.balloonPercentInput.inputValue()).trim();
     const pv = parseFloat(pct.replace(/[^0-9.-]/g, ""));
     expect(Number.isNaN(pv) ? 0 : pv).toBeCloseTo(0, 2);
-    await expect(this.balloonFixedCheckbox).toBeVisible({ timeout: 12_000 });
+    await expect(this.balloonFixedCheckboxHost()).toBeVisible({ timeout: 12_000 });
     await expect(this.balloonFixedCheckbox).not.toBeChecked();
+  }
+
+  /** Cash price must be set before balloon **$** / **%** sync — otherwise **%** flickers to `NaN%`. */
+  async ensureCashPriceReadyForBalloon(minAmount = 1_000): Promise<void> {
+    this.logStep("Ensure Cash Price Ready For Balloon");
+    await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
+    const readCash = async (): Promise<number> => {
+      const raw = (await this.cashPriceOfAssetInputField.inputValue().catch(() => "")).trim();
+      const n = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+      return Number.isNaN(n) ? 0 : n;
+    };
+    if ((await readCash()) < minAmount) {
+      await this.cashPriceOfAsset("$20,000");
+      await this.waitUntilNoVisibleAppLoaderOverlays(10_000);
+    }
+    await expect.poll(readCash, { timeout: 20_000, intervals: [300, 500, 1_000] }).toBeGreaterThanOrEqual(
+      minAmount,
+    );
+  }
+
+  private async balloonPercentRaw(): Promise<string> {
+    return (await this.balloonPercentInput.inputValue().catch(() => "")).replace(/%/g, "").trim();
+  }
+
+  private async readBalloonAmountRaw(): Promise<string> {
+    return (await this.balloonAmountInput.inputValue().catch(() => "")).trim();
+  }
+
+  private balloonAmountRawValid(raw: string, minDollars: number): boolean {
+    if (!raw || /nan/i.test(raw)) {
+      return false;
+    }
+    const n = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+    return !Number.isNaN(n) && n >= minDollars;
+  }
+
+  private async balloonAmountNumeric(): Promise<number> {
+    const raw = await this.readBalloonAmountRaw();
+    const n = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+    return Number.isNaN(n) ? 0 : n;
+  }
+
+  /**
+   * Balloon **$** can flicker blank/NaN during pricing recalculation — wait for loaders,
+   * then require a valid amount unchanged for consecutive reads (UDP-T3669).
+   */
+  private async waitForBalloonAmountValueStable(
+    minDollars = 1,
+    opts?: { timeoutMs?: number; intervalMs?: number; stableRounds?: number },
+  ): Promise<string> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(opts?.timeoutMs ?? 20_000);
+    return this.waitForFieldValueStable(
+      () => this.readBalloonAmountRaw(),
+      (raw) => this.balloonAmountRawValid(raw, minDollars),
+      { ...opts, label: "Balloon Amount $" },
+    );
+  }
+
+  /** Balloon **%** can briefly read `NaN%` while **$** syncs — ignore until stable. */
+  private async waitForBalloonPercentValueStable(
+    opts?: { timeoutMs?: number; intervalMs?: number; stableRounds?: number },
+  ): Promise<string> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(opts?.timeoutMs ?? 20_000);
+    return this.waitForFieldValueStable(
+      () => this.balloonPercentRaw(),
+      (raw) => raw.length > 0 && !/nan/i.test(raw),
+      { ...opts, label: "Balloon Amount %" },
+    );
+  }
+
+  private balloonAmountLooksCleared(raw: string): boolean {
+    const t = raw.trim();
+    if (!t || /nan/i.test(t)) {
+      return true;
+    }
+    const n = parseFloat(t.replace(/[^0-9.-]/g, ""));
+    return Number.isNaN(n) || n === 0;
+  }
+
+  private static balloonAmountTypeDigits(value: string): string {
+    const n = parseFloat(value.replace(/[$\s,]/g, ""));
+    if (!Number.isNaN(n) && n >= 0) {
+      return String(Math.round(n));
+    }
+    return value.replace(/[^\d]/g, "");
+  }
+
+  /** Fill balloon **$** via the currency-mask input (click → select-all → type digits → Tab). */
+  private async fillBalloonAmountInput(value: string, minDollars: number): Promise<void> {
+    const input = this.balloonAmountInput;
+    const digits = DOAssetDetailsPage.balloonAmountTypeDigits(value);
+
+    await input.scrollIntoViewIfNeeded();
+    await expect(input).toBeVisible({ timeout: 20_000 });
+    await input.click();
+    await input.press("ControlOrMeta+a");
+    await input.press("Backspace");
+    await input.pressSequentially(digits, { delay: 50 });
+
+    const afterTyping = await this.readBalloonAmountRaw();
+    this.logStep(`Balloon $ after typing: "${afterTyping}"`);
+    if (this.balloonAmountLooksCleared(afterTyping)) {
+      throw new Error(`Balloon Amount cleared after typing (read: "${afterTyping}").`);
+    }
+
+    await input.press("Tab");
+    const afterTab = await this.readBalloonAmountRaw();
+    this.logStep(`Balloon $ after Tab: "${afterTab}"`);
+    if (this.balloonAmountLooksCleared(afterTab)) {
+      throw new Error(`Balloon Amount reset after Tab (read: "${afterTab}").`);
+    }
+
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    const afterLoader = await this.readBalloonAmountRaw();
+    this.logStep(`Balloon $ after loader: "${afterLoader}"`);
+    if (!this.balloonAmountRawValid(afterLoader, minDollars)) {
+      throw new Error(`Balloon Amount reset after loader (read: "${afterLoader}").`);
+    }
+  }
+
+  /** Balloon **$** / **%** settled after loaders — ignores transient NaN/blank flicker. */
+  async expectBalloonFieldsStable(minDollars = 1): Promise<void> {
+    this.logStep("Expect Balloon Fields Stable");
+    await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
+    const dollars = await this.waitForBalloonAmountValueStable(minDollars);
+    this.logStep(`Balloon $ final stable read: "${dollars}"`);
+    const pct = await this.waitForBalloonPercentValueStable();
+    this.logStep(`Balloon % final stable read: "${pct}"`);
   }
 
   async enterBalloonAmount(amount: string): Promise<void> {
     this.logStep(`Entered balloon amount as ${this.stepValueDisplay(amount)}`);
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    await this.ensureCashPriceReadyForBalloon();
     await expect(this.balloonAmountInput).toBeVisible({ timeout: 20_000 });
-    await this.balloonAmountInput.scrollIntoViewIfNeeded();
-    /** Same PrimeNG `<amount>` / `#amount` pattern as {@link fillLoanDetailsCurrencyAmount} — raw `fill` often leaves $0.00. */
-    await this.fillLoanDetailsCurrencyAmount(this.balloonAmountInput, amount);
-    await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
 
-    const balloonAmountNumeric = async (): Promise<number> => {
-      const raw = (await this.balloonAmountInput.inputValue()).trim();
-      const n = parseFloat(raw.replace(/[^0-9.-]/g, ""));
-      return Number.isNaN(n) ? 0 : n;
-    };
+    const target = parseFloat(amount.replace(/[$\s,]/g, ""));
+    const minDollars =
+      !Number.isNaN(target) && target >= 1 ? Math.max(1, target * 0.99) : 1;
 
-    if ((await balloonAmountNumeric()) < 1) {
-      const stripped = amount.replace(/[$\s,]/g, "");
-      const parsed = parseFloat(stripped);
-      if (!Number.isNaN(parsed) && parsed >= 1) {
-        const withCents = `$${parsed.toFixed(2)}`;
-        await this.fillLoanDetailsCurrencyAmount(this.balloonAmountInput, withCents);
-        await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
-      }
+    await this.fillBalloonAmountInput(amount, minDollars);
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+
+    try {
+      const stable = await this.waitForBalloonAmountValueStable(minDollars);
+      this.logStep(`Balloon $ stable: "${stable}"`);
+    } catch {
+      const current = await this.readBalloonAmountRaw();
+      throw new Error(
+        `Balloon Amount was cleared or did not stabilize (expected >= ${minDollars}, last read: "${current}").`,
+      );
     }
+  }
 
-    await expect
-      .poll(async () => balloonAmountNumeric(), { timeout: 12_000 })
-      .toBeGreaterThanOrEqual(1);
+  /**
+   * CSA path: enter balloon **%**, check **Fixed**, then **Calculate** (do not fill **$** — it stays
+   * `$0.00` until Calculate on this product). UDP-T3669.
+   */
+  async enterBalloonPercentAndCheckFixed(percentDigits: string): Promise<void> {
+    this.logStep(`Enter Balloon Percent And Check Fixed ${percentDigits}`);
+    await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
+    await this.ensureCashPriceReadyForBalloon();
+    await this.cashPriceOfAsset("$20,000");
+    await this.enterBalloonPercent(percentDigits);
+    await this.checkBalloonFixedCheckbox();
+    await this.expectBalloonFixedCheckboxChecked();
   }
 
   async expectBalloonPercentInputMatches(rx: RegExp): Promise<void> {
     this.logStep("Expect Balloon Percent Input Matches");
     await expect(this.balloonPercentInput).toBeVisible({ timeout: 15_000 });
-    await expect
-      .poll(async () => (await this.balloonPercentInput.inputValue()).replace(/%/g, "").trim(), {
-        timeout: 12_000,
-      })
-      .toMatch(rx);
+    await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
+    const stable = await this.waitForBalloonPercentValueStable();
+    expect(stable).toMatch(rx);
   }
 
   async enterBalloonPercent(percentDigits: string): Promise<void> {
     this.logStep(`Entered balloon % as ${this.stepValueDisplay(percentDigits)}`);
+    await this.ensureCashPriceReadyForBalloon();
     await expect(this.balloonPercentInput).toBeVisible({ timeout: 15_000 });
     await this.balloonPercentInput.scrollIntoViewIfNeeded();
     await this.balloonPercentInput.click({ force: true });
     await this.balloonPercentInput.press("ControlOrMeta+a");
     await this.balloonPercentInput.fill(percentDigits.replace(/%/g, "").trim(), { force: true });
-    await this.balloonPercentInput.press("Tab").catch(() => {});
+    this.logStep(`Balloon % immediately after fill: "${await this.balloonPercentRaw()}"`);
+    await this.paymentSummaryRoot
+      .getByText(/^Payment\s+Summary$/i)
+      .click({ timeout: 5_000 })
+      .catch(() => this.loanDate.click({ timeout: 5_000 }).catch(() => {}));
+    await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
+    await this.waitForBalloonPercentValueStable();
   }
 
   /**
-   * Asserts the Balloon **$** masked input matches `rx`.
-   * When **Fixed** is unchecked and the value was set via **%** only, the $ control may stay empty
-   * until **Calculate** — use {@link expectBalloonPercentInputMatches} for that phase instead.
+   * Asserts the Balloon **$** masked input matches `rx` after the value has stabilized.
    */
   async expectBalloonAmountInputMatches(rx: RegExp): Promise<void> {
     this.logStep("Expect Balloon Amount Input Matches");
+    await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
+    const stable = await this.waitForBalloonAmountValueStable(1);
+    expect(stable).toMatch(rx);
+  }
+
+  /** PrimeNG **Fixed** balloon checkbox host (`p-checkbox` beside Balloon Amount). */
+  private balloonFixedCheckboxHost(): Locator {
+    const paymentSummary = this.paymentSummaryRoot;
+    return paymentSummary
+      .locator("p-checkbox")
+      .filter({ has: paymentSummary.locator(':text-is("Fixed")') })
+      .first()
+      .or(
+        paymentSummary
+          .locator(':text-is("Fixed")')
+          .locator("xpath=ancestor::p-checkbox[1]")
+          .first(),
+      );
+  }
+
+  private async isBalloonFixedCheckboxChecked(): Promise<boolean> {
+    const host = this.balloonFixedCheckboxHost();
+    const hostCls = (await host.getAttribute("class")) ?? "";
+    if (hostCls.includes("p-checkbox-checked")) {
+      return true;
+    }
+    const box = host.locator(".p-checkbox-box, [class*='p-checkbox-box']").first();
+    const aria = await box.getAttribute("aria-checked").catch(() => null);
+    if (aria === "true") {
+      return true;
+    }
+    if (aria === "false") {
+      return false;
+    }
+    return this.balloonFixedCheckbox.isChecked().catch(() => false);
+  }
+
+  async expectBalloonFixedCheckboxChecked(): Promise<void> {
+    this.logStep("Expect Balloon Fixed Checkbox Checked");
+    const host = this.balloonFixedCheckboxHost();
+    await expect(host).toBeVisible({ timeout: 12_000 });
     await expect
-      .poll(async () => (await this.balloonAmountInput.inputValue()).trim(), { timeout: 12_000 })
-      .toMatch(rx);
+      .poll(async () => this.isBalloonFixedCheckboxChecked(), {
+        timeout: 10_000,
+        intervals: [200, 400, 800],
+      })
+      .toBe(true);
   }
 
   async checkBalloonFixedCheckbox(): Promise<void> {
     this.logStep("Check Balloon Fixed Checkbox");
-    await expect(this.balloonFixedCheckbox).toBeVisible({ timeout: 12_000 });
-    await this.balloonFixedCheckbox.scrollIntoViewIfNeeded();
-    await this.balloonFixedCheckbox.click({ force: true }).catch(() => {});
-    await this.balloonFixedCheckbox.check({ force: true });
-    await expect(this.balloonFixedCheckbox).toBeChecked({ timeout: 8_000 });
+    const host = this.balloonFixedCheckboxHost();
+    await expect(host).toBeVisible({ timeout: 15_000 });
+    await host.scrollIntoViewIfNeeded();
+
+    const box = host
+      .locator(".p-checkbox-box, [class*='p-checkbox-box']")
+      .or(host.getByRole("checkbox"))
+      .first();
+    const fixedLabel = this.paymentSummaryRoot.locator(':text("Fixed")').first();
+
+    if (await this.isBalloonFixedCheckboxChecked()) {
+      return;
+    }
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (await this.isBalloonFixedCheckboxChecked()) {
+        break;
+      }
+      if (await box.isVisible().catch(() => false)) {
+        await box.click({ timeout: 10_000 });
+      } else if (await fixedLabel.isVisible().catch(() => false)) {
+        await fixedLabel.click({ timeout: 10_000 });
+      } else {
+        await host.click({ timeout: 10_000 });
+      }
+      await this.waitUntilNoVisibleAppLoaderOverlays(5_000);
+    }
+
+    await this.expectBalloonFixedCheckboxChecked();
   }
 
   /**
@@ -1540,6 +1929,89 @@ export class DOAssetDetailsPage extends BasePage {
 
     await expect(row).toBeVisible({ timeout: 25_000 });
     await expect(row).toContainText(pattern);
+  }
+
+  /** Row label anchor — **Payment Amount** in Payment Summary (UDP-T3666). */
+  paymentAmountLabel(): Locator {
+    return this.paymentSummaryRoot.getByText(/^Payment\s+Amount$/i).first();
+  }
+
+  /** Read-only **Payment Amount** control in Payment Summary (disabled input after **Calculate**). */
+  paymentSummaryPaymentAmountField(): Locator {
+    return this.paymentSummaryRoot
+      .locator("xpath=.//*[normalize-space(.)='Payment Amount']/following::input[1]")
+      .first();
+  }
+
+  /**
+   * Display value for **Payment Amount** on CSA Webform (read-only label or `amount #amount`).
+   * Shows **Irregular** when the schedule is non-uniform (balloon / segment structure).
+   */
+  paymentAmountDisplayField(): Locator {
+    return this.paymentSummaryPaymentAmountField().or(
+      this.paymentAmountLabel()
+        .locator(
+          'xpath=ancestor::div[contains(@class,"grid")][1]//label[contains(@class,"customePadding") or contains(@class,"col-3")]',
+        )
+        .first(),
+    );
+  }
+
+  /**
+   * After **Apply** on a non-uniform schedule (e.g. **Interest Only** segment),
+   * **Payment Amount** in Payment Summary must read **Irregular**.
+   */
+  async expectPaymentAmountShowsIrregular(): Promise<void> {
+    this.logStep("Expect Payment Amount Shows Irregular");
+    await this.waitForQuoteLoadersToFinish();
+
+    const summary = this.paymentSummaryRoot;
+    const paymentAmount = this.paymentAmountDisplayField();
+    await paymentAmount.scrollIntoViewIfNeeded().catch(() => {});
+
+    await expect
+      .poll(
+        async () => {
+          if (await paymentAmount.isVisible().catch(() => false)) {
+            const raw = (
+              (await paymentAmount.inputValue().catch(() => "")) ||
+              (await paymentAmount.textContent().catch(() => "")) ||
+              ""
+            ).trim();
+            if (/^Irregular$/i.test(raw)) {
+              return true;
+            }
+          }
+          return summary.getByText(/^Irregular$/i).first().isVisible().catch(() => false);
+        },
+        { timeout: 45_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(true);
+  }
+
+  /** Payment Summary populated after **Calculate** (repay total or payment amount has a value). */
+  async expectPaymentSummaryCalculated(): Promise<void> {
+    this.logStep("Expect Payment Summary Calculated");
+    await this.waitForQuoteLoadersToFinish();
+    const paymentAmount = this.paymentSummaryPaymentAmountField();
+    const totalRepay = this.paymentSummaryRoot
+      .locator("xpath=.//*[normalize-space(.)='Total Amount to Repay']/following::input[1]")
+      .first();
+
+    await expect
+      .poll(
+        async () => {
+          for (const field of [paymentAmount, totalRepay]) {
+            if (!(await field.isVisible().catch(() => false))) continue;
+            const raw = (await field.inputValue().catch(() => "")).trim();
+            if (/^Irregular$/i.test(raw)) return true;
+            if (/\$\s*[\d,]+\.\d{2}/.test(raw)) return true;
+          }
+          return false;
+        },
+        { timeout: 45_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(true);
   }
 
   /**
@@ -2314,9 +2786,109 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * **Payment Schedule** card: heading, table with Date / Number / Frequency / Payment, and at least one row
-   * with a currency amount (after **Calculate**).
+   * **Payment / Lease Schedule** section title (CSA vs FL label varies).
    */
+  private paymentScheduleSectionTitle(): Locator {
+    return this.standardQuoteRoot().getByText(/Payment\s+Schedule|Lease\s+Schedule/i).first();
+  }
+
+  /**
+   * Visible instalment row with **$** amount and frequency inside the schedule panel.
+   */
+  private paymentScheduleMoneyDataRow(): Locator {
+    return this.paymentScheduleContentScope()
+      .locator("tr")
+      .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
+      .filter({ hasText: /Monthly|Weekly|Fortnightly/i })
+      .filter({ visible: true })
+      .first();
+  }
+
+  /** **Edit Payment Schedule** control on the quote shell (enabled only in detailed/grid view on some builds). */
+  private editPaymentScheduleTrigger(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .getByRole("button", { name: /Edit\s+Payment\s+Schedule/i })
+      .or(root.getByRole("link", { name: /Edit\s+Payment\s+Schedule/i }))
+      .first();
+  }
+
+  /**
+   * Host for **Payment / Lease Schedule** view toggles (`pi-equals` segment vs `pi-bars` grid).
+   */
+  private leasePaymentScheduleViewToggleScope(): Locator {
+    const root = this.standardQuoteRoot();
+    const card = root
+      .locator("p-card")
+      .filter({ hasText: /Payment\s+Schedule|Lease\s+Schedule/i })
+      .first();
+    return card.or(this.paymentScheduleContentScope());
+  }
+
+  /**
+   * Unselected **pi-bars** list/grid view radio — never the highlighted **pi-equals** control.
+   */
+  private leasePaymentScheduleBarsViewRadio(): Locator {
+    const scope = this.leasePaymentScheduleViewToggleScope();
+    const barsIcon = scope.locator("i.pi.pi-bars");
+    return scope
+      .getByRole("radio", { checked: false })
+      .filter({ has: barsIcon })
+      .first()
+      .or(
+        this.standardQuoteRoot()
+          .getByRole("radio", { checked: false })
+          .filter({ has: this.standardQuoteRoot().locator("i.pi.pi-bars") })
+          .first(),
+      );
+  }
+
+  /** Selected **pi-bars** list/grid view radio after the toggle is active. */
+  private leasePaymentScheduleBarsViewRadioSelected(): Locator {
+    const scope = this.leasePaymentScheduleViewToggleScope();
+    const barsIcon = scope.locator("i.pi.pi-bars");
+    return scope
+      .getByRole("radio", { checked: true })
+      .filter({ has: barsIcon })
+      .first();
+  }
+
+  private async isLeasePaymentListViewActive(): Promise<boolean> {
+    const selectedBars = this.leasePaymentScheduleBarsViewRadioSelected();
+    if (!(await selectedBars.isVisible().catch(() => false))) {
+      return false;
+    }
+    const ariaChecked = await selectedBars.getAttribute("aria-checked");
+    if (ariaChecked === "true") {
+      return true;
+    }
+    const cls = (await selectedBars.getAttribute("class")) ?? "";
+    return cls.includes("p-highlight");
+  }
+
+  /** Unselected **pi-equals** default segment view radio. */
+  private leasePaymentScheduleDefaultViewRadio(): Locator {
+    const scope = this.leasePaymentScheduleViewToggleScope();
+    const equalsIcon = scope.locator("i.pi.pi-equals");
+    return scope
+      .getByRole("radio", { checked: false })
+      .filter({ has: equalsIcon })
+      .first()
+      .or(
+        this.standardQuoteRoot()
+          .getByRole("radio", { checked: false })
+          .filter({ has: this.standardQuoteRoot().locator("i.pi.pi-equals") })
+          .first(),
+      );
+  }
+
+  /** Selected **pi-equals** default segment view radio. */
+  private leasePaymentScheduleDefaultViewRadioSelected(): Locator {
+    const scope = this.leasePaymentScheduleViewToggleScope();
+    const equalsIcon = scope.locator("i.pi.pi-equals");
+    return scope
+      .getByRole("radio", { checked: true })
+      .filter({ has: equalsIcon })
   async expectPaymentScheduleSectionWithTableData(): Promise<void> {
     this.logStep("Expect Payment Schedule Section With Table Data");
     const root = this.standardQuoteRoot();
@@ -2349,6 +2921,147 @@ export class DOAssetDetailsPage extends BasePage {
       .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
       .filter({ hasText: /Monthly|Weekly|Fortnightly/i })
       .first();
+  }
+
+  private async isLeasePaymentDefaultViewActive(): Promise<boolean> {
+    const selectedEquals = this.leasePaymentScheduleDefaultViewRadioSelected();
+    if (!(await selectedEquals.isVisible().catch(() => false))) {
+      return true;
+    }
+    const ariaChecked = await selectedEquals.getAttribute("aria-checked");
+    if (ariaChecked === "true") {
+      return true;
+    }
+    const cls = (await selectedEquals.getAttribute("class")) ?? "";
+    return cls.includes("p-highlight");
+  }
+
+  /**
+   * Ensure the default **pi-equals** segment view is active (Edit Payment Schedule works here).
+   */
+  private async clickLeasePaymentScheduleDefaultViewIfNeeded(): Promise<void> {
+    if (await this.isLeasePaymentDefaultViewActive()) {
+      return;
+    }
+
+    const defaultRadio = this.leasePaymentScheduleDefaultViewRadio();
+    if (!(await defaultRadio.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    if (!(await defaultRadio.isEnabled().catch(() => false))) {
+      return;
+    }
+
+    await defaultRadio.scrollIntoViewIfNeeded();
+    await defaultRadio.click({ timeout: 12_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+  }
+
+  /**
+   * Switch from default **pi-equals** segment view to **pi-bars** detailed grid view.
+   * No-op when the grid toggle is not present — stay on default segment view.
+   */
+  private async clickLeasePaymentScheduleBarsViewIfNeeded(): Promise<void> {
+    if (await this.isLeasePaymentListViewActive()) {
+      return;
+    }
+
+    const barsRadio = this.leasePaymentScheduleBarsViewRadio();
+    if (!(await barsRadio.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    if (!(await barsRadio.isEnabled().catch(() => false))) {
+      return;
+    }
+
+    await barsRadio.scrollIntoViewIfNeeded();
+    await barsRadio.click({ timeout: 12_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+
+    const selectedBars = this.leasePaymentScheduleBarsViewRadioSelected();
+    await expect
+      .poll(
+        async () => {
+          if (!(await selectedBars.isVisible().catch(() => false))) {
+            return false;
+          }
+          const ariaChecked = await selectedBars.getAttribute("aria-checked");
+          if (ariaChecked === "true") {
+            return true;
+          }
+          const cls = (await selectedBars.getAttribute("class")) ?? "";
+          return cls.includes("p-highlight");
+        },
+        { timeout: 20_000, intervals: [300, 500, 1_000] },
+      )
+      .toBe(true);
+  }
+
+  /**
+   * From the default segment/summary schedule view, switch to the detailed list/grid view
+   * (`pi-bars` toggle) so instalment rows and **Edit Payment Schedule** are available.
+   */
+  async openDetailedPaymentScheduleView(): Promise<void> {
+    this.logStep("Open Detailed Payment Schedule View");
+    await this.waitForQuoteLoadersToFinish();
+
+    const title = this.paymentScheduleSectionTitle();
+    await expect(title).toBeVisible({ timeout: 45_000 });
+    await title.scrollIntoViewIfNeeded();
+
+    const dataRow = this.paymentScheduleMoneyDataRow();
+    const editBtn = this.editPaymentScheduleTrigger();
+
+    const detailedViewReady = async (): Promise<boolean> =>
+      (await dataRow.isVisible().catch(() => false)) &&
+      (await editBtn.isVisible().catch(() => false)) &&
+      (await editBtn.isEnabled().catch(() => false));
+
+    if (await detailedViewReady()) {
+      return;
+    }
+
+    await this.clickLeasePaymentScheduleDefaultViewIfNeeded();
+
+    if (await detailedViewReady()) {
+      return;
+    }
+
+    await this.clickLeasePaymentScheduleBarsViewIfNeeded();
+
+    await expect
+      .poll(detailedViewReady, { timeout: 30_000, intervals: [500, 1_000, 2_000] })
+      .toBe(true);
+    await expect(dataRow).toBeVisible({ timeout: 15_000 });
+    await expect(editBtn).toBeEnabled({ timeout: 15_000 });
+  }
+
+  /**
+   * **Payment Schedule** card: heading, table with Date / Number / Frequency / Payment, and at least one row
+   * with a currency amount (after **Calculate**).
+   */
+  async expectPaymentScheduleSectionWithTableData(): Promise<void> {
+    this.logStep("Expect Payment Schedule Section With Table Data");
+    const scheduleTitle = this.paymentScheduleSectionTitle();
+    await expect(scheduleTitle).toBeVisible({ timeout: 45_000 });
+    await scheduleTitle.scrollIntoViewIfNeeded().catch(() => {});
+
+    await this.openDetailedPaymentScheduleView();
+
+    const scope = this.paymentScheduleContentScope();
+    // PrimeNG columnheaders include filter affordances in a11y name ("Date Show Filter Menu").
+    const scheduleHeader = (label: RegExp): Locator =>
+      scope
+        .getByRole("columnheader", { name: label })
+        .or(scope.locator("th").filter({ hasText: label }))
+        .first();
+
+    await expect(scheduleHeader(/^Date\b/i)).toBeVisible({ timeout: 15_000 });
+    await expect(scheduleHeader(/^Number\b/i)).toBeVisible({ timeout: 10_000 });
+    await expect(scheduleHeader(/^Frequency\b/i)).toBeVisible({ timeout: 10_000 });
+    await expect(scheduleHeader(/^Payment\b/i)).toBeVisible({ timeout: 10_000 });
+
+    const dataRow = this.paymentScheduleMoneyDataRow();
     await expect(dataRow).toBeVisible({ timeout: 25_000 });
   }
 
@@ -2357,7 +3070,7 @@ export class DOAssetDetailsPage extends BasePage {
    */
   private paymentScheduleCard(): Locator {
     const root = this.standardQuoteRoot();
-    const title = root.getByText(/Payment\s+Schedule/i).first();
+    const title = this.paymentScheduleSectionTitle();
     return title
       .locator("xpath=ancestor::p-card[1]")
       .first()
@@ -2376,7 +3089,7 @@ export class DOAssetDetailsPage extends BasePage {
   private paymentScheduleContentScope(): Locator {
     const root = this.standardQuoteRoot();
     const card = this.paymentScheduleCard();
-    const title = root.getByText(/Payment\s+Schedule/i).first();
+    const title = this.paymentScheduleSectionTitle();
     const withTable = root
       .locator("div")
       .filter({ has: title })
@@ -2395,14 +3108,10 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async clickPaymentScheduleViewTogglesAndExpectRowsRemain(): Promise<void> {
     this.logStep("Click Payment Schedule View Toggles And Expect Rows Remain");
-    const root = this.standardQuoteRoot();
-    const scheduleScope = this.paymentScheduleContentScope();
+    await this.openDetailedPaymentScheduleView();
 
-    const paymentRow = root
-      .locator("tr")
-      .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
-      .filter({ hasText: /Monthly|Weekly|Fortnightly/i })
-      .first();
+    const scope = this.paymentScheduleContentScope();
+    const paymentRow = this.paymentScheduleMoneyDataRow();
 
     const assertMoneyRowVisible = async (): Promise<void> => {
       await expect(paymentRow).toBeVisible({ timeout: 15_000 });
@@ -2410,76 +3119,75 @@ export class DOAssetDetailsPage extends BasePage {
 
     await assertMoneyRowVisible();
 
-    const selectGroup = scheduleScope
+    const toggleScope = this.leasePaymentScheduleViewToggleScope();
+    const hasEqualsBarsToggle = await toggleScope
+      .locator("i.pi.pi-equals, i.pi.pi-bars")
+      .first()
+      .isVisible({ timeout: 5_000 })
+      .catch(() => false);
+
+    if (hasEqualsBarsToggle) {
+      const uncheckedViewRadios = [
+        toggleScope
+          .getByRole("radio", { checked: false })
+          .filter({ has: toggleScope.locator("i.pi.pi-equals") })
+          .first(),
+        toggleScope
+          .getByRole("radio", { checked: false })
+          .filter({ has: toggleScope.locator("i.pi.pi-bars") })
+          .first(),
+      ];
+      for (const toggle of uncheckedViewRadios) {
+        if (!(await toggle.isVisible().catch(() => false))) {
+          continue;
+        }
+        if (!(await toggle.isEnabled().catch(() => false))) {
+          continue;
+        }
+        await toggle.scrollIntoViewIfNeeded();
+        await toggle.click({ timeout: 10_000 });
+        await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+        await assertMoneyRowVisible();
+      }
+      return;
+    }
+
+    const selectGroup = scope
       .locator("p-selectbutton, p-selectButton, p-togglebutton, .p-selectbutton")
       .first();
     if (await selectGroup.isVisible({ timeout: 10_000 }).catch(() => false)) {
       const btns = selectGroup.locator("button, .p-button, [role='button']");
       const n = await btns.count();
       if (n >= 2) {
-        await expect(btns.last()).toBeVisible({ timeout: 10_000 });
-        await btns.last().scrollIntoViewIfNeeded();
-        await btns.last().click({ force: true, timeout: 10_000 });
-        await this.page.waitForTimeout(400);
-        await assertMoneyRowVisible();
-        await btns.first().scrollIntoViewIfNeeded();
-        await btns.first().click({ force: true, timeout: 10_000 });
-        await this.page.waitForTimeout(400);
-        await assertMoneyRowVisible();
+        for (const idx of [0, n - 1]) {
+          const btn = btns.nth(idx);
+          if (!(await btn.isEnabled().catch(() => false))) {
+            continue;
+          }
+          await btn.scrollIntoViewIfNeeded();
+          await btn.click({ timeout: 10_000 });
+          await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+          await assertMoneyRowVisible();
+        }
         return;
       }
     }
 
-    const card = root.locator("p-card").filter({ hasText: /Payment\s+Schedule/i }).first();
-    const toggleScope = (await card.isVisible({ timeout: 5_000 }).catch(() => false))
-      ? card
-      : scheduleScope;
-
-    const rightViewBtn = toggleScope
-      .locator("button:has(i.pi.pi-bars)")
-      .first()
-      .or(toggleScope.locator("a:has(i.pi.pi-bars)").first())
-      .or(toggleScope.locator("button:has(i.pi.pi-table)").first())
-      .or(toggleScope.locator("button:has(i.pi.pi-th-large)").first())
-      .or(toggleScope.locator("button:has(i.pi.pi-list)").first())
-      .or(
-        toggleScope
-          .locator("i.pi.pi-bars, i.pi.pi-table, i.pi.pi-th-large")
-          .first()
-          .locator("xpath=ancestor::button[1] | ancestor::a[1]"),
-      );
-
-    await expect(rightViewBtn).toBeVisible({ timeout: 15_000 });
-    await rightViewBtn.scrollIntoViewIfNeeded();
-    await rightViewBtn.click({ force: true, timeout: 10_000 });
-    await this.page.waitForTimeout(400);
-    await assertMoneyRowVisible();
-
-    const group = rightViewBtn
-      .locator(
-        "xpath=ancestor::p-selectButton[1] | ancestor::p-selectbutton[1] | ancestor::div[contains(@class,'p-button-group')][1] | ancestor::div[contains(@class,'p-buttonset')][1] | ancestor::div[contains(@class,'p-selectbutton')][1]",
-      )
-      .first();
-
-    if (await group.isVisible({ timeout: 2_500 }).catch(() => false)) {
-      const groupBtns = group.getByRole("button");
-      const c = await groupBtns.count();
-      for (let i = 0; i < c; i++) {
-        const b = groupBtns.nth(i);
-        if (!(await b.isVisible({ timeout: 800 }).catch(() => false))) {
-          continue;
-        }
-        const hasBarsOrListIcon =
-          (await b.locator("i.pi.pi-bars, i.pi.pi-list").count()) > 0;
-        if (hasBarsOrListIcon) {
-          continue;
-        }
-        await b.scrollIntoViewIfNeeded();
-        await b.click({ force: true, timeout: 8_000 });
-        await this.page.waitForTimeout(400);
-        await assertMoneyRowVisible();
-        break;
+    const iconToggles = toggleScope
+      .locator("button, a, [role='button']")
+      .filter({
+        has: toggleScope.locator("i.pi-bars, i.pi-list, i.pi-table, i.pi-th-large"),
+      });
+    const iconCount = await iconToggles.count();
+    for (let i = 0; i < iconCount; i++) {
+      const btn = iconToggles.nth(i);
+      if (!(await btn.isEnabled().catch(() => false))) {
+        continue;
       }
+      await btn.scrollIntoViewIfNeeded();
+      await btn.click({ timeout: 10_000 });
+      await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+      await assertMoneyRowVisible();
     }
   }
 
@@ -2501,38 +3209,237 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
+  /** Header **X** on **Edit Payment Schedule** (close without Apply/Cancel). */
+  private editPaymentScheduleDialogCloseButton(): Locator {
+    const dialog = this.editPaymentScheduleDialog();
+    return dialog
+      .locator(
+        "button.p-dialog-header-close, button.p-dialog-header-icon.p-dialog-header-close",
+      )
+      .or(
+        dialog.locator(
+          "button.p-dialog-header-icon:has(.pi-times), button.p-dialog-header-icon:has(.pi.pi-times)",
+        ),
+      )
+      .first();
+  }
+
+  /** Close **Edit Payment Schedule** when it is already open (e.g. stale dialog blocking a fresh open). */
+  async closeEditPaymentScheduleDialogIfOpen(): Promise<void> {
+    const dialog = this.editPaymentScheduleDialog();
+    if (!(await dialog.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      return;
+    }
+    this.logStep("Close Edit Payment Schedule dialog if open");
+    const closeBtn = this.editPaymentScheduleDialogCloseButton();
+    if (await closeBtn.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await closeBtn.scrollIntoViewIfNeeded().catch(() => {});
+      await closeBtn.click({ timeout: 10_000 });
+    } else {
+      await this.page.keyboard.press("Escape").catch(() => {});
+    }
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
+  }
+
+  /** Instalment grid inside **Edit Payment Schedule** (Date / Payment / Remaining Balance). */
+  private editPaymentScheduleInstalmentTable(): Locator {
+    const dialog = this.editPaymentScheduleDialog();
+    return dialog
+      .locator("table")
+      .filter({ has: dialog.locator("th").filter({ hasText: /^Payment$/i }) })
+      .filter({ has: dialog.locator("th").filter({ hasText: /^Date$/i }) })
+      .first();
+  }
+
+  /** Segment editor table inside **Edit Payment Schedule** (Number / Type / Amount). */
+  private editPaymentScheduleSegmentTable(): Locator {
+    const dialog = this.editPaymentScheduleDialog();
+    return dialog
+      .locator("table")
+      .filter({ has: dialog.locator("th").filter({ hasText: /^Type$/i }) })
+      .first();
+  }
+
+  /** Log every visible **Edit Payment Schedule** table row for locator diagnosis (UDP-T3669). */
+  private async logEditPaymentScheduleDialogRows(): Promise<void> {
+    const dialog = this.editPaymentScheduleDialog();
+    const tables = dialog.locator("table");
+    const tableCount = await tables.count();
+    for (let t = 0; t < tableCount; t++) {
+      const table = tables.nth(t);
+      const headers = (
+        await table.locator("thead th").allTextContents().catch(() => [])
+      )
+        .map((h) => h.replace(/\s+/g, " ").trim())
+        .join(" | ");
+      this.logStep(`Edit Payment Schedule table ${t + 1} headers: ${headers || "(none)"}`);
+      const rows = table.locator("tbody tr");
+      const rowCount = await rows.count();
+      for (let r = 0; r < rowCount; r++) {
+        const row = rows.nth(r);
+        const cells = (
+          await row.locator("td").allTextContents().catch(() => [])
+        ).map((c) => c.replace(/\s+/g, " ").trim());
+        const inputs = await row.locator("input").evaluateAll((els) =>
+          els.map((el) => ((el as HTMLInputElement).value ?? "").trim()),
+        );
+        this.logStep(
+          `Edit Payment Schedule table ${t + 1} row ${r + 1}: cells=${JSON.stringify(cells)} inputs=${JSON.stringify(inputs)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Last instalment row for balloon/balance checks — instalment grid first, then quote schedule,
+   * not the segment editor row (`1 Fixed $0.00`).
+   */
+  private async editPaymentScheduleLastInstalmentRow(): Promise<Locator> {
+    const dialog = this.editPaymentScheduleDialog();
+    await this.logEditPaymentScheduleDialogRows();
+
+    const instalmentTable = this.editPaymentScheduleInstalmentTable();
+    if (await instalmentTable.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const row = instalmentTable.locator("tbody tr").filter({ visible: true }).last();
+      if (await row.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        this.logStep(
+          `Using Edit Payment Schedule instalment table last row: "${((await row.textContent()) ?? "").replace(/\s+/g, " ").trim()}"`,
+        );
+        return row;
+      }
+    }
+
+    await this.openDetailedPaymentScheduleView().catch(() => {});
+    const scheduleRow = this.paymentScheduleContentScope()
+      .locator("tr")
+      .filter({ hasText: /\$\s*[\d,.]+/ })
+      .filter({ visible: true })
+      .last();
+    if (await scheduleRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      this.logStep(
+        `Using quote Payment Schedule last row: "${((await scheduleRow.textContent()) ?? "").replace(/\s+/g, " ").trim()}"`,
+      );
+      return scheduleRow;
+    }
+
+    const balloonRow = dialog
+      .locator("table tbody tr")
+      .filter({ hasText: /\$\s*[\d,.]+/ })
+      .filter({ visible: true })
+      .last();
+    this.logStep(
+      `Falling back to last currency row in dialog: "${((await balloonRow.textContent()) ?? "").replace(/\s+/g, " ").trim()}"`,
+    );
+    return balloonRow;
+  }
+
+  /** Opens **Edit Payment Schedule** from the default Lease Schedule segment view. */
+  async openEditPaymentScheduleDialog(): Promise<void> {
+    this.logStep("Open Edit Payment Schedule Dialog");
+    await this.waitForQuoteLoadersToFinish();
+    await this.closeEditPaymentScheduleDialogIfOpen();
+
+    const title = this.paymentScheduleSectionTitle();
+    await expect(title).toBeVisible({ timeout: 45_000 });
+    await title.scrollIntoViewIfNeeded();
+
+    const editBtn = this.editPaymentScheduleTrigger();
+    const editReady = async (): Promise<boolean> =>
+      (await editBtn.isVisible().catch(() => false)) &&
+      (await editBtn.isEnabled().catch(() => false));
+
+    if (!(await editReady())) {
+      await this.clickLeasePaymentScheduleDefaultViewIfNeeded();
+    }
+
+    await expect
+      .poll(editReady, { timeout: 45_000, intervals: [500, 1_000, 2_000] })
+      .toBe(true);
+
+    await editBtn.scrollIntoViewIfNeeded();
+    await editBtn.click({ timeout: 20_000 });
+    await expect(this.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+  }
+
   private async paymentScheduleHost(): Promise<Locator> {
     const root = this.standardQuoteRoot();
-    const scheduleCard = root.locator("p-card").filter({ hasText: /Payment\s+Schedule/i }).first();
+    const scheduleCard = root
+      .locator("p-card")
+      .filter({ hasText: /Payment\s+Schedule|Lease\s+Schedule/i })
+      .first();
     if (await scheduleCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
       return scheduleCard;
     }
     return root
       .locator("div")
-      .filter({ has: root.getByText(/Payment\s+Schedule/i).first() })
+      .filter({ has: this.paymentScheduleSectionTitle() })
       .filter({ has: root.locator("table tbody tr") })
       .first();
   }
 
-  /** Opens **Edit Payment Schedule** from the pencil / edit control on the schedule card. */
-  async openEditPaymentScheduleDialog(): Promise<void> {
-    this.logStep("Open Edit Payment Schedule Dialog");
-    const root = this.standardQuoteRoot();
-    const scheduleHost = await this.paymentScheduleHost();
-    const editIcon = root
-      .getByRole("button", { name: /Edit\s+Payment\s+Schedule/i })
-      .or(root.getByRole("link", { name: /Edit\s+Payment\s+Schedule/i }))
-      .or(
-        scheduleHost
-          .locator("button:not(.brand-edit-btn), a:not(.brand-edit-btn), [role='button']:not(.brand-edit-btn)")
-          .filter({
-            has: scheduleHost.locator("i.pi-pencil, i.pi-pen-to-square, .fa-pen-to-square"),
-          }),
-      )
+  /**
+   * Last payment row in **Edit Payment Schedule** shows the balloon amount (UDP-T3669).
+   */
+  async expectEditPaymentScheduleLastInstalmentMatchesBalloon(
+    balloonPattern: RegExp,
+  ): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule Last Instalment Matches Balloon");
+    await this.waitForQuoteLoadersToFinish();
+    const dialog = this.editPaymentScheduleDialog();
+    await expect(dialog).toBeVisible({ timeout: 20_000 });
+    const lastRow = await this.editPaymentScheduleLastInstalmentRow();
+    await expect(lastRow).toBeVisible({ timeout: 25_000 });
+    await expect(lastRow).toContainText(balloonPattern);
+  }
+
+  /** Remaining balance on the last payment row in **Edit Payment Schedule** is **$0** (UDP-T3669). */
+  async expectEditPaymentScheduleLastInstalmentRemainingBalanceZero(): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule Last Instalment Remaining Balance Zero");
+    await this.waitForQuoteLoadersToFinish();
+    const dialog = this.editPaymentScheduleDialog();
+    await expect(dialog).toBeVisible({ timeout: 20_000 });
+    const lastRow = await this.editPaymentScheduleLastInstalmentRow();
+    await expect(lastRow).toBeVisible({ timeout: 25_000 });
+
+    const instalmentTable = this.editPaymentScheduleInstalmentTable();
+    if (await instalmentTable.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      const headers = instalmentTable.locator("thead th");
+      const count = await headers.count();
+      let balanceIdx = -1;
+      for (let i = 0; i < count; i++) {
+        const text = ((await headers.nth(i).textContent()) ?? "").replace(/\s+/g, " ").trim();
+        if (/Remaining|Balance/i.test(text)) {
+          balanceIdx = i;
+          break;
+        }
+      }
+      if (balanceIdx >= 0) {
+        await expect(lastRow.locator("td").nth(balanceIdx)).toContainText(/\$\s*0(?:\.00)?/);
+        return;
+      }
+    }
+
+    const balanceHeader = dialog
+      .locator("th, [role='columnheader']")
+      .filter({ hasText: /Remaining|Balance/i })
       .first();
-    await expect(editIcon).toBeEnabled({ timeout: 20_000 });
-    await editIcon.click({ timeout: 20_000 });
-    await expect(this.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+    if (await balanceHeader.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const headers = dialog.locator("th, [role='columnheader']");
+      const count = await headers.count();
+      let balanceIdx = -1;
+      for (let i = 0; i < count; i++) {
+        const text = ((await headers.nth(i).textContent()) ?? "").replace(/\s+/g, " ").trim();
+        if (/Remaining|Balance/i.test(text)) {
+          balanceIdx = i;
+          break;
+        }
+      }
+      if (balanceIdx >= 0) {
+        await expect(lastRow.locator("td").nth(balanceIdx)).toContainText(/\$\s*0(?:\.00)?/);
+        return;
+      }
+    }
+    await expect(lastRow).toContainText(/\$\s*0(?:\.00)?/);
   }
 
   /** First segment row inside **Edit Payment Schedule** table. */
@@ -2558,8 +3465,16 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Segment **Type** dropdown inside **Edit Payment Schedule** (e.g. Normal, Fixed, Interest Only). */
   async selectEditPaymentScheduleSegmentType(typeLabel: string): Promise<void> {
-    this.logStep(`Select Edit Payment Schedule Segment Type ${typeLabel}`);
-    const row = this.editPaymentScheduleSegmentRow();
+    await this.selectEditPaymentScheduleSegmentTypeOnRow(0, typeLabel);
+  }
+
+  /** Segment **Type** on a specific row (0-based) inside **Edit Payment Schedule**. */
+  async selectEditPaymentScheduleSegmentTypeOnRow(
+    rowIndex: number,
+    typeLabel: string,
+  ): Promise<void> {
+    this.logStep(`Select Edit Payment Schedule Segment Type ${typeLabel} on row ${rowIndex + 1}`);
+    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
     const typeCombo = row.getByRole("combobox").first();
     await typeCombo.click({ timeout: 10_000 });
     const typePattern = new RegExp(
@@ -2574,6 +3489,24 @@ export class DOAssetDetailsPage extends BasePage {
       .first()
       .click({ timeout: 10_000 });
     await this.page.keyboard.press("Escape").catch(() => {});
+  }
+
+  /** Segment **Amount** on a specific row (0-based) inside **Edit Payment Schedule**. */
+  async enterEditPaymentScheduleSegmentAmountOnRow(
+    rowIndex: number,
+    amount: string,
+  ): Promise<void> {
+    this.logStep(`Enter Edit Payment Schedule Segment Amount ${amount} on row ${rowIndex + 1}`);
+    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
+    const amountInput = row
+      .locator("input[currencymask]")
+      .first()
+      .or(row.locator("xpath=.//label[contains(normalize-space(.),'Amount')]/following::input[1]"))
+      .first();
+    await expect(amountInput).toBeVisible({ timeout: 10_000 });
+    await amountInput.click({ clickCount: 3 });
+    await amountInput.fill(amount);
+    await amountInput.press("Tab").catch(() => {});
   }
 
   /** **Calculate** inside **Edit Payment Schedule** (FIS fetch for segment amounts). */
@@ -2647,6 +3580,19 @@ export class DOAssetDetailsPage extends BasePage {
     await this.waitForLoadingComplete();
   }
 
+  /**
+   * **Edit Payment Schedule** → first segment **Interest Only** → **Calculate** → **Apply**.
+   * Yields a non-uniform schedule so Payment Summary shows **Irregular** (UDP-T3666).
+   */
+  async applyInterestOnlyEditPaymentSchedule(): Promise<void> {
+    this.logStep("Apply Interest Only Edit Payment Schedule");
+    await this.openEditPaymentScheduleDialog();
+    await this.selectEditPaymentScheduleSegmentType("Interest Only");
+    await this.clickEditPaymentScheduleCalculate();
+    await this.clickEditPaymentScheduleApply();
+    await this.expectEditPaymentScheduleDialogClosedOnStandardQuote();
+  }
+
   /** User returns to **Standard Quote** after **Apply** (edit dialog closed). */
   async expectEditPaymentScheduleDialogClosedOnStandardQuote(): Promise<void> {
     this.logStep("Expect Edit Payment Schedule Dialog Closed On Standard Quote");
@@ -2657,26 +3603,40 @@ export class DOAssetDetailsPage extends BasePage {
 
   private editPaymentScheduleCancelButton(): Locator {
     const dialog = this.editPaymentScheduleDialog();
-    return dialog
+    const footer = dialog
+      .locator("div")
+      .filter({ has: dialog.getByRole("button", { name: /^APPLY$/i }) })
+      .last();
+    return footer
       .getByRole("button", { name: /^CANCEL$/i })
-      .or(dialog.locator("p-button").filter({ hasText: /^Cancel$/i }).locator("button"))
-      .first();
+      .first()
+      .or(
+        dialog
+          .locator("p-button")
+          .filter({ has: dialog.locator(':text-is("CANCEL")') })
+          .locator("button")
+          .first(),
+      )
+      .or(dialog.locator("p-button").filter({ hasText: /^CANCEL$/i }).locator("button").first());
   }
 
   private editPaymentScheduleCancelConfirmDialog(): Locator {
     return this.page
-      .locator("p-confirmdialog, .p-confirm-dialog, [role='alertdialog']")
+      .locator("p-confirmdialog .p-dialog, p-confirmdialog, .p-confirm-dialog")
       .filter({ visible: true })
-      .filter({ hasText: /unsaved changes|lost|cancel/i })
+      .filter({
+        hasText: /Any unsaved changes will be lost\.\s*Are you sure you want to cancel\?/i,
+      })
       .first();
   }
 
   /**
-   * Edit segment fields only (no **Calculate**) — leaves unsaved changes for **Cancel** flow.
+   * Edit segment fields only (no **Calculate**) — leaves unsaved changes for **Cancel** / **Reset** flows.
    */
   async modifyEditPaymentScheduleSegmentFields(opts?: {
     type?: string;
     number?: string;
+    amount?: string;
   }): Promise<void> {
     this.logStep("Modify Edit Payment Schedule Segment Fields");
     if (opts?.number) {
@@ -2685,14 +3645,116 @@ export class DOAssetDetailsPage extends BasePage {
     if (opts?.type) {
       await this.selectEditPaymentScheduleSegmentType(opts.type);
     }
+    if (opts?.amount) {
+      await this.enterEditPaymentScheduleSegmentAmountOnRow(0, opts.amount);
+    }
+    if (opts?.number || opts?.type || opts?.amount) {
+      const dialog = this.editPaymentScheduleDialog();
+      await dialog
+        .getByText(/Balloon Amount|Number of Payments/i)
+        .first()
+        .click({ timeout: 5_000 })
+        .catch(() => {});
+    }
+  }
+
+  private editPaymentScheduleResetButton(): Locator {
+    const dialog = this.editPaymentScheduleDialog();
+    return dialog
+      .getByRole("button", { name: /^Reset$/i })
+      .or(dialog.locator("p-button").filter({ hasText: /^Reset$/i }).locator("button"))
+      .first();
+  }
+
+  /** **Reset** inside **Edit Payment Schedule** — discards unsaved segment edits. */
+  async clickEditPaymentScheduleReset(): Promise<void> {
+    this.logStep("Click Edit Payment Schedule Reset");
+    const resetBtn = this.editPaymentScheduleResetButton();
+    await expect(resetBtn).toBeVisible({ timeout: 10_000 });
+    await expect(resetBtn).toBeEnabled({ timeout: 10_000 });
+    await resetBtn.click({ timeout: 10_000 });
+    await this.waitForLoadingComplete();
+  }
+
+  private normalizeEditPaymentScheduleSegmentAmount(value: string): string {
+    return value.replace(/\s+/g, "").trim();
+  }
+
+  private normalizeEditPaymentScheduleSegmentType(value: string): string {
+    return value.replace(/\s+/g, " ").trim();
+  }
+
+  private editPaymentScheduleSegmentsEqual(
+    actual: DOEditPaymentScheduleSegmentSnapshot[],
+    expected: DOEditPaymentScheduleSegmentSnapshot[],
+  ): boolean {
+    if (actual.length !== expected.length) {
+      return false;
+    }
+    return actual.every((row, index) => {
+      const baseline = expected[index];
+      return (
+        row.number === baseline.number &&
+        this.normalizeEditPaymentScheduleSegmentType(row.type).toLowerCase() ===
+          this.normalizeEditPaymentScheduleSegmentType(baseline.type).toLowerCase() &&
+        this.normalizeEditPaymentScheduleSegmentAmount(row.amount) ===
+          this.normalizeEditPaymentScheduleSegmentAmount(baseline.amount)
+      );
+    });
+  }
+
+  /** Snapshot of one segment row (Number, Type, Amount) in **Edit Payment Schedule**. */
+  async getEditPaymentScheduleSegmentRowSnapshot(
+    rowIndex: number,
+  ): Promise<DOEditPaymentScheduleSegmentSnapshot> {
+    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
+    const number = await row.getByRole("spinbutton").first().inputValue();
+    const type = this.normalizeEditPaymentScheduleSegmentType(
+      (await row.getByRole("combobox").first().textContent()) ?? "",
+    );
+    const amountCell = row.locator("td").nth(2);
+    const amountInput = amountCell.locator("input").first();
+    const amount = (await amountInput.isVisible().catch(() => false))
+      ? await amountInput.inputValue()
+      : this.normalizeEditPaymentScheduleSegmentAmount((await amountCell.textContent()) ?? "");
+
+    return { number, type, amount };
+  }
+
+  /** Snapshot of all segment rows in **Edit Payment Schedule**. */
+  async getEditPaymentScheduleSegmentRowsSnapshot(): Promise<DOEditPaymentScheduleSegmentSnapshot[]> {
+    const rowCount = await this.countEditPaymentScheduleSegmentRows();
+    const snapshots: DOEditPaymentScheduleSegmentSnapshot[] = [];
+    for (let index = 0; index < rowCount; index++) {
+      snapshots.push(await this.getEditPaymentScheduleSegmentRowSnapshot(index));
+    }
+    return snapshots;
+  }
+
+  /** Assert segment rows match a previously captured snapshot (e.g. after **Reset**). */
+  async expectEditPaymentScheduleSegmentRowsMatch(
+    expected: DOEditPaymentScheduleSegmentSnapshot[],
+  ): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule Segment Rows Match Snapshot");
+    await expect
+      .poll(async () => {
+        const actual = await this.getEditPaymentScheduleSegmentRowsSnapshot();
+        return this.editPaymentScheduleSegmentsEqual(actual, expected);
+      }, { timeout: 15_000, intervals: [300, 500, 1_000] })
+      .toBe(true);
   }
 
   /** **CANCEL** on **Edit Payment Schedule** — prompts unsaved-changes confirmation. */
   async clickEditPaymentScheduleCancel(): Promise<void> {
     this.logStep("Click Edit Payment Schedule Cancel");
+    const dialog = this.editPaymentScheduleDialog();
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
     const cancelBtn = this.editPaymentScheduleCancelButton();
     await expect(cancelBtn).toBeVisible({ timeout: 10_000 });
+    await expect(cancelBtn).toBeEnabled({ timeout: 10_000 });
+    await cancelBtn.scrollIntoViewIfNeeded();
     await cancelBtn.click({ timeout: 10_000 });
+    await expect(this.editPaymentScheduleCancelConfirmDialog()).toBeVisible({ timeout: 15_000 });
   }
 
   /** Unsaved-changes confirmation after **Cancel**. */
@@ -2700,8 +3762,19 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Expect Edit Payment Schedule Cancel Confirmation Visible");
     const confirmDlg = this.editPaymentScheduleCancelConfirmDialog();
     await expect(confirmDlg).toBeVisible({ timeout: 15_000 });
-    await expect(confirmDlg).toContainText(/Any unsaved changes will be lost/i);
-    await expect(confirmDlg).toContainText(/cancel/i);
+    await expect(confirmDlg).toContainText(
+      /Any unsaved changes will be lost\.\s*Are you sure you want to cancel\?/i,
+    );
+    const confirmDiscardBtn = confirmDlg
+      .getByRole("button", { name: /^(Yes|OK|Confirm|Discard)$/i })
+      .or(confirmDlg.locator("button.p-confirm-dialog-accept").first())
+      .first();
+    const stayEditingBtn = confirmDlg
+      .getByRole("button", { name: /^(No|Stay)$/i })
+      .or(confirmDlg.locator("button.p-confirm-dialog-reject").first())
+      .first();
+    await expect(confirmDiscardBtn).toBeVisible({ timeout: 10_000 });
+    await expect(stayEditingBtn).toBeVisible({ timeout: 10_000 });
   }
 
   /** Confirm discard on cancel confirmation — exits edit screen back to **Standard Quote**. */
@@ -2734,8 +3807,67 @@ export class DOAssetDetailsPage extends BasePage {
   private editPaymentScheduleAddSegmentButton(): Locator {
     const dialog = this.editPaymentScheduleDialog();
     return dialog
-      .getByRole("button", { name: /\+\s*Add Segment|Add Segment/i })
-      .first();
+      .locator("button, a, [role='button']")
+      .filter({ has: dialog.locator(':text-is("Add Segment")') })
+      .first()
+      .or(dialog.getByRole("button", { name: /\+\s*Add Segment|Add Segment/i }).first());
+  }
+
+  /** Row count in the **Edit Payment Schedule** segment table. */
+  async countEditPaymentScheduleSegmentRows(): Promise<number> {
+    return this.editPaymentScheduleDialog().locator("table tbody tr").count();
+  }
+
+  /** **+ Add Segment** becomes enabled after reducing the first segment **Number**. */
+  async waitForEditPaymentScheduleAddSegmentEnabled(): Promise<void> {
+    this.logStep("Wait For Edit Payment Schedule Add Segment Enabled");
+    const addBtn = this.editPaymentScheduleAddSegmentButton();
+    await expect(addBtn).toBeVisible({ timeout: 15_000 });
+    await expect(addBtn).toBeEnabled({ timeout: 30_000 });
+  }
+
+  private editPaymentScheduleSegmentDeleteButton(rowIndex: number): Locator {
+    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
+    return row
+      .locator("td")
+      .last()
+      .getByRole("button")
+      .first()
+      .or(
+        row
+          .locator("button.p-button-icon-only, button")
+          .filter({
+            has: row.locator(
+              ".fa-trash-can, .fa-light.fa-trash-can, i.fa-trash-can, .pi-trash, i.pi-trash",
+            ),
+          })
+          .first(),
+      );
+  }
+
+  /** Trash icon on the **last** segment row (UDP-T3674). */
+  async clickEditPaymentScheduleDeleteLastSegment(): Promise<void> {
+    this.logStep("Click Edit Payment Schedule Delete Last Segment");
+    const dialog = this.editPaymentScheduleDialog();
+    const rows = dialog.locator("table tbody tr");
+    const lastIndex = (await rows.count()) - 1;
+    expect(lastIndex).toBeGreaterThanOrEqual(0);
+    const deleteBtn = this.editPaymentScheduleSegmentDeleteButton(lastIndex);
+    await expect(deleteBtn).toBeVisible({ timeout: 10_000 });
+    await expect(deleteBtn).toBeEnabled({ timeout: 10_000 });
+    await deleteBtn.click({ timeout: 10_000 });
+    await this.waitForLoadingComplete();
+  }
+
+  /** Dialog stays open with no visible validation errors (UDP-T3674). */
+  async expectEditPaymentScheduleDialogOpenWithoutErrors(): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule Dialog Open Without Errors");
+    const dialog = this.editPaymentScheduleDialog();
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    const errors = dialog
+      .locator(".p-message-error, .p-error, [class*='validation-error']")
+      .filter({ visible: true });
+    await expect(errors).toHaveCount(0);
   }
 
   /** Finance term (months) shown in the edit-schedule summary. */
@@ -2794,6 +3926,7 @@ export class DOAssetDetailsPage extends BasePage {
       if (firstValue >= term) {
         const chunk = Math.max(1, Math.floor(term / 3));
         await this.enterEditPaymentScheduleSegmentNumberOnRow(0, String(chunk));
+        await this.waitForEditPaymentScheduleAddSegmentEnabled();
       }
     }
 
@@ -2804,9 +3937,11 @@ export class DOAssetDetailsPage extends BasePage {
       if (!(await addBtn.isEnabled().catch(() => false))) break;
 
       await addBtn.click({ timeout: 10_000 });
+      await this.waitForLoadingComplete();
       const rowIndex = (await rows().count()) - 1;
       const remaining = term - total;
       await this.enterEditPaymentScheduleSegmentNumberOnRow(rowIndex, String(remaining));
+      await this.waitForLoadingComplete();
     }
 
     const finalTotal = await this.getEditPaymentScheduleNumberOfPayments();
@@ -2831,7 +3966,20 @@ export class DOAssetDetailsPage extends BasePage {
     const term = await this.getEditPaymentScheduleFinanceTermMonths();
     const total = await this.getEditPaymentScheduleNumberOfPayments();
     expect(total).toBe(term);
-    await expect(this.editPaymentScheduleAddSegmentButton()).toBeDisabled({ timeout: 15_000 });
+
+    const addBtn = this.editPaymentScheduleAddSegmentButton();
+    await expect(addBtn).toBeVisible({ timeout: 15_000 });
+    await expect(addBtn).toBeDisabled({ timeout: 15_000 });
+
+    const rowCountAtMax = await this.countEditPaymentScheduleSegmentRows();
+    await addBtn.click({ timeout: 5_000, force: true }).catch(() => {});
+    await this.waitForLoadingComplete();
+    await expect
+      .poll(async () => this.countEditPaymentScheduleSegmentRows(), {
+        timeout: 5_000,
+        intervals: [200, 500],
+      })
+      .toBe(rowCountAtMax);
   }
 
   /**
@@ -3463,6 +4611,41 @@ export class DOAssetDetailsPage extends BasePage {
       .toBeVisible({ timeout: 30_000 });
   }
 
+  /** Standard Quote header stepper — jump to a section (e.g. **Asset Details**, **Post Submission**). */
+  async clickStandardQuoteStepTab(stepLabel: string | RegExp): Promise<void> {
+    const label =
+      typeof stepLabel === "string"
+        ? new RegExp(stepLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+        : stepLabel;
+    this.logStep(`Click Standard Quote step tab: ${label.source}`);
+    const root = this.standardQuoteRoot();
+    const tab = root
+      .getByRole("tab", { name: label })
+      .or(root.getByRole("link", { name: label }))
+      .or(this.page.getByText(label).filter({ visible: true }))
+      .first();
+    await tab.waitFor({ state: "visible", timeout: 30_000 });
+    await tab.scrollIntoViewIfNeeded();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await tab.click({ timeout: 15_000 });
+    await this.page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  }
+
+  /** UDP-T3860 — Standard Quote reopens on **Asset Details**; Post Submission UI is not displayed. */
+  async expectAssetDetailsStepActiveNotPostSubmission(): Promise<void> {
+    this.logStep("Expect Asset Details Step Active Not Post Submission");
+    await this.expectStandardQuoteLoaded();
+    await this.expectAssetDetailsStepVisible();
+    await expect(this.page.locator("app-less-deposit").first()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      this.page.locator("app-customer-quote-post-submit, app-post-submission").first(),
+    ).toHaveCount(0, { timeout: 10_000 });
+    await expect(this.page.locator(':text-is("Browse Files")').first()).toHaveCount(0, {
+      timeout: 10_000,
+    });
+  }
+
   /** Assert Standard Quote shell and Asset Details / Less Deposit are loaded. */
   async expectStandardQuoteLoaded(): Promise<void> {
     this.logStep("Expect Standard Quote Loaded");
@@ -3491,6 +4674,58 @@ export class DOAssetDetailsPage extends BasePage {
       return;
     }
     this.log(`Quote shell open (quote id ${q} not shown in header on this build).`);
+  }
+
+  /** Read numeric Quote ID from the Standard Quote header (UDP-T3827 dashboard reopen). */
+  async readStandardQuoteIdFromHeader(): Promise<string> {
+    this.logStep("Read Standard Quote ID From Header");
+    await this.waitForStandardQuoteReady();
+    const root = this.standardQuoteRoot();
+    const quoteIdLabel = root
+      .getByText(/Quote\s*(No\.?|Number|ID)\s*:?/i)
+      .filter({ visible: true })
+      .first();
+    await expect(quoteIdLabel).toBeVisible({ timeout: 30_000 });
+
+    const block = quoteIdLabel
+      .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
+      .or(quoteIdLabel.locator("xpath=ancestor::div[1]"))
+      .first();
+    const input = block.locator("input").filter({ visible: true }).first();
+    if (await input.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      const value = (await input.inputValue()).trim();
+      const numeric = value.match(/\d{3,}/)?.[0];
+      if (numeric) {
+        return numeric;
+      }
+    }
+
+    const text = ((await block.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    const fromText = text.match(/\b(\d{3,})\b/)?.[1];
+    if (fromText) {
+      return fromText;
+    }
+
+    const fromUrl = this.page.url().match(/\b(\d{3,})\b/)?.[1];
+    if (fromUrl) {
+      return fromUrl;
+    }
+
+    throw new Error("readStandardQuoteIdFromHeader: could not resolve Quote ID from header.");
+  }
+
+  /** UDP-T3651 — workflow **Status** defaults to **Open Quote** after first save on Asset Details. */
+  async expectWorkflowStatusOpenQuote(): Promise<void> {
+    this.logStep("Expect workflow status Open Quote");
+    await expect(this.workflowStatusInput).toBeVisible({ timeout: 30_000 });
+    await expect(this.workflowStatusInput).toHaveJSProperty("readOnly", true);
+    await expect
+      .poll(async () => (await this.workflowStatusInput.inputValue()).trim(), {
+        timeout: 60_000,
+        intervals: [500, 1_000, 2_000],
+      })
+      .toBe("Open Quote");
+    await expect(this.workflowStatusInput).toHaveValue("Open Quote");
   }
 
   /** Reads **Loan Date** and sets **First Payment** to {@link suggestFirstPaymentDdMmYyyy}. */

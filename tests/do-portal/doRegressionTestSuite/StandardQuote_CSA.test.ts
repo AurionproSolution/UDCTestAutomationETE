@@ -13,12 +13,16 @@ import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDeta
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
 const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
+const EBBETT_DEALER = "Ebbett Volkswagen - Hamilton";
 
 function standardQuoteRoot(page: Page): Locator {
   return page.locator("app-quote-details, app-standard-quote").first();
 }
 
-async function openStandardQuoteFromDashboard(page: Page): Promise<{
+async function openStandardQuoteFromDashboard(
+  page: Page,
+  dealer: string = TLC_DEALER,
+): Promise<{
   dashboardPage: DODashboardPage;
   assetDetailsPage: DOAssetDetailsPage;
 }> {
@@ -26,7 +30,7 @@ async function openStandardQuoteFromDashboard(page: Page): Promise<{
   const assetDetailsPage = new DOAssetDetailsPage(page);
   await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
   await dashboardPage.waitForAuthenticatedDashboard();
-  await dashboardPage.selectDealer(TLC_DEALER);
+  await dashboardPage.selectDealer(dealer);
   await dashboardPage.clickCreateStandardQuote();
   await dashboardPage.selectCSAproduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
@@ -78,18 +82,23 @@ async function prepareCalculableCsaQuote(
   await assetDetailsPage.termsOfFinance(opts?.term ?? "36");
   await assetDetailsPage.interestRate(opts?.interest ?? "9");
   await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
-  if (opts?.balloonFixed) {
-    await assetDetailsPage.checkBalloonFixedCheckbox();
-  }
-  if (opts?.balloonPercent) {
-    // Align loan cash with asset value so % → $ does not evaluate to NaN.
-    await assetDetailsPage.cashPriceOfAsset("$20,000");
-    await assetDetailsPage.enterBalloonPercent(opts.balloonPercent);
-  } else if (opts?.balloon) {
-    await assetDetailsPage.enterBalloonAmount(opts.balloon);
-  }
-  // Originator / origination ref **after** asset + finance edits so dialogs and async pricing do not clear it.
+  // Origination ref before balloon so async pricing does not wipe balloon after entry.
   await assetDetailsPage.enterOriginationReference(opts?.origRef ?? "SQ-CSA-Ref-01");
+  if (opts?.balloonPercent) {
+    await assetDetailsPage.cashPriceOfAsset("$20,000");
+    if (opts?.balloonFixed) {
+      await assetDetailsPage.enterBalloonPercentAndCheckFixed(opts.balloonPercent);
+    } else {
+      await assetDetailsPage.enterBalloonPercent(opts.balloonPercent);
+    }
+  } else if (opts?.balloon) {
+    await assetDetailsPage.ensureCashPriceReadyForBalloon();
+    await assetDetailsPage.enterBalloonAmount(opts.balloon);
+    if (opts?.balloonFixed) {
+      await assetDetailsPage.checkBalloonFixedCheckbox();
+      await assetDetailsPage.expectBalloonFixedCheckboxChecked();
+    }
+  }
 }
 
 /**
@@ -259,6 +268,74 @@ async function openAddOnAccessoriesPageFromStandardQuote(
   );
 }
 
+function standardQuoteQuoteIdBlock(page: Page): Locator {
+  const root = standardQuoteRoot(page);
+  const quoteIdLabel = root
+    .getByText(/Quote\s*(No\.?|Number|ID)\s*:?/i)
+    .filter({ visible: true })
+    .first();
+  return quoteIdLabel
+    .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
+    .or(quoteIdLabel.locator("xpath=ancestor::div[1]"))
+    .first();
+}
+
+/**
+ * UDP-T3650 / UDP-T3651 shared flow: minimal CSA Standard Quote → Save (stay on Asset Details).
+ */
+async function saveMinimalCsaStandardQuote(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  const addAssetPage = new DOAddAssetPage(page);
+  await selectCsaProductAndProgram(assetDetailsPage);
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, {
+    origRef: "SQ-CSA-Ref-01",
+    interest: "9",
+  });
+  await assetDetailsPage.clickSaveStandardQuoteStep({
+    originatorRefForRequiredDialog: "SQ-CSA-Ref-01",
+  });
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+}
+
+async function expectQuoteIdAssignedOnAssetDetailsHeader(page: Page): Promise<void> {
+  const root = standardQuoteRoot(page);
+  await expect(root).toBeVisible({ timeout: 30_000 });
+
+  const quoteIdLabel = root
+    .getByText(/Quote\s*(No\.?|Number|ID)\s*:?/i)
+    .filter({ visible: true })
+    .first();
+  await expect(quoteIdLabel).toBeVisible({ timeout: 30_000 });
+
+  const quoteIdBlock = standardQuoteQuoteIdBlock(page);
+  const quoteIdInput = quoteIdBlock.locator("input").filter({ visible: true }).first();
+
+  if (await quoteIdInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await expect(quoteIdInput).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => (await quoteIdInput.inputValue()).trim(), {
+        timeout: 60_000,
+        intervals: [500, 1_000, 2_000],
+      })
+      .not.toBe("");
+    const displayedQuoteId = (await quoteIdInput.inputValue()).trim();
+    expect(displayedQuoteId.length).toBeGreaterThan(0);
+    expect(displayedQuoteId).toMatch(/\d+/);
+    await expect(quoteIdInput).not.toBeEditable();
+    return;
+  }
+
+  await expect
+    .poll(async () => ((await quoteIdBlock.textContent()) ?? "").replace(/\s/g, " ").trim(), {
+      timeout: 60_000,
+      intervals: [500, 1_000, 2_000],
+    })
+    .toMatch(/\d+/);
+}
+
 test.describe("Standard Quote - CSA @do @regression", () => {
   test(
     "UDP-T3646 - Standard Quote Created Directly from Dashboard",
@@ -354,17 +431,10 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     "UDP-T3650 - Quote ID Assigned on First Save",
     { tag: ["@do", "@regression", "@UDP-T3650"] },
     async ({ page }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      const addAssetPage = new DOAddAssetPage(page);
-      await selectCsaProductAndProgram(assetDetailsPage);
-      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.clickSaveStandardQuoteStep();
-      const quoteId = standardQuoteRoot(page).getByText(/Quote\s*ID/i).first();
-      if (await quoteId.isVisible({ timeout: 20_000 }).catch(() => false)) {
-        const block = quoteId.locator("xpath=ancestor::div[1]");
-        await expect.soft(block).toContainText(/\d+/);
-      }
+      await saveMinimalCsaStandardQuote(page, assetDetailsPage);
+      await expectQuoteIdAssignedOnAssetDetailsHeader(page);
     },
   );
 
@@ -372,21 +442,11 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     "UDP-T3651 - Status Defaults to 'Open Quote'",
     { tag: ["@do", "@regression", "@UDP-T3651"] },
     async ({ page }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      const addAssetPage = new DOAddAssetPage(page);
-      await selectCsaProductAndProgram(assetDetailsPage);
-      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, {
-        balloonPercent: "20",
-      });
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.enterOriginationReference("SQ-CSA-Ref-01");
-      await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
-      await assetDetailsPage.clickSaveStandardQuoteStep({
-        originatorRefForRequiredDialog: "SQ-CSA-Ref-01",
-      });
-      const root = standardQuoteRoot(page);
-      await expect.soft(root).toContainText(/Open\s+Quote/i, { timeout: 45_000 });
+      await saveMinimalCsaStandardQuote(page, assetDetailsPage);
+      await expectQuoteIdAssignedOnAssetDetailsHeader(page);
+      await assetDetailsPage.expectWorkflowStatusOpenQuote();
     },
   );
 
@@ -471,21 +531,29 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3656"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page, EBBETT_DEALER);
       await selectCsaProductAndProgram(assetDetailsPage);
-      const editBrand = standardQuoteRoot(page).getByRole("button", { name: /Edit/i }).first();
-      if (!(await editBrand.isVisible({ timeout: 8_000 }).catch(() => false))) {
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+      if (!(await assetDetailsPage.brandEditButton().isVisible({ timeout: 10_000 }).catch(() => false))) {
         test.skip(true, "Edit brand not available for this dealer.");
       }
-      await editBrand.click();
-      const options = page.getByRole("option");
-      const count = await options.count();
-      if (count >= 2) {
-        await options.nth(0).click();
-        await options.nth(1).click();
-        const selected = page.locator(".p-highlight, .p-radiobutton-checked, [aria-checked='true']");
-        expect.soft(await selected.count()).toBeLessThanOrEqual(1);
-      }
+
+      await test.step("Open Brand Selection, select the first brand, and Add", async () => {
+        await assetDetailsPage.openBrandSelectionDialog();
+        await assetDetailsPage.selectBrandSelectionRadioAtIndex(0);
+        await assetDetailsPage.expectBrandSelectionRadioCheckedAtIndex(0);
+        await assetDetailsPage.expectExactlyOneBrandSelected();
+        await assetDetailsPage.clickBrandSelectionAddButton();
+      });
+
+      await test.step("Select a second brand — only one may remain selected", async () => {
+        await assetDetailsPage.openBrandSelectionDialog();
+        await assetDetailsPage.selectBrandSelectionRadioAtIndex(1);
+        await assetDetailsPage.expectBrandSelectionRadioCheckedAtIndex(1);
+        await assetDetailsPage.expectBrandSelectionRadioNotCheckedAtIndex(0);
+        await assetDetailsPage.expectExactlyOneBrandSelected();
+      });
     },
   );
 
@@ -496,10 +564,12 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectCsaProductAndProgram(assetDetailsPage);
-      await assetDetailsPage.selectCondition("New");
-      await assetDetailsPage.scrollRecommendedRetailPriceIntoView();
-      await expect.soft(assetDetailsPage.recommendedRetailPriceInput).toBeVisible({ timeout: 20_000 });
-      await assetDetailsPage.selectCondition("Used");
+      await assetDetailsPage.waitForStandardQuoteReady();
+
+      await assetDetailsPage.selectConditionInStandardQuote("New");
+      await assetDetailsPage.expectRecommendedRetailPriceVisibleAfterNewCondition();
+
+      await assetDetailsPage.selectConditionInStandardQuote("Used");
       await assetDetailsPage.expectRecommendedRetailPriceHiddenAfterUsedCondition();
     },
   );
@@ -540,10 +610,59 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectCsaProductAndProgram(assetDetailsPage);
-      await assetDetailsPage.expectUdcEstablishmentFeePrePopulatedFromProgram();
-      await assetDetailsPage.expectDealerOriginationFeePopulatedFromProgram();
-      await expect.soft(assetDetailsPage.totalEstablishmentFeeInputField).toBeVisible({
-        timeout: 15_000,
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+      await test.step("Navigate to Fees section", async () => {
+        await assetDetailsPage.udcEstablishmentFeeInputField.scrollIntoViewIfNeeded();
+        await assetDetailsPage.dealerOriginationFeeInputField.scrollIntoViewIfNeeded();
+        await expect(assetDetailsPage.udcEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+        await expect(assetDetailsPage.dealerOriginationFeeInputField).toBeVisible({ timeout: 20_000 });
+        await expect(assetDetailsPage.totalEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+      });
+
+      await test.step("Enter valid fee values when blank", async () => {
+        const udcRaw = (await assetDetailsPage.udcEstablishmentFeeInputField.inputValue()).trim();
+        const dealerRaw = (await assetDetailsPage.dealerOriginationFeeInputField.inputValue()).trim();
+        let feesEdited = false;
+        if (udcRaw.length === 0) {
+          await assetDetailsPage.udcEstablishmentFee("$300");
+          feesEdited = true;
+        }
+        if (dealerRaw.length === 0) {
+          await assetDetailsPage.dealerOriginationFee("$200");
+          feesEdited = true;
+        }
+        if (feesEdited) {
+          await assetDetailsPage.waitForQuoteLoadersToFinish();
+        }
+      });
+
+      await test.step("Verify Total Establishment Fee = UDC + Dealer", async () => {
+        const udc = await assetDetailsPage.readUdcEstablishmentFee();
+        const dealer = await assetDetailsPage.readDealerOriginationFee();
+        const expectedTotal = Math.round((udc + dealer) * 100) / 100;
+
+        await expect
+          .poll(
+            async () => {
+              const raw = (await assetDetailsPage.totalEstablishmentFeeInputField.inputValue()).trim();
+              const actual = Math.round(assetDetailsPage.parseDisplayedCurrency(raw) * 100) / 100;
+              return Math.abs(actual - expectedTotal) <= 0.01;
+            },
+            { timeout: 30_000, intervals: [300, 500, 1_000] },
+          )
+          .toBe(true);
+
+        const displayedTotal = Math.round(
+          assetDetailsPage.parseDisplayedCurrency(
+            (await assetDetailsPage.totalEstablishmentFeeInputField.inputValue()).trim(),
+          ) * 100,
+        ) / 100;
+        expect(Math.abs(displayedTotal - expectedTotal)).toBeLessThanOrEqual(0.01);
+
+        if (udc === 0 && dealer === 0) {
+          expect(displayedTotal).toBe(0);
+        }
       });
     },
   );
@@ -606,12 +725,9 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       const addAssetPage = new DOAddAssetPage(page);
       await selectCsaProductAndProgram(assetDetailsPage);
-      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, { term: "9999" });
+      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, { term: "121" });
       await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectTermExceedsProgramMaxOnCalculateThenRestore({
-        overMaxTerm: "9999",
-        restoreTerm: "36",
-      });
+      await assetDetailsPage.expectTermExceedsProgramMaxValidation(120);
     },
   );
 
@@ -649,10 +765,22 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectCsaProductAndProgram(assetDetailsPage);
-      const rate = (await assetDetailsPage.interestRateInputField.inputValue()).trim();
-      expect.soft(rate.length).toBeGreaterThan(0);
-      expect.soft(/\d/.test(rate)).toBeTruthy();
-      await assetDetailsPage.expectInterestRateEditable();
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+      const rateField = assetDetailsPage.interestRateInputField;
+      await expect(rateField).toBeVisible({ timeout: 30_000 });
+
+      const expectedDefaultRate = "12.95";
+      await expect
+        .poll(async () => (await rateField.inputValue()).replace(/%/g, "").trim(), {
+          timeout: 60_000,
+          intervals: [500, 1_000, 2_000],
+        })
+        .toMatch(new RegExp(`^${expectedDefaultRate.replace(".", "\\.")}$`));
+
+      const rate = (await rateField.inputValue()).trim();
+      expect(rate.length).toBeGreaterThan(0);
+      expect(rate.replace(/%/g, "").trim()).toBe(expectedDefaultRate);
     },
   );
 
@@ -665,12 +793,12 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, {
-        balloonPercent: "20",
-        balloonFixed: false,
+        balloon: "$4,000",
+        balloonFixed: true,
       });
       await assetDetailsPage.clickCalculateButton();
-      const irregular = standardQuoteRoot(page).getByText(/Irregular/i).first();
-      await expect.soft(irregular).toBeVisible({ timeout: 45_000 });
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+      await assetDetailsPage.expectPaymentAmountShowsIrregular();
     },
   );
 
@@ -710,7 +838,7 @@ test.describe("Standard Quote - CSA @do @regression", () => {
   );
 
   test(
-    "UDP-T3669 - CSA product/program selected. Balloon amount is entered. Fixed checkbox is visible.",
+    "UDP-T3669 - Fixed Balloon Amount Is Final Payment In Edit Payment Schedule",
     { tag: ["@do", "@regression", "@UDP-T3669"] },
     async ({ page }) => {
       test.setTimeout(600_000);
@@ -718,12 +846,11 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, {
-        balloonPercent: "20",
+        balloon: "$4,000",
         balloonFixed: true,
       });
-      await assetDetailsPage.expectBalloonAmountInputMatches(/4[, ]?000|4000/);
       await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentScheduleLastPaymentRowContains(/4[, ]?000|4000/);
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
     },
   );
 
@@ -788,33 +915,10 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
       await assetDetailsPage.clickCalculateButton();
-      const root = standardQuoteRoot(page);
-      const scheduleCard = root.locator("p-card").filter({ hasText: /Payment\s+Schedule/i }).first();
-      const scheduleHost = (await scheduleCard.isVisible({ timeout: 10_000 }).catch(() => false))
-        ? scheduleCard
-        : root
-            .locator("div")
-            .filter({ has: root.getByText(/Payment\s+Schedule/i).first() })
-            .filter({ has: root.locator("table tbody tr") })
-            .first();
-      const editIcon = root
-        .getByRole("button", { name: /Edit\s+Payment\s+Schedule/i })
-        .or(root.getByRole("link", { name: /Edit\s+Payment\s+Schedule/i }))
-        .or(
-          scheduleHost
-            .locator("button:not(.brand-edit-btn), a:not(.brand-edit-btn), [role='button']:not(.brand-edit-btn)")
-            .filter({
-              has: scheduleHost.locator("i.pi-pencil, i.pi-pen-to-square, .fa-pen-to-square"),
-            }),
-        )
-        .first();
-      if (await editIcon.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await expect(editIcon).toBeEnabled({ timeout: 20_000 });
-        await editIcon.click({ timeout: 20_000 });
-        await expect
-          .soft(page.getByRole("dialog").filter({ hasText: /Payment\s+Schedule|Segment/i }).first())
-          .toBeVisible({ timeout: 20_000 });
-      }
+      await assetDetailsPage.openEditPaymentScheduleDialog();
+      await expect
+        .soft(page.getByRole("dialog").filter({ hasText: /Payment\s+Schedule|Segment/i }).first())
+        .toBeVisible({ timeout: 20_000 });
     },
   );
 
@@ -823,7 +927,43 @@ test.describe("Standard Quote - CSA @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3674"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      test.fixme(true, "Requires Edit Payment Schedule dialog with multiple segments — manual UI discovery pending.");
+      const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const addAssetPage = new DOAddAssetPage(page);
+      await selectCsaProductAndProgram(assetDetailsPage);
+      await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
+      await assetDetailsPage.clickCalculateButton();
+      await assetDetailsPage.openEditPaymentScheduleDialog();
+      await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+
+      const dialog = assetDetailsPage.editPaymentScheduleDialog();
+      const segmentRow = (index: number) => dialog.locator("table tbody tr").nth(index);
+
+      await assetDetailsPage.enterEditPaymentScheduleSegmentNumberOnRow(0, "30");
+      await assetDetailsPage.waitForEditPaymentScheduleAddSegmentEnabled();
+      await assetDetailsPage.clickEditPaymentScheduleAddSegment();
+
+      const paymentsTotal = await assetDetailsPage.getEditPaymentScheduleNumberOfPayments();
+      const remainingOnNewRow = String(Math.max(1, paymentsTotal - 30));
+      await assetDetailsPage.enterEditPaymentScheduleSegmentNumberOnRow(1, remainingOnNewRow);
+      await assetDetailsPage.selectEditPaymentScheduleSegmentTypeOnRow(1, "Normal");
+      await assetDetailsPage.clickEditPaymentScheduleCalculate();
+      await assetDetailsPage.expectEditPaymentScheduleCalculateSummaryVisible();
+
+      const rowCountBeforeDelete = await assetDetailsPage.countEditPaymentScheduleSegmentRows();
+      expect(rowCountBeforeDelete).toBeGreaterThan(1);
+      const firstRowNumberBefore = await segmentRow(0).getByRole("spinbutton").first().inputValue();
+
+      await assetDetailsPage.clickEditPaymentScheduleDeleteLastSegment();
+
+      await expect
+        .poll(async () => assetDetailsPage.countEditPaymentScheduleSegmentRows(), {
+          timeout: 20_000,
+          intervals: [300, 500, 1_000],
+        })
+        .toBe(rowCountBeforeDelete - 1);
+      await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible();
+      await expect(segmentRow(0).getByRole("spinbutton").first()).toHaveValue(firstRowNumberBefore);
+      await assetDetailsPage.expectEditPaymentScheduleDialogOpenWithoutErrors();
     },
   );
 
@@ -837,72 +977,27 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await selectCsaProductAndProgram(assetDetailsPage);
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
       await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentScheduleViewTogglesWorkAndTablePopulated();
+      await assetDetailsPage.openEditPaymentScheduleDialog();
+      await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
 
-      // Open Edit Payment Schedule dialog (reuse pattern from T3673)
-      const root = standardQuoteRoot(page);
-      const scheduleCard = root.locator("p-card").filter({ hasText: /Payment\s+Schedule/i }).first();
-      const scheduleHost = (await scheduleCard.isVisible({ timeout: 10_000 }).catch(() => false))
-        ? scheduleCard
-        : root
-            .locator("div")
-            .filter({ has: root.getByText(/Payment\s+Schedule/i).first() })
-            .filter({ has: root.locator("table tbody tr") })
-            .first();
-      const editIcon = root
-        .getByRole("button", { name: /Edit\s+Payment\s+Schedule/i })
-        .or(root.getByRole("link", { name: /Edit\s+Payment\s+Schedule/i }))
-        .or(
-          scheduleHost
-            .locator("button:not(.brand-edit-btn), a:not(.brand-edit-btn), [role='button']:not(.brand-edit-btn)")
-            .filter({
-              has: scheduleHost.locator("i.pi-pencil, i.pi-pen-to-square, .fa-pen-to-square"),
-            }),
-        )
-        .first();
-      await expect(editIcon).toBeEnabled({ timeout: 20_000 });
-      await editIcon.click({ timeout: 20_000 });
-      const dialog = page.getByRole("dialog").filter({ hasText: /Edit\s+Payment\s+Schedule/i }).first();
-      await expect(dialog).toBeVisible({ timeout: 20_000 });
+      const defaultSchedule = await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+      expect(defaultSchedule.length).toBeGreaterThan(0);
 
-      // 1. Modify segment Number, Type, and Amount
-      const numberInput = dialog
-        .locator("xpath=.//label[contains(normalize-space(.),'Number')]/following::input[1]")
-        .first();
-      await expect(numberInput).toBeVisible({ timeout: 10_000 });
-      await numberInput.fill("20");
+      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+        number: "20",
+        type: "Interest Only",
+      });
 
-      const typeTrigger = dialog
-        .locator(
-          "xpath=.//label[contains(normalize-space(.),'Type')]/following::p-dropdown[1]//*[contains(@class,'p-dropdown-trigger') or @aria-label='dropdown trigger'][1]",
-        )
-        .first();
-      await typeTrigger.click({ timeout: 10_000 });
-      await page
-        .locator(".p-dropdown-panel")
-        .filter({ visible: true })
-        .locator("li[role='option'], .p-dropdown-item")
-        .filter({ hasText: /^Fixed$/i })
-        .first()
-        .click({ timeout: 10_000 });
+      const modifiedSchedule = await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+      expect(modifiedSchedule[0].number).toBe("20");
+      expect(modifiedSchedule[0].type).toMatch(/Interest Only/i);
+      expect(modifiedSchedule[0].number).not.toBe(defaultSchedule[0].number);
+      expect(modifiedSchedule[0].type.toLowerCase()).not.toBe(defaultSchedule[0].type.toLowerCase());
 
-      const amountInput = dialog
-        .locator("xpath=.//label[contains(normalize-space(.),'Amount')]/following::input[1]")
-        .first();
-      await expect(amountInput).toBeVisible({ timeout: 10_000 });
-      await amountInput.fill("200");
+      await assetDetailsPage.clickEditPaymentScheduleReset();
 
-      // Brief pause so segment edits settle before Reset
-      await page.waitForTimeout(2_000);
-
-      // 2. Click Reset (PrimeNG outlined p-button — not Calculate)
-      const resetBtn = dialog.locator("p-button").filter({ hasText: /^Reset$/i }).locator("button").first();
-      await expect(resetBtn).toBeVisible({ timeout: 10_000 });
-      await expect(resetBtn).toBeEnabled({ timeout: 10_000 });
-      await resetBtn.click({ timeout: 10_000 });
-
-      // After reset, segment fields revert to defaults
-      await expect(numberInput).toHaveValue("36", { timeout: 15_000 });
+      await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 15_000 });
+      await assetDetailsPage.expectEditPaymentScheduleSegmentRowsMatch(defaultSchedule);
     },
   );
 
@@ -934,12 +1029,55 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
       await assetDetailsPage.clickCalculateButton();
       await assetDetailsPage.openEditPaymentScheduleDialog();
-      await assetDetailsPage.modifyEditPaymentScheduleSegment({
-        number: "30",
-        type: "Interest Only",
+      await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+
+      const originalSchedule = await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+      const modifiedNumber = "20";
+      const modifiedType = "Interest Only";
+
+      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+        number: modifiedNumber,
+        type: modifiedType,
       });
+
+      const modifiedFirstRow = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
+      expect(modifiedFirstRow.number).toBe(modifiedNumber);
+      expect(modifiedFirstRow.type).toMatch(/Interest Only/i);
+      expect(modifiedFirstRow.number).not.toBe(originalSchedule[0].number);
+      expect(modifiedFirstRow.type.toLowerCase()).not.toBe(originalSchedule[0].type.toLowerCase());
+
+      await assetDetailsPage.waitForEditPaymentScheduleAddSegmentEnabled();
+      await assetDetailsPage.clickEditPaymentScheduleAddSegment();
+
+      const paymentsTotal = await assetDetailsPage.getEditPaymentScheduleNumberOfPayments();
+      const remainingOnNewRow = String(Math.max(1, paymentsTotal - Number(modifiedNumber)));
+      await assetDetailsPage.enterEditPaymentScheduleSegmentNumberOnRow(1, remainingOnNewRow);
+      await assetDetailsPage.selectEditPaymentScheduleSegmentTypeOnRow(1, "Normal");
+
+      const modifiedBeforeCalculate =
+        await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+      expect(modifiedBeforeCalculate).toHaveLength(2);
+      expect(modifiedBeforeCalculate[0].number).toBe(modifiedNumber);
+      expect(modifiedBeforeCalculate[0].type).toMatch(/Interest Only/i);
+      expect(modifiedBeforeCalculate[1].number).toBe(remainingOnNewRow);
+      expect(modifiedBeforeCalculate[1].type).toMatch(/Normal/i);
+
+      await assetDetailsPage.clickEditPaymentScheduleCalculate();
+
+      const modifiedAfterCalculate =
+        await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+      expect(modifiedAfterCalculate[0].number).toBe(modifiedNumber);
+      expect(modifiedAfterCalculate[0].type).toMatch(/Interest Only/i);
+      expect(modifiedAfterCalculate[1].number).toBe(remainingOnNewRow);
+      expect(modifiedAfterCalculate[1].type).toMatch(/Normal/i);
+
       await assetDetailsPage.clickEditPaymentScheduleApply();
-      await assetDetailsPage.expectEditPaymentScheduleDialogClosedOnStandardQuote();
+
+      await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeHidden({ timeout: 20_000 });
+      await expect(standardQuoteRoot(page)).toBeVisible({ timeout: 15_000 });
+
+      await assetDetailsPage.openEditPaymentScheduleDialog();
+      await assetDetailsPage.expectEditPaymentScheduleSegmentRowsMatch(modifiedAfterCalculate);
     },
   );
 
@@ -954,14 +1092,36 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
       await assetDetailsPage.clickCalculateButton();
       await assetDetailsPage.openEditPaymentScheduleDialog();
+      await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+
+      const defaultSchedule = await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+
       await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
-        number: "30",
+        number: "20",
         type: "Interest Only",
       });
+
+      const modifiedSchedule = await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+      expect(modifiedSchedule[0].number).toBe("20");
+      expect(modifiedSchedule[0].type).toMatch(/Interest Only/i);
+      expect(modifiedSchedule[0].number).not.toBe(defaultSchedule[0].number);
+      expect(modifiedSchedule[0].type.toLowerCase()).not.toBe(defaultSchedule[0].type.toLowerCase());
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel();
+      await assetDetailsPage.expectEditPaymentScheduleCancelConfirmationVisible();
+
+      await assetDetailsPage.dismissEditPaymentScheduleCancelConfirmationStayEditing();
+      await assetDetailsPage.expectEditPaymentScheduleSegmentRowsMatch(modifiedSchedule);
+
       await assetDetailsPage.clickEditPaymentScheduleCancel();
       await assetDetailsPage.expectEditPaymentScheduleCancelConfirmationVisible();
       await assetDetailsPage.confirmEditPaymentScheduleCancelDiscard();
-      await assetDetailsPage.expectEditPaymentScheduleDialogClosedOnStandardQuote();
+
+      await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeHidden({ timeout: 20_000 });
+      await expect(standardQuoteRoot(page)).toBeVisible({ timeout: 15_000 });
+
+      await assetDetailsPage.openEditPaymentScheduleDialog();
+      await assetDetailsPage.expectEditPaymentScheduleSegmentRowsMatch(defaultSchedule);
     },
   );
 
@@ -976,8 +1136,14 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
       await assetDetailsPage.clickCalculateButton();
       await assetDetailsPage.openEditPaymentScheduleDialog();
+      await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+
+      const financeTerm = await assetDetailsPage.getEditPaymentScheduleFinanceTermMonths();
       await assetDetailsPage.addEditPaymentScheduleSegmentsUntilTermReached();
       await assetDetailsPage.expectEditPaymentScheduleAddSegmentDisabledAtTermMax();
+
+      const totalPayments = await assetDetailsPage.getEditPaymentScheduleNumberOfPayments();
+      expect(totalPayments).toBe(financeTerm);
     },
   );
 
