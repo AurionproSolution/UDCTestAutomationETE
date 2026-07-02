@@ -105,9 +105,16 @@ export class DOAddAssetPage extends BasePage {
     this.policyExpiryDateInputField = page.getByPlaceholder("policyExpiryDate");
     this.selectDateButton = page.locator("//span[@data-date='2026-3-31']");
     this.cancelButton = page.locator("//span[text()='Cancel']");
-    this.searchForAssetButton = page.locator(
-      "//button[@class='p-ripple p-element p-button p-component p-button-outlined']",
-    );
+    this.searchForAssetButton = page
+      .getByRole("button", { name: /Search for Asset/i })
+      .or(
+        page
+          .locator("app-add-asset, app-asset-details-add-asset, app-standard-quote-add-asset")
+          .getByRole("button", { name: /Search/i }),
+      )
+      .or(page.locator("button.p-button-outlined").filter({ hasText: /Search for Asset/i }))
+      .filter({ visible: true })
+      .first();
     this.summitButton = page.getByRole("button", { name: /^Submit$/i }).filter({ visible: true }).last();
     this.crossButton = page
       .locator("button.p-dialog-header-close, timesicon button")
@@ -342,7 +349,9 @@ export class DOAddAssetPage extends BasePage {
   }
   async clickSearchForAssetButton(): Promise<void> {
     this.logStep("Clicked Search for Asset");
-    await this.searchForAssetButton.click();
+    const btn = this.searchForAssetButton;
+    await btn.waitFor({ state: "visible", timeout: 45_000 });
+    await btn.click({ timeout: 15_000 });
   }
   async clickSummitButton(): Promise<void> {
     this.logStep("Clicked Submit on Add Asset");
