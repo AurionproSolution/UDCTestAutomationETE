@@ -389,6 +389,39 @@ export class DODashboardPage extends BasePage {
       .first();
   }
 
+  /** **Quotes & Applications** listing — filter grid by **QID** / Quote ID, then **View**. */
+  async searchDealerListingByQuoteId(quoteId: string): Promise<void> {
+    const id = quoteId.trim();
+    if (!id) {
+      throw new Error("searchDealerListingByQuoteId: quoteId is required.");
+    }
+    this.logStep(`Search Dealer Listing By Quote ID ${id}`);
+    await this.waitForAppLoaderOverlayGone(30_000);
+
+    const search = this.page
+      .getByRole("textbox", { name: /QID|Quote\s*ID|Search Quote|Search/i })
+      .first();
+    await expect(search).toBeVisible({ timeout: 20_000 });
+    await search.fill(id);
+
+    const viewBtn = this.page.getByRole("button", { name: /^View$/i }).first();
+    if (await viewBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await viewBtn.click({ timeout: 15_000 });
+    } else {
+      await search.press("Enter");
+    }
+    await this.waitForAppLoaderOverlayGone(60_000);
+
+    const row = this.page.locator("table tbody tr").filter({ hasText: new RegExp(`\\b${id}\\b`) }).first();
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    this.log(`Dealer listing filtered to QID ${id}.`);
+  }
+
+  /** Dealer dashboard → open an existing Standard Quote by Quote ID from the listing grid. */
+  async openStandardQuoteByQuoteId(quoteId: string): Promise<void> {
+    const id = quoteId.trim();
+    if (!id) {
+      throw new Error("openStandardQuoteByQuoteId: quoteId is required.");
   /** Read a column cell value for a quote row (header text match). */
   async readQuoteGridColumnForRow(
     row: Locator,
@@ -492,5 +525,139 @@ export class DODashboardPage extends BasePage {
     await expect(
       this.page.locator("app-quote-details, app-standard-quote").first(),
     ).toBeVisible({ timeout: 120_000 });
+  }
+
+  /** Post-login dealer home → **Quotes & Applications** listing grid. */
+  async navigateToQuotesAndApplicationsListing(): Promise<void> {
+    this.logStep("Navigate To Quotes And Applications Listing");
+    await this.waitForAppLoaderOverlayGone(120_000);
+    const link = this.page
+      .getByRole("link", { name: /Quotes\s*&\s*Applications/i })
+      .first();
+    if (await link.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await link.click({ timeout: 20_000 });
+      await this.waitForAppLoaderOverlayGone(60_000);
+    }
+    await this.waitForLoadingComplete(30_000);
+  }
+
+  /**
+   * Switch listing grid type when the dealer dashboard exposes a **Quote** / **Application** combobox.
+   * No-op when the control is absent (single combined grid).
+   */
+  async selectDealerListingGridType(gridLabel: RegExp): Promise<void> {
+    this.logStep(`Select Dealer Listing Grid Type ${gridLabel}`);
+    await this.waitForAppLoaderOverlayGone(60_000);
+    const listingType = this.page
+      .getByRole("combobox", { name: /^(Quote|Application|Listing|Loan)$/i })
+      .first();
+    if (!(await listingType.isVisible({ timeout: 12_000 }).catch(() => false))) {
+      return;
+    }
+    await listingType.click({ timeout: 10_000 });
+    const option = this.page.getByRole("option", { name: gridLabel }).first();
+    if (await option.isVisible({ timeout: 12_000 }).catch(() => false)) {
+      await option.click({ timeout: 10_000 });
+      await this.waitForAppLoaderOverlayGone(60_000);
+    } else {
+      await this.page.keyboard.press("Escape").catch(() => {});
+    }
+  }
+
+  /**
+   * **Applications** grid → open first row with **Submitted** status (navigation-only; no new quote).
+   * @returns Quote / Application ID opened from the grid.
+   */
+  async openSubmittedApplicationFromListing(): Promise<string> {
+    this.logStep("Open Submitted Application From Listing");
+    await this.navigateToQuotesAndApplicationsListing();
+    await this.selectDealerListingGridType(/^Application/i);
+
+    const row = this.page
+      .locator("table tbody tr")
+      .filter({ hasText: /\bSubmitted\b/i })
+      .first();
+    await expect(row).toBeVisible({ timeout: 60_000 });
+
+    const rowText = (await row.innerText()).replace(/\s+/g, " ").trim();
+    const quoteId = rowText.match(/\b(\d{3,})\b/)?.[1] ?? "";
+
+    const openTarget = row
+      .getByRole("link")
+      .first()
+      .or(row.locator("td").filter({ hasText: /^\d{3,}$/ }).first())
+      .or(row.getByText(/^\d{3,}$/).first());
+    await openTarget.scrollIntoViewIfNeeded();
+    await openTarget.click({ timeout: 20_000 });
+
+    await expect(
+      this.page.locator("app-quote-details, app-standard-quote").first(),
+    ).toBeVisible({ timeout: 120_000 });
+
+    if (!quoteId) {
+      throw new Error(
+        "openSubmittedApplicationFromListing: could not resolve Quote/Application ID from the Submitted row.",
+      );
+    }
+    this.log(`Opened submitted application ${quoteId} from dashboard listing.`);
+    return quoteId;
+  }
+
+  /**
+   * **Quotes** grid → open an existing **Open Quote** by ID (navigation-only; no create/submit).
+   * Alias path for {@link openStandardQuoteByQuoteId} after ensuring Quotes listing view.
+   */
+  async openOpenQuoteFromListing(quoteId: string): Promise<void> {
+    await this.navigateToQuotesAndApplicationsListing();
+    await this.selectDealerListingGridType(/^Quote/i);
+    await this.openStandardQuoteByQuoteId(quoteId);
+  }
+
+  /**
+   * **Applications** grid → open an application in **Ready for Documentation** (navigation-only).
+   * When `quoteId` is set, opens that row; otherwise the first matching listing row.
+   * @returns Quote / Application ID opened from the grid.
+   */
+  async openReadyForDocumentationApplicationFromListing(quoteId?: string): Promise<string> {
+    this.logStep("Open Ready For Documentation Application From Listing");
+    await this.navigateToQuotesAndApplicationsListing();
+    await this.selectDealerListingGridType(/^Application/i);
+
+    const id = quoteId?.trim() ?? "";
+    if (id) {
+      await this.searchDealerListingByQuoteId(id);
+      await this.openStandardQuoteByQuoteId(id);
+      this.log(`Opened Ready for Documentation application ${id} from dashboard listing (QID).`);
+      return id;
+    }
+
+    const row = this.page
+      .locator("table tbody tr")
+      .filter({ hasText: /Ready\s+for\s+Documentation/i })
+      .first();
+    await expect(row).toBeVisible({ timeout: 60_000 });
+
+    const rowText = (await row.innerText()).replace(/\s+/g, " ").trim();
+    const resolvedId = rowText.match(/\b(\d{3,})\b/)?.[1] ?? "";
+
+    const openTarget = row
+      .getByRole("link")
+      .first()
+      .or(row.locator("td").filter({ hasText: /^\d{3,}$/ }).first())
+      .or(row.getByText(/^\d{3,}$/).first());
+    await openTarget.scrollIntoViewIfNeeded();
+    await openTarget.click({ timeout: 20_000 });
+
+    await expect(
+      this.page.locator("app-quote-details, app-standard-quote").first(),
+    ).toBeVisible({ timeout: 120_000 });
+
+    if (!resolvedId) {
+      throw new Error(
+        "openReadyForDocumentationApplicationFromListing: could not resolve Quote/Application ID from the Ready for Documentation row.",
+      );
+    }
+    this.log(`Opened Ready for Documentation application ${resolvedId} from dashboard listing.`);
+    return resolvedId;
   }
 }

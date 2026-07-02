@@ -235,32 +235,59 @@ export class DOReferenceDetailsPage extends BasePage {
    * other builds use **Submit** only. Try advances in order, then **Submit** if Upload is not yet shown.
    */
   async advanceFromReferenceDetailsToPostSubmission(): Promise<void> {
+    const uploadBrowse = this.page.locator(':text-is("Browse Files")');
+    const postSubmissionStep = this.page.getByText(/^Post Submission$/i).first();
     const uploadBrowse = this.page.getByRole("button", { name: /^Browse Files$/i });
 
     const footerAdvanceButtons: Locator[] = [
       this.page.getByRole("button", { name: /Save\s+and\s+Next|Save\s*&\s*Next/i }).last(),
       /** QAT: label is often a `span` with exact `Next` — resolve the real `<button>`. */
-      this.page.locator("button").filter({ has: this.page.locator(':text-is("Next")') }).last(),
-      this.page.getByRole("button", { name: /^Next$/i }).last(),
       this.page
         .locator("button.p-button, button.p-element")
         .filter({ has: this.page.locator("span.p-button-label").filter({ hasText: /^Next$/ }) })
         .last(),
+      this.page.locator("button").filter({ has: this.page.locator(':text-is("Next")') }).last(),
+      this.page.getByRole("button", { name: /^Next$/i }).last(),
     ];
+
+    const reachedPostSubmissionEntry = async (): Promise<boolean> =>
+      (await uploadBrowse.isVisible({ timeout: 2_000 }).catch(() => false)) ||
+      (await postSubmissionStep.isVisible({ timeout: 2_000 }).catch(() => false));
 
     for (const btn of footerAdvanceButtons) {
       const ready =
         (await btn.isVisible({ timeout: 2_000 }).catch(() => false)) &&
         (await btn.isEnabled().catch(() => false));
       if (!ready) continue;
+      await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
       await btn.scrollIntoViewIfNeeded();
-      await btn.click({ timeout: 20_000 });
+      await btn.click({ timeout: 30_000 });
       await this.page.waitForLoadState("domcontentloaded").catch(() => {});
-      if (await uploadBrowse.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
+      if (await reachedPostSubmissionEntry()) {
         return;
       }
     }
 
     await this.clickSubmitButton();
+  }
+
+  /** **.app-loader-overlay** intercepts footer **Next** / **Submit** on QAT. */
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const overlays = this.page.locator(".app-loader-overlay");
+          const count = await overlays.count();
+          for (let i = 0; i < count; i++) {
+            if (await overlays.nth(i).isVisible().catch(() => false)) {
+              return false;
+            }
+          }
+          return true;
+        },
+        { timeout: timeoutMs, intervals: [200, 500, 1_000, 2_000] },
+      )
+      .toBe(true);
   }
 }

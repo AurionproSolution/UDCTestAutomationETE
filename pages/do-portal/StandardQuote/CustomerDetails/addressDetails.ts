@@ -741,6 +741,18 @@ export class DOAddressDetailsPage extends BasePage {
 
     // PrimeNG time row: physical + CSA-B + trust address hosts use the same widgets.
     if (isPreviousCard || isPhysicalHost || isBusinessPhysicalHost || isTrustAddressHost) {
+      if (isPhysicalHost) {
+        const hubYear = this.physicalTimeAtHubInput(4, block);
+        const hubMonth = this.physicalTimeAtHubInput(6, block);
+        if (await fillPair(hubYear, hubMonth)) return;
+      }
+
+      if (isBusinessPhysicalHost) {
+        const bizYear = this.businessPhysicalTimeYearsInput();
+        const bizMonth = this.businessPhysicalTimeMonthsInput();
+        if (await fillPair(bizYear, bizMonth)) return;
+      }
+
       const timeRow = block
         .locator("div, section, form")
         .filter({ has: block.getByText(/Time at Address/i) })
@@ -1010,6 +1022,16 @@ export class DOAddressDetailsPage extends BasePage {
     if (await bizRoot.isVisible({ timeout: 5000 }).catch(() => false)) {
       await bizRoot.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
       await this.fillYearsMonthsInBlock(bizRoot, year, month);
+      this.logStep(
+        `Time at address complete: years ${this.stepValueDisplay(year)}, months ${this.stepValueDisplay(month)}`,
+      );
+      return;
+    }
+
+    const physicalBlock = this.physicalAddressBlock;
+    if (await physicalBlock.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await physicalBlock.scrollIntoViewIfNeeded({ timeout: 15000 }).catch(() => {});
+      await this.fillYearsMonthsInBlock(physicalBlock, year, month);
       this.logStep(
         `Time at address complete: years ${this.stepValueDisplay(year)}, months ${this.stepValueDisplay(month)}`,
       );
@@ -2961,18 +2983,33 @@ export class DOAddressDetailsPage extends BasePage {
   async waitForPhysicalAddressStep() {
     this.logStep("Wait For Physical Address Step");
     await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
-    const soleSearch = this.page
-      .locator("app-sole-trade")
-      .locator('input[name="physicalSearchValue"]')
-      .filter({ visible: true })
-      .first();
-    if (await soleSearch.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await soleSearch.waitFor({ state: "visible", timeout: 120000 });
-      return;
-    }
+    await expect
+      .poll(
+        async () => {
+          const soleSearch = this.page
+            .locator("app-sole-trade")
+            .locator('input[name="physicalSearchValue"]')
+            .filter({ visible: true })
+            .first();
+          if (await soleSearch.isVisible({ timeout: 500 }).catch(() => false)) {
+            return true;
+          }
+          if (await this.physicalSearchInput.isVisible({ timeout: 500 }).catch(() => false)) {
+            return true;
+          }
+          const host = await this.activePhysicalHost();
+          const inHost = host
+            .locator('input[name="physicalSearchValue"]')
+            .filter({ visible: true })
+            .first();
+          return inHost.isVisible({ timeout: 500 }).catch(() => false);
+        },
+        { timeout: 120_000, intervals: [300, 500, 900, 1500] },
+      )
+      .toBe(true);
     await this.physicalSearchInput.waitFor({
       state: "visible",
-      timeout: 120000,
+      timeout: 30_000,
     });
   }
 

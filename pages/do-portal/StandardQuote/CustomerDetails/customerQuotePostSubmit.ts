@@ -3,6 +3,7 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { BasePage } from "../../../common";
+import { DOFinancialPositionPage } from "./financialPosition";
 import { DOCustomerDetailsPage } from "./customerDetailsPage";
 import { DOSearchCustomerDialog } from "./searchCustomerDialog";
 
@@ -121,6 +122,160 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await this.waitForUploadStep();
     await this.uploadDocument();
     await this.expectDocumentUploaded();
+  }
+
+  /**
+   * CSA Post Submission: upload → footer **Next** → **Status** Submit + declaration (UDP-T3845).
+   */
+  async uploadAdvanceAndSubmitApplication(): Promise<void> {
+    await this.uploadAndAdvanceToFullPostSubmission();
+    await this.submitApplicationFromPostSubmission();
+  }
+
+  /**
+   * CSA Post Submission: mandatory **Browse Files** upload, then footer **Next** from Customer Details
+   * upload entry into full Post Submission (Credit Conditions tab — UDP-T3844/T3845).
+   */
+  async uploadAndAdvanceToFullPostSubmission(): Promise<void> {
+    await this.prepareMinimalPostSubmissionForWorkflow();
+    await this.clickNextToEnterFullPostSubmission();
+  }
+
+  /** **Status** → **Submit** + Originator Declaration after Post Submission entry (Zephyr: application submitted). */
+  async submitApplicationFromPostSubmission(): Promise<void> {
+    this.logStep("Submit Application From Post Submission");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.submitQuoteThroughWorkflowDeclaration();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  }
+
+  /**
+   * Customer Details upload entry → footer **Next** → full Post Submission document strip.
+   * Retries while **.app-loader-overlay** blocks pointer events (QAT).
+   */
+  async clickNextToEnterFullPostSubmission(): Promise<void> {
+    this.logStep("Click Next To Enter Full Post Submission");
+    const creditTab = await this.resolveCreditConditionsTab();
+    if (await creditTab.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return;
+    }
+
+    await this.waitForUploadProcessingToFinish();
+
+    const footer = this.postSubmissionFooterScope();
+    const footerAdvanceButtons: Locator[] = [
+      footer
+        .locator("button.p-button, button.p-element")
+        .filter({ has: footer.locator("span.p-button-label").filter({ hasText: /^Next$/ }) })
+        .last(),
+      footer.getByRole("button", { name: /Save\s+and\s+Next|Save\s*&\s*Next/i }).last(),
+      footer.locator("button").filter({ has: footer.locator(':text-is("Next")') }).last(),
+      footer.getByRole("button", { name: /^Next$/i }).last(),
+    ];
+
+    const reachedFullPostSubmission = async (): Promise<boolean> =>
+      (await creditTab.isVisible({ timeout: 1_500 }).catch(() => false)) ||
+      (await this.page
+        .getByRole("tab", { name: /Credit Conditions|Additional Approval Conditions/i })
+        .first()
+        .isVisible({ timeout: 1_500 })
+        .catch(() => false));
+
+    await this.clickFooterAdvanceWhenLoaderClear(footerAdvanceButtons, reachedFullPostSubmission, 180_000);
+
+    await expect
+      .poll(async () => creditTab.isVisible().catch(() => false), {
+        timeout: 120_000,
+        intervals: [500, 1_500, 3_000],
+      })
+      .toBe(true);
+  }
+
+  /** Click sticky footer **Next** / **Save and Next** once the app loader is not intercepting. */
+  private async clickFooterAdvanceWhenLoaderClear(
+    buttons: Locator[],
+    successCheck: () => Promise<boolean>,
+    timeoutMs: number,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    let forceNext = false;
+
+    while (Date.now() < deadline) {
+      if (await successCheck()) {
+        return;
+      }
+
+      await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+
+      for (const btn of buttons) {
+        const ready =
+          (await btn.isVisible({ timeout: 1_000 }).catch(() => false)) &&
+          (await btn.isEnabled().catch(() => false));
+        if (!ready) continue;
+
+        if (await this.isAppLoaderBlocking()) {
+          break;
+        }
+
+        await btn.scrollIntoViewIfNeeded();
+        try {
+          if (forceNext) {
+            await btn.click({ force: true, timeout: 15_000 });
+          } else {
+            await this.clickElement(btn, 15_000);
+          }
+          await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+          if (await successCheck()) {
+            return;
+          }
+        } catch {
+          forceNext = true;
+          await this.page.waitForTimeout(400);
+        }
+      }
+
+      await this.page.waitForTimeout(400);
+    }
+  }
+
+  private async isAppLoaderBlocking(): Promise<boolean> {
+    const overlay = this.page.locator(".app-loader-overlay").filter({ visible: true });
+    if ((await overlay.count()) > 0) {
+      return true;
+    }
+    const spinner = this.page.locator(
+      ".app-loader-overlay p-progressspinner, .app-loader-overlay .p-progressspinner, .p-blockui",
+    ).filter({ visible: true });
+    return (await spinner.count()) > 0;
+  }
+
+  /** PrimeNG upload widget / overlay can still block footer **Next** after `expectDocumentUploaded`. */
+  private async waitForUploadProcessingToFinish(): Promise<void> {
+    const panel = this.uploadTabContentPanel();
+    const uploadProgress = panel.locator("progressbar, .p-progressbar").first();
+    if (await uploadProgress.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await uploadProgress.waitFor({ state: "hidden", timeout: 90_000 }).catch(() => {});
+    }
+    await expect
+      .poll(
+        async () => {
+          const busy = panel.getByText(/Upload complete|Uploaded/i).first();
+          return busy.isVisible().catch(() => false);
+        },
+        { timeout: 60_000, intervals: [300, 800, 1_500] },
+      )
+      .toBe(true);
+  }
+
+  /** **.app-loader-overlay** blocks footer clicks after upload round-trips (same pattern as Personal Details). */
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!(await this.isAppLoaderBlocking())) {
+        return;
+      }
+      await this.page.waitForTimeout(200);
+    }
   }
 
   /**
@@ -446,6 +601,156 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     }
   }
 
+  /** Generate **Customer Quote - Basic** on Documents tab (prerequisite for e-sign). */
+  async generateCustomerQuoteBasicDocument(): Promise<void> {
+    this.logStep("Generate Customer Quote Basic Document");
+    await this.openDocumentsTab();
+    const beforeAudit = await this.auditGeneratedDocumentRegenerationState(
+      /Customer Quote\s*-\s*Basic/i,
+    );
+    if (beforeAudit.latestTimestamp) {
+      this.logStep(
+        `Pre-generation timestamp="${beforeAudit.latestTimestamp}" (${beforeAudit.latestMs} ms), rows=${beforeAudit.rowCount}`,
+      );
+    }
+    await this.selectCustomerQuoteBasicRow();
+    await this.clickDownload();
+    await this.confirmDocumentParameters();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.refreshGeneratedDocumentsTab();
+    const afterAudit = await this.auditGeneratedDocumentRegenerationState(
+      /Customer Quote\s*-\s*Basic/i,
+    );
+    this.logStep(
+      `Post-generation timestamp="${afterAudit.latestTimestamp}" (${afterAudit.latestMs} ms), rows=${afterAudit.rowCount}, historyIcon=${afterAudit.historyIconVisible}`,
+    );
+  }
+
+  /** Toggle away from **Documents** and back to force the grid to reload after regeneration. */
+  private async refreshGeneratedDocumentsTab(): Promise<void> {
+    let root = this.documentManagementTabView();
+    if ((await root.count()) === 0) {
+      root = this.page.locator(".p-tabview").first();
+    }
+    const uploadTab = root.getByRole("tab", { name: /^Upload$/i }).first();
+    if (await uploadTab.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await uploadTab.click({ timeout: 10_000 }).catch(() => {});
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    }
+    const documentsTab = root.getByRole("tab", { name: /^Documents$/i }).first();
+    await documentsTab.click({ timeout: 15_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.generatedDocumentsCustomerQuoteBasicRow().waitFor({ state: "visible", timeout: 45_000 });
+  }
+
+  private generatedDocumentsCustomerQuoteBasicRow(): Locator {
+    return this.documentManagementStrip()
+      .locator("tr")
+      .filter({ hasText: /Customer Quote\s*-\s*Basic/i })
+      .first();
+  }
+
+  private async confirmCancelElectronicSigningDialogIfPresent(): Promise<void> {
+    const confirmDlg = this.page
+      .locator("p-confirmdialog, .p-confirm-dialog")
+      .filter({ visible: true })
+      .first();
+    const roleDlg = this.page
+      .getByRole("dialog")
+      .filter({ visible: true, hasText: /cancel.*e-?sign|e-?sign.*cancel|sure.*cancel/i })
+      .first();
+
+    const dlg =
+      (await confirmDlg.isVisible({ timeout: 6_000 }).catch(() => false))
+        ? confirmDlg
+        : (await roleDlg.isVisible({ timeout: 1_500 }).catch(() => false))
+          ? roleDlg
+          : null;
+    if (!dlg) {
+      return;
+    }
+
+    const accept = dlg
+      .getByRole("button", { name: /^(Yes|OK|Confirm|Cancel E-?Sign)$/i })
+      .or(dlg.locator("button.p-confirm-dialog-accept"))
+      .first();
+    await accept.waitFor({ state: "visible", timeout: 8_000 });
+    await accept.click({ timeout: 8_000 });
+    await dlg.waitFor({ state: "hidden", timeout: 25_000 }).catch(() => {});
+  }
+
+  /**
+   * UDP-T3841 / UDP-T3843 — start e-sign (dealer + borrower verification) without completing signing.
+   */
+  async initiateElectronicSigningWithoutCompletion(options?: {
+    borrowerName?: string;
+    deliveryMethod?: "Screen" | "Email";
+  }): Promise<void> {
+    const borrowerName = options?.borrowerName ?? "Liza Marie Doe";
+    const deliveryMethod = options?.deliveryMethod ?? "Screen";
+
+    await this.generateCustomerQuoteBasicDocument();
+    await this.openSigningAndVerificationTab();
+    await this.selectPreferredDeliveryMethod(deliveryMethod);
+    await this.completeDealerOnScreenSigningIfRequired();
+    await this.startBorrowerElectronicVerification(borrowerName);
+  }
+
+  /**
+   * UDP-T3843 — cancel in-progress e-sign from Signing & Verification or signatory pop-up.
+   */
+  async cancelElectronicSigningProcess(): Promise<void> {
+    this.logStep("Cancel Electronic Signing Process");
+    await this.openSigningAndVerificationTab();
+    const panel = this.signatoriesPanel();
+
+    const signingTabCancel = panel
+      .getByRole("button", { name: /Cancel\s*E-?Sign(ing)?/i })
+      .or(panel.getByRole("link", { name: /Cancel\s*E-?Sign(ing)?/i }))
+      .or(panel.locator("button, a").filter({ hasText: /Cancel\s*E-?Sign/i }))
+      .filter({ visible: true })
+      .first();
+
+    if (await signingTabCancel.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await signingTabCancel.click({ timeout: 12_000 });
+      await this.confirmCancelElectronicSigningDialogIfPresent();
+      return;
+    }
+
+    // UDP-T3840 — E-Sign Status hyperlink opens signatory pop-up; cancel from there.
+    await this.openDocumentsTab();
+    const row = this.generatedDocumentsCustomerQuoteBasicRow();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    const esignStatusLink = row
+      .getByRole("link")
+      .filter({ hasText: /Pending|In Progress|Started|Cancelled/i })
+      .or(row.locator("a, button").filter({ hasText: /^(Pending|In Progress|Started)$/i }))
+      .first();
+    await expect(esignStatusLink).toBeVisible({ timeout: 20_000 });
+    await esignStatusLink.click({ timeout: 12_000 });
+
+    const signatoryDlg = this.page
+      .getByRole("dialog")
+      .filter({ hasText: /signator|e-?sign|signing/i })
+      .last();
+    await expect(signatoryDlg).toBeVisible({ timeout: 15_000 });
+    const popupCancel = signatoryDlg
+      .getByRole("button", { name: /Cancel\s*E-?Sign(ing)?|^Cancel$/i })
+      .filter({ visible: true })
+      .first();
+    await popupCancel.click({ timeout: 12_000 });
+    await this.confirmCancelElectronicSigningDialogIfPresent();
+  }
+
+  /** UDP-T3843 — initiate e-sign then cancel before completion. */
+  async initiateAndCancelElectronicSigningFlow(options?: {
+    borrowerName?: string;
+    deliveryMethod?: "Screen" | "Email";
+  }): Promise<void> {
+    await this.initiateElectronicSigningWithoutCompletion(options);
+    await this.cancelElectronicSigningProcess();
+  }
+
   /**
    * UDP-T3826 — generate documents, complete dealer + borrower e-sign on **Screen**, then assert Upload tab.
    */
@@ -456,10 +761,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     const borrowerName = options?.borrowerName ?? "Liza Marie Doe";
     const deliveryMethod = options?.deliveryMethod ?? "Screen";
 
-    await this.openDocumentsTab();
-    await this.selectCustomerQuoteBasicRow();
-    await this.clickDownload();
-    await this.confirmDocumentParameters();
+    await this.generateCustomerQuoteBasicDocument();
 
     await this.openSigningAndVerificationTab();
     await this.selectPreferredDeliveryMethod(deliveryMethod);
@@ -486,6 +788,35 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .first()
       .isVisible({ timeout: 1_500 })
       .catch(() => false);
+  }
+
+  /** UDP-T3841 / UDP-T3843 — Generated Documents tab shows unsigned document row. */
+  async expectGeneratedDocumentsTabUnsignedDocumentVisible(
+    expectedEsignStatus?: RegExp,
+  ): Promise<void> {
+    this.logStep("Expect Generated Documents Tab Unsigned Document Visible");
+    await this.openDocumentsTab();
+    const row = this.generatedDocumentsCustomerQuoteBasicRow();
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    const rowText = (await row.innerText()).replace(/\s+/g, " ").trim();
+    expect(rowText).toMatch(/Customer Quote\s*-\s*Basic/i);
+    if (expectedEsignStatus) {
+      expect(rowText).toMatch(expectedEsignStatus);
+    }
+  }
+
+  /** UDP-T3843 — E-Sign status **Cancelled** on Generated Documents row. */
+  async expectGeneratedDocumentsTabEsignStatusCancelled(): Promise<void> {
+    await this.expectGeneratedDocumentsTabUnsignedDocumentVisible(/\bCancelled\b/i);
+  }
+
+  /** UDP-T3841 / UDP-T3843 — Upload tab must NOT list Source = Electronically Signed. */
+  async expectUploadTabNoElectronicallySignedDocuments(): Promise<void> {
+    this.logStep("Expect Upload Tab No Electronically Signed Documents");
+    await this.ensureUploadTab();
+    const table = this.uploadTabDocumentsTable();
+    const eSignedRows = table.locator("tbody tr").filter({ hasText: /\bElectronically Signed\b/i });
+    await expect(eSignedRows).toHaveCount(0, { timeout: 15_000 });
   }
 
   /** UDP-T3826 step 2 — Upload tab lists e-signed documents with Source = Electronically Signed. */
@@ -588,6 +919,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     if (await spinner.isVisible({ timeout: 2000 }).catch(() => false)) {
       await spinner.waitFor({ state: "hidden", timeout: 60000 });
     }
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     await new Promise((r) => setTimeout(r, 800));
   }
 
@@ -636,6 +968,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   async openDocumentsTab(): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
     let root = this.documentManagementTabView();
     if ((await root.count()) === 0) {
       root = this.page
@@ -648,24 +981,37 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     }
     await root.waitFor({ state: "visible", timeout: 60000 });
 
+    const basicRow = root
+      .locator("tr")
+      .filter({ hasText: /Customer Quote\s*-\s*Basic|Purchase\s*Invoice/i })
+      .first();
+    const documentsTabActive = root
+      .locator(".p-tabview-nav li.p-highlight")
+      .filter({ hasText: /^Documents$/i })
+      .first();
+    if (
+      (await documentsTabActive.isVisible({ timeout: 1_500 }).catch(() => false)) &&
+      (await basicRow.isVisible({ timeout: 1_500 }).catch(() => false))
+    ) {
+      return;
+    }
+
     const scopedRole = root.getByRole("tab", { name: /Documents/i });
     let tab: Locator =
       (await scopedRole.count()) > 0 ? scopedRole.first() : this.documentsTabInStrip(root);
 
     await tab.waitFor({ state: "visible", timeout: 30000 });
     await tab.scrollIntoViewIfNeeded();
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     try {
       await tab.click({ timeout: 15000 });
     } catch {
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
       tab = this.documentsTabInStrip(root);
-      await tab.click({ timeout: 30000 });
+      await tab.click({ timeout: 30_000, force: true });
     }
 
-    await root
-      .locator("tr")
-      .filter({ hasText: /Customer Quote\s*-\s*Basic/i })
-      .first()
-      .waitFor({ state: "visible", timeout: 45000 });
+    await basicRow.waitFor({ state: "visible", timeout: 45_000 });
   }
 
   /** Select "Customer Quote - Basic" row checkbox (PrimeNG `.p-checkbox-box.p-highlight`). */
@@ -962,6 +1308,19 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .toBeTruthy();
   }
 
+  /** UDP-T3827 — upload a small in-memory JPEG on the Upload tab. */
+  async uploadMinimalJpegDocument(): Promise<void> {
+    this.logStep("Upload Minimal JPEG Document");
+    await this.ensureUploadTab();
+    await this.uploadFilePayload({
+      name: "minimal-upload.jpg",
+      mimeType: "image/jpeg",
+      buffer: MINIMAL_JPEG_BYTES,
+    });
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.postSubmitMicroDelay(800);
+  }
+
   async uploadJpgThenPdfExpectBothVisible(): Promise<void> {
     await this.ensureUploadTab();
     const jpgName = "minimal-upload.jpg";
@@ -1080,16 +1439,19 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         return pick(wrapper);
       }
 
-      let el: HTMLElement | null = tbl.parentElement;
+      let el: Element | null = tbl.parentElement;
       while (el) {
-        const style = getComputedStyle(el);
-        if (el.scrollHeight > el.clientHeight + 2 && /auto|scroll/i.test(style.overflowY)) {
-          return pick(el);
+        if (el instanceof HTMLElement) {
+          const style = getComputedStyle(el);
+          if (el.scrollHeight > el.clientHeight + 2 && /auto|scroll/i.test(style.overflowY)) {
+            return pick(el);
+          }
         }
         el = el.parentElement;
       }
 
-      return pick((tbl.parentElement as HTMLElement | null) ?? tbl);
+      const fallback = tbl.parentElement ?? tbl;
+      return pick(fallback instanceof HTMLElement ? fallback : (tbl as HTMLElement));
     });
   }
 
@@ -1292,7 +1654,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       }
     }
 
-    const openQuote = p.getByRole("button", { name: /Open\s+Quote/i }).first();
+    const openQuote = p.getByRole("button", { name: /Open\s+Quote|Ready\s+for\s+Documentation/i }).first();
     if (await openQuote.isVisible({ timeout: 2_000 }).catch(() => false)) {
       await openQuote.scrollIntoViewIfNeeded();
       await openQuote.click({ timeout: 8_000 });
@@ -1305,7 +1667,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         ".textSelectOP, .p-menu-overlay, .p-tieredmenu-overlay, .p-overlaypanel, .p-component-overlay-content, .p-dropdown-panel, .p-select-overlay",
       )
       .filter({ visible: true })
-      .filter({ hasText: /Submit|Withdraw/i })
+      .filter({ hasText: /Submit|Withdraw|Generate\s+Documentation/i })
       .first();
   }
 
@@ -1898,6 +2260,396 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     }
   }
 
+  /** Active **Documents** tab panel (generated-documents grid + toolbar). */
+  private async generatedDocumentsContentPanel(): Promise<Locator> {
+    let root = this.documentManagementTabView();
+    if ((await root.count()) === 0) {
+      root = this.page
+        .locator(".p-tabview")
+        .filter({ has: this.page.getByRole("tab", { name: /^Documents$/i }) })
+        .first();
+    }
+    await root.waitFor({ state: "visible", timeout: 30_000 });
+
+    const documentsPanel = root.locator(".p-tabview-panel").filter({
+      has: root.locator("table tbody tr").first(),
+    });
+    const panelByRole = root.getByRole("tabpanel", { name: /^Documents$/i });
+    const visibleDocPanel = documentsPanel.filter({ visible: true }).first();
+    if ((await visibleDocPanel.count()) > 0 && (await visibleDocPanel.isVisible().catch(() => false))) {
+      return visibleDocPanel;
+    }
+    if ((await panelByRole.count()) > 0) {
+      return panelByRole.filter({ visible: true }).first();
+    }
+    return root
+      .locator(".p-tabview-panel")
+      .filter({ visible: true })
+      .filter({ has: root.locator("table tbody tr") })
+      .first();
+  }
+
+  private generatedDocumentsPurchaseInvoiceRow(): Locator {
+    return this.documentManagementStrip()
+      .locator("tbody tr")
+      .filter({ hasText: /Purchase\s*Invoice/i })
+      .first();
+  }
+
+  private async generatedDocumentsSharedActionButton(
+    action: "Preview" | "Download" | "Print",
+  ): Promise<Locator> {
+    const panel = await this.generatedDocumentsContentPanel();
+    const rx = new RegExp(`^${action}$`, "i");
+    return panel
+      .getByRole("link", { name: rx })
+      .or(panel.getByRole("button", { name: rx }))
+      .or(panel.locator("a, button").filter({ hasText: rx }))
+      .filter({ visible: true })
+      .last();
+  }
+
+  /** Select a Generated Documents grid row by document-name pattern (checkbox). */
+  async selectGeneratedDocumentsRowByDocumentName(namePattern: RegExp): Promise<Locator> {
+    await this.openDocumentsTab();
+    const row = await this.generatedDocumentsRowByName(namePattern);
+    await expect(row).toBeVisible({ timeout: 60_000 });
+    const box = row.locator(".p-checkbox-box").first();
+    await box.scrollIntoViewIfNeeded();
+    const checked = row.locator(".p-checkbox-box.p-highlight");
+    if (!(await checked.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      await box.click({ timeout: 10_000 });
+    }
+    await checked.waitFor({ state: "visible", timeout: 15_000 });
+    return row;
+  }
+
+  /** Generated Documents grid inside the active **Documents** tab panel (not Upload / Credit Conditions). */
+  private async generatedDocumentsDataTable(): Promise<Locator> {
+    await this.openDocumentsTab();
+    const panel = await this.generatedDocumentsContentPanel();
+    const table = panel.locator("table").first();
+    await expect(table).toBeVisible({ timeout: 30_000 });
+    return table;
+  }
+
+  /** UDP-T3837 — number of selectable Generated Documents grid rows. */
+  async countGeneratedDocumentsRows(): Promise<number> {
+    this.logStep("Count Generated Documents Rows");
+    const rows = (await this.generatedDocumentsDataTable()).locator("tbody tr");
+    let count = 0;
+    const n = await rows.count();
+    for (let i = 0; i < n; i++) {
+      const row = rows.nth(i);
+      if (!(await row.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      const box = row.locator(".p-checkbox-box").first();
+      if (!(await box.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      const text = (await row.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+      if (text.length > 0) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  /** UDP-T3836 — count Generated Documents rows for a document name (version/history rows included). */
+  async countGeneratedDocumentsRowsByDocumentName(namePattern: RegExp): Promise<number> {
+    this.logStep(`Count Generated Documents Rows By Document Name: ${namePattern.source}`);
+    const rows = (await this.generatedDocumentsDataTable())
+      .locator("tbody tr")
+      .filter({ hasText: namePattern });
+    let count = 0;
+    const n = await rows.count();
+    for (let i = 0; i < n; i++) {
+      if (await rows.nth(i).isVisible({ timeout: 500 }).catch(() => false)) {
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  /** UDP-T3836 — poll until the Generated Documents grid shows the expected row count for a document name. */
+  async expectGeneratedDocumentsRowCountByDocumentName(
+    namePattern: RegExp,
+    expected: number,
+  ): Promise<void> {
+    this.logStep(
+      `Expect Generated Documents Row Count By Document Name: ${namePattern.source} = ${expected}`,
+    );
+    await expect
+      .poll(async () => this.countGeneratedDocumentsRowsByDocumentName(namePattern), {
+        timeout: 120_000,
+        intervals: [1_000, 2_000, 5_000],
+      })
+      .toBe(expected);
+  }
+
+  /** UDP-T3835 / UDP-T3836 — history icon absent when only the latest version is retained. */
+  async expectGeneratedDocumentHistoryIconHidden(namePattern: RegExp): Promise<void> {
+    this.logStep("Expect Generated Document History Icon Hidden");
+    const row = await this.generatedDocumentsRowByName(namePattern);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    const historyColIdx = await this.generatedDocumentsHistoryColumnIndex();
+    const history = row
+      .locator("td")
+      .nth(historyColIdx)
+      .locator(
+        ".fa-history, .fa-clock-rotate-left, i[class*='history'], button[class*='history'], [class*='history']",
+      )
+      .filter({ visible: true });
+    await expect(history).toHaveCount(0, { timeout: 8_000 });
+  }
+
+  /**
+   * UDP-T3836 — after manual re-generation (**Download** / **Preview**), portal retains a single
+   * row with an advanced **Date & Time** (historical AF versions are not listed separately).
+   */
+  async expectManuallyGeneratedHistoricalVersionReplacedInPortal(
+    namePattern: RegExp,
+    beforeTimestamp: string,
+  ): Promise<string> {
+    this.logStep("Expect Manually Generated Historical Version Replaced In Portal");
+    const normalizedBefore =
+      DOCustomerQuotePostSubmitPage.normalizeGeneratedDocumentDateTimeText(beforeTimestamp);
+    const beforeMs =
+      DOCustomerQuotePostSubmitPage.parseGeneratedDocumentDateTimeMs(normalizedBefore);
+    this.logStep(
+      `Regeneration audit — beforeTimestamp="${normalizedBefore}" (${beforeMs} ms)`,
+    );
+
+    await expect
+      .poll(async () => this.countGeneratedDocumentsRowsByDocumentName(namePattern), {
+        timeout: 120_000,
+        intervals: [1_000, 2_000, 5_000],
+      })
+      .toBe(1);
+
+    let latest = normalizedBefore;
+    let pollAttempt = 0;
+    let lastAudit = await this.auditGeneratedDocumentRegenerationState(namePattern);
+    this.logStep(
+      `Regeneration audit — initial grid: rows=${lastAudit.rowCount}, timestamps=[${lastAudit.timestamps.join("; ")}], historyIcon=${lastAudit.historyIconVisible}`,
+    );
+
+    try {
+      await expect
+        .poll(
+          async () => {
+            pollAttempt += 1;
+            lastAudit = await this.auditGeneratedDocumentRegenerationState(namePattern);
+            latest = lastAudit.latestTimestamp || latest;
+            const latestMs = lastAudit.latestMs;
+            const advanced = latestMs > beforeMs && latest.trim() !== normalizedBefore.trim();
+            this.logStep(
+              `Regeneration poll #${pollAttempt}: read="${latest}" (${latestMs} ms), before="${normalizedBefore}" (${beforeMs} ms), rows=${lastAudit.rowCount}, historyIcon=${lastAudit.historyIconVisible}, advanced=${advanced}`,
+            );
+            return advanced;
+          },
+          { timeout: 120_000, intervals: [1_000, 2_000, 5_000] },
+        )
+        .toBe(true);
+    } catch (error) {
+      const finalAudit = await this.auditGeneratedDocumentRegenerationState(namePattern);
+      const diagnosis =
+        finalAudit.latestTimestamp.trim() === normalizedBefore.trim()
+          ? "UI Date & Time unchanged after regeneration — regeneration may not have produced a new AF version, or the portal grid did not refresh."
+          : `UI Date & Time changed to "${finalAudit.latestTimestamp}" but chronological comparison failed (before=${beforeMs} ms, latest=${finalAudit.latestMs} ms).`;
+      throw new Error(
+        [
+          `Generated Documents regeneration timestamp poll failed for ${namePattern.source}.`,
+          `before="${normalizedBefore}" (${beforeMs} ms)`,
+          `latest="${finalAudit.latestTimestamp}" (${finalAudit.latestMs} ms)`,
+          `visibleRows=${finalAudit.rowCount}, timestamps=[${finalAudit.timestamps.join("; ")}]`,
+          `historyIconVisible=${finalAudit.historyIconVisible}`,
+          `rowTexts=[${finalAudit.rowTexts.join(" | ")}]`,
+          diagnosis,
+        ].join(" "),
+        { cause: error instanceof Error ? error : undefined },
+      );
+    }
+
+    if (lastAudit.historyIconVisible) {
+      this.logStep(
+        "Regeneration audit — History column icon still visible (View Latest / matrix behaviour; TC_DOC_027 verifies single portal row + updated Date & Time only).",
+      );
+    }
+    return latest;
+  }
+
+  /**
+   * UDP-T3837 — select Generated Documents rows by **zero-based** index (unchecks all others).
+   */
+  async setGeneratedDocumentsRowSelection(indices: number[]): Promise<void> {
+    this.logStep(`Set Generated Documents Row Selection: ${indices.join(", ")}`);
+    const rows = (await this.generatedDocumentsDataTable()).locator("tbody tr");
+    const want = new Set(indices);
+    const n = await rows.count();
+    let visibleIndex = 0;
+
+    for (let i = 0; i < n; i++) {
+      const row = rows.nth(i);
+      if (!(await row.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      const box = row.locator(".p-checkbox-box").first();
+      if (!(await box.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      const text = (await row.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+      if (!text) {
+        continue;
+      }
+
+      const shouldCheck = want.has(visibleIndex);
+      const checked = row.locator(".p-checkbox-box.p-highlight");
+      const isChecked = await checked.isVisible({ timeout: 400 }).catch(() => false);
+      if (shouldCheck !== isChecked) {
+        await box.scrollIntoViewIfNeeded();
+        await box.click({ timeout: 8_000 });
+        if (shouldCheck) {
+          await expect(checked).toBeVisible({ timeout: 8_000 });
+        } else {
+          await expect(checked).toHaveCount(0, { timeout: 8_000 });
+        }
+      }
+      visibleIndex += 1;
+    }
+
+    for (const idx of indices) {
+      expect(
+        visibleIndex,
+        `Generated Documents row index ${idx} is out of range (${visibleIndex} visible row(s)).`,
+      ).toBeGreaterThan(idx);
+    }
+  }
+
+  /**
+   * UDP-T3837 — **Preview** opens `expectedTabCount` new browser tab(s) for the current selection.
+   */
+  async expectGeneratedDocumentsPreviewOpensTabs(expectedTabCount: number): Promise<void> {
+    this.logStep(`Expect Generated Documents Preview Opens ${expectedTabCount} Tab(s)`);
+    if (expectedTabCount < 1) {
+      throw new Error("expectGeneratedDocumentsPreviewOpensTabs: expectedTabCount must be >= 1.");
+    }
+
+    const preview = await this.generatedDocumentsSharedActionButton("Preview");
+    await expect(preview).toBeVisible({ timeout: 20_000 });
+    await preview.scrollIntoViewIfNeeded();
+
+    const context = this.page.context();
+    const pagesBefore = context.pages().length;
+
+    if (expectedTabCount === 1) {
+      const popupPromise = this.page.waitForEvent("popup", { timeout: 25_000 }).catch(() => null);
+      const pagePromise = context.waitForEvent("page", { timeout: 12_000 }).catch(() => null);
+      await preview.click({ timeout: 12_000 });
+      const popup = (await popupPromise) ?? (await pagePromise);
+      expect(popup, "Generated Documents Preview did not open a new tab").toBeTruthy();
+      await popup!.close().catch(() => {});
+      return;
+    }
+
+    await preview.click({ timeout: 12_000 });
+    await expect
+      .poll(async () => context.pages().length - pagesBefore, {
+        timeout: 30_000,
+        intervals: [400, 800, 1_500, 3_000],
+      })
+      .toBe(expectedTabCount);
+
+    const opened = context.pages().slice(pagesBefore);
+    expect(opened.length).toBeGreaterThanOrEqual(expectedTabCount);
+    for (const tab of opened.slice(0, expectedTabCount)) {
+      await tab.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => {});
+      await tab.close().catch(() => {});
+    }
+  }
+
+  /** UDP-T3850 — **Purchase Invoice** row visible on Generated Documents tab. */
+  async expectPurchaseInvoiceVisibleInGeneratedDocuments(): Promise<void> {
+    this.logStep("Expect Purchase Invoice Visible In Generated Documents");
+    await this.openDocumentsTab();
+    const row = this.generatedDocumentsPurchaseInvoiceRow();
+    await expect
+      .poll(async () => row.isVisible().catch(() => false), {
+        timeout: 120_000,
+        intervals: [1_000, 2_500, 5_000],
+      })
+      .toBe(true);
+    const rowText = (await row.innerText()).replace(/\s+/g, " ").trim();
+    expect(rowText).toMatch(/Purchase\s*Invoice/i);
+  }
+
+  /** UDP-T3851 — **Preview** opens Purchase Invoice in a new tab. */
+  async expectPurchaseInvoicePreviewOpensNewTab(): Promise<void> {
+    this.logStep("Expect Purchase Invoice Preview Opens New Tab");
+    await this.selectGeneratedDocumentsRowByDocumentName(/Purchase\s*Invoice/i);
+    const preview = await this.generatedDocumentsSharedActionButton("Preview");
+    await expect(preview).toBeVisible({ timeout: 20_000 });
+
+    const popupPromise = this.page.waitForEvent("popup", { timeout: 25_000 }).catch(() => null);
+    const pagePromise = this.page.context().waitForEvent("page", { timeout: 12_000 }).catch(() => null);
+    await preview.scrollIntoViewIfNeeded();
+    await preview.click({ timeout: 12_000 });
+
+    const popup = (await popupPromise) ?? (await pagePromise);
+    expect(popup, "Preview did not open a new tab for Purchase Invoice").toBeTruthy();
+    await popup!.close().catch(() => {});
+  }
+
+  /** UDP-T3851 — **Download** saves Purchase Invoice locally. */
+  async expectPurchaseInvoiceDownloadStarts(): Promise<void> {
+    this.logStep("Expect Purchase Invoice Download Starts");
+    await this.selectGeneratedDocumentsRowByDocumentName(/Purchase\s*Invoice/i);
+    const downloadBtn = await this.generatedDocumentsSharedActionButton("Download");
+    await expect(downloadBtn).toBeVisible({ timeout: 20_000 });
+
+    const responseLooksLikeFilePayload = (res: Response): boolean => {
+      if (!res.ok() || res.request().method() !== "GET") {
+        return false;
+      }
+      const ct = (res.headers()["content-type"] || "").toLowerCase();
+      if (ct.includes("text/html")) {
+        return false;
+      }
+      const cd = (res.headers()["content-disposition"] || "").toLowerCase();
+      return (
+        /application\/pdf|application\/octet-stream|attachment|filename=/i.test(ct + cd) ||
+        cd.includes("attachment")
+      );
+    };
+
+    const downloadP = this.page.waitForEvent("download", { timeout: 18_000 }).catch(() => null);
+    const popupP = this.page.waitForEvent("popup", { timeout: 8_000 }).catch(() => null);
+    const responseP = this.page
+      .waitForResponse((r) => responseLooksLikeFilePayload(r), { timeout: 18_000 })
+      .catch(() => null);
+
+    await downloadBtn.scrollIntoViewIfNeeded();
+    await downloadBtn.click({ timeout: 12_000 });
+
+    const d = await downloadP;
+    if (d) {
+      await d.path().catch(() => {});
+      return;
+    }
+    const pop = await popupP;
+    if (pop) {
+      await pop.close().catch(() => {});
+      return;
+    }
+    const res = await responseP;
+    if (res) {
+      return;
+    }
+
+    throw new Error("Generated Documents: Download did not start for Purchase Invoice.");
+  }
+
   /** UDP-T3829 — Generated **Documents** tab grid headers (best-effort). */
   async expectGeneratedDocumentsTabColumnHeaders(): Promise<void> {
     this.logStep("Expect Generated Documents Tab Column Headers");
@@ -1917,6 +2669,325 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         .soft(strip.getByText(rx).or(strip.getByRole("columnheader", { name: rx })).first())
         .toBeVisible({ timeout: 25_000 });
     }
+  }
+
+  /** UDP-T3829 / UDP-T3859 — **Date & Time** cell (DD/MM/YYYY with optional `|` or space before time). */
+  static readonly GENERATED_DOC_DATE_TIME_RX =
+    /\d{1,2}\/\d{1,2}\/\d{4}(?:\s*(?:\|\s*)?\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)?/i;
+
+  /** Normalize portal **Date & Time** copy (`29/06/2026 | 10:00 PM` → `29/06/2026 10:00 PM`). */
+  static normalizeGeneratedDocumentDateTimeText(value: string): string {
+    return value
+      .replace(/\s*\|\s*/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  /** Extract the **Date & Time** token from a grid cell or row snippet. */
+  static extractGeneratedDocumentDateTime(value: string): string {
+    const normalized = DOCustomerQuotePostSubmitPage.normalizeGeneratedDocumentDateTimeText(value);
+    const match = normalized.match(DOCustomerQuotePostSubmitPage.GENERATED_DOC_DATE_TIME_RX);
+    if (!match) {
+      throw new Error(`Could not extract Generated Documents Date & Time from "${value}".`);
+    }
+    return DOCustomerQuotePostSubmitPage.normalizeGeneratedDocumentDateTimeText(match[0]);
+  }
+
+  /** Parse Generated Documents **Date & Time** for chronological comparison (local calendar). */
+  static parseGeneratedDocumentDateTimeMs(value: string): number {
+    const trimmed = DOCustomerQuotePostSubmitPage.normalizeGeneratedDocumentDateTimeText(value);
+    const match = trimmed.match(DOCustomerQuotePostSubmitPage.GENERATED_DOC_DATE_TIME_RX);
+    if (!match) {
+      throw new Error(`Could not parse Generated Documents Date & Time from "${trimmed}".`);
+    }
+    const normalized = DOCustomerQuotePostSubmitPage.normalizeGeneratedDocumentDateTimeText(match[0]);
+    const [datePart, timePart = "00:00"] = normalized.split(/\s+/, 2);
+    const [day, month, year] = datePart.split("/").map((part) => Number(part));
+    let hours = 0;
+    let minutes = 0;
+    let seconds = 0;
+    const timeMatch = timePart.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AP]M))?$/i);
+    if (timeMatch) {
+      hours = Number(timeMatch[1]);
+      minutes = Number(timeMatch[2]);
+      seconds = timeMatch[3] ? Number(timeMatch[3]) : 0;
+      const meridiem = timeMatch[4]?.toUpperCase();
+      if (meridiem === "PM" && hours < 12) hours += 12;
+      if (meridiem === "AM" && hours === 12) hours = 0;
+    }
+    return new Date(year, month - 1, day, hours, minutes, seconds).getTime();
+  }
+
+  /** Zero-based **Date & Time** column index in the Generated Documents grid. */
+  private async generatedDocumentsDateTimeColumnIndex(): Promise<number> {
+    const table = await this.generatedDocumentsDataTable();
+    const headers = table.locator("thead th");
+    const n = await headers.count();
+    for (let i = 0; i < n; i++) {
+      const text = (await headers.nth(i).innerText()).replace(/\s+/g, " ").trim();
+      if (/Date\s*&\s*Time|Date and Time/i.test(text)) {
+        return i;
+      }
+    }
+    return 2;
+  }
+
+  /** Zero-based **History** column index in the Generated Documents grid. */
+  private async generatedDocumentsHistoryColumnIndex(): Promise<number> {
+    const table = await this.generatedDocumentsDataTable();
+    const headers = table.locator("thead th");
+    const n = await headers.count();
+    for (let i = 0; i < n; i++) {
+      const text = (await headers.nth(i).innerText()).replace(/\s+/g, " ").trim();
+      if (/^History$/i.test(text)) {
+        return i;
+      }
+    }
+    return 3;
+  }
+
+  /** Read **Date & Time** from a Generated Documents row's dedicated column cell. */
+  private async readGeneratedDocumentDateTimeFromRow(row: Locator): Promise<string> {
+    const colIdx = await this.generatedDocumentsDateTimeColumnIndex();
+    const cell = row.locator("td").nth(colIdx);
+    await expect(cell).toBeVisible({ timeout: 15_000 });
+    const cellText = (await cell.innerText()).replace(/\s+/g, " ").trim();
+    if (!cellText || cellText === "-") {
+      throw new Error(`Generated Documents Date & Time cell is empty: "${cellText}"`);
+    }
+    return DOCustomerQuotePostSubmitPage.extractGeneratedDocumentDateTime(cellText);
+  }
+
+  /** Visible Generated Documents rows matching `namePattern` (newest **Date & Time** first). */
+  private async generatedDocumentsRowsByNameVisible(namePattern: RegExp): Promise<Locator[]> {
+    const panel = await this.generatedDocumentsContentPanel();
+    const rows = panel.locator("tbody tr").filter({ hasText: namePattern });
+    const n = await rows.count();
+    const visible: Array<{ row: Locator; ms: number; timestamp: string }> = [];
+
+    for (let i = 0; i < n; i++) {
+      const row = rows.nth(i);
+      if (!(await row.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      let timestamp = "";
+      let ms = Number.NEGATIVE_INFINITY;
+      try {
+        timestamp = await this.readGeneratedDocumentDateTimeFromRow(row);
+        ms = DOCustomerQuotePostSubmitPage.parseGeneratedDocumentDateTimeMs(timestamp);
+      } catch {
+        timestamp = "";
+      }
+      visible.push({ row, ms, timestamp });
+    }
+
+    visible.sort((a, b) => b.ms - a.ms);
+    return visible.map((entry) => entry.row);
+  }
+
+  private async generatedDocumentsRowByName(namePattern: RegExp): Promise<Locator> {
+    const rows = await this.generatedDocumentsRowsByNameVisible(namePattern);
+    if (rows.length === 0) {
+      const panel = await this.generatedDocumentsContentPanel();
+      return panel.locator("tbody tr").filter({ hasText: namePattern }).first();
+    }
+    return rows[0];
+  }
+
+  /** UDP-T3836 diagnostics — row count, timestamps, history icon, and raw grid copy. */
+  async auditGeneratedDocumentRegenerationState(namePattern: RegExp): Promise<{
+    rowCount: number;
+    timestamps: string[];
+    latestTimestamp: string;
+    latestMs: number;
+    historyIconVisible: boolean;
+    rowTexts: string[];
+  }> {
+    await this.openDocumentsTab();
+    const panel = await this.generatedDocumentsContentPanel();
+    const rows = panel.locator("tbody tr").filter({ hasText: namePattern });
+    const historyColIdx = await this.generatedDocumentsHistoryColumnIndex();
+    const timestamps: string[] = [];
+    const rowTexts: string[] = [];
+    let latestTimestamp = "";
+    let latestMs = Number.NEGATIVE_INFINITY;
+    let historyIconVisible = false;
+    let rowCount = 0;
+
+    const n = await rows.count();
+    for (let i = 0; i < n; i++) {
+      const row = rows.nth(i);
+      if (!(await row.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      rowCount += 1;
+      const rowText = (await row.innerText()).replace(/\s+/g, " ").trim();
+      rowTexts.push(rowText);
+
+      try {
+        const timestamp = await this.readGeneratedDocumentDateTimeFromRow(row);
+        timestamps.push(timestamp);
+        const ms = DOCustomerQuotePostSubmitPage.parseGeneratedDocumentDateTimeMs(timestamp);
+        if (ms >= latestMs) {
+          latestMs = ms;
+          latestTimestamp = timestamp;
+        }
+      } catch {
+        timestamps.push("(empty)");
+      }
+
+      const historyCell = row.locator("td").nth(historyColIdx);
+      const history = historyCell
+        .locator(
+          ".fa-history, .fa-clock-rotate-left, i[class*='history'], button[class*='history'], [class*='history']",
+        )
+        .filter({ visible: true });
+      if (await history.count()) {
+        historyIconVisible = true;
+      }
+    }
+
+    return {
+      rowCount,
+      timestamps,
+      latestTimestamp,
+      latestMs: Number.isFinite(latestMs) ? latestMs : 0,
+      historyIconVisible,
+      rowTexts,
+    };
+  }
+
+  /** UDP-T3859 — read **Date & Time** for a Generated Documents row (opens **Documents** tab). */
+  async readGeneratedDocumentDateTime(namePattern: RegExp): Promise<string> {
+    this.logStep("Read Generated Document Date Time");
+    await this.openDocumentsTab();
+    const row = await this.generatedDocumentsRowByName(namePattern);
+    await expect(row).toBeVisible({ timeout: 60_000 });
+    return this.readGeneratedDocumentDateTimeFromRow(row);
+  }
+
+  /** Poll until **Date & Time** is populated on a Generated Documents row (after first generation). */
+  async readGeneratedDocumentDateTimeWhenReady(namePattern: RegExp): Promise<string> {
+    this.logStep("Read Generated Document Date Time When Ready");
+    let latest = "";
+    await expect
+      .poll(
+        async () => {
+          try {
+            latest = await this.readGeneratedDocumentDateTime(namePattern);
+            return latest.length > 0;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 120_000, intervals: [1_000, 2_000, 5_000] },
+      )
+      .toBe(true);
+    return latest;
+  }
+
+  /** UDP-T3859 — workflow header shows **Ready for Documentation**. */
+  async expectWorkflowStatusReadyForDocumentation(): Promise<void> {
+    this.logStep("Expect Workflow Status Ready For Documentation");
+    await this.scrollWorkflowStatusHeaderIntoView();
+    await expect
+      .poll(async () => /Ready\s+for\s+Documentation/i.test(await this.readWorkflowStatusText()), {
+        timeout: 60_000,
+        intervals: [500, 1_500, 3_000],
+      })
+      .toBe(true);
+  }
+
+  /** Opens workflow **Status** menu and clicks an action (e.g. **Generate Documentation**). */
+  async clickWorkflowStatusMenuItem(itemLabel: RegExp): Promise<void> {
+    this.logStep(`Click Workflow Status Menu Item: ${itemLabel.source}`);
+    await this.scrollWorkflowStatusHeaderIntoView();
+    await this.openWorkflowStatusDropdownInner();
+    const clicked = await this.clickWorkflowMenuItemByRegex(itemLabel);
+    if (!clicked) {
+      throw new Error(`Workflow status menu item not found: ${itemLabel.source}`);
+    }
+    await this.postSubmitMicroDelay(120);
+  }
+
+  /** Confirm / loan-date dialogs after workflow **Status** actions (Generate Documentation, Submit). */
+  async confirmWorkflowTransitionDialogsIfPresent(): Promise<void> {
+    await this.confirmSubmitQuoteDialogIfPresent();
+    const loanDlg = this.page.getByRole("dialog").filter({ hasText: /Loan date is in the past/i });
+    if (await loanDlg.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      const yes = loanDlg.getByRole("button", { name: /^Yes$/i }).first();
+      await yes.click({ timeout: 12_000 });
+      await loanDlg.waitFor({ state: "hidden", timeout: 30_000 }).catch(() => {});
+      await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
+    }
+  }
+
+  /**
+   * UDP-T3858 / UDP-T3859 — after a quote change, return to **Ready for Documentation** when the
+   * workflow offers **Generate Documentation** (no-op when already in that state).
+   */
+  async advanceToReadyForDocumentationViaGenerateDocumentationIfRequired(): Promise<void> {
+    this.logStep("Advance To Ready For Documentation Via Generate Documentation If Required");
+    if (/Ready\s+for\s+Documentation/i.test(await this.readWorkflowStatusText())) {
+      return;
+    }
+    await this.clickWorkflowStatusMenuItem(/Generate\s+Documentation/i);
+    await this.confirmWorkflowTransitionDialogsIfPresent();
+    await expect
+      .poll(async () => /Ready\s+for\s+Documentation/i.test(await this.readWorkflowStatusText()), {
+        timeout: 120_000,
+        intervals: [1_000, 2_500, 5_000],
+      })
+      .toBe(true);
+  }
+
+  /** Jump to **Post Submission** from the Standard Quote header stepper. */
+  async clickPostSubmissionStepTab(): Promise<void> {
+    this.logStep("Click Post Submission Step Tab");
+    const root = this.page.locator("app-quote-details, app-standard-quote").first();
+    const tab = root
+      .getByRole("tab", { name: /Post Submission/i })
+      .or(root.getByRole("link", { name: /Post Submission/i }))
+      .or(this.page.getByText(/Post Submission/i).filter({ visible: true }))
+      .first();
+    await tab.waitFor({ state: "visible", timeout: 30_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await tab.scrollIntoViewIfNeeded();
+    await tab.click({ timeout: 15_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.expectReopenedPostSubmissionDocumentStripVisible();
+  }
+
+  /**
+   * UDP-T3859 — poll until Generated Documents **Date & Time** advances after re-generation.
+   * @returns Updated timestamp string from the grid.
+   */
+  async expectGeneratedDocumentTimestampUpdatedAfterRegeneration(
+    namePattern: RegExp,
+    originalTimestamp: string,
+  ): Promise<string> {
+    this.logStep("Expect Generated Document Timestamp Updated After Regeneration");
+    const originalMs =
+      DOCustomerQuotePostSubmitPage.parseGeneratedDocumentDateTimeMs(originalTimestamp);
+    let latest = originalTimestamp;
+
+    await expect
+      .poll(
+        async () => {
+          latest = await this.readGeneratedDocumentDateTime(namePattern);
+          const latestMs = DOCustomerQuotePostSubmitPage.parseGeneratedDocumentDateTimeMs(latest);
+          return latestMs > originalMs && latest.trim() !== originalTimestamp.trim();
+        },
+        { timeout: 120_000, intervals: [1_000, 2_000, 5_000] },
+      )
+      .toBe(true);
+
+    await this.openDocumentsTab();
+    const row = await this.generatedDocumentsRowByName(namePattern);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row).toContainText(latest);
+
+    return latest;
   }
 
   /** UDP-T3830 — click **Select All** on Generated Documents (when present). */
@@ -1942,6 +3013,19 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await expect(tab).toHaveCount(0, { timeout: 8_000 });
   }
 
+  /** UDP-T3844 — Credit Conditions tab appears on Post Submission document strip (after mandatory upload). */
+  async expectCreditConditionsTabVisible(): Promise<void> {
+    this.logStep("Expect Credit Conditions Tab Visible");
+    await this.waitForUploadStep();
+    const tab = await this.resolveCreditConditionsTab();
+    await expect
+      .poll(async () => tab.isVisible().catch(() => false), {
+        timeout: 120_000,
+        intervals: [500, 1_500, 3_000],
+      })
+      .toBe(true);
+  }
+
   /** UDP-T3845+ — open **Credit Conditions** tab in Post Submission (when AF data exists). */
   async openCreditConditionsTab(): Promise<void> {
     this.logStep("Open Credit Conditions Tab");
@@ -1949,47 +3033,332 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     if ((await root.count()) === 0) {
       root = this.page.locator(".p-tabview").first();
     }
-    const tab = root
-      .getByRole("tab", { name: /Credit Conditions|Additional Approval Conditions/i })
-      .or(root.locator("a.p-tabview-nav-link").filter({ hasText: /Credit Conditions|Additional Approval/i }))
-      .first();
+    const tab = await this.resolveCreditConditionsTab();
     await tab.waitFor({ state: "visible", timeout: 60_000 });
     await tab.click({ timeout: 20_000 });
+    const panel = await this.creditConditionsTabContentPanel(root);
     await expect(
-      root.getByText(/Condition/i).or(root.getByRole("columnheader", { name: /Condition/i })),
+      panel
+        .getByRole("columnheader", { name: /^Condition$/i })
+        .or(panel.locator("thead th").filter({ hasText: /^Condition$/i })),
     ).toBeVisible({ timeout: 45_000 });
   }
 
-  /** UDP-T3861 / UDP-T3862 — active Post Submission shell. */
-  private postSubmissionRoot(): Locator {
-    return this.page.locator("app-customer-quote-post-submit, app-post-submission").first();
+  /** Strip PrimeNG filter-menu suffix from grid header labels. */
+  static normalizeGridHeaderLabel(raw: string): string {
+    return raw
+      .replace(/\s+/g, " ")
+      .replace(/show filter menu/gi, "")
+      .trim();
   }
 
-  /** UDP-T3861 / UDP-T3862 — Post Submission step is visible and customer fields are read-only. */
-  async expectPostSubmissionScreenVisible(): Promise<void> {
-    this.logStep("Expect Post Submission Screen Visible");
-    await this.waitForUploadStep();
-    await expect(this.page.getByText(/Post Submission/i).first()).toBeVisible({ timeout: 30_000 });
-    await expect(
-      this.postSubmissionRoot().or(this.documentManagementTabView()).first(),
-    ).toBeVisible({ timeout: 30_000 });
-    await this.expectPostSubmissionFieldsViewOnlyExceptNotesAndUpload();
+  /** Visible Credit Conditions column headers mapped to zero-based `th` index. */
+  private async creditConditionsHeaderColumnMap(table: Locator): Promise<Map<string, number>> {
+    const headers = table.locator("thead th");
+    const n = await headers.count();
+    const map = new Map<string, number>();
+
+    for (let i = 0; i < n; i++) {
+      const th = headers.nth(i);
+      if (!(await th.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      const label = DOCustomerQuotePostSubmitPage.normalizeGridHeaderLabel(
+        (await th.innerText().catch(() => "")) ?? "",
+      );
+      if (label) {
+        map.set(label.toLowerCase(), i);
+      }
+    }
+    return map;
   }
 
   /**
-   * UDP-T3861 — borrower/customer sections are view-only; Notes and Upload remain actionable.
+   * UDP-T3845 — read visible Credit Conditions data rows using header labels
+   * (**Condition** / **Customer**), not fixed column indexes.
    */
-  async expectPostSubmissionFieldsViewOnlyExceptNotesAndUpload(): Promise<void> {
-    this.logStep("Expect Post Submission fields view-only except notes and upload");
-    const post = this.postSubmissionRoot();
-    if (await post.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      const readOnlyMarkers = post.locator(
-        "input[disabled], textarea[disabled], input[readonly], textarea[readonly], .p-disabled",
+  private async readCreditConditionsVisibleRowData(
+    table: Locator,
+  ): Promise<Array<{ conditionText: string; customerText: string }>> {
+    const columnMap = await this.creditConditionsHeaderColumnMap(table);
+    const conditionIdx = columnMap.get("condition");
+    const customerIdx = columnMap.get("customer");
+    if (conditionIdx === undefined || customerIdx === undefined) {
+      throw new Error(
+        `Credit Conditions grid is missing Condition and/or Customer column headers (found: ${[...columnMap.keys()].join(", ")}).`,
       );
-      await expect.soft(readOnlyMarkers.first()).toBeVisible({ timeout: 20_000 });
     }
-    await expect.soft(this.addNewNotesButton).toBeVisible({ timeout: 15_000 });
-    await expect.soft(this.browseFilesButton).toBeVisible({ timeout: 15_000 });
+
+    const rows = table.locator("tbody tr");
+    const rowCount = await rows.count();
+    const data: Array<{ conditionText: string; customerText: string }> = [];
+
+    for (let i = 0; i < rowCount; i++) {
+      const row = rows.nth(i);
+      if (!(await row.isVisible({ timeout: 1_000 }).catch(() => false))) {
+        continue;
+      }
+
+      const conditionCell = row.locator("td").nth(conditionIdx);
+      const customerCell = row.locator("td").nth(customerIdx);
+      const conditionRaw = ((await conditionCell.innerText().catch(() => "")) ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const customerText = ((await customerCell.innerText().catch(() => "")) ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const conditionText = DOCustomerQuotePostSubmitPage.normalizeCreditConditionText(conditionRaw);
+
+      if (!conditionText && !customerText) {
+        continue;
+      }
+
+      data.push({ conditionText, customerText });
+    }
+
+    return data;
+  }
+
+  /**
+   * UDP-T3845 — Credit Conditions grid has **Condition** and **Customer** only;
+   * **To-Do Name** is not displayed on the portal.
+   */
+  async expectCreditConditionsTabTwoColumnsOnly(): Promise<void> {
+    this.logStep("Expect Credit Conditions Tab Two Columns Only");
+    await this.openCreditConditionsTab();
+    let root = this.documentManagementStrip();
+    if ((await root.count()) === 0) {
+      root = this.page.locator(".p-tabview").first();
+    }
+    const panel = await this.creditConditionsTabContentPanel(root);
+    const table = panel.locator("table").first();
+    await expect(table).toBeVisible({ timeout: 30_000 });
+
+    const headerCell = (label: RegExp): Locator =>
+      table
+        .getByRole("columnheader", { name: label })
+        .or(table.locator("thead th").filter({ hasText: label }));
+
+    await expect(headerCell(/^Condition$/i).first()).toBeVisible({ timeout: 20_000 });
+    await expect(headerCell(/^Customer$/i).first()).toBeVisible({ timeout: 20_000 });
+
+    const todoName = panel
+      .getByRole("columnheader", { name: /To-?Do\s*Name/i })
+      .or(panel.getByText(/^To-?Do\s*Name$/i))
+      .or(table.locator("thead th").filter({ hasText: /To-?Do\s*Name/i }));
+    await expect(todoName).toHaveCount(0, { timeout: 8_000 });
+
+    const columnMap = await this.creditConditionsHeaderColumnMap(table);
+    const visibleHeaders = [...columnMap.keys()];
+    this.logStep(`Credit Conditions visible headers: [${visibleHeaders.join(", ")}]`);
+    expect(visibleHeaders, "Credit Conditions grid must expose exactly two data columns").toHaveLength(2);
+    expect(columnMap.has("condition"), "Missing Condition column header").toBe(true);
+    expect(columnMap.has("customer"), "Missing Customer column header").toBe(true);
+    expect(
+      visibleHeaders.some((label) => /to-?do\s*name/i.test(label)),
+      "To-Do Name column must not be rendered",
+    ).toBe(false);
+
+    const rowData = await this.readCreditConditionsVisibleRowData(table);
+    expect(
+      rowData.length,
+      "Credit Conditions grid has no visible AF data rows",
+    ).toBeGreaterThan(0);
+
+    for (const row of rowData) {
+      expect(
+        row.conditionText.length,
+        `Credit Conditions row must include a Condition description (customer="${row.customerText}")`,
+      ).toBeGreaterThan(0);
+      expect(
+        row.customerText.length,
+        `Credit Conditions row must include an associated Customer for condition "${row.conditionText}"`,
+      ).toBeGreaterThan(0);
+    }
+  }
+
+  /**
+   * UDP-T3849 — Credit Conditions grid is **view-only** for dealers: no add / edit / delete
+   * controls and no editable fields in condition rows.
+   */
+  async expectCreditConditionsTabViewOnlyForDealer(): Promise<void> {
+    this.logStep("Expect Credit Conditions Tab View Only For Dealer");
+    await this.openCreditConditionsTab();
+    let root = this.documentManagementStrip();
+    if ((await root.count()) === 0) {
+      root = this.page.locator(".p-tabview").first();
+    }
+    const panel = await this.creditConditionsTabContentPanel(root);
+    await expect(panel).toBeVisible({ timeout: 30_000 });
+
+    const table = panel.locator("table").first();
+    await expect(table).toBeVisible({ timeout: 30_000 });
+    const dataRows = table.locator("tbody tr").filter({ visible: true });
+    await expect(dataRows.first()).toBeVisible({ timeout: 30_000 });
+
+    const mutationControls: Locator[] = [
+      panel.getByRole("button", { name: /^(Add|New|Create)(\s+Condition)?$/i }),
+      panel.getByRole("button", { name: /^Edit(\s+Condition)?$/i }),
+      panel.getByRole("button", { name: /^(Delete|Remove)(\s+Condition)?$/i }),
+      panel.getByRole("link", { name: /^(Add|Edit|Delete|Remove)(\s+Condition)?$/i }),
+      table
+        .locator("xpath=ancestor::div[1]")
+        .locator("button, a")
+        .filter({ hasText: /^(Add|Edit|Delete|Remove)$/i }),
+      table.locator(".fa-plus, .fa-pencil, .fa-pen, .fa-trash, .fa-trash-alt, .fa-edit"),
+    ];
+    for (const control of mutationControls) {
+      await expect(control).toHaveCount(0, { timeout: 5_000 });
+    }
+
+    const editableInputs = table.locator(
+      "tbody input:not([disabled]):not([readonly]), tbody textarea:not([disabled]):not([readonly])",
+    );
+    await expect(editableInputs).toHaveCount(0, { timeout: 8_000 });
+
+    const editableContent = table.locator("tbody [contenteditable='true']");
+    await expect(editableContent).toHaveCount(0, { timeout: 5_000 });
+
+    const rowCheckboxes = table.locator("tbody .p-checkbox-box");
+    await expect(rowCheckboxes).toHaveCount(0, { timeout: 5_000 });
+
+    const rowActionButtons = table.locator(
+      "tbody button, tbody a[role='button'], tbody .p-row-editor-init, tbody .p-row-editor-save, tbody .p-row-editor-cancel",
+    );
+    await expect(rowActionButtons).toHaveCount(0, { timeout: 5_000 });
+  }
+
+  /** UDP-T3848 — one Credit Conditions grid row with mandatory-indicator audit. */
+  static creditConditionRowShowsMandatoryAsterisk(conditionCell: Locator): Promise<boolean> {
+    return (async () => {
+      const marker = conditionCell
+        .locator('[class*="mandatory"], [class*="required"], .fa-asterisk, .p-error')
+        .filter({ visible: true })
+        .first();
+      if (await marker.isVisible({ timeout: 400 }).catch(() => false)) {
+        return true;
+      }
+      if (await conditionCell.getByText("*", { exact: true }).isVisible({ timeout: 400 }).catch(() => false)) {
+        return true;
+      }
+      const text = ((await conditionCell.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+      return /^\*\s+/.test(text) || /\s\*\s*$/.test(text);
+    })();
+  }
+
+  /** Strip leading/trailing mandatory asterisk from **Condition** column display text. */
+  static normalizeCreditConditionText(raw: string): string {
+    return raw.replace(/\s+/g, " ").trim().replace(/^\*\s+/, "").replace(/\s*\*\s*$/, "").trim();
+  }
+
+  private async creditConditionsDataTable(): Promise<Locator> {
+    await this.openCreditConditionsTab();
+    let root = this.documentManagementStrip();
+    if ((await root.count()) === 0) {
+      root = this.page.locator(".p-tabview").first();
+    }
+    const panel = await this.creditConditionsTabContentPanel(root);
+    const table = panel.locator("table").first();
+    await expect(table).toBeVisible({ timeout: 30_000 });
+    return table;
+  }
+
+  /**
+   * UDP-T3848 — read Credit Conditions rows and whether the **Condition** column shows a mandatory (*).
+   */
+  async readCreditConditionsMandatoryIndicatorAudit(): Promise<
+    Array<{
+      conditionText: string;
+      customerText: string;
+      mandatoryIndicatorPresent: boolean;
+    }>
+  > {
+    this.logStep("Read Credit Conditions Mandatory Indicator Audit");
+    const table = await this.creditConditionsDataTable();
+    const columnMap = await this.creditConditionsHeaderColumnMap(table);
+    const conditionIdx = columnMap.get("condition");
+    const customerIdx = columnMap.get("customer");
+    if (conditionIdx === undefined || customerIdx === undefined) {
+      return [];
+    }
+
+    const rows = table.locator("tbody tr");
+    const rowCount = await rows.count();
+    if (rowCount === 0) {
+      return [];
+    }
+
+    const audits: Array<{
+      conditionText: string;
+      customerText: string;
+      mandatoryIndicatorPresent: boolean;
+    }> = [];
+
+    for (let i = 0; i < rowCount; i++) {
+      const row = rows.nth(i);
+      if (!(await row.isVisible({ timeout: 1_000 }).catch(() => false))) {
+        continue;
+      }
+
+      const conditionCell = row.locator("td").nth(conditionIdx);
+      const customerCell = row.locator("td").nth(customerIdx);
+      const conditionRaw = ((await conditionCell.innerText().catch(() => "")) ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const customerText = ((await customerCell.innerText().catch(() => "")) ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const conditionText = DOCustomerQuotePostSubmitPage.normalizeCreditConditionText(conditionRaw);
+
+      if (!conditionText && !customerText) {
+        continue;
+      }
+
+      const mandatoryIndicatorPresent =
+        await DOCustomerQuotePostSubmitPage.creditConditionRowShowsMandatoryAsterisk(conditionCell);
+
+      audits.push({ conditionText, customerText, mandatoryIndicatorPresent });
+    }
+
+    return audits;
+  }
+
+  private async creditConditionsTabContentPanel(root: Locator): Promise<Locator> {
+    const byRole = root
+      .getByRole("tabpanel", { name: /Credit Conditions|Additional Approval Conditions/i })
+      .first();
+    if (await byRole.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return byRole;
+    }
+    return root
+      .locator(".p-tabview-panel")
+      .filter({
+        has: root
+          .getByRole("columnheader", { name: /^Condition$/i })
+          .or(root.locator("thead th").filter({ hasText: /^Condition$/i })),
+      })
+      .first();
+  }
+
+  private async resolveCreditConditionsTab(): Promise<Locator> {
+    let root = this.documentManagementStrip();
+    if ((await root.count()) === 0) {
+      root = this.page.locator(".p-tabview").first();
+    }
+    return root
+      .getByRole("tab", { name: /Credit Conditions|Additional Approval Conditions/i })
+      .or(root.locator("a.p-tabview-nav-link").filter({ hasText: /Credit Conditions|Additional Approval/i }))
+      .first();
+  }
+
+  /** Post-submission host (`app-customer-quote-post-submit` / `app-post-submission`). */
+  private postSubmissionHost(): Locator {
+    return this.page.locator("app-customer-quote-post-submit, app-post-submission").first();
+  }
+
+  /** Standard Quote chrome wrapping Post Submission (footer **Save** / **Previous** / **Cancel**). */
+  private postSubmissionFooterScope(): Locator {
+    return this.page.locator("app-quote-details, app-standard-quote").last();
   }
 
   /** Quote footer PrimeNG buttons (Save / Previous / Cancel) — same chrome as Customer Details steps. */
@@ -2001,32 +3370,98 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       .last();
   }
 
-  /** UDP-T3862 — Save / Previous / Cancel remain on Post Submission (no Next). */
+  /** UDP-T3861 / UDP-T3862 — Post Submission screen is loaded. */
+  async expectPostSubmissionScreenVisible(): Promise<void> {
+    this.logStep("Expect Post Submission Screen Visible");
+    await this.waitForUploadStep();
+    await expect(this.postSubmissionHost()).toBeVisible({ timeout: 60_000 });
+    await expect(this.page.getByText(/Post Submission/i).first()).toBeVisible({ timeout: 30_000 });
+    await expect(this.browseFilesButton).toBeVisible({ timeout: 30_000 });
+  }
+
+  /**
+   * Reopened post-submit application (Submitted, Ready for Documentation, etc.) —
+   * Post Submission shell + document strip; does not require **Browse Files** upload entry.
+   */
+  async expectReopenedPostSubmissionDocumentStripVisible(): Promise<void> {
+    this.logStep("Expect Reopened Post Submission Document Strip Visible");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await expect(this.page.locator("app-quote-details, app-standard-quote").first()).toBeVisible({
+      timeout: 60_000,
+    });
+
+    await expect
+      .poll(
+        async () => {
+          if (await this.postSubmissionHost().isVisible().catch(() => false)) {
+            return true;
+          }
+          if (await this.page.getByText(/Post Submission/i).first().isVisible().catch(() => false)) {
+            return true;
+          }
+          const strip = this.documentManagementStrip();
+          if (!(await strip.isVisible({ timeout: 800 }).catch(() => false))) {
+            return false;
+          }
+          const creditTab = await this.resolveCreditConditionsTab();
+          return (
+            (await creditTab.isVisible({ timeout: 500 }).catch(() => false)) ||
+            (await strip
+              .getByRole("tab", { name: /^Upload$/i })
+              .isVisible({ timeout: 500 })
+              .catch(() => false)) ||
+            (await strip
+              .getByRole("tab", { name: /^Documents$/i })
+              .isVisible({ timeout: 500 })
+              .catch(() => false))
+          );
+        },
+        { timeout: 120_000, intervals: [500, 1_500, 3_000] },
+      )
+      .toBe(true);
+  }
+
+  /**
+   * UDP-T3860 — Submitted application reopened from dashboard lands directly on Post Submission
+   * (document strip + footer controls).
+   */
+  async expectOpenedDirectlyInPostSubmissionFromDashboard(): Promise<void> {
+    this.logStep("Expect Opened Directly In Post Submission From Dashboard");
+    await this.expectPostSubmissionScreenVisible();
+    await this.expectPostSubmissionSavePreviousCancelVisible();
+    const strip = this.documentManagementStrip();
+    await expect(
+      strip
+        .getByRole("tab", { name: /^Upload$/i })
+        .or(strip.getByRole("tab", { name: /^Documents$/i }))
+        .first(),
+    ).toBeVisible({ timeout: 30_000 });
+  }
+
+  /** UDP-T3862 — **Save**, **Previous**, and **Cancel** remain on Post Submission footer. */
   async expectPostSubmissionSavePreviousCancelVisible(): Promise<void> {
     this.logStep("Expect Post Submission Save Previous Cancel Visible");
     await this.waitForUploadStep();
-    await expect.soft(this.footerPrimeButton(/^Save$/)).toBeVisible({ timeout: 15_000 });
-    await expect
-      .soft(
-        this.footerPrimeButton(/^Previous$/).or(
-          this.page.getByRole("button", { name: /Previous|Back/i }).last(),
-        ),
-      )
-      .toBeVisible({ timeout: 15_000 });
-    await expect
-      .soft(
-        this.footerPrimeButton(/^Cancel$/).or(this.page.getByRole("button", { name: /^Cancel$/i }).last()),
-      )
-      .toBeVisible({ timeout: 15_000 });
+    const footer = this.postSubmissionFooterScope();
+    await expect(footer).toBeVisible({ timeout: 30_000 });
+
+    const save = footer.getByRole("button", { name: /^Save$/i }).filter({ visible: true }).last();
+    const previous = footer
+      .getByRole("button", { name: /^Previous$/i })
+      .filter({ visible: true })
+      .last();
+    const cancel = footer.getByRole("button", { name: /^Cancel$/i }).filter({ visible: true }).last();
+
+    await expect(save).toBeVisible({ timeout: 20_000 });
+    await expect(previous).toBeVisible({ timeout: 20_000 });
+    await expect(cancel).toBeVisible({ timeout: 20_000 });
   }
 
   /** UDP-T3862 — **Next** is not available on Post Submission. */
   async expectPostSubmissionNextButtonHidden(): Promise<void> {
     this.logStep("Expect Post Submission Next Button Hidden");
     await this.waitForUploadStep();
-    const nextInPost = this.page
-      .locator("app-customer-quote-post-submit, app-post-submission")
-      .getByRole("button", { name: /^Next$/i });
+    const nextInPost = this.postSubmissionHost().getByRole("button", { name: /^Next$/i });
     await expect(nextInPost).toHaveCount(0, { timeout: 10_000 });
     await expect(this.footerPrimeButton(/^Next$/)).toHaveCount(0, { timeout: 10_000 });
   }
@@ -2039,6 +3474,120 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await expect(this.browseFilesButton).toBeVisible({ timeout: 30_000 });
   }
 
+  private borrowerSummaryRow(customerName: string): Locator {
+    const escaped = customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return this.postSubmissionHost()
+      .locator("tr, .p-datatable-row, .p-row")
+      .filter({ hasText: new RegExp(escaped, "i") })
+      .first();
+  }
+
+  private postSubmissionCustomerNameLink(customerName: string): Locator {
+    const escaped = customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return this.page
+      .locator(
+        "div.align-items-center.capitalize.cursor-pointer.ng-star-inserted a.cursor-pointer.text-primary, a.cursor-pointer.text-primary",
+      )
+      .filter({ hasText: new RegExp(`^${escaped}`, "i") })
+      .first();
+  }
+
+  private postSubmissionFinancialPositionLink(customerName: string): Locator {
+    const row = this.borrowerSummaryRow(customerName);
+    return row
+      .getByRole("link", { name: /Financial\s*Position/i })
+      .or(
+        row
+          .locator("a, span.cursor-pointer, .text-primary")
+          .filter({ hasText: /Financial\s*Position/i }),
+      )
+      .or(
+        this.postSubmissionHost()
+          .locator("a, span.cursor-pointer, .text-primary")
+          .filter({ hasText: /Financial\s*Position/i }),
+      )
+      .first();
+  }
+
+  /**
+   * UDP-T3861 — contract terms and borrower summary fields are not editable on Post Submission
+   * (Notes and Upload remain interactive separately).
+   */
+  async expectPostSubmissionContractAndCustomerDetailsViewOnly(): Promise<void> {
+    this.logStep("Expect Post Submission Contract And Customer Details View Only");
+    await this.waitForUploadStep();
+    const host = this.postSubmissionHost();
+    await expect(host).toBeVisible({ timeout: 60_000 });
+
+    const quoteShell = this.page.locator("app-quote-details, app-standard-quote").last();
+    const lessDeposit = quoteShell.locator("app-less-deposit").first();
+    if (await lessDeposit.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const contractInputs = lessDeposit.locator(
+        "input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])",
+      );
+      await expect(contractInputs.filter({ visible: true })).toHaveCount(0, { timeout: 10_000 });
+
+      const enabledDropdowns = lessDeposit.locator("p-dropdown:not(.p-disabled) .p-dropdown-trigger");
+      await expect(enabledDropdowns.filter({ visible: true })).toHaveCount(0, { timeout: 8_000 });
+    }
+
+    const customerInputs = host.locator(
+      'input:not([type="file"]):not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])',
+    );
+    await expect(customerInputs.filter({ visible: true })).toHaveCount(0, { timeout: 10_000 });
+
+    const customerDropdowns = host.locator(
+      "p-dropdown:not(.p-disabled) .p-dropdown-trigger, p-multiselect:not(.p-disabled) .p-multiselect-trigger",
+    );
+    await expect(customerDropdowns.filter({ visible: true })).toHaveCount(0, { timeout: 8_000 });
+  }
+
+  /** UDP-T3861 — **Customer Name** hyperlink opens a view-only Personal Details screen. */
+  async clickPostSubmissionCustomerNameLinkAndExpectViewDialog(customerName: string): Promise<void> {
+    this.logStep(`Click Post Submission Customer Name Link (${customerName})`);
+    const link = this.postSubmissionCustomerNameLink(customerName);
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    await link.scrollIntoViewIfNeeded();
+    await link.click({ timeout: 15_000 });
+
+    await expect(this.page.locator(':text-is("1. Personal Details")')).toBeVisible({
+      timeout: 60_000,
+    });
+    const personalRoot = this.page.locator("app-personal-details").first();
+    await expect(personalRoot).toBeVisible({ timeout: 30_000 });
+    const editable = personalRoot.locator(
+      'input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])',
+    );
+    await expect(editable.filter({ visible: true })).toHaveCount(0, { timeout: 15_000 });
+
+    await this.clickPostSubmissionStepTab();
+    await this.waitForUploadStep();
+  }
+
+  /** UDP-T3861 — **Financial Position** hyperlink opens a view-only Financial Position screen. */
+  async clickPostSubmissionFinancialPositionLinkAndExpectViewDialog(
+    customerName: string = "Liza Marie Doe",
+  ): Promise<void> {
+    this.logStep(`Click Post Submission Financial Position Link (${customerName})`);
+    const link = this.postSubmissionFinancialPositionLink(customerName);
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    await link.scrollIntoViewIfNeeded();
+    await link.click({ timeout: 15_000 });
+
+    const fin = new DOFinancialPositionPage(this.page);
+    await fin.waitForFinancialPositionStep();
+    const finRoot = this.page
+      .locator(
+        "app-individual-financial, app-financial-position, app-individual-financial-details, app-business-financial, app-sole-trade-financial",
+      )
+      .first();
+    await expect(finRoot).toBeVisible({ timeout: 30_000 });
+    const editable = finRoot.locator(
+      'input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])',
+    );
+    await expect(editable.filter({ visible: true })).toHaveCount(0, { timeout: 15_000 });
+  }
+
   /** UDP-T3865 — workflow status control visible on current quote step. */
   async expectWorkflowStatusControlVisible(): Promise<void> {
     this.logStep("Expect Workflow Status Control Visible");
@@ -2048,7 +3597,11 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       await expect(statusInput).toBeVisible();
       return;
     }
-    await expect(this.page.getByRole("button", { name: /Open\s+Quote|Submitted|Assessment|Credit Hold/i }).first()).toBeVisible({
+    await expect(
+      this.page
+        .getByRole("button", { name: /Open\s+Quote|Submitted|Assessment|Credit Hold/i })
+        .first(),
+    ).toBeVisible({
       timeout: 15_000,
     });
   }
