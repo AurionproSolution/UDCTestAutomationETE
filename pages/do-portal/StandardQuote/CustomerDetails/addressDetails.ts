@@ -2983,18 +2983,33 @@ export class DOAddressDetailsPage extends BasePage {
   async waitForPhysicalAddressStep() {
     this.logStep("Wait For Physical Address Step");
     await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
-    const soleSearch = this.page
-      .locator("app-sole-trade")
-      .locator('input[name="physicalSearchValue"]')
-      .filter({ visible: true })
-      .first();
-    if (await soleSearch.isVisible({ timeout: 8000 }).catch(() => false)) {
-      await soleSearch.waitFor({ state: "visible", timeout: 120000 });
-      return;
-    }
+    await expect
+      .poll(
+        async () => {
+          const soleSearch = this.page
+            .locator("app-sole-trade")
+            .locator('input[name="physicalSearchValue"]')
+            .filter({ visible: true })
+            .first();
+          if (await soleSearch.isVisible({ timeout: 500 }).catch(() => false)) {
+            return true;
+          }
+          if (await this.physicalSearchInput.isVisible({ timeout: 500 }).catch(() => false)) {
+            return true;
+          }
+          const host = await this.activePhysicalHost();
+          const inHost = host
+            .locator('input[name="physicalSearchValue"]')
+            .filter({ visible: true })
+            .first();
+          return inHost.isVisible({ timeout: 500 }).catch(() => false);
+        },
+        { timeout: 120_000, intervals: [300, 500, 900, 1500] },
+      )
+      .toBe(true);
     await this.physicalSearchInput.waitFor({
       state: "visible",
-      timeout: 120000,
+      timeout: 30_000,
     });
   }
 

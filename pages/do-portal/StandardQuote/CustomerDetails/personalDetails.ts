@@ -692,6 +692,176 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.fillElement(this.versionNumber, versionNumber);
   }
 
+  /** Visible `app-personal-details` host (ignore hidden step clones). */
+  private visiblePersonalDetailsRoot(): Locator {
+    return this.page.locator("app-personal-details").filter({ visible: true }).first();
+  }
+
+  private async dismissOpenDropdownPanels(): Promise<void> {
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.page
+      .getByRole("listbox")
+      .first()
+      .waitFor({ state: "hidden", timeout: 8_000 })
+      .catch(() => {});
+    await this.page
+      .locator(".p-dropdown-panel, .p-overlay-visible")
+      .first()
+      .waitFor({ state: "hidden", timeout: 5_000 })
+      .catch(() => {});
+  }
+
+  /** Loaders cleared, form visible, **Next** enabled, dependants ages bound (if shown). */
+  async waitForPersonalDetailsStepReady(): Promise<void> {
+    this.logStep("Wait For Personal Details ready");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.visiblePersonalDetailsRoot().waitFor({ state: "visible", timeout: 120_000 });
+    await this.dismissOpenDropdownPanels();
+    await this.nextButton.waitFor({ state: "visible", timeout: 60_000 });
+    await expect
+      .poll(async () => this.nextButton.isEnabled().catch(() => false), {
+        timeout: 60_000,
+        message: "Personal Details Next must be enabled before advance",
+      })
+      .toBe(true);
+    await this.waitForDependantsAgesReadyIfPresent();
+    await this.waitForCriticalPersonalFieldsStable();
+  }
+
+  private async waitForCriticalPersonalFieldsStable(): Promise<void> {
+    await expect
+      .poll(async () => (await this.lastNameInput.inputValue()).trim().length > 0, {
+        timeout: 20_000,
+        message: "Last Name must be populated before Personal Details Next",
+      })
+      .toBe(true);
+    const dob = await this.resolveDateOfBirthInput();
+    await expect
+      .poll(async () => (await dob.inputValue()).trim().length > 6, {
+        timeout: 20_000,
+        message: "Date of Birth must be populated before Personal Details Next",
+      })
+      .toBe(true);
+  }
+
+  /** When dependants > 0, Angular renders age spinbuttons — wait until each has a value. */
+  private async waitForDependantsAgesReadyIfPresent(): Promise<void> {
+    const need = await this.selectedDependantsCount();
+    if (need <= 0) {
+      return;
+    }
+    const root = this.visiblePersonalDetailsRoot();
+    const spinbuttons = root.getByRole("spinbutton");
+    await expect
+      .poll(async () => spinbuttons.count(), {
+        timeout: 30_000,
+        message: `Expected ${need} dependants age field(s) to render`,
+      })
+      .toBeGreaterThanOrEqual(need);
+    const count = await spinbuttons.count();
+    await expect
+      .poll(
+        async () => {
+          for (let i = 0; i < count; i++) {
+            const val = (await spinbuttons.nth(i).inputValue().catch(() => "")).trim();
+            if (!val) {
+              return false;
+            }
+          }
+          return true;
+        },
+        {
+          timeout: 30_000,
+          message: "Dependants age fields must be filled before Personal Details Next",
+        },
+      )
+      .toBe(true);
+  }
+
+  private async selectedDependantsCount(): Promise<number> {
+    const dropdown = this.noOfDependentsDropdown
+      .locator("xpath=ancestor::p-dropdown[1]")
+      .or(this.noOfDependentsDropdown.locator("xpath=ancestor::div[contains(@class,'p-dropdown')][1]"))
+      .first();
+    const label = dropdown.locator(".p-dropdown-label, [class*='p-dropdown-label']").first();
+    const text = ((await label.textContent().catch(() => "")) ?? "").trim();
+    const n = parseInt(text, 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  private async visibleBlockingPersonalValidationTexts(): Promise<string[]> {
+    const root = this.visiblePersonalDetailsRoot();
+    if (!(await root.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      return [];
+    }
+    const rx = /is required|incorrect format|invalid|must be|please select/i;
+    const nodes = root.getByText(rx);
+    const count = await nodes.count();
+    const out: string[] = [];
+    for (let i = 0; i < Math.min(count, 10); i++) {
+      const el = nodes.nth(i);
+      if (!(await el.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      const t = (await el.textContent())?.replace(/\s+/g, " ").trim();
+      if (t && rx.test(t)) {
+        out.push(t);
+      }
+    }
+    return [...new Set(out)];
+  }
+
+  private async isAddressDetailsStepVisible(): Promise<boolean> {
+    const physicalSearch = this.page
+      .locator('input[name="physicalSearchValue"]')
+      .filter({ visible: true })
+      .first();
+    if (await physicalSearch.isVisible({ timeout: 500 }).catch(() => false)) {
+      return true;
+    }
+    const addressHost = this.page.locator("app-physical-address").filter({ visible: true }).first();
+    if (await addressHost.isVisible({ timeout: 500 }).catch(() => false)) {
+      return true;
+    }
+    return this.page
+      .locator(':text-is("2. Address Details")')
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+  }
+
+  private async isPersonalDetailsStepVisible(): Promise<boolean> {
+    return this.visiblePersonalDetailsRoot().isVisible({ timeout: 500 }).catch(() => false);
+  }
+
+  /** After **Next**, poll until Personal Details is exited or Address Details is shown. */
+  private async waitForAdvancePastPersonalDetailsStep(): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    try {
+      await expect
+        .poll(
+          async () => {
+            if (await this.isAddressDetailsStepVisible()) {
+              return true;
+            }
+            return !(await this.isPersonalDetailsStepVisible());
+          },
+          { timeout: 120_000, intervals: [250, 400, 700, 1200] },
+        )
+        .toBe(true);
+    } catch {
+      const validation = await this.visibleBlockingPersonalValidationTexts();
+      if (validation.length > 0) {
+        throw new Error(
+          `Personal Details Next did not advance to Address Details. Validation: ${validation.join(" | ")}`,
+        );
+      }
+      throw new Error(
+        "Personal Details Next did not advance to Address Details (still on Personal Details step).",
+      );
+    }
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  }
+
   async selectNewZealandResident(): Promise<void> {
     await this.newZealandResidentDropdown.click();
   }
@@ -856,38 +1026,23 @@ export class DOPersonalDetailsPage extends BasePage {
 
   async clickNextButton(): Promise<void> {
     this.logStep("Click Next (Personal Details)");
+    await this.waitForPersonalDetailsStepReady();
+    await this.dismissOpenDropdownPanels();
     await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
-    await this.nextButton.waitFor({ state: "visible", timeout: 120_000 });
-    for (let i = 0; i < 120; i++) {
-      if (await this.nextButton.isEnabled().catch(() => false)) {
-        break;
-      }
-      await this.page.waitForTimeout(500);
-    }
     await this.nextButton.scrollIntoViewIfNeeded();
-    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) {
-        await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
-      }
-      try {
-        if (attempt === 0) {
-          await this.clickElement(this.nextButton, 60_000);
-        } else {
-          await this.nextButton.scrollIntoViewIfNeeded({ timeout: 5_000 }).catch(() => {});
-          await this.nextButton.click({ force: true, timeout: 30_000 });
-        }
-        break;
-      } catch (err) {
-        if (attempt === 2) {
-          throw err;
-        }
-        await this.page.waitForTimeout(500);
-      }
+    await expect(this.nextButton).toBeEnabled({ timeout: 30_000 });
+
+    const blockingBefore = await this.visibleBlockingPersonalValidationTexts();
+    if (blockingBefore.length > 0) {
+      throw new Error(
+        `Cannot advance Personal Details — validation visible: ${blockingBefore.join(" | ")}`,
+      );
     }
+
+    await this.clickElement(this.nextButton, 60_000);
+    await this.waitForAdvancePastPersonalDetailsStep();
     if (!this.page.isClosed()) {
       await this.page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
-      await this.page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
     }
   }
 }

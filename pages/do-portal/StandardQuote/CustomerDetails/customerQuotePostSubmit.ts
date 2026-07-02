@@ -3,6 +3,7 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { BasePage } from "../../../common";
+import { DOFinancialPositionPage } from "./financialPosition";
 
 /** Default PDF used on Customer Details after Reference submit (Upload tab). */
 export const DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF = path.join(
@@ -1339,6 +1340,19 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         { timeout: 45_000, intervals: [400, 1_200, 2_500] },
       )
       .toBeTruthy();
+  }
+
+  /** UDP-T3827 — upload a small in-memory JPEG on the Upload tab. */
+  async uploadMinimalJpegDocument(): Promise<void> {
+    this.logStep("Upload Minimal JPEG Document");
+    await this.ensureUploadTab();
+    await this.uploadFilePayload({
+      name: "minimal-upload.jpg",
+      mimeType: "image/jpeg",
+      buffer: MINIMAL_JPEG_BYTES,
+    });
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.postSubmitMicroDelay(800);
   }
 
   async uploadJpgThenPdfExpectBothVisible(): Promise<void> {
@@ -3385,6 +3399,120 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await this.waitForUploadStep();
     await expect(this.addNewNotesButton).toBeEnabled({ timeout: 30_000 });
     await expect(this.browseFilesButton).toBeVisible({ timeout: 30_000 });
+  }
+
+  private borrowerSummaryRow(customerName: string): Locator {
+    const escaped = customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return this.postSubmissionHost()
+      .locator("tr, .p-datatable-row, .p-row")
+      .filter({ hasText: new RegExp(escaped, "i") })
+      .first();
+  }
+
+  private postSubmissionCustomerNameLink(customerName: string): Locator {
+    const escaped = customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return this.page
+      .locator(
+        "div.align-items-center.capitalize.cursor-pointer.ng-star-inserted a.cursor-pointer.text-primary, a.cursor-pointer.text-primary",
+      )
+      .filter({ hasText: new RegExp(`^${escaped}`, "i") })
+      .first();
+  }
+
+  private postSubmissionFinancialPositionLink(customerName: string): Locator {
+    const row = this.borrowerSummaryRow(customerName);
+    return row
+      .getByRole("link", { name: /Financial\s*Position/i })
+      .or(
+        row
+          .locator("a, span.cursor-pointer, .text-primary")
+          .filter({ hasText: /Financial\s*Position/i }),
+      )
+      .or(
+        this.postSubmissionHost()
+          .locator("a, span.cursor-pointer, .text-primary")
+          .filter({ hasText: /Financial\s*Position/i }),
+      )
+      .first();
+  }
+
+  /**
+   * UDP-T3861 — contract terms and borrower summary fields are not editable on Post Submission
+   * (Notes and Upload remain interactive separately).
+   */
+  async expectPostSubmissionContractAndCustomerDetailsViewOnly(): Promise<void> {
+    this.logStep("Expect Post Submission Contract And Customer Details View Only");
+    await this.waitForUploadStep();
+    const host = this.postSubmissionHost();
+    await expect(host).toBeVisible({ timeout: 60_000 });
+
+    const quoteShell = this.page.locator("app-quote-details, app-standard-quote").last();
+    const lessDeposit = quoteShell.locator("app-less-deposit").first();
+    if (await lessDeposit.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const contractInputs = lessDeposit.locator(
+        "input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])",
+      );
+      await expect(contractInputs.filter({ visible: true })).toHaveCount(0, { timeout: 10_000 });
+
+      const enabledDropdowns = lessDeposit.locator("p-dropdown:not(.p-disabled) .p-dropdown-trigger");
+      await expect(enabledDropdowns.filter({ visible: true })).toHaveCount(0, { timeout: 8_000 });
+    }
+
+    const customerInputs = host.locator(
+      'input:not([type="file"]):not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])',
+    );
+    await expect(customerInputs.filter({ visible: true })).toHaveCount(0, { timeout: 10_000 });
+
+    const customerDropdowns = host.locator(
+      "p-dropdown:not(.p-disabled) .p-dropdown-trigger, p-multiselect:not(.p-disabled) .p-multiselect-trigger",
+    );
+    await expect(customerDropdowns.filter({ visible: true })).toHaveCount(0, { timeout: 8_000 });
+  }
+
+  /** UDP-T3861 — **Customer Name** hyperlink opens a view-only Personal Details screen. */
+  async clickPostSubmissionCustomerNameLinkAndExpectViewDialog(customerName: string): Promise<void> {
+    this.logStep(`Click Post Submission Customer Name Link (${customerName})`);
+    const link = this.postSubmissionCustomerNameLink(customerName);
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    await link.scrollIntoViewIfNeeded();
+    await link.click({ timeout: 15_000 });
+
+    await expect(this.page.locator(':text-is("1. Personal Details")')).toBeVisible({
+      timeout: 60_000,
+    });
+    const personalRoot = this.page.locator("app-personal-details").first();
+    await expect(personalRoot).toBeVisible({ timeout: 30_000 });
+    const editable = personalRoot.locator(
+      'input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])',
+    );
+    await expect(editable.filter({ visible: true })).toHaveCount(0, { timeout: 15_000 });
+
+    await this.clickPostSubmissionStepTab();
+    await this.waitForUploadStep();
+  }
+
+  /** UDP-T3861 — **Financial Position** hyperlink opens a view-only Financial Position screen. */
+  async clickPostSubmissionFinancialPositionLinkAndExpectViewDialog(
+    customerName: string = "Liza Marie Doe",
+  ): Promise<void> {
+    this.logStep(`Click Post Submission Financial Position Link (${customerName})`);
+    const link = this.postSubmissionFinancialPositionLink(customerName);
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    await link.scrollIntoViewIfNeeded();
+    await link.click({ timeout: 15_000 });
+
+    const fin = new DOFinancialPositionPage(this.page);
+    await fin.waitForFinancialPositionStep();
+    const finRoot = this.page
+      .locator(
+        "app-individual-financial, app-financial-position, app-individual-financial-details, app-business-financial, app-sole-trade-financial",
+      )
+      .first();
+    await expect(finRoot).toBeVisible({ timeout: 30_000 });
+    const editable = finRoot.locator(
+      'input:not([disabled]):not([readonly]), textarea:not([disabled]):not([readonly])',
+    );
+    await expect(editable.filter({ visible: true })).toHaveCount(0, { timeout: 15_000 });
   }
 
   /** UDP-T3852+ — loan date in the past confirmation dialog (Submit / Generate Documentation). */

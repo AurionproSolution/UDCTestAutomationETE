@@ -170,7 +170,7 @@ async function fillValidIndividualPersonalBorrower(p: DOPersonalDetailsPage): Pr
   await p.chooseLicenceType("Full Licence");
   await p.chooseCountryOfIssue("New Zealand");
   await p.enterLicenceNumber("AB123456");
-  await p.enterVersionNumber("001");
+  await p.enterVersionNumber("244");
   await p.chooseNewZealandResident("Yes");
   await p.chooseCountryOfBirth("New Zealand");
   await p.chooseCountryOfCitizenship("New Zealand");
@@ -182,35 +182,6 @@ async function navigatePersonalToAddressDetailsStep(
   address: DOAddressDetailsPage,
 ): Promise<void> {
   await personal.clickNextButton();
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const onAddress = await page
-      .locator('input[name="physicalSearchValue"], app-physical-address')
-      .filter({ visible: true })
-      .first()
-      .isVisible({ timeout: 25_000 })
-      .catch(() => false);
-    if (onAddress) {
-      await address.waitForPhysicalAddressStep();
-      await address.waitForAddressStepReadyForInput();
-      return;
-    }
-    const stillOnPersonal = await page
-      .locator("app-personal-details")
-      .filter({ visible: true })
-      .first()
-      .isVisible({ timeout: 3_000 })
-      .catch(() => false);
-    if (stillOnPersonal && attempt < 2) {
-      await personal.clickNextButton();
-      continue;
-    }
-    await page
-      .locator(".app-loader-overlay")
-      .filter({ visible: true })
-      .first()
-      .waitFor({ state: "hidden", timeout: 90_000 })
-      .catch(() => {});
-  }
   await address.waitForAddressStepReadyForInput();
 }
 
@@ -460,8 +431,32 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     "UDP-T3827 - TC_DOC_018 Post Submission — Previously Uploaded Documents Remain Visible; New Documents Can Be Added",
     { tag: ['@do', '@regression', '@UDP-T3827'] },
     async ({ page }) => {
-      test.setTimeout(600_000);
-      test.fixme(true, "Zephyr: Application has been submitted. Documents were uploaded in Customer Details. — needs AF matrix / e-sign / workflow state or dashboard reopen data.");
+      test.setTimeout(900_000);
+      const preSubmitPdf = DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF;
+      const postSubmitJpgName = "minimal-upload.jpg";
+
+      const { personal } = await openCsaQuoteThroughPersonalDetails(page);
+      const post = await completeCustomerDetailsAndSubmitToPostSubmission(page, personal);
+      await post.uploadDocument(preSubmitPdf);
+      await post.expectDocumentUploaded(preSubmitPdf);
+
+      const assetDetailsPage = new DOAssetDetailsPage(page);
+      await post.clickNextToEnterFullPostSubmission();
+      await post.submitApplicationFromPostSubmission();
+      const quoteId = await assetDetailsPage.readStandardQuoteIdFromHeader();
+
+      const dashboardPage = await openDealerDashboard(page);
+      await dashboardPage.navigateToQuotesAndApplicationsListing();
+      await dashboardPage.selectDealerListingGridType(/^Application/i);
+      await dashboardPage.searchDealerListingByQuoteId(quoteId);
+      await dashboardPage.openStandardQuoteByQuoteId(quoteId);
+
+      await navigateExistingApplicationToPostSubmission(page, assetDetailsPage, post);
+      await post.ensureUploadTab();
+      await post.expectDocumentUploaded(preSubmitPdf);
+      await post.uploadMinimalJpegDocument();
+      await post.expectDocumentUploaded(path.join("x", postSubmitJpgName));
+      await post.expectDocumentUploaded(preSubmitPdf);
     },
   );
 
@@ -982,12 +977,15 @@ test.describe("DO Portal — Documentation (Zephyr UDP-T3823–UDP-T3862)", () =
     { tag: ['@do', '@regression', '@UDP-T3861'] },
     async ({ page }) => {
       test.setTimeout(900_000);
+      const borrowerName = "Liza Marie Doe";
       const post = await openPostSubmissionUploadStep(page);
       await post.expectPostSubmissionScreenVisible();
-      await post.expectPostSubmissionNotesAndUploadActionable();
+      await post.expectPostSubmissionContractAndCustomerDetailsViewOnly();
       await post.addNoteAndSubmit("UDP-T3861 automation note — post submission upload check.");
       await post.uploadDocument();
       await post.expectDocumentUploaded();
+      await post.clickPostSubmissionCustomerNameLinkAndExpectViewDialog(borrowerName);
+      await post.clickPostSubmissionFinancialPositionLinkAndExpectViewDialog(borrowerName);
     },
   );
 

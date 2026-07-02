@@ -191,41 +191,13 @@ async function fillMinimalAddressContinue(
   await addressDetailsPage.clickNextButton();
 }
 
-/** Personal **Next** can stall behind `.app-loader-overlay` on QAT — retry before Address wait. */
+/** Personal **Next** → Address Details (loaders / validation handled in POM). */
 async function navigatePersonalToAddressDetailsStep(
   page: Page,
   personal: DOPersonalDetailsPage,
   address: DOAddressDetailsPage,
 ): Promise<void> {
   await personal.clickNextButton();
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const onAddress = await page
-      .locator('input[name="physicalSearchValue"], app-physical-address')
-      .filter({ visible: true })
-      .first()
-      .isVisible({ timeout: 25_000 })
-      .catch(() => false);
-    if (onAddress) {
-      await address.waitForPhysicalAddressStep();
-      return;
-    }
-    const stillOnPersonal = await page
-      .locator("app-personal-details")
-      .filter({ visible: true })
-      .first()
-      .isVisible({ timeout: 3_000 })
-      .catch(() => false);
-    if (stillOnPersonal && attempt < 2) {
-      await personal.clickNextButton();
-      continue;
-    }
-    await page
-      .locator(".app-loader-overlay")
-      .filter({ visible: true })
-      .first()
-      .waitFor({ state: "hidden", timeout: 90_000 })
-      .catch(() => {});
-  }
   await address.waitForAddressStepReadyForInput();
 }
 
