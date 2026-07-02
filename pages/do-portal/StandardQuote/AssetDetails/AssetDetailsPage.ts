@@ -1344,7 +1344,10 @@ export class DOAssetDetailsPage extends BasePage {
   /** After **Waive LMF**, payment schedule should not list timed LMF fee rows. */
   async expectPaymentScheduleExcludesLmfFeeRows(): Promise<void> {
     this.logStep("Expect Payment Schedule Excludes LMF Fee Rows");
-    const scope = this.paymentScheduleContentScope();
+    const dlg = this.editPaymentScheduleDialog();
+    const scope = (await dlg.isVisible({ timeout: 3_000 }).catch(() => false))
+      ? dlg
+      : this.paymentScheduleContentScope();
     const lmfRows = scope
       .locator("tbody tr")
       .filter({ hasText: /LMF|Loan\s+Maintenance|Maintenance\s+Fee/i });
@@ -2358,42 +2361,32 @@ export class DOAssetDetailsPage extends BasePage {
   async expectPaymentScheduleSectionWithTableData(): Promise<void> {
     this.logStep("Expect Payment Schedule Section With Table Data");
     const root = this.standardQuoteRoot();
-    await expect(root.getByText(/Payment\s+Schedule/i).first()).toBeVisible({
-      timeout: 45_000,
-    });
+    const title = root.getByText(/Payment\s+Schedule/i).first();
+    await expect(title).toBeVisible({ timeout: 45_000 });
+    await title.scrollIntoViewIfNeeded().catch(() => {});
 
-    const dateHdr = root
-      .getByRole("columnheader", { name: /^Date$/i })
-      .or(root.locator("th").filter({ hasText: /^Date$/i }))
+    const scheduleScope = this.paymentScheduleContentScope();
+    const table = scheduleScope
+      .locator("table")
+      .filter({ hasText: /Date|Number|Frequency|Payment/i })
       .first();
-    const freqHdr = root
-      .getByRole("columnheader", { name: /^Frequency$/i })
-      .or(root.locator("th").filter({ hasText: /^Frequency$/i }))
-      .first();
-    const payHdr = root
-      .getByRole("columnheader", { name: /^Payment$/i })
-      .or(root.locator("th").filter({ hasText: /^Payment$/i }))
-      .first();
-    const numHdr = root
-      .getByRole("columnheader", { name: /^Number$/i })
-      .or(root.locator("th").filter({ hasText: /^Number$/i }))
-      .first();
+    await expect(table).toBeVisible({ timeout: 25_000 });
+    await table.scrollIntoViewIfNeeded().catch(() => {});
 
-    await expect(dateHdr.or(root.getByText(/^Date$/).first())).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(numHdr.or(root.getByText(/^Number$/).first())).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(freqHdr.or(root.getByText(/^Frequency$/).first())).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(payHdr.or(root.getByText(/^Payment$/).first())).toBeVisible({
-      timeout: 10_000,
-    });
+    // PrimeNG grid headers often expose "Date Show Filter Menu", not exact "Date".
+    const scheduleColumnHeader = (label: string): Locator =>
+      table
+        .getByRole("columnheader", { name: new RegExp(`^${label}\\b`, "i") })
+        .or(table.locator("th").filter({ hasText: new RegExp(`^${label}$`, "i") }))
+        .first();
 
-    const dataRow = root
-      .locator("tr")
+    await expect(scheduleColumnHeader("Date")).toBeVisible({ timeout: 15_000 });
+    await expect(scheduleColumnHeader("Number")).toBeVisible({ timeout: 10_000 });
+    await expect(scheduleColumnHeader("Frequency")).toBeVisible({ timeout: 10_000 });
+    await expect(scheduleColumnHeader("Payment")).toBeVisible({ timeout: 10_000 });
+
+    const dataRow = table
+      .locator("tbody tr")
       .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
       .filter({ hasText: /Monthly|Weekly|Fortnightly/i })
       .first();

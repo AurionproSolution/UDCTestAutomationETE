@@ -39,9 +39,12 @@ export function standardQuoteRoot(page: Page) {
   return page.locator("app-quote-details, app-standard-quote").first();
 }
 
+export type StandardQuoteProductDialog = "csa" | "financeLease";
+
 export async function openStandardQuoteForDealer(
   page: Page,
   dealerName: string,
+  opts?: { productDialog?: StandardQuoteProductDialog },
 ): Promise<{ dashboard: DODashboardPage; asset: DOAssetDetailsPage }> {
   const dashboard = new DODashboardPage(page);
   const asset = new DOAssetDetailsPage(page);
@@ -49,7 +52,11 @@ export async function openStandardQuoteForDealer(
   await dashboard.waitForAuthenticatedDashboard();
   await dashboard.selectDealer(dealerName);
   await dashboard.clickCreateStandardQuote();
-  await dashboard.selectCSAproduct();
+  if (opts?.productDialog === "financeLease") {
+    await dashboard.selectFinanceLeaseProduct();
+  } else {
+    await dashboard.selectCSAproduct();
+  }
   await expect(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   return { dashboard, asset };
 }
@@ -92,7 +99,7 @@ export async function addMinimalUsedAssetForLmf(
   await addAsset.clickCrossButton();
 }
 
-/** Calculable CSA quote with LMF-populated pricing after **Calculate**. */
+/** Calculable quote with LMF-populated pricing after **Calculate** (CSA or Finance Lease). */
 export async function prepareCalculableLmfQuote(
   page: Page,
   asset: DOAssetDetailsPage,
@@ -100,22 +107,46 @@ export async function prepareCalculableLmfQuote(
 ): Promise<void> {
   const cfg = loadLmfConfig();
   const addAsset = new DOAddAssetPage(page);
-  await selectProductProgram(
-    asset,
-    opts?.product ?? cfg.lmfConfigured.product,
-    opts?.program ?? cfg.lmfConfigured.program,
-  );
+  const product = opts?.product ?? cfg.lmfConfigured.product;
+  const program = opts?.program ?? cfg.lmfConfigured.program;
+  const origRef = opts?.origRef ?? "SQ-LMF-CALC";
+  const isFinanceLease = /finance\s*lease/i.test(product);
+
+  await selectProductProgram(asset, product, program);
   await addMinimalUsedAssetForLmf(asset, addAsset);
   await asset.termsOfFinance("36");
   await asset.interestRate("4");
+
+  if (isFinanceLease) {
+    await asset.clickCalculateButton();
+    await asset.waitForLoadingComplete(120_000);
+    await asset.enterResidualValuePercentFinanceLease("20");
+    await asset.interestRate("4");
+    await asset.enterOriginationReference(origRef);
+    await asset.clickCalculateButton();
+    await asset.waitForLoadingComplete(120_000);
+    return;
+  }
+
   await asset.ensureLoanDateAndFirstPaymentReadyForCalculate();
-  await asset.enterOriginationReference(opts?.origRef ?? "SQ-LMF-CALC");
+  await asset.enterOriginationReference(origRef);
   await asset.clickCalculateButton();
   await asset.waitForLoadingComplete(120_000);
-  await asset.enterOriginationReference(opts?.origRef ?? "SQ-LMF-CALC");
+  await asset.enterOriginationReference(origRef);
   await asset.interestRate("4");
   await asset.clickCalculateButton();
   await asset.waitForLoadingComplete(120_000);
+}
+
+/** Zephyr UDP-T3936: LMF is $0.00, or the row is absent when AF has no preconfigured LMF (common on FL). */
+export async function expectLoanMaintenanceFeeZeroOrAbsent(asset: DOAssetDetailsPage): Promise<void> {
+  await asset.scrollLessDepositIntoView();
+  const lmfLabel = asset.standardQuoteRoot().getByText(/Loan\s+Maintenance\s+Fee/i).first();
+  if (!(await lmfLabel.isVisible({ timeout: 15_000 }).catch(() => false))) {
+    return;
+  }
+  await asset.expectLoanMaintenanceFeeZero();
+  await asset.expectLoanMaintenanceFeeDisplayOnly();
 }
 
 export async function openQuickQuoteStandardQuoteForDealer(
@@ -159,16 +190,18 @@ export async function openQuickQuoteStandardQuoteForDealer(
   return { asset, quickQuote };
 }
 
-/** After QQ → SQ, run **Calculate** so LMF / Waive LMF rows populate on Asset Details. */
+/** After QQ → SQ, run Asset Details steps through **Calculate** so LMF / Waive LMF populate. */
 export async function calculateQuickQuoteStandardQuote(
   asset: DOAssetDetailsPage,
   origRef = "SQ-LMF-QQ-CALC",
 ): Promise<void> {
+  await asset.waitForAssetDetailsStepReady();
   await asset.ensureLoanDateAndFirstPaymentReadyForCalculate();
   await asset.enterOriginationReference(origRef);
   await asset.clickCalculateButton();
   await asset.waitForLoadingComplete(120_000);
   await asset.enterOriginationReference(origRef);
+  await asset.interestRate("4");
   await asset.clickCalculateButton();
   await asset.waitForLoadingComplete(120_000);
 }
