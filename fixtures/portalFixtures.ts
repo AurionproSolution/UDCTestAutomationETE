@@ -16,7 +16,7 @@ import { CommonUtils } from '../utils/commonUtils';
 import { TableUtils } from '../utils/tableUtils';
 
 // Import test data
-import doLoginData from '../testData/do-portal/loginData.json';
+import { getDoPortalLoginData } from '../testData/do-portal/doLoginData';
 import rssLoginData from '../testData/rss-portal/loginData.json';
 import cssLoginData from '../testData/css-portal/loginData.json';
 
@@ -87,7 +87,7 @@ export const test = base.extend<PortalFixtures>({
       } else if (process.env.ALLOW_DO_MFA_RELOGIN === '1') {
         const loginPage = new DOLoginPage(page);
         await loginPage.navigate();
-        await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+        await loginPage.loginWithTestData(getDoPortalLoginData().validUsers[0]);
         await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
         await dashboardPage.waitForAuthenticatedDashboard();
       } else {
@@ -166,7 +166,7 @@ export async function getAuthenticatedPage(page: Page, portal: PortalType): Prom
         } else if (process.env.ALLOW_DO_MFA_RELOGIN === '1') {
           const loginPage = new DOLoginPage(page);
           await loginPage.navigate();
-          await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+          await loginPage.loginWithTestData(getDoPortalLoginData().validUsers[0]);
           await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
           await dashboardPage.waitForAuthenticatedDashboard();
         } else {

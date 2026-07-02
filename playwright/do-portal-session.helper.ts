@@ -14,7 +14,6 @@ import * as path from "path";
 import {
   DO_PORTAL_ACCESS_TOKEN_COOKIE_NAMES,
   DO_PORTAL_ACCESS_TOKEN_KEYS,
-  DO_PORTAL_AUTH_META_FILE_REL,
   DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX,
   DO_PORTAL_KEEPALIVE_INTERVAL_MS,
   DO_PORTAL_LONG_TEST_TIMEOUT_MS,
@@ -23,14 +22,15 @@ import {
   DO_PORTAL_REFRESH_TOKEN_KEYS,
   DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS,
   type DoPortalAuthMeta,
+  getDoPortalAuthMetaFileRel,
   OIDC_USER_KEY_PATTERN,
   doPortalAuthOrigins,
   doPortalOAuthClientId,
   doPortalTokenEndpointUrl,
 } from "../config/do-portal-auth.config";
-import { DO_DEALER_STANDARD_QUOTE_URL } from "../config/env";
+import { DO_BASE_URL, DO_DEALER_STANDARD_QUOTE_URL, getCurrentEnv } from "../config/env";
 import { logTestStep } from "../utils/testStepLog";
-import { doPortalAuthFile } from "./do-portal-auth.helper";
+import { getDoPortalAuthFile } from "./do-portal-auth.helper";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -147,7 +147,7 @@ export function isAccessTokenExpiringSoon(
 // ---------------------------------------------------------------------------
 
 export function readStorageStateFile(
-  filePath = doPortalAuthFile,
+  filePath = getDoPortalAuthFile(),
 ): PlaywrightStorageState | undefined {
   if (!fs.existsSync(filePath)) return undefined;
   try {
@@ -159,7 +159,7 @@ export function readStorageStateFile(
 
 export function writeStorageStateFile(
   state: PlaywrightStorageState,
-  filePath = doPortalAuthFile,
+  filePath = getDoPortalAuthFile(),
 ): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.${process.pid}.tmp`;
@@ -168,7 +168,7 @@ export function writeStorageStateFile(
 }
 
 export function readAuthMeta(): DoPortalAuthMeta | undefined {
-  const metaPath = path.join(process.cwd(), DO_PORTAL_AUTH_META_FILE_REL);
+  const metaPath = path.join(process.cwd(), getDoPortalAuthMetaFileRel());
   if (!fs.existsSync(metaPath)) return undefined;
   try {
     return JSON.parse(fs.readFileSync(metaPath, "utf8")) as DoPortalAuthMeta;
@@ -178,13 +178,13 @@ export function readAuthMeta(): DoPortalAuthMeta | undefined {
 }
 
 export function writeAuthMeta(meta: DoPortalAuthMeta): void {
-  const metaPath = path.join(process.cwd(), DO_PORTAL_AUTH_META_FILE_REL);
+  const metaPath = path.join(process.cwd(), getDoPortalAuthMetaFileRel());
   fs.mkdirSync(path.dirname(metaPath), { recursive: true });
   fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
 }
 
 async function withStorageFileLock<T>(fn: () => Promise<T> | T): Promise<T> {
-  const lockPath = `${doPortalAuthFile}.lock`;
+  const lockPath = `${getDoPortalAuthFile()}.lock`;
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     try {
@@ -199,7 +199,7 @@ async function withStorageFileLock<T>(fn: () => Promise<T> | T): Promise<T> {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
-  throw new Error(`Timed out acquiring lock for ${doPortalAuthFile}`);
+  throw new Error(`Timed out acquiring lock for ${getDoPortalAuthFile()}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +409,7 @@ export function discoverTokensFromStorageState(
 function resolveSessionSavedAtMs(
   meta: DoPortalAuthMeta | undefined,
   tokens: DiscoveredTokens | undefined,
-  filePath = doPortalAuthFile,
+  filePath = getDoPortalAuthFile(),
 ): number | undefined {
   if (meta?.sessionSavedAt) {
     const parsed = Date.parse(meta.sessionSavedAt);
@@ -430,11 +430,29 @@ export function evaluateDoPortalSessionFromState(
   meta: DoPortalAuthMeta | undefined,
   options: { filePath?: string; nowMs?: number } = {},
 ): DoPortalSessionEvaluation {
-  const filePath = options.filePath ?? doPortalAuthFile;
+  const filePath = options.filePath ?? getDoPortalAuthFile();
   const nowMs = options.nowMs ?? Date.now();
 
   if (!state) {
     return { action: "mfa", reason: "Auth storage file does not exist." };
+  }
+
+  const expectedEnv = getCurrentEnv();
+  const expectedBaseUrl = DO_BASE_URL().replace(/\/$/, "");
+  if (meta?.testEnv && meta.testEnv !== expectedEnv) {
+    return {
+      action: "mfa",
+      reason: `Saved session is for "${meta.testEnv}" but TEST_ENV is "${expectedEnv}".`,
+    };
+  }
+  if (meta?.portalBaseUrl) {
+    const savedBaseUrl = meta.portalBaseUrl.replace(/\/$/, "");
+    if (savedBaseUrl !== expectedBaseUrl) {
+      return {
+        action: "mfa",
+        reason: `Saved session URL "${savedBaseUrl}" does not match ${expectedBaseUrl}.`,
+      };
+    }
   }
 
   const tokens = discoverTokensFromStorageState(state, meta);
@@ -490,7 +508,7 @@ export function evaluateDoPortalSessionFromState(
 }
 
 export function evaluateDoPortalSession(
-  filePath = doPortalAuthFile,
+  filePath = getDoPortalAuthFile(),
 ): DoPortalSessionEvaluation {
   if (!fs.existsSync(filePath)) {
     return { action: "mfa", reason: "Auth storage file does not exist." };
@@ -501,7 +519,7 @@ export function evaluateDoPortalSession(
   });
 }
 
-export function hasReusableDoPortalSession(filePath = doPortalAuthFile): boolean {
+export function hasReusableDoPortalSession(filePath = getDoPortalAuthFile()): boolean {
   return evaluateDoPortalSession(filePath).action === "reuse";
 }
 
@@ -599,6 +617,8 @@ export function discoverAndSaveAuthMeta(
 
   const meta: DoPortalAuthMeta = {
     discoveredAt: nowIso,
+    testEnv: getCurrentEnv(),
+    portalBaseUrl: DO_BASE_URL(),
     sessionSavedAt: options.stampSessionSavedAt
       ? nowIso
       : previousMeta?.sessionSavedAt,
@@ -917,7 +937,7 @@ async function applyTokensToPage(
 }
 
 export async function refreshAccessTokenFromFile(
-  filePath = doPortalAuthFile,
+  filePath = getDoPortalAuthFile(),
 ): Promise<TokenRefreshResult> {
   return withStorageFileLock(async () => {
     const state = readStorageStateFile(filePath);
@@ -1005,7 +1025,7 @@ export async function ensureFreshDoPortalStorageFile(): Promise<TokenRefreshResu
     };
   }
 
-  if (!fs.existsSync(doPortalAuthFile)) {
+  if (!fs.existsSync(getDoPortalAuthFile())) {
     return { ok: false, message: evaluation.reason };
   }
 
@@ -1016,10 +1036,11 @@ export async function saveDoPortalStorageState(
   context: BrowserContext,
   options: DiscoverAuthMetaOptions = {},
 ): Promise<void> {
+  const authFile = getDoPortalAuthFile();
   await withStorageFileLock(async () => {
-    fs.mkdirSync(path.dirname(doPortalAuthFile), { recursive: true });
-    await context.storageState({ path: doPortalAuthFile });
-    const state = readStorageStateFile();
+    fs.mkdirSync(path.dirname(authFile), { recursive: true });
+    await context.storageState({ path: authFile });
+    const state = readStorageStateFile(authFile);
     if (state) discoverAndSaveAuthMeta(state, options);
   });
 }
@@ -1027,7 +1048,7 @@ export async function saveDoPortalStorageState(
 /** Load saved cookies into an existing context (after MFA in fixture / stale reuseBrowser). */
 export async function applyDoPortalAuthToContext(
   context: BrowserContext,
-  filePath = doPortalAuthFile,
+  filePath = getDoPortalAuthFile(),
 ): Promise<void> {
   const state = readStorageStateFile(filePath);
   if (!state?.cookies?.length) return;

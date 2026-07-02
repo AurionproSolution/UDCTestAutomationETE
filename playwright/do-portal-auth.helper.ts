@@ -7,9 +7,9 @@
 import { chromium, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { DO_BASE_URL, DO_DEALER_STANDARD_QUOTE_URL } from "../config/env";
+import { DO_BASE_URL, DO_DEALER_STANDARD_QUOTE_URL, getCurrentEnv } from "../config/env";
 import { DOLoginPage } from "../pages";
-import doLoginData from "../testData/do-portal/loginData.json";
+import { getDoPortalLoginData } from "../testData/do-portal/doLoginData";
 import { logTestStep } from "../utils/testStepLog";
 import {
   discoverAndSaveAuthMeta,
@@ -19,12 +19,17 @@ import {
   refreshAccessTokenFromFile,
 } from "./do-portal-session.helper";
 
-export const doPortalAuthFile = path.join(
-  process.cwd(),
-  "playwright",
-  ".auth",
-  "do-portal.json",
-);
+export function getDoPortalAuthFile(): string {
+  return path.join(
+    process.cwd(),
+    "playwright",
+    ".auth",
+    `do-portal.${getCurrentEnv()}.json`,
+  );
+}
+
+/** @deprecated Use {@link getDoPortalAuthFile}() for environment-specific storage. */
+export const doPortalAuthFile = getDoPortalAuthFile();
 
 function attachTokenDiscoveryListeners(page: Page): void {
   page.on("response", (response) => {
@@ -35,18 +40,27 @@ function attachTokenDiscoveryListeners(page: Page): void {
 }
 
 export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
-  fs.mkdirSync(path.dirname(doPortalAuthFile), { recursive: true });
+  const authFile = getDoPortalAuthFile();
+  const loginData = getDoPortalLoginData();
+  const env = getCurrentEnv();
+  const baseUrl = DO_BASE_URL();
+
+  fs.mkdirSync(path.dirname(authFile), { recursive: true });
   attachTokenDiscoveryListeners(page);
 
+  logTestStep(
+    `DO auth: environment=${env}, url=${baseUrl}, user=${loginData.validUsers[0].username}`,
+  );
+
   const loginPage = new DOLoginPage(page);
-  await loginPage.navigate(DO_BASE_URL());
-  await loginPage.loginWithTestData(doLoginData.validUsers[0]);
+  await loginPage.navigate(baseUrl);
+  await loginPage.loginWithTestData(loginData.validUsers[0]);
   await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
   await page.waitForLoadState("domcontentloaded");
-  logTestStep(`Saving DO portal storage state to ${doPortalAuthFile}`);
-  await page.context().storageState({ path: doPortalAuthFile });
+  logTestStep(`Saving DO portal storage state to ${authFile}`);
+  await page.context().storageState({ path: authFile });
 
-  const state = readStorageStateFile();
+  const state = readStorageStateFile(authFile);
   if (state) discoverAndSaveAuthMeta(state, { stampSessionSavedAt: true });
 }
 

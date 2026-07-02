@@ -13,7 +13,7 @@ import * as fs from "fs";
 import type { OrtoniReportConfig } from "ortoni-report";
 import * as os from "os";
 import path from "path";
-import { doPortalAuthFile } from "./playwright/do-portal-auth.helper";
+import { getDoPortalAuthFile } from "./playwright/do-portal-auth.helper";
 
 /** VS Code / Cursor Test Explorer: one project is always enabled (see docs/test-explorer.md). */
 const ideMode = process.env.PLAYWRIGHT_IDE === "1";
@@ -77,8 +77,9 @@ function doPortalResolvedUse(): typeof maximizedChrome & {
   storageState?: string;
 } {
   if (!useGlobalDoAuth) return maximizedChrome;
-  if (fs.existsSync(doPortalAuthFile)) {
-    return { ...maximizedChrome, storageState: doPortalAuthFile };
+  const authFile = getDoPortalAuthFile();
+  if (fs.existsSync(authFile)) {
+    return { ...maximizedChrome, storageState: authFile };
   }
   return maximizedChrome;
 }

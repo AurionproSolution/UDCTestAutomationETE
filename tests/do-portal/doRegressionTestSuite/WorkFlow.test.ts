@@ -8,7 +8,7 @@
 import { expect, test } from "@fixtures/doPortalTest";
 import { existsSync } from "fs";
 import path from "path";
-import { doPortalAuthFile } from "../../../playwright/do-portal-auth.helper";
+import { getDoPortalAuthFile } from "../../../playwright/do-portal-auth.helper";
 import {
   CSA_SQ_PRODUCT,
   CSA_SQ_PROGRAM,
@@ -204,7 +204,7 @@ test.describe("Workflow - CSA @do @regression", () => {
       test.setTimeout(900_000);
       const seed = getWorkflowSeed("WF-CONCURRENT-EDIT");
       const quoteId = resolveSeedQuoteId(seed);
-      const contextB = await page.context().browser()!.newContext({ storageState: doPortalAuthFile });
+      const contextB = await page.context().browser()!.newContext({ storageState: getDoPortalAuthFile() });
       const pageB = await contextB.newPage();
       const assetA = new DOAssetDetailsPage(page);
       const assetB = new DOAssetDetailsPage(pageB);
