@@ -9,6 +9,7 @@ import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDeta
 import {
   authorisedDealer,
   calculateQuickQuoteStandardQuote,
+  expectLoanMaintenanceFeeZeroOrAbsent,
   loadLmfConfig,
   openQuickQuoteStandardQuoteForDealer,
   openStandardQuoteForDealer,
@@ -80,14 +81,15 @@ test.describe("LMF @do @regression", () => {
       const cfg = loadLmfConfig();
       const zeroProduct = process.env.LMF_ZERO_PRODUCT?.trim() || cfg.lmfZeroConfigured.product;
       const zeroProgram = process.env.LMF_ZERO_PROGRAM?.trim() || cfg.lmfZeroConfigured.program;
-      const { asset } = await openStandardQuoteForDealer(page, authorisedDealer());
+      const { asset } = await openStandardQuoteForDealer(page, authorisedDealer(), {
+        productDialog: "financeLease",
+      });
       await prepareCalculableLmfQuote(page, asset, {
         product: zeroProduct,
         program: zeroProgram,
         origRef: "SQ-LMF-T3936",
       });
-      await asset.expectLoanMaintenanceFeeZero();
-      await asset.expectLoanMaintenanceFeeDisplayOnly();
+      await expectLoanMaintenanceFeeZeroOrAbsent(asset);
     },
   );
 
@@ -123,8 +125,29 @@ test.describe("LMF @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3938"] },
     async ({ page }) => {
       test.setTimeout(600_000);
+      const cfg = loadLmfConfig();
+      const sqProgram =
+        process.env.LMF_QUICK_QUOTE_SQ_PROGRAM?.trim() ||
+        cfg.quickQuote.standardQuoteProgram ||
+        cfg.lmfConfigured.program;
+
       const { asset } = await openQuickQuoteStandardQuoteForDealer(page, authorisedDealer());
+
+      // Standard Quote — verify QQ carry-over, then complete steps through Calculate.
+      await asset.waitForAssetDetailsStepReady();
+      await asset.expectProductProgramCarriedFromQuickQuote(cfg.quickQuote.product, sqProgram, {
+        requireLockedDropdowns: false,
+      });
+      await asset.expectFinanceCarriedFromQuickQuote({
+        cashPrice: /20[, ]?000|20000/i,
+        term: /36/,
+        frequencyText: /Monthly/i,
+        interestRate: /^4(\.0+)?$/,
+        depositPercent: /10/,
+      });
       await calculateQuickQuoteStandardQuote(asset, "SQ-LMF-T3938");
+
+      // Zephyr: Waiving LMF checkbox in Less Deposit below Total Amount Borrowed.
       await asset.expectWaiveLmfInLessDepositBelowTotalBorrowed();
       await asset.expectWaiveLmfCheckboxVisibleAndEnabled();
     },
