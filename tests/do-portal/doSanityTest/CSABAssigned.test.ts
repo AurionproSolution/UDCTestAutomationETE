@@ -7,6 +7,7 @@ import { test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
+  DOCustomerDetailsPage,
   DOBusinessDetailsPage,
   DOCustomerQuotePostSubmitPage,
   DODashboardPage,
@@ -79,13 +80,11 @@ test.describe("DO Portal - CSAC Assigned - Sanity @do @smoke", () => {
     await assetDetailsPage.interestRate("4");
     await assetDetailsPage.clickCalculateButton();
     await assetDetailsPage.clickNextButton();
-    await assetDetailsPage.waitForAddBorrowerButton();
-    await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-    await assetDetailsPage.searchByDropdownClick();
-    await assetDetailsPage.selectUDCSelectOption();
-    await assetDetailsPage.enterUDCCustomerNumber("420");
-    await assetDetailsPage.clickSearchButton();
-    await assetDetailsPage.clickAddNewCustomerButton();
+    const customerDetailsPage = new DOCustomerDetailsPage(page);
+    await customerDetailsPage.waitForAddBorrowerButton();
+    await customerDetailsPage.clickAddBorrowersOrGuarantors();
+    await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+    await customerDetailsPage.clickAddNewCustomerButton();
     await businessDetailsPage.waitForBusinessDetailsStep();
     await businessDetailsPage.selectOrganisationType("Incorporated Body");
     await businessDetailsPage.enterLegalName("Test Legal Entity Ltd");

@@ -7,7 +7,7 @@
 import { expect, test } from "@fixtures/doPortalTest";
 import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
-import { DOAssetDetailsPage, DODashboardPage, DOQuickQuotePage } from "../../../pages";
+import { DOAssetDetailsPage, DOCustomerDetailsPage, DODashboardPage, DOQuickQuotePage } from "../../../pages";
 
 const AFV_SQ_PRODUCT = "AFV-B-Assigned";
 const TLC_DEALER = "Armstrong Prestige Wellington";
@@ -873,8 +873,9 @@ test.describe("Standard Quote - AFV @do @regression", () => {
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
       await calculateAfVQuote(page, assetDetailsPage);
       await assetDetailsPage.clickNextButton();
-      await assetDetailsPage.waitForAddBorrowerButton();
-      const addBtnVisible = await assetDetailsPage.addBorrowerorGuarantorButton.isVisible().catch(() => false);
+      const customerDetailsPage = new DOCustomerDetailsPage(page);
+      await customerDetailsPage.waitForAddBorrowerButton();
+      const addBtnVisible = await customerDetailsPage.addBorrowersOrGuarantorsButton.isVisible().catch(() => false);
       const personalVisible = await page.locator("app-personal-details").isVisible().catch(() => false);
       expect.soft(addBtnVisible || personalVisible).toBeTruthy();
     },

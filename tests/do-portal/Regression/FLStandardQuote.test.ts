@@ -10,6 +10,7 @@ import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
     DOAddOnsAccessoriesPage,
     DOAssetDetailsPage,
+    DOCustomerDetailsPage,
     DOBusinessDetailsPage,
     DODashboardPage,
     DOReferenceDetailsPage,
@@ -137,13 +138,11 @@ test(
  
     await assetDetailsPage.enterOriginationReferenceFinanceLease("Test Orig Ref 123");
     await assetDetailsPage.clickNextButtonFinanceLease("Test Orig Ref 123");
-    await assetDetailsPage.waitForAddBorrowerButton();
-    await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-    await assetDetailsPage.searchByDropdownClick();
-    await assetDetailsPage.selectUDCSelectOption();
-    await assetDetailsPage.enterUDCCustomerNumber("420");
-    await assetDetailsPage.clickSearchButton();
-    await assetDetailsPage.clickAddNewCustomerButton();
+    const customerDetailsPage = new DOCustomerDetailsPage(page);
+    await customerDetailsPage.waitForAddBorrowerButton();
+    await customerDetailsPage.clickAddBorrowersOrGuarantors();
+    await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+    await customerDetailsPage.clickAddNewCustomerButton();
     const businessDetailsPage = new DOBusinessDetailsPage(page);
     const addressDetailsPage = new DOAddressDetailsPage(page);
     const financialPositionPage = new DOFinancialPositionPage(page);

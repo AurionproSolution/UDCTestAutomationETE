@@ -7,6 +7,7 @@ import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
   DOBusinessDetailsPage,
+  DOCustomerDetailsPage,
   DOCustomerQuotePostSubmitPage,
   DODashboardPage,
 } from "../../../pages";
@@ -82,13 +83,11 @@ test.describe("DO Portal - Finance Lease - Sanity @do @smoke", () => {
     await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
     await assetDetailsPage.clickCalculateButton();
     await assetDetailsPage.clickNextButton();
-    await assetDetailsPage.waitForAddBorrowerButton();
-    await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-    await assetDetailsPage.searchByDropdownClick();
-    await assetDetailsPage.selectUDCSelectOption();
-    await assetDetailsPage.enterUDCCustomerNumber("420");
-    await assetDetailsPage.clickSearchButton();
-    await assetDetailsPage.clickAddNewCustomerButton();
+    const customerDetailsPage = new DOCustomerDetailsPage(page);
+    await customerDetailsPage.waitForAddBorrowerButton();
+    await customerDetailsPage.clickAddBorrowersOrGuarantors();
+    await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+    await customerDetailsPage.clickAddNewCustomerButton();
     await businessDetailsPage.waitForBusinessDetailsStep();
     await businessDetailsPage.selectOrganisationType("Incorporated Body");
     await businessDetailsPage.enterLegalName("Test Legal Entity Ltd");

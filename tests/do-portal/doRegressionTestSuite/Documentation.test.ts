@@ -12,6 +12,7 @@ import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAddressDetailsPage,
   DOAssetDetailsPage,
+  DOCustomerDetailsPage,
   DOCustomerQuotePostSubmitPage,
   DODashboardPage,
   DOEmploymentDetailsPage,
@@ -137,13 +138,11 @@ async function openCustomerDetailsBeforeSubmit(page: Page): Promise<DOCustomerQu
   await assetDetailsPage.clickCalculateButton();
   await assetDetailsPage.enterOriginationReference("SQ-DOC-Ref");
   await assetDetailsPage.clickNextButton();
-  await assetDetailsPage.waitForAddBorrowerButton();
-  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-  await assetDetailsPage.searchByDropdownClick();
-  await assetDetailsPage.selectUDCSelectOption();
-  await assetDetailsPage.enterUDCCustomerNumber("420");
-  await assetDetailsPage.clickSearchButton();
-  await assetDetailsPage.clickAddNewCustomerButton();
+  const customerDetailsPage = new DOCustomerDetailsPage(page);
+  await customerDetailsPage.waitForAddBorrowerButton();
+  await customerDetailsPage.clickAddBorrowersOrGuarantors();
+  await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+  await customerDetailsPage.clickAddNewCustomerButton();
   const personal = new DOPersonalDetailsPage(page);
   await fillValidIndividualPersonalBorrower(personal);
   return new DOCustomerQuotePostSubmitPage(page);
@@ -159,13 +158,11 @@ async function openPostSubmissionUploadStep(page: Page): Promise<DOCustomerQuote
   await assetDetailsPage.clickCalculateButton();
   await assetDetailsPage.enterOriginationReference("SQ-DOC-Ref");
   await assetDetailsPage.clickNextButton();
-  await assetDetailsPage.waitForAddBorrowerButton();
-  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-  await assetDetailsPage.searchByDropdownClick();
-  await assetDetailsPage.selectUDCSelectOption();
-  await assetDetailsPage.enterUDCCustomerNumber("420");
-  await assetDetailsPage.clickSearchButton();
-  await assetDetailsPage.clickAddNewCustomerButton();
+  const customerDetailsPage = new DOCustomerDetailsPage(page);
+  await customerDetailsPage.waitForAddBorrowerButton();
+  await customerDetailsPage.clickAddBorrowersOrGuarantors();
+  await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+  await customerDetailsPage.clickAddNewCustomerButton();
   const personal = new DOPersonalDetailsPage(page);
   await fillValidIndividualPersonalBorrower(personal);
   await personal.clickNextButton();
@@ -209,13 +206,11 @@ async function openReferenceDetailsStepWithPastLoanDate(page: Page): Promise<{
   await assetDetailsPage.enterOriginationReference("SQ-DOC-PastLoan");
   await assetDetailsPage.clickCalculateButton();
   await assetDetailsPage.clickNextButton();
-  await assetDetailsPage.waitForAddBorrowerButton();
-  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-  await assetDetailsPage.searchByDropdownClick();
-  await assetDetailsPage.selectUDCSelectOption();
-  await assetDetailsPage.enterUDCCustomerNumber("420");
-  await assetDetailsPage.clickSearchButton();
-  await assetDetailsPage.clickAddNewCustomerButton();
+  const customerDetailsPage = new DOCustomerDetailsPage(page);
+  await customerDetailsPage.waitForAddBorrowerButton();
+  await customerDetailsPage.clickAddBorrowersOrGuarantors();
+  await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+  await customerDetailsPage.clickAddNewCustomerButton();
   const personal = new DOPersonalDetailsPage(page);
   await fillValidIndividualPersonalBorrower(personal);
   await personal.clickNextButton();

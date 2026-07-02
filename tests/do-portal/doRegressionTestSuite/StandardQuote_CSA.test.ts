@@ -7,7 +7,7 @@
 import { expect, test } from "@fixtures/doPortalTest";
 import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
-import { DOAssetDetailsPage, DODashboardPage } from "../../../pages";
+import { DOAssetDetailsPage, DOCustomerDetailsPage, DODashboardPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
@@ -1176,14 +1176,15 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
       await assetDetailsPage.clickCalculateButton();
       await assetDetailsPage.clickNextButton();
-      await assetDetailsPage.waitForAddBorrowerButton();
-      const addBtnVisible = await assetDetailsPage.addBorrowerorGuarantorButton
+      const customerDetailsPage = new DOCustomerDetailsPage(page);
+      await customerDetailsPage.waitForAddBorrowerButton();
+      const addBtnVisible = await customerDetailsPage.addBorrowersOrGuarantorsButton
         .isVisible()
         .catch(() => false);
       const personalVisible = await page.locator("app-personal-details").isVisible().catch(() => false);
       expect.soft(addBtnVisible || personalVisible).toBeTruthy();
       if (addBtnVisible) {
-        await expect.soft(assetDetailsPage.addBorrowerorGuarantorButton).toBeVisible();
+        await expect.soft(customerDetailsPage.addBorrowersOrGuarantorsButton).toBeVisible();
       }
     },
   );

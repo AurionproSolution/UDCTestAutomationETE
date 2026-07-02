@@ -11,6 +11,7 @@ import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAddressDetailsPage,
   DOAssetDetailsPage,
+  DOCustomerDetailsPage,
   DOCustomerQuotePostSubmitPage,
   DODashboardPage,
   DOEmploymentDetailsPage,
@@ -20,6 +21,10 @@ import {
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
+import {
+  DOSearchCustomerDialog,
+  resolveSearchCustomerDialog,
+} from "../../../pages/do-portal/StandardQuote/CustomerDetails/searchCustomerDialog";
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
 const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
@@ -95,9 +100,10 @@ async function prepareCalculableCsaQuote(
 async function openStandardQuoteOnCustomerDetailsStep(
   page: Page,
   opts?: { origRef?: string },
-): Promise<DOAssetDetailsPage> {
+): Promise<DOCustomerDetailsPage> {
   const origRef = opts?.origRef ?? CSA_CUSTOMER_DETAILS_ORIG_REF;
   const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+  const customerDetailsPage = new DOCustomerDetailsPage(page);
   const addAssetPage = new DOAddAssetPage(page);
   await selectCsaProductAndProgram(assetDetailsPage);
   await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage, { origRef });
@@ -108,28 +114,25 @@ async function openStandardQuoteOnCustomerDetailsStep(
   for (let attempt = 0; attempt < 3; attempt++) {
     await assetDetailsPage.clickNextButton();
     try {
-      await assetDetailsPage.waitForAddBorrowerButton();
-      return assetDetailsPage;
+      await customerDetailsPage.waitForAddBorrowerButton();
+      return customerDetailsPage;
     } catch (err) {
       if (attempt === 2) throw err;
       await assetDetailsPage.enterOriginationReference(origRef);
       await assetDetailsPage.waitForLoadingComplete();
     }
   }
-  return assetDetailsPage;
+  return customerDetailsPage;
 }
 
 /** Search path used in CSA regression: unlikely match â†’ **Add New Customer** enabled. */
 async function openAddNewIndividualPersonal(
-  assetDetailsPage: DOAssetDetailsPage,
+  customerDetailsPage: DOCustomerDetailsPage,
 ): Promise<DOPersonalDetailsPage> {
-  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-  await assetDetailsPage.searchByDropdownClick();
-  await assetDetailsPage.selectUDCSelectOption();
-  await assetDetailsPage.enterUDCCustomerNumber("420");
-  await assetDetailsPage.clickSearchButton();
-  await assetDetailsPage.clickAddNewCustomerButton();
-  return new DOPersonalDetailsPage(assetDetailsPage.page);
+  await customerDetailsPage.clickAddBorrowersOrGuarantors();
+  await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+  await customerDetailsPage.clickAddNewCustomerButton();
+  return new DOPersonalDetailsPage(customerDetailsPage.page);
 }
 
 async function fillValidIndividualPersonalBorrower(p: DOPersonalDetailsPage): Promise<void> {
@@ -398,15 +401,8 @@ async function returnToReferenceOrSummaryForPartyObserve(page: Page): Promise<vo
   await navigateToBorrowerSummaryIfAvailable(page);
 }
 
-function customerSearchDialog(page: Page): Locator {
-  return page
-    .getByRole("dialog")
-    .filter({ has: page.getByRole("button", { name: /^Search$/i }) })
-    .last();
-}
-
 function searchTypeRadio(page: Page, label: RegExp): Locator {
-  return customerSearchDialog(page).getByRole("radio", { name: label });
+  return new DOSearchCustomerDialog(page).searchTypeRadio(label);
 }
 
   
@@ -417,10 +413,10 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3709"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
       const root = standardQuoteRoot(page);
       await expect.soft(root.getByText(/Customer\s+Details/i).first()).toBeVisible({ timeout: 60_000 });
-      const addBtn = assetDetailsPage.addBorrowerorGuarantorButton;
+      const addBtn = customerDetailsPage.addBorrowersOrGuarantorsButton;
       if (await addBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
         await expect.soft(addBtn).toBeVisible();
       } else {
@@ -434,9 +430,9 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3710"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      const dlg = customerSearchDialog(page);
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
+      const dlg = resolveSearchCustomerDialog(page);
       await expect.soft(dlg).toBeVisible({ timeout: 60_000 });
       const ind = searchTypeRadio(page, /Individual/i).first();
       await expect.soft(ind).toBeVisible({ timeout: 20_000 });
@@ -462,10 +458,10 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3712"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      const dlg = customerSearchDialog(page);
-      await assetDetailsPage.searchByDropdownClick();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
+      const dlg = resolveSearchCustomerDialog(page);
+      await customerDetailsPage.searchCustomer.openSearchByDropdown();
       const panel = page.locator(".p-dropdown-panel").last();
       const opt = panel.getByRole("option", { name: /Customer Name|First Name/i }).first();
       if (await opt.isVisible({ timeout: 15_000 }).catch(() => false)) {
@@ -480,15 +476,15 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3713"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
+      await customerDetailsPage.searchCustomer.openSearchByDropdown();
       const panel = page.locator(".p-dropdown-panel").last();
       const opt = panel.getByRole("option", { name: /Driver|Licence/i }).first();
       if (await opt.isVisible({ timeout: 15_000 }).catch(() => false)) {
         await opt.click();
       }
-      await expect.soft(customerSearchDialog(page)).toBeVisible();
+      await expect.soft(resolveSearchCustomerDialog(page)).toBeVisible();
     },
   );
 
@@ -497,13 +493,13 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3714"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber("420");
-      await assetDetailsPage.clickSearchButton();
-      await expect.soft(customerSearchDialog(page)).toBeVisible();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
+      await customerDetailsPage.searchCustomer.openSearchByDropdown();
+      await customerDetailsPage.searchCustomer.selectSearchByUdcCustomerNumber();
+      await customerDetailsPage.searchCustomer.enterUdcCustomerNumber("420");
+      await customerDetailsPage.searchCustomer.clickSearch();
+      await expect.soft(resolveSearchCustomerDialog(page)).toBeVisible();
     },
   );
 
@@ -530,8 +526,8 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3717"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
       const trust = searchTypeRadio(page, /Trust/i).first();
       if (await trust.isVisible({ timeout: 10_000 }).catch(() => false)) {
         await trust.check({ force: true });
@@ -547,14 +543,14 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3718"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber("999999999999");
-      await assetDetailsPage.clickSearchButton();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
+      await customerDetailsPage.searchCustomer.openSearchByDropdown();
+      await customerDetailsPage.searchCustomer.selectSearchByUdcCustomerNumber();
+      await customerDetailsPage.searchCustomer.enterUdcCustomerNumber("999999999999");
+      await customerDetailsPage.searchCustomer.clickSearch();
       await expect
-        .soft(assetDetailsPage.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
+        .soft(customerDetailsPage.searchCustomer.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
         .toBeVisible({ timeout: 90_000 });
     },
   );
@@ -564,14 +560,14 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3719"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber("420");
-      await assetDetailsPage.clickSearchButton();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
+      await customerDetailsPage.searchCustomer.openSearchByDropdown();
+      await customerDetailsPage.searchCustomer.selectSearchByUdcCustomerNumber();
+      await customerDetailsPage.searchCustomer.enterUdcCustomerNumber("420");
+      await customerDetailsPage.searchCustomer.clickSearch();
       await expect
-        .soft(assetDetailsPage.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
+        .soft(customerDetailsPage.searchCustomer.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
         .toBeVisible({ timeout: 90_000 });
     },
   );
@@ -584,12 +580,12 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
       if (!EXISTING_UDC_CUSTOMER_NUMBER) {
         test.skip(true, "Set UDC_EXISTING_CUSTOMER_NUMBER to a real party for FIS search selection.");
       }
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
-      await assetDetailsPage.clickSearchButton();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
+      await customerDetailsPage.searchCustomer.openSearchByDropdown();
+      await customerDetailsPage.searchCustomer.selectSearchByUdcCustomerNumber();
+      await customerDetailsPage.searchCustomer.enterUdcCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
+      await customerDetailsPage.searchCustomer.clickSearch();
       const row = page.locator("table tbody tr, .p-datatable-tbody tr").filter({ hasText: /.+/ }).first();
       await row.click({ timeout: 30_000 }).catch(async () => {
         await page.getByRole("row").nth(1).click();
@@ -933,12 +929,12 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
       if (!EXISTING_UDC_CUSTOMER_NUMBER) {
         test.skip(true, "Set UDC_EXISTING_CUSTOMER_NUMBER for FIS pre-population check.");
       }
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
-      await assetDetailsPage.clickSearchButton();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
+      await customerDetailsPage.searchCustomer.openSearchByDropdown();
+      await customerDetailsPage.searchCustomer.selectSearchByUdcCustomerNumber();
+      await customerDetailsPage.searchCustomer.enterUdcCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
+      await customerDetailsPage.searchCustomer.clickSearch();
       await page.locator("table tbody tr").first().click({ timeout: 30_000 }).catch(async () => {
         await page.getByRole("row").nth(1).click();
       });
@@ -1015,14 +1011,14 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3751"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
       const trust = searchTypeRadio(page, /Trust/i).first();
       if (!(await trust.isVisible({ timeout: 10_000 }).catch(() => false))) {
         test.skip(true, "Trust search type not available.");
       }
       await trust.check({ force: true });
-      await assetDetailsPage.clickAddNewCustomerButton();
+      await customerDetailsPage.clickAddNewCustomerButton();
       const trustPage = new DOTrustDetailsPage(page);
       await trustPage.waitForTrustDetailsStep();
       await trustPage.selectTrustTypeFirstAvailableOption();
@@ -1043,14 +1039,14 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3709â€
     { tag: ["@do", "@regression", "@UDP-T3752"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+      const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
+      await customerDetailsPage.clickAddBorrowersOrGuarantors();
       const trust = searchTypeRadio(page, /Trust/i).first();
       if (!(await trust.isVisible({ timeout: 10_000 }).catch(() => false))) {
         test.skip(true, "Trust search type not available.");
       }
       await trust.check({ force: true });
-      await assetDetailsPage.clickAddNewCustomerButton();
+      await customerDetailsPage.clickAddNewCustomerButton();
       const trustPage = new DOTrustDetailsPage(page);
       await trustPage.waitForTrustDetailsStep();
       await trustPage.touchTrustTypeDropdownWithoutSelection();

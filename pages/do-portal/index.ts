@@ -8,6 +8,8 @@ export { DOLoginPage } from "./login/LoginPage";
 export { DOQuickQuotePage } from "./QuickQuote/QuickQuotePage";
 export { DOAddOnsAccessoriesPage } from "./StandardQuote/AssetDetails/AddOnsAccessoriesPage";
 export { DOAssetDetailsPage } from "./StandardQuote/AssetDetails/AssetDetailsPage";
+export { DOCustomerDetailsPage } from "./StandardQuote/CustomerDetails/customerDetailsPage";
+export { DOSearchCustomerDialog, resolveSearchCustomerDialog } from "./StandardQuote/CustomerDetails/searchCustomerDialog";
 export { DOBusinessDetailsPage } from "./StandardQuote/CustomerDetails/businessDetails";
 export { DOAddressDetailsPage } from "./StandardQuote/CustomerDetails/addressDetails";
 export { DOEmploymentDetailsPage } from "./StandardQuote/CustomerDetails/employmentDetails";

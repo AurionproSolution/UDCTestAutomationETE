@@ -234,6 +234,18 @@ Include appropriate tags based on:
 ### Page Objects to Use
 Select from existing page objects that match the feature area. If no suitable page objects exist, note this in the generated test comments.
 
+**DO Standard Quote — wizard step → page object** (do not put Customer Details / Search Customer on `DOAssetDetailsPage`):
+
+| Step | Use |
+|------|-----|
+| Asset Details | `DOAssetDetailsPage` |
+| Customer Details (borrowers, Add Borrowers / Guarantors) | `DOCustomerDetailsPage` |
+| Search Customer modal | `DOSearchCustomerDialog` via `customerDetailsPage.searchCustomer` |
+| Personal / Address / Employment / etc. | `DOPersonalDetailsPage`, `DOAddressDetailsPage`, … under `StandardQuote/CustomerDetails/` |
+| Post submission | `DOCustomerQuotePostSubmitPage` |
+
+After **Next** from Asset Details, instantiate or return `DOCustomerDetailsPage` (see `CustomerDetails.test.ts` → `openStandardQuoteOnCustomerDetailsStep`). Legacy `assetDetailsPage.clickAddBorrowerorGuarantorButton()` still works but prefer `DOCustomerDetailsPage` for new tests.
+
 ## Step 5: Generate Test Script
 
 Create a complete test file with this structure:

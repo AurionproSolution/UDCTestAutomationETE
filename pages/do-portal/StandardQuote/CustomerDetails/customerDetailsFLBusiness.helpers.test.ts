@@ -13,6 +13,7 @@ import { DOAddAssetPage } from "../AssetDetails/AddAssetPage";
 import { DOAssetDetailsPage } from "../AssetDetails/AssetDetailsPage";
 import { DOAddressDetailsPage } from "./addressDetails";
 import { DOBusinessDetailsPage } from "./businessDetails";
+import { DOCustomerDetailsPage } from "./customerDetailsPage";
 import { DOFinancialPositionPage } from "./financialPosition";
 
 const FL_SQ_PRODUCT = "Finance Lease - Business Asg";
@@ -47,10 +48,11 @@ async function addMinimalFlUsedAsset(
 export async function openFinanceLeaseBusinessAsgToAddBorrowerStep(
   page: Page,
   opts?: { origRef?: string },
-): Promise<DOAssetDetailsPage> {
+): Promise<DOCustomerDetailsPage> {
   const origRef = opts?.origRef ?? FL_CUSTOMER_DETAILS_ORIG_REF;
   const dashboardPage = new DODashboardPage(page);
   const assetDetailsPage = new DOAssetDetailsPage(page);
+  const customerDetailsPage = new DOCustomerDetailsPage(page);
   const addAssetPage = new DOAddAssetPage(page);
   await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
   await dashboardPage.waitForAuthenticatedDashboard();
@@ -72,20 +74,17 @@ export async function openFinanceLeaseBusinessAsgToAddBorrowerStep(
   await assetDetailsPage.clickCalculateButton();
   await assetDetailsPage.enterOriginationReference(origRef);
   await assetDetailsPage.clickNextButton();
-  await assetDetailsPage.waitForAddBorrowerButton();
-  return assetDetailsPage;
+  await customerDetailsPage.waitForAddBorrowerButton();
+  return customerDetailsPage;
 }
 
 async function openAddNewBusinessBorrower(
-  assetDetailsPage: DOAssetDetailsPage,
+  customerDetailsPage: DOCustomerDetailsPage,
 ): Promise<DOBusinessDetailsPage> {
-  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-  await assetDetailsPage.searchByDropdownClick();
-  await assetDetailsPage.selectUDCSelectOption();
-  await assetDetailsPage.enterUDCCustomerNumber("420");
-  await assetDetailsPage.clickSearchButton();
-  await assetDetailsPage.clickAddNewCustomerButton();
-  return new DOBusinessDetailsPage(assetDetailsPage.page);
+  await customerDetailsPage.clickAddBorrowersOrGuarantors();
+  await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
+  await customerDetailsPage.clickAddNewCustomerButton();
+  return new DOBusinessDetailsPage(customerDetailsPage.page);
 }
 
 async function navigateFlBusinessBorrowerToFinancialPosition(
@@ -138,7 +137,7 @@ async function navigateFlBusinessBorrowerToFinancialPosition(
 export async function openFlBusinessStandardQuoteAndReachFinancialPosition(
   page: Page,
 ): Promise<DOFinancialPositionPage> {
-  const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-  const biz = await openAddNewBusinessBorrower(asset);
+  const customerDetails = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+  const biz = await openAddNewBusinessBorrower(customerDetails);
   return navigateFlBusinessBorrowerToFinancialPosition(page, biz);
 }

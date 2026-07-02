@@ -1,5 +1,6 @@
 import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common/BasePage";
+import { DOCustomerDetailsPage } from "../CustomerDetails/customerDetailsPage";
 
 export class DOAssetDetailsPage extends BasePage {
   readonly dialogBox: Locator;
@@ -45,6 +46,7 @@ export class DOAssetDetailsPage extends BasePage {
   readonly balloonAmountInput: Locator;
   readonly balloonPercentInput: Locator;
   readonly balloonFixedCheckbox: Locator;
+  private readonly customerDetails: DOCustomerDetailsPage;
 
   constructor(page: Page) {
     super(page);
@@ -156,55 +158,12 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
     this.calculateButton = page.getByRole("button", { name: /^Calculate$/i });
     this.nextButton = page.getByRole("button", { name: "Next" }).last();
-    /** Customer Details: CTA label varies (`/`, `&`, `and`), may live on `p-button` or `span.p-button-label` (not always in a11y name). */
-    const quoteCustomerShell = page.locator("app-standard-quote, app-quote-details").first();
-    const addBorrowerLabel = /Add\s+Borrowers?\s*(\/|&|and)\s*Guarantors?/i;
-    const addBorrowerClickableFromText = (root: Locator): Locator =>
-      root
-        .getByText(addBorrowerLabel)
-        .first()
-        .locator("xpath=ancestor::button[1] | ancestor::a[1] | ancestor::p-button[1]");
-    const addBorrowerLooseTextClickable = (root: Locator): Locator =>
-      root
-        .getByText("Add Borrowers / Guarantors", { exact: false })
-        .first()
-        .locator("xpath=ancestor::button[1] | ancestor::a[1] | ancestor::p-button[1]");
-    this.addBorrowerorGuarantorButton = quoteCustomerShell
-      .getByRole("button", { name: addBorrowerLabel })
-      .or(quoteCustomerShell.getByRole("link", { name: addBorrowerLabel }))
-      .or(page.getByRole("button", { name: addBorrowerLabel }))
-      .or(page.getByRole("link", { name: addBorrowerLabel }))
-      .or(page.locator(':text-is("Add Borrowers / Guarantors")'))
-      .or(addBorrowerClickableFromText(quoteCustomerShell))
-      .or(addBorrowerClickableFromText(page.locator("body")))
-      .or(addBorrowerLooseTextClickable(quoteCustomerShell))
-      .or(addBorrowerLooseTextClickable(page.locator("body")))
-      .or(
-        quoteCustomerShell
-          .locator("button.p-button, button.p-element, p-button")
-          .filter({ hasText: addBorrowerLabel })
-          .first(),
-      )
-      .or(
-        page
-          .locator("button, a")
-          .filter({ hasText: addBorrowerLabel })
-          .first(),
-      )
-      .first();
-    this.customerSearchDialog = page
-      .getByRole("dialog")
-      .filter({ has: page.getByRole("button", { name: /Search/i }) })
-      .last();
-    this.searchByDropdown = this.customerSearchDialog
-      .getByRole("button", { name: "dropdown trigger" })
-      .first();
-    this.searchButton = this.customerSearchDialog.getByRole("button", {
-      name: "Search",
-    });
-    this.addNewCustomerButton = this.customerSearchDialog.getByRole("button", {
-      name: /Add New Customer/i,
-    });
+    this.customerDetails = new DOCustomerDetailsPage(page);
+    this.addBorrowerorGuarantorButton = this.customerDetails.addBorrowersOrGuarantorsButton;
+    this.customerSearchDialog = this.customerDetails.customerSearchDialog;
+    this.searchByDropdown = this.customerDetails.searchByDropdown;
+    this.searchButton = this.customerDetails.searchButton;
+    this.addNewCustomerButton = this.customerDetails.addNewCustomerButton;
 
     this.additionalFundsRoot = page.locator("app-additional-funds").first();
     this.additionalFundsInput = this.additionalFundsRoot
@@ -3439,226 +3398,39 @@ export class DOAssetDetailsPage extends BasePage {
     );
   }
 
+  /** @deprecated use {@link DOCustomerDetailsPage.waitForAddBorrowerButton} */
   async waitForAddBorrowerButton(): Promise<void> {
-    this.logStep("Wait For Add Borrower Button");
-    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
-    await this.standardQuoteRoot()
-      .getByText(/Customer\s+Details/i)
-      .first()
-      .waitFor({ state: "visible", timeout: 90_000 })
-      .catch(() => {});
-    await expect
-      .poll(
-        async () => {
-          const btn = await this.addBorrowerorGuarantorButton.isVisible().catch(() => false);
-          const personal = await this.page.locator("app-personal-details").isVisible().catch(() => false);
-          return btn || personal;
-        },
-        { timeout: 120_000 },
-      )
-      .toBe(true);
-    if (await this.addBorrowerorGuarantorButton.isVisible().catch(() => false)) {
-      await this.addBorrowerorGuarantorButton.scrollIntoViewIfNeeded();
-    }
+    return this.customerDetails.waitForAddBorrowerButton();
   }
 
+  /** @deprecated use {@link DOCustomerDetailsPage.clickAddBorrowersOrGuarantors} */
   async clickAddBorrowerorGuarantorButton(): Promise<void> {
-    this.logStep("Click Add Borroweror Guarantor Button");
-    await this.addBorrowerorGuarantorButton.click();
-    await this.customerSearchDialog.waitFor({
-      state: "visible",
-      timeout: 60000,
-    });
+    return this.customerDetails.clickAddBorrowersOrGuarantors();
   }
+
+  /** @deprecated use {@link DOSearchCustomerDialog.openSearchByDropdown} */
   async searchByDropdownClick(): Promise<void> {
-    this.logStep("Search By Dropdown Click");
-    await this.customerSearchDialog.waitFor({
-      state: "visible",
-      timeout: 60000,
-    });
-    await this.searchByDropdown.waitFor({ state: "visible", timeout: 30000 });
-    await this.searchByDropdown.click();
+    return this.customerDetails.searchByDropdownClick();
   }
+
+  /** @deprecated use {@link DOSearchCustomerDialog.selectSearchByUdcCustomerNumber} */
   async selectUDCSelectOption(): Promise<void> {
-    this.logStep("Select UDC option");
-    const panel = this.page.locator(".p-dropdown-panel").last();
-    const opt = panel.getByRole("option", { name: /UDC Customer Number/i });
-    await opt.waitFor({ state: "visible", timeout: 30000 });
-    await opt.click();
-    await this.page
-      .locator(".p-dropdown-panel")
-      .waitFor({ state: "hidden", timeout: 15000 })
-      .catch(() => {});
+    return this.customerDetails.selectUDCSelectOption();
   }
 
+  /** @deprecated use {@link DOSearchCustomerDialog.enterUdcCustomerNumber} */
   async enterUDCCustomerNumber(customerNumber: string): Promise<void> {
-    this.logStep(`Entered UDC customer number as ${this.stepValueDisplay(customerNumber)}`);
-    await this.customerSearchDialog.waitFor({
-      state: "visible",
-      timeout: 60000,
-    });
-
-    const namedTextboxes = this.customerSearchDialog.getByRole("textbox", {
-      name: /UDC|Customer number|Customer Number|search value|Enter customer/i,
-    });
-    const angularTextHost = this.customerSearchDialog
-      .locator("text")
-      .filter({ hasText: /UDC Customer Number/ })
-      .locator("#text");
-    const labelFollowingInput = this.customerSearchDialog.locator(
-      "xpath=.//label[contains(normalize-space(.), 'UDC Customer Number') or contains(., 'Customer number')][1]/following::input[contains(@class,'p-inputtext') or contains(@class,'form-control')][1]",
-    );
-
-    const deadline = Date.now() + 35000;
-    while (Date.now() < deadline) {
-      const n = await namedTextboxes.count();
-      for (let i = 0; i < n; i++) {
-        const el = namedTextboxes.nth(i);
-        if (
-          (await el.isVisible().catch(() => false)) &&
-          (await el.isEnabled().catch(() => false))
-        ) {
-          await el.fill(customerNumber);
-          return;
-        }
-      }
-
-      const udcFromText = angularTextHost.last();
-      if (
-        (await udcFromText.count()) > 0 &&
-        (await udcFromText.isVisible().catch(() => false)) &&
-        (await udcFromText.isEnabled().catch(() => false))
-      ) {
-        await udcFromText.fill(customerNumber);
-        return;
-      }
-
-      const fromLabel = labelFollowingInput.first();
-      if (
-        (await fromLabel.count()) > 0 &&
-        (await fromLabel.isVisible().catch(() => false)) &&
-        (await fromLabel.isEnabled().catch(() => false))
-      ) {
-        await fromLabel.fill(customerNumber);
-        return;
-      }
-
-      const inputs = this.customerSearchDialog.locator(
-        "input.p-inputtext, input.form-control, input[type='search'], textarea.p-inputtextarea",
-      );
-      const total = await inputs.count();
-      for (let i = 0; i < total; i++) {
-        const inp = inputs.nth(i);
-        if (
-          (await inp.isVisible().catch(() => false)) &&
-          (await inp.isEnabled().catch(() => false))
-        ) {
-          await inp.fill(customerNumber);
-          return;
-        }
-      }
-
-      await this.page.waitForTimeout(200);
-    }
-
-    throw new Error(
-      "No visible, enabled UDC customer number field found in borrower search dialog after 35s.",
-    );
+    return this.customerDetails.enterUDCCustomerNumber(customerNumber);
   }
+
+  /** @deprecated use {@link DOSearchCustomerDialog.clickSearch} */
   async clickSearchButton(): Promise<void> {
-    this.logStep("Click Search Button");
-    await this.searchButton.waitFor({ state: "visible", timeout: 30000 });
-    await this.searchButton.click();
-    await this.page
-      .waitForLoadState("networkidle", { timeout: 35000 })
-      .catch(() => {});
-    await this.page
-      .locator(".p-progress-spinner, .p-blockui, [class*='p-progress']")
-      .first()
-      .waitFor({ state: "hidden", timeout: 45000 })
-      .catch(() => {});
-    await this.page.waitForTimeout(1200);
+    return this.customerDetails.clickSearchButton();
   }
 
-  /**
-   * Resolves "Add New Customer" — scoped dialog filter can miss if the app
-   * changes dialog structure; fall back to last dialog or page-wide button.
-   */
-  private addNewCustomerButtonCandidates(): Locator[] {
-    return [
-      this.customerSearchDialog.getByRole("button", {
-        name: /Add New Customer/i,
-      }),
-      this.page
-        .getByRole("dialog")
-        .last()
-        .getByRole("button", { name: /Add New Customer/i }),
-      this.page.getByRole("button", { name: /Add New Customer/i }),
-    ];
-  }
-
+  /** @deprecated use {@link DOSearchCustomerDialog.clickAddNewCustomer} */
   async clickAddNewCustomerButton(): Promise<void> {
-    this.logStep("Click Add New Customer Button");
-    const deadlineEnable = Date.now() + 90000;
-    let addBtn: Locator | null = null;
-
-    while (Date.now() < deadlineEnable && !addBtn) {
-      for (const candidate of this.addNewCustomerButtonCandidates()) {
-        const first = candidate.first();
-        if (!(await first.isVisible().catch(() => false))) continue;
-        if (await first.isEnabled().catch(() => false)) {
-          addBtn = first;
-          break;
-        }
-      }
-      if (!addBtn) await this.page.waitForTimeout(400);
-    }
-
-    if (!addBtn) {
-      throw new Error(
-        "Add New Customer was not visible and enabled within 90s. " +
-          "Use a UDC number with no matches so this button enables after Search.",
-      );
-    }
-
-    await addBtn.scrollIntoViewIfNeeded();
-    await addBtn.click({ timeout: 30000 });
-
-    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
-    await this.page
-      .waitForLoadState("networkidle", { timeout: 25000 })
-      .catch(() => {});
-    await this.page.waitForTimeout(600);
-
-    const markers: Locator[] = [
-      this.page.locator('input[name="dateOfBirth"]'),
-      this.page.getByRole("button", { name: /Choose Date/i }),
-      this.page.getByRole("textbox", { name: /First Name/i }),
-      this.page
-        .locator("text")
-        .filter({ hasText: /^First Name/ })
-        .locator("#text"),
-      this.page.locator(
-        "//label[contains(normalize-space(.),'Title')]/following-sibling::div//div[@aria-label='dropdown trigger']",
-      ),
-      this.page.locator("app-personal-detail-email-contact"),
-      this.page.getByRole("textbox", { name: /Phone number/i }),
-      this.page.locator(
-        "//span//label[contains(text(),'Title')]/following-sibling::div//span",
-      ),
-    ];
-
-    const deadline = Date.now() + 120000;
-    while (Date.now() < deadline) {
-      for (const m of markers) {
-        if (await m.first().isVisible().catch(() => false)) return;
-      }
-      await this.page.waitForTimeout(250);
-    }
-
-    throw new Error(
-      "Personal details did not open after Add New Customer (expected DOB, Choose Date, First Name, Title, or email block).",
-    );
+    return this.customerDetails.clickAddNewCustomerButton();
   }
 
   // ---- AFV Standard Quote helpers (UDP-T4020–UDP-T4072) ----
