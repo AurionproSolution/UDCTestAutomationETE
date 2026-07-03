@@ -12,14 +12,16 @@ DO login in IDE mode uses **`globalSetup`** (invisible in the tree), not the sep
 
 ### DO session reuse (15-minute gate)
 
-Saved auth lives in **`playwright/.auth/do-portal.json`** with timestamps in **`do-portal-auth-meta.json`**.
+Saved auth lives in **`playwright/.auth/do-portal.<env>.json`** with timestamps in **`do-portal-auth-meta.<env>.json`**.
 
 Before each DO test run, the framework checks:
 
 - **Reuse** saved cookies when the session was saved **≤ 15 minutes ago** and the JWT is still valid.
 - **Run MFA login** when the session is **older than 15 minutes**, the JWT is **expired**, or the JWT expires within **2 minutes**.
 
-`playwright.reuseBrowser` is **`false`** in workspace settings so a fresh browser context always loads the latest saved cookies after MFA.
+In IDE mode, MFA runs on the **same browser** as your test (login → OTP → dealer). `globalSetup` only performs silent token refresh — it does not open a second headed window.
+
+If a reused session lands on **`/landing`** (Select Application), the dashboard helper clicks **Quotes & Applications** automatically before continuing.
 
 After pulling this change:
 

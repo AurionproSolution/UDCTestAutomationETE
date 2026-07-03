@@ -19,4 +19,5 @@ export { DOCustomerQuotePostSubmitPage } from "./StandardQuote/CustomerDetails/c
 export { DOReferenceDetailsPage } from "./StandardQuote/CustomerDetails/referenceDetails";
 export { DOSoleTraderDetailsPage } from "./StandardQuote/CustomerDetails/soleTraderDetails";
 export { DOTrustDetailsPage } from "./StandardQuote/CustomerDetails/trustDetails";
+export { DOSettlementPage } from "./StandardQuote/Settlement/SettlementPage";
 

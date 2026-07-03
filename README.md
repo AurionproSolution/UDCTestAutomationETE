@@ -302,7 +302,31 @@ test('should display dashboard @do', async ({ doAuthenticatedPage, doDashboardPa
 | `CI` | Set automatically on GitHub Actions | - |
 | `PLAYWRIGHT_IDE` | Set to `1` in VS Code/Cursor (`.vscode/settings.json`) for a **single** `udc-chromium` project so Test Explorer lists all portals under `tests/` | unset (multi-project config for CLI/CI) |
 | `PLAYWRIGHT_USE_DO_GLOBAL_AUTH` | On CI, set to `1` to run `playwright/do-portal-auth.setup.ts` and apply DO `storageState` for tag projects and DO matrix jobs | unset (DO auth off on CI) |
-| `DO_PORTAL_TOTP_SECRET` | Base32 TOTP secret used for automated DO MFA in SIT (`TEST_ENV=sit`) | unset |
+| `DO_PORTAL_TOTP_SECRET` | Base32 TOTP secret used for automated DO MFA in SIT (`TEST_ENV=sit`). See [SIT TOTP Setup](#sit-totp-setup) below. | unset |
+
+### SIT TOTP Setup
+
+For automated TOTP/MFA login on SIT environment, configure the TOTP secret using one of these methods:
+
+**Option 1: Environment Variable (Recommended for CI/Local)**
+```powershell
+$env:TEST_ENV="sit"
+$env:DO_PORTAL_TOTP_SECRET="YOUR_BASE32_SECRET"
+npm run test:do:sit
+```
+
+**Option 2: Local Secrets File (Recommended for daily development)**
+```powershell
+# Copy the example file
+copy config/secrets.local.json.example config/secrets.local.json
+# Edit and add your TOTP secret
+```
+The `config/secrets.local.json` file is gitignored and will be used automatically when `TEST_ENV=sit`.
+
+**Option 3: Shared Team Secret (For teams with one shared SIT account)**
+Store the TOTP secret in your team's password manager (1Password, LastPass, etc.) and share the setup instructions. Each team member creates their own `config/secrets.local.json` with the shared secret.
+
+**Without TOTP Secret:** If no secret is configured, the test will stop at the OTP prompt during headed login - manually enter the code from your authenticator app.
 | `PLAYWRIGHT_SKIP_ORTONI` | Set to `1` to skip Ortoni reporter (IDE default) | unset (Ortoni enabled on CLI) |
 | `PLAYWRIGHT_SKIP_REPORT_BACKUP` | Set to `1` to skip automatic copy to `results/report-<timestamp>/` | unset (backup enabled on CLI) |
 

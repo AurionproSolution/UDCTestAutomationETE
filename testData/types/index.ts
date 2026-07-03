@@ -22,6 +22,8 @@ export interface LoginTestData {
 export interface LoginUsers {
   validUsers: LoginCredentials[];
   invalidUsers: InvalidLoginData[];
+  /** Base32 TOTP secret for automated MFA (SIT only). */
+  totpSecret?: string;
 }
 
 export interface InvalidLoginData extends LoginCredentials {

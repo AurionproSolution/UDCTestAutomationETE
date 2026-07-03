@@ -800,9 +800,13 @@ export class DOAssetDetailsPage extends BasePage {
     const lessDeposit = this.page.locator("app-less-deposit").first();
     return lessDeposit
       .locator("gen-button")
-      .filter({ has: lessDeposit.locator("span.p-button-label", { hasText: /^Settlement$/i }) })
+      .filter({
+        has: lessDeposit.locator("span.p-button-label", {
+          hasText: /^(Calculate\s+)?Settlement$/i,
+        }),
+      })
       .locator("button.p-button")
-      .or(lessDeposit.getByRole("button", { name: /^Settlement$/i }))
+      .or(lessDeposit.getByRole("button", { name: /^(Calculate\s+)?Settlement$/i }))
       .first();
   }
 
@@ -2889,6 +2893,15 @@ export class DOAssetDetailsPage extends BasePage {
     return scope
       .getByRole("radio", { checked: true })
       .filter({ has: equalsIcon })
+      .first()
+      .or(
+        this.standardQuoteRoot()
+          .getByRole("radio", { checked: true })
+          .filter({ has: this.standardQuoteRoot().locator("i.pi.pi-equals") })
+          .first(),
+      );
+  }
+
   async expectPaymentScheduleSectionWithTableData(): Promise<void> {
     this.logStep("Expect Payment Schedule Section With Table Data");
     const root = this.standardQuoteRoot();
@@ -2921,6 +2934,7 @@ export class DOAssetDetailsPage extends BasePage {
       .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
       .filter({ hasText: /Monthly|Weekly|Fortnightly/i })
       .first();
+    await expect(dataRow).toBeVisible({ timeout: 25_000 });
   }
 
   private async isLeasePaymentDefaultViewActive(): Promise<boolean> {
@@ -5217,6 +5231,26 @@ export class DOAssetDetailsPage extends BasePage {
     return this.financeSummaryLabelValueField("Interest Charge");
   }
 
+  /** Row label anchor for **Interest Charge**. */
+  interestChargeLabel(): Locator {
+    return this.standardQuoteRoot().locator(':text-is("Interest Charge")').first();
+  }
+
+  /** Display value for **Interest Charge** on CSA Webform. */
+  interestChargeDisplayLabel(): Locator {
+    const icLabel = this.interestChargeLabel();
+    return icLabel
+      .locator(
+        'xpath=ancestor::div[contains(@class,"grid")][1]//label[contains(@class,"customePadding")]',
+      )
+      .first()
+      .or(
+        icLabel.locator(
+          'xpath=following::label[contains(@class,"customePadding")][1]',
+        ),
+      );
+  }
+
   parseDisplayedCurrency(raw: string): number {
     const n = Number.parseFloat(raw.replace(/[^0-9.-]/g, ""));
     return Number.isFinite(n) ? n : 0;
@@ -5284,6 +5318,44 @@ export class DOAssetDetailsPage extends BasePage {
         ? (await field.inputValue().catch(() => "")).trim()
         : ((await field.textContent()) ?? "").trim();
     return this.parseDisplayedCurrency(raw);
+  }
+
+  /** Poll-friendly read — skips long visibility waits. */
+  async readTotalAmountBorrowedNumericFast(): Promise<number> {
+    const display = this.totalAmountBorrowedDisplayLabel();
+    if (await display.isVisible({ timeout: 500 }).catch(() => false)) {
+      const raw = ((await display.textContent()) ?? "").replace(/\s+/g, " ").trim();
+      return this.parseDisplayedCurrency(raw);
+    }
+    const field = this.totalAmountBorrowedField();
+    if (await field.isVisible({ timeout: 500 }).catch(() => false)) {
+      const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
+      const raw =
+        tag === "input" || tag === "textarea"
+          ? (await field.inputValue().catch(() => "")).trim()
+          : ((await field.textContent()) ?? "").trim();
+      return this.parseDisplayedCurrency(raw);
+    }
+    return 0;
+  }
+
+  /** Poll-friendly read — skips long visibility waits. */
+  async readInterestChargeNumericFast(): Promise<number> {
+    const display = this.interestChargeDisplayLabel();
+    if (await display.isVisible({ timeout: 500 }).catch(() => false)) {
+      const raw = ((await display.textContent()) ?? "").replace(/\s+/g, " ").trim();
+      return this.parseDisplayedCurrency(raw);
+    }
+    const field = this.interestChargeField();
+    if (await field.isVisible({ timeout: 500 }).catch(() => false)) {
+      const tag = (await field.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
+      const raw =
+        tag === "input" || tag === "textarea"
+          ? (await field.inputValue().catch(() => "")).trim()
+          : ((await field.textContent()) ?? "").trim();
+      return this.parseDisplayedCurrency(raw);
+    }
+    return 0;
   }
 
   async expectTotalAmountBorrowedReadOnly(): Promise<void> {

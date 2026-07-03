@@ -71,11 +71,11 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
 
 /**
  * Ensures auth storage exists and access token is usable.
- * - Missing file → full MFA login.
+ * - Missing file → full MFA login (on `page` when provided, else headed browser).
  * - Expired access + valid refresh → silent file refresh (no MFA).
  * - Expired access + no refresh → full MFA login.
  */
-export async function ensureDoPortalAuthStorage(): Promise<void> {
+export async function ensureDoPortalAuthStorage(page?: Page): Promise<void> {
   const evaluation = evaluateDoPortalSession();
 
   if (evaluation.action === "reuse") {
@@ -96,6 +96,10 @@ export async function ensureDoPortalAuthStorage(): Promise<void> {
   }
 
   logTestStep(`DO auth: ${evaluation.reason} — running MFA login.`);
+  if (page) {
+    await loginDoPortalAndSaveStorage(page);
+    return;
+  }
   await runHeadedLoginAndSave();
 }
 

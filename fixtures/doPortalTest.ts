@@ -4,11 +4,11 @@
  */
 
 import { test as base, expect } from "@playwright/test";
-import { ensureDoPortalAuthStorage } from "../playwright/do-portal-auth.helper";
+import { loginDoPortalAndSaveStorage } from "../playwright/do-portal-auth.helper";
 import {
-  applyDoPortalAuthToContext,
-  evaluateDoPortalSession,
   installDoPortalAuthRecovery,
+  evaluateDoPortalSession,
+  refreshAccessTokenFromFile,
   startDoPortalSessionKeepAlive,
 } from "../playwright/do-portal-session.helper";
 
@@ -16,13 +16,21 @@ export const test = base.extend({
   page: async ({ page }, use) => {
     let evaluation = evaluateDoPortalSession();
 
+    if (evaluation.action === "mfa" && evaluation.tokens?.refreshToken) {
+      const refreshed = await refreshAccessTokenFromFile();
+      if (refreshed.ok) {
+        evaluation = evaluateDoPortalSession();
+      }
+    }
+
     if (evaluation.action === "mfa") {
-      await ensureDoPortalAuthStorage();
-      await applyDoPortalAuthToContext(page.context());
+      // Drop stale cookies so MFA does not skip FIS and land on /landing.
+      await page.context().clearCookies();
+      await loginDoPortalAndSaveStorage(page);
       evaluation = evaluateDoPortalSession();
       if (evaluation.action === "mfa") {
         throw new Error(
-          `DO portal session is not reusable after auth setup: ${evaluation.reason}`,
+          `DO portal session is not reusable after MFA login: ${evaluation.reason}`,
         );
       }
     }

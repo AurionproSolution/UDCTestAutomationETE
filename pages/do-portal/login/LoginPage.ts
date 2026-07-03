@@ -202,6 +202,36 @@ export class DOLoginPage extends BasePage {
   }
  
   /**
+   * Post-SSO **Select Application** launcher (no Login with FIS on screen).
+   */
+  async isAppLauncherVisible(): Promise<boolean> {
+    const selectApp = this.page.getByText(/Select Application/i).first();
+    const onLauncher =
+      (await selectApp.isVisible({ timeout: 3_000 }).catch(() => false)) &&
+      (await this.quoteAndAppButton.isVisible({ timeout: 2_000 }).catch(() => false));
+    return onLauncher;
+  }
+
+  /** From `/landing` — same step as after successful FIS sign-in. */
+  async enterDealerFromAppLauncher(): Promise<void> {
+    this.log("App launcher detected — opening Quotes & Applications…");
+    await expect(this.quoteAndAppButton).toBeVisible({ timeout: 60_000 });
+    await this.page
+      .locator(".app-loader-overlay, .p-progressspinner")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+    await this.clickElement(this.quoteAndAppButton, 30_000);
+    await this.page
+      .locator(".loading, .spinner, [data-testid='loading']")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+    await this.page.waitForURL(/\/dealer(\/|$)/i, { timeout: 60_000 }).catch(() => {});
+    this.log("Opened Quotes & Applications");
+  }
+
+  /**
    * Navigate to DO Portal login page
    */
   async navigate(urlOverride?: string): Promise<void> {
@@ -211,6 +241,12 @@ export class DOLoginPage extends BasePage {
     await this.navigateTo(targetUrl);
     // domcontentloaded returns before SPA/SSO shell paints the FIS button; wait for the real login entry.
     await this.page.waitForLoadState("load");
+
+    if (await this.isAppLauncherVisible()) {
+      this.log("App launcher visible — SSO session already active; skipping Login with FIS.");
+      return;
+    }
+
     await expect(this.loginWithFisButton).toBeVisible({ timeout: 90_000 });
   }
  
@@ -222,6 +258,11 @@ export class DOLoginPage extends BasePage {
     password: string,
     options?: { totpSecret?: string },
   ): Promise<void> {
+    if (await this.isAppLauncherVisible()) {
+      await this.enterDealerFromAppLauncher();
+      return;
+    }
+
     this.log(`Logging in as: ${username}`);
     this.log("Clicking Login with FIS button");
     await this.clickElement(this.loginWithFisButton, 90_000);
@@ -267,19 +308,38 @@ export class DOLoginPage extends BasePage {
  
     this.log("Clicking Sign in");
     await utils.click(signinButton);
- 
+
+    // Wait for loaders and app overlay to clear before dashboard interactions
     await surface
       .locator(".loading, .spinner, [data-testid='loading']")
       .first()
       .waitFor({ state: "hidden", timeout: 30_000 })
       .catch(() => {});
+    // Also wait for app-loader-overlay to be hidden (SIT specific)
+    await surface
+      .locator(".app-loader-overlay, .p-progressspinner")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+    
+    // Verify we're on the DO portal dashboard (not still on FIS login)
+    await surface.waitForURL(/udc-test\.fiscloudservices\.com\/SITDOPortal/, { timeout: 30_000 }).catch(() => {});
+    const currentUrl = surface.url();
+    if (!currentUrl.includes("udc-test.fiscloudservices.com/SITDOPortal")) {
+      throw new Error(`Expected to be on DO Portal dashboard but current URL is: ${currentUrl}`);
+    }
     this.log("Verified dashboard is loaded or navigation completed");
- 
+
     this.log("Clicking Quotes & Applications from dashboard");
     const quoteAndApp = surface.getByRole("link", {
       name: /Quotes & Applications/i,
     });
     await expect(quoteAndApp).toBeVisible({ timeout: 90_000 });
+    // Ensure overlay is gone before clicking
+    await surface
+      .locator(".app-loader-overlay")
+      .waitFor({ state: "hidden", timeout: 15_000 })
+      .catch(() => {});
     await utils.click(quoteAndApp);
     await surface
       .locator(".loading, .spinner, [data-testid='loading']")
