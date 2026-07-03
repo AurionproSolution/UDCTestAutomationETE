@@ -3031,8 +3031,6 @@ export class DOAssetDetailsPage extends BasePage {
     return scope
       .getByRole("radio", { checked: true })
       .filter({ has: equalsIcon })
-<<<<<<< HEAD
-=======
       .first()
       .or(
         this.standardQuoteRoot()
@@ -3040,42 +3038,6 @@ export class DOAssetDetailsPage extends BasePage {
           .filter({ has: this.standardQuoteRoot().locator("i.pi.pi-equals") })
           .first(),
       );
-  }
-
-  async expectPaymentScheduleSectionWithTableData(): Promise<void> {
-    this.logStep("Expect Payment Schedule Section With Table Data");
-    const root = this.standardQuoteRoot();
-    const title = root.getByText(/Payment\s+Schedule/i).first();
-    await expect(title).toBeVisible({ timeout: 45_000 });
-    await title.scrollIntoViewIfNeeded().catch(() => {});
-
-    const scheduleScope = this.paymentScheduleContentScope();
-    const table = scheduleScope
-      .locator("table")
-      .filter({ hasText: /Date|Number|Frequency|Payment/i })
-      .first();
-    await expect(table).toBeVisible({ timeout: 25_000 });
-    await table.scrollIntoViewIfNeeded().catch(() => {});
-
-    // PrimeNG grid headers often expose "Date Show Filter Menu", not exact "Date".
-    const scheduleColumnHeader = (label: string): Locator =>
-      table
-        .getByRole("columnheader", { name: new RegExp(`^${label}\\b`, "i") })
-        .or(table.locator("th").filter({ hasText: new RegExp(`^${label}$`, "i") }))
-        .first();
-
-    await expect(scheduleColumnHeader("Date")).toBeVisible({ timeout: 15_000 });
-    await expect(scheduleColumnHeader("Number")).toBeVisible({ timeout: 10_000 });
-    await expect(scheduleColumnHeader("Frequency")).toBeVisible({ timeout: 10_000 });
-    await expect(scheduleColumnHeader("Payment")).toBeVisible({ timeout: 10_000 });
-
-    const dataRow = table
-      .locator("tbody tr")
-      .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
-      .filter({ hasText: /Monthly|Weekly|Fortnightly/i })
->>>>>>> 878e3f75971d963311ffc3495ec5cd45139cf743
-      .first();
-    await expect(dataRow).toBeVisible({ timeout: 25_000 });
   }
 
   private async isLeasePaymentDefaultViewActive(): Promise<boolean> {

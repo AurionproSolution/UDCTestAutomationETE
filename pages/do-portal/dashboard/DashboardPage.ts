@@ -459,16 +459,6 @@ export class DODashboardPage extends BasePage {
     this.logStep(`Open Standard Quote By Quote ID ${id}`);
     await this.waitForAppLoaderOverlayGone(30_000);
 
-<<<<<<< HEAD
-    const quoteLink = this.page
-      .locator(`:text-is("${id}")`)
-      .or(this.page.getByText(id, { exact: true }))
-      .first();
-    await expect(quoteLink).toBeVisible({ timeout: 45_000 });
-    await quoteLink.scrollIntoViewIfNeeded();
-    await quoteLink.click({ timeout: 20_000 });
-
-=======
     const row = this.page
       .locator("table tbody tr")
       .filter({ hasText: new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`) })
@@ -493,7 +483,6 @@ export class DODashboardPage extends BasePage {
     }
 
     await this.waitForAppLoaderOverlayGone(120_000);
->>>>>>> 878e3f75971d963311ffc3495ec5cd45139cf743
     await expect(
       this.page.locator("app-quote-details, app-standard-quote").first(),
     ).toBeVisible({ timeout: 120_000 });
