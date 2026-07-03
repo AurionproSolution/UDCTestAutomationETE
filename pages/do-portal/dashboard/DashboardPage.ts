@@ -261,6 +261,8 @@ export class DODashboardPage extends BasePage {
     const option = dialog.getByText(/Term\s*Loan/i).first();
     await option.waitFor({ state: "attached" });
     await option.click({ force: false });
+    await expect(dialog).toBeHidden({ timeout: 60_000 });
+    await this.waitForAppLoaderOverlayGone(120_000);
   }
 
   /**
@@ -422,6 +424,25 @@ export class DODashboardPage extends BasePage {
     const id = quoteId.trim();
     if (!id) {
       throw new Error("openStandardQuoteByQuoteId: quoteId is required.");
+    }
+
+    this.logStep(`Open Standard Quote By Quote ID ${id}`);
+    await this.waitForAppLoaderOverlayGone(30_000);
+
+    const quoteLink = this.page
+      .locator(`:text-is("${id}")`)
+      .or(this.page.getByText(id, { exact: true }))
+      .first();
+    await expect(quoteLink).toBeVisible({ timeout: 45_000 });
+    await quoteLink.scrollIntoViewIfNeeded();
+    await quoteLink.click({ timeout: 20_000 });
+
+    await expect(
+      this.page.locator("app-quote-details, app-standard-quote").first(),
+    ).toBeVisible({ timeout: 120_000 });
+    this.log(`Opened Standard Quote ${id}.`);
+  }
+
   /** Read a column cell value for a quote row (header text match). */
   async readQuoteGridColumnForRow(
     row: Locator,

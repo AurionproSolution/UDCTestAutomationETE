@@ -329,6 +329,30 @@ async function openAddOnAccessoriesPageFromStandardQuote(
   );
 }
 
+function standardQuoteQuoteIdBlock(page: Page): Locator {
+  const root = standardQuoteRoot(page);
+  const quoteIdLabel = root
+    .getByText(/Quote\s*(No\.?|Number|ID)\s*:?/i)
+    .filter({ visible: true })
+    .first();
+  return quoteIdLabel
+    .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
+    .or(quoteIdLabel.locator("xpath=ancestor::div[1]"))
+    .first();
+}
+
+/** UDP-T4214 — Quote ID is blank until the first Save assigns it in FIS AF. */
+async function expectQuoteIdBlankBeforeFirstSave(page: Page): Promise<void> {
+  const quoteIdBlock = standardQuoteQuoteIdBlock(page);
+  const quoteIdInput = quoteIdBlock.locator("input").filter({ visible: true }).first();
+  if (await quoteIdInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await expect.soft(quoteIdInput).toHaveValue("", { timeout: 15_000 });
+    return;
+  }
+  const text = ((await quoteIdBlock.textContent()) ?? "").replace(/\s+/g, " ").trim();
+  expect.soft(text).not.toMatch(/\d{3,}/);
+}
+
 test.describe("Standard Quote - TL @do @regression", () => {
   test(
     "UDP-T4214 - TC_SQ_001 Standard Quote Default Fields on Load",
@@ -336,8 +360,32 @@ test.describe("Standard Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await selectTlProductAndProgram(assetDetailsPage);
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+      await assetDetailsPage.waitForProductSelectionSettled(/TL/i);
       const root = standardQuoteRoot(page);
+
+      const originatorRoot = root.locator("app-quote-originator").first();
+      if (await originatorRoot.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        for (const labelRx of [/Originator\s+Name/i, /Originator\s+Number/i]) {
+          const label = originatorRoot.getByText(labelRx).first();
+          if (!(await label.isVisible({ timeout: 5_000 }).catch(() => false))) continue;
+          const block = label
+            .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
+            .or(label.locator("xpath=ancestor::div[1]"))
+            .first();
+          const valueInput = block
+            .locator("input:not([type='checkbox'])")
+            .filter({ visible: true })
+            .first();
+          if (await valueInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+            expect.soft((await valueInput.inputValue()).trim().length).toBeGreaterThan(0);
+            continue;
+          }
+          const blockText = ((await block.textContent()) ?? "").replace(/\s+/g, " ").trim();
+          const withoutLabel = blockText.replace(labelRx, "").trim();
+          expect.soft(withoutLabel.length).toBeGreaterThan(0);
+        }
+      }
 
       const promoHost = root.locator("p-checkbox").filter({
         has: root
@@ -347,10 +395,41 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const promoInput = promoHost.first().locator('input[type="checkbox"]').first();
       if (await promoHost.first().isVisible({ timeout: 15_000 }).catch(() => false)) {
         await expect.soft(promoInput).not.toBeChecked();
+      } else {
+        const byRole = root.getByRole("checkbox", { name: /Promotion\s+Quote/i }).first();
+        if (await byRole.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await expect.soft(byRole).not.toBeChecked();
+        }
       }
 
-      await expect.soft(root.getByText(TL_SQ_PRODUCT).first()).toBeVisible({ timeout: 20_000 });
-      await expect.soft(root.getByText(TL_SQ_PROGRAM).first()).toBeVisible({ timeout: 20_000 });
+      const productHost = root
+        .locator("p-dropdown")
+        .filter({ has: root.locator("label").filter({ hasText: /^Product/i }) })
+        .first();
+      if (await productHost.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        const productLabel =
+          (await productHost.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
+        expect.soft(productLabel).toMatch(/TL/i);
+      } else {
+        await expect.soft(root.getByText(/TL/i).first()).toBeVisible({ timeout: 20_000 });
+      }
+
+      const programLabel = await assetDetailsPage.readSelectedProgramLabel();
+      expect.soft(programLabel).toMatch(/^$|^Select/i);
+      await expect.soft(root.getByText(TL_SQ_PROGRAM)).toHaveCount(0, { timeout: 5_000 });
+
+      const loanPurpose = root
+        .getByRole("textbox", { name: /^Loan Purpose/i })
+        .or(
+          root.locator(
+            "xpath=.//label[contains(normalize-space(.),'Loan Purpose')]/following::input[1]",
+          ),
+        )
+        .first();
+      if (await loanPurpose.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        const value = (await loanPurpose.inputValue()).trim();
+        expect.soft(value.length).toBeGreaterThan(0);
+      }
 
       const salesperson = root
         .getByRole("combobox", { name: /Salesperson/i })
@@ -362,17 +441,22 @@ test.describe("Standard Quote - TL @do @regression", () => {
         expect.soft(label.length).toBeGreaterThan(0);
       }
 
-      const conditionUsed = root.getByRole("radio", { name: /Used/i }).or(root.getByText(/^Used$/i)).first();
-      if (await conditionUsed.isVisible({ timeout: 10_000 }).catch(() => false)) {
-        const checked =
-          (await conditionUsed.getAttribute("aria-checked")) === "true" ||
-          (await conditionUsed.locator('input[type="radio"]').isChecked().catch(() => false));
-        if (checked) {
-          await expect.soft(conditionUsed).toBeVisible();
+      await assetDetailsPage.expectWorkflowStatusOpenQuote();
+
+      const usedRadio = root.getByRole("radio", { name: /^Used$/i }).first();
+      if (await usedRadio.isVisible({ timeout: 10_000 }).catch(() => false)) {
+        await expect.soft(usedRadio).toBeChecked();
+      } else {
+        const conditionHost = root
+          .locator("p-dropdown, p-selectbutton")
+          .filter({ hasText: /Condition/i })
+          .first();
+        if (await conditionHost.isVisible({ timeout: 10_000 }).catch(() => false)) {
+          await expect.soft(conditionHost).toContainText(/Used/i);
         }
       }
 
-      await expect.soft(root).toContainText(/Open\s+Quote/i, { timeout: 20_000 });
+      await expectQuoteIdBlankBeforeFirstSave(page);
     },
   );
 
@@ -410,11 +494,11 @@ test.describe("Standard Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await selectTlProductAndProgram(assetDetailsPage);
-      await assetDetailsPage.selectCondition("New");
-      await assetDetailsPage.scrollRecommendedRetailPriceIntoView();
-      await expect.soft(assetDetailsPage.recommendedRetailPriceInput).toBeVisible({ timeout: 20_000 });
-      await assetDetailsPage.selectCondition("Used");
+
+      await assetDetailsPage.selectConditionInStandardQuote("New");
+      await assetDetailsPage.expectRecommendedRetailPriceVisibleAfterNewCondition();
+
+      await assetDetailsPage.selectConditionInStandardQuote("Used");
       await assetDetailsPage.expectRecommendedRetailPriceHiddenAfterUsedCondition();
     },
   );
@@ -466,9 +550,16 @@ test.describe("Standard Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+
       await selectTlProductAndProgram(assetDetailsPage);
+      await assetDetailsPage.enterAsset("Car and Light Commercial /");
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+      await assetDetailsPage.expectTotalEstablishmentFeeSumDollars(0);
+
       await assetDetailsPage.udcEstablishmentFee("$300");
       await assetDetailsPage.dealerOriginationFee("$200");
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
       await assetDetailsPage.expectTotalEstablishmentFeeSumDollars(500);
     },
   );

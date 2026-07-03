@@ -250,7 +250,10 @@ export class DOAssetDetailsPage extends BasePage {
     const productDropdown = this.page.locator(
       `//span//label[contains(text(), 'Product')]/following-sibling::div//span`,
     );
-    await productDropdown.click();
+    await productDropdown.click({ timeout: 15_000 });
+    await expect(this.page.getByRole("option").first())
+      .toBeVisible({ timeout: 15_000 })
+      .catch(() => {});
   }
 
   /**
@@ -258,7 +261,9 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async selectProduct(productName: string): Promise<void> {
     this.logStep(`Selected product: ${this.stepValueDisplay(productName)}`);
-    await this.page.getByRole("option", { name: productName }).click();
+    const option = this.page.getByRole("option", { name: productName, exact: true });
+    await expect(option.first()).toBeVisible({ timeout: 15_000 });
+    await option.click();
   }
 
   /**
@@ -288,6 +293,7 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(`Chose product: ${this.stepValueDisplay(productName)}`);
     await this.openProductDropdown();
     await this.selectProduct(productName);
+    await this.waitForProductSelectionSettled(productName, { waitLoanPurpose: false });
   }
 
   /**
@@ -297,6 +303,8 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(`Chose program: ${this.stepValueDisplay(programName)}`);
     await this.openProgramDropdown();
     await this.selectProgram(programName);
+    await this.waitForQuoteLoadersToFinish();
+    await this.waitForLoanPurposePopulated();
   }
 
   /** Standard Quote / Asset Details shell (first `app-quote-details` or `app-standard-quote`). */
@@ -310,12 +318,142 @@ export class DOAssetDetailsPage extends BasePage {
       state: "visible",
       timeout: 60_000,
     });
-  
-    await expect(
-      this.cashPriceOfAssetInputField
-    ).toBeVisible({
+
+    await expect(this.cashPriceOfAssetInputField).toBeVisible({
       timeout: 60_000,
     });
+  }
+
+  /** Loan Purpose textbox when shown on Standard Quote header rows. */
+  loanPurposeInputField(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .getByRole("textbox", { name: /^Loan Purpose/i })
+      .or(
+        root.locator(
+          "xpath=.//label[contains(normalize-space(.),'Loan Purpose')]/following::input[1]",
+        ),
+      )
+      .first();
+  }
+
+  /**
+   * Visible PrimeNG dropdown value for a Standard Quote header label (TL/CSA:
+   * `span[role="combobox"].p-dropdown-label`).
+   */
+  private primeLabeledDropdownCombobox(fieldLabel: string): Locator {
+    const root = this.standardQuoteRoot();
+    const labelContains = `contains(normalize-space(.), '${fieldLabel}')`;
+    const combobox = "span[@role='combobox' and contains(@class,'p-dropdown-label')]";
+    return root
+      .locator(`xpath=.//label[${labelContains}]/following-sibling::div//${combobox}[1]`)
+      .or(
+        root.locator(
+          `xpath=.//label[${labelContains}]/following::p-dropdown[1]//${combobox}[1]`,
+        ),
+      )
+      .or(root.locator(`xpath=.//label[${labelContains}]/following::${combobox}[1]`))
+      .filter({ visible: true })
+      .first();
+  }
+
+  private async readPrimeLabeledDropdownValue(fieldLabel: string): Promise<string> {
+    const combobox = this.primeLabeledDropdownCombobox(fieldLabel);
+    if (!(await combobox.isVisible({ timeout: 20_000 }).catch(() => false))) {
+      return "";
+    }
+    const raw = ((await combobox.textContent().catch(() => "")) ?? "").trim();
+    return this.isDropdownPlaceholder(raw) ? "" : raw;
+  }
+
+  productDropdownHost(): Locator {
+    const root = this.standardQuoteRoot();
+    return this.primeLabeledDropdownCombobox("Product")
+      .locator("xpath=ancestor::p-dropdown[1]")
+      .or(
+        root.locator(
+          "xpath=.//label[contains(normalize-space(.), 'Product')]/following::p-dropdown[1]",
+        ),
+      )
+      .first();
+  }
+
+  private isDropdownPlaceholder(value: string): boolean {
+    const t = value.replace(/\s+/g, " ").trim();
+    return t.length === 0 || /^select\b/i.test(t) || /^—+$/.test(t) || t === "-";
+  }
+
+  private productLabelMatches(expected: string | RegExp, label: string): boolean {
+    const t = label.trim();
+    if (!t) return false;
+    if (typeof expected === "string") {
+      return t === expected || t.includes(expected);
+    }
+    return expected.test(t);
+  }
+
+  async readSelectedProductLabel(): Promise<string> {
+    this.logStep("Read selected product label");
+    return this.readPrimeLabeledDropdownValue("Product");
+  }
+
+  async waitForSelectedProductLabel(
+    expected: string | RegExp,
+    opts?: { timeoutMs?: number },
+  ): Promise<void> {
+    this.logStep(`Wait for selected product label: ${String(expected)}`);
+    const timeoutMs = opts?.timeoutMs ?? 60_000;
+    await expect
+      .poll(
+        async () => {
+          const label = await this.readSelectedProductLabel();
+          return this.productLabelMatches(expected, label) ? label : null;
+        },
+        { timeout: timeoutMs, intervals: [300, 500, 1_000] },
+      )
+      .not.toBeNull();
+  }
+
+  async waitForLoanPurposePopulated(opts?: { timeoutMs?: number }): Promise<void> {
+    this.logStep("Wait for loan purpose populated");
+    const field = this.loanPurposeInputField();
+    const timeoutMs = opts?.timeoutMs ?? 60_000;
+
+    const visible = await expect
+      .poll(async () => field.isVisible().catch(() => false), {
+        timeout: 15_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+    if (!visible) return;
+
+    await expect
+      .poll(
+        async () => {
+          const v = (await field.inputValue().catch(() => "")).trim();
+          return v.length > 0 ? v : null;
+        },
+        { timeout: timeoutMs, intervals: [300, 500, 1_000] },
+      )
+      .not.toBeNull();
+  }
+
+  /**
+   * After product change (dashboard dialog or Asset Details dropdown): loaders clear, product label
+   * reflects the selection, and Loan Purpose auto-populates when the control is shown.
+   */
+  async waitForProductSelectionSettled(
+    expectedProduct: string | RegExp,
+    opts?: { waitLoanPurpose?: boolean; timeoutMs?: number },
+  ): Promise<void> {
+    this.logStep("Wait for product selection settled");
+    await this.waitForQuoteLoadersToFinish(opts?.timeoutMs);
+    await this.waitForSelectedProductLabel(expectedProduct, opts);
+    if (opts?.waitLoanPurpose !== false) {
+      await this.waitForLoanPurposePopulated(opts);
+    }
   }
 
   /**
@@ -2889,37 +3027,6 @@ export class DOAssetDetailsPage extends BasePage {
     return scope
       .getByRole("radio", { checked: true })
       .filter({ has: equalsIcon })
-  async expectPaymentScheduleSectionWithTableData(): Promise<void> {
-    this.logStep("Expect Payment Schedule Section With Table Data");
-    const root = this.standardQuoteRoot();
-    const title = root.getByText(/Payment\s+Schedule/i).first();
-    await expect(title).toBeVisible({ timeout: 45_000 });
-    await title.scrollIntoViewIfNeeded().catch(() => {});
-
-    const scheduleScope = this.paymentScheduleContentScope();
-    const table = scheduleScope
-      .locator("table")
-      .filter({ hasText: /Date|Number|Frequency|Payment/i })
-      .first();
-    await expect(table).toBeVisible({ timeout: 25_000 });
-    await table.scrollIntoViewIfNeeded().catch(() => {});
-
-    // PrimeNG grid headers often expose "Date Show Filter Menu", not exact "Date".
-    const scheduleColumnHeader = (label: string): Locator =>
-      table
-        .getByRole("columnheader", { name: new RegExp(`^${label}\\b`, "i") })
-        .or(table.locator("th").filter({ hasText: new RegExp(`^${label}$`, "i") }))
-        .first();
-
-    await expect(scheduleColumnHeader("Date")).toBeVisible({ timeout: 15_000 });
-    await expect(scheduleColumnHeader("Number")).toBeVisible({ timeout: 10_000 });
-    await expect(scheduleColumnHeader("Frequency")).toBeVisible({ timeout: 10_000 });
-    await expect(scheduleColumnHeader("Payment")).toBeVisible({ timeout: 10_000 });
-
-    const dataRow = table
-      .locator("tbody tr")
-      .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
-      .filter({ hasText: /Monthly|Weekly|Fortnightly/i })
       .first();
   }
 
@@ -4934,21 +5041,22 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
+  /** **Program** PrimeNG dropdown host (label-scoped). */
   programDropdownHost(): Locator {
     const root = this.standardQuoteRoot();
-    return root
-      .locator("p-dropdown")
-      .filter({ has: root.locator("label").filter({ hasText: /^Program/i }) })
+    return this.primeLabeledDropdownCombobox("Program")
+      .locator("xpath=ancestor::p-dropdown[1]")
+      .or(
+        root.locator(
+          "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
+        ),
+      )
       .first();
   }
 
   async readSelectedProgramLabel(): Promise<string> {
-    const host = this.programDropdownHost();
-    const combobox = host.getByRole("combobox").first();
-    if (await combobox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      return (await combobox.textContent())?.trim() ?? "";
-    }
-    return (await host.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
+    this.logStep("Read selected program label");
+    return this.readPrimeLabeledDropdownValue("Program");
   }
 
   async expectProgramDropdownDisabled(): Promise<void> {
