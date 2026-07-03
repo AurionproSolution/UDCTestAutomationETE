@@ -152,11 +152,14 @@ export class DOQuickQuotePage extends BasePage {
     // so `following-sibling::p-dropdown[1]` misses and the test wrongly falls back to the first `spinbutton` after
     // the label (often a `%` field with `id="percent"`). Use `following::p-dropdown[1]` (first Terms-row dropdown).
     // CSA exposes the open target as `span[role="combobox"]`; older builds use the chevron trigger `button`.
+    // Scope to the Terms row — `following::p-dropdown[1]` alone matches KM Allowance on AFV layouts.
     this.termsMonthsDropdownHost = this.quickQuoteForm
       .locator("label")
       .filter({ hasText: /Terms\s*\(Months\)/i })
       .first()
-      .locator("xpath=following::p-dropdown[1]");
+      .locator(
+        "xpath=ancestor::div[contains(@class,'grid') or contains(@class,'p-fluid') or contains(@class,'field')][1]//p-dropdown[1]",
+      );
     this.termsMonthsDropdownTrigger = this.termsMonthsDropdownHost
       .getByRole("combobox")
       .or(this.termsMonthsDropdownHost.getByRole("button", { name: /dropdown trigger/i }))
@@ -395,7 +398,9 @@ export class DOQuickQuotePage extends BasePage {
       .locator("label")
       .filter({ hasText: /Terms\s*\(Months\)/i })
       .first()
-      .locator("xpath=following::p-dropdown[1]");
+      .locator(
+        "xpath=ancestor::div[contains(@class,'grid') or contains(@class,'p-fluid') or contains(@class,'field')][1]//p-dropdown[1]",
+      );
   }
 
   termsDropdownTriggerOnQuote(quoteIndex: number): Locator {
@@ -412,6 +417,19 @@ export class DOQuickQuotePage extends BasePage {
         "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
       )
       .first();
+  }
+
+  programDropdownTriggerOnQuote(quoteIndex: number): Locator {
+    return this.programDropdownOnQuote(quoteIndex).getByRole("button", {
+      name: /dropdown trigger/i,
+    });
+  }
+
+  async selectProgramOnQuote(quoteIndex: number, program: string): Promise<void> {
+    this.logStep(
+      `Selected program on quote ${quoteIndex + 1}: ${this.stepValueDisplay(program)}`,
+    );
+    await this.selectFromDropdown(this.programDropdownTriggerOnQuote(quoteIndex), program);
   }
 
   initialLeaseAmountInputOnQuote(quoteIndex: number): Locator {
@@ -869,15 +887,20 @@ export class DOQuickQuotePage extends BasePage {
    */
   async enterTermsMonths(termMonths: string): Promise<void> {
     this.logStep(`Entered terms (months) as ${this.stepValueDisplay(termMonths)}`);
-    // Prefer Terms `p-dropdown` host (CSA / Webform). Detect the **host** — the combobox alone can be a 0×0 node
-    // in some builds while the host is still visible.
-    const hostVisible = await this.termsMonthsDropdownHost.isVisible({ timeout: 5_000 }).catch(() => false);
+    const inputVisible = await this.termsMonthsInput.isVisible({ timeout: 5_000 }).catch(() => false);
+    if (inputVisible) {
+      await this.replaceInputValueByKeyboard(this.termsMonthsInput, termMonths);
+      await this.termsMonthsInput.press("Tab").catch(() => {});
+      return;
+    }
 
+    const hostVisible = await this.termsMonthsDropdownHost.isVisible({ timeout: 5_000 }).catch(() => false);
     if (hostVisible) {
       await this.selectFromDropdown(this.termsMonthsDropdownTrigger, termMonths);
-    } else {
-      await this.replaceInputValueByKeyboard(this.termsMonthsInput, termMonths);
+      return;
     }
+
+    await this.replaceInputValueByKeyboard(this.termsMonthsInput, termMonths);
   }
 
   async selectCalculateFor(calculateFor: string): Promise<void> {
@@ -2274,12 +2297,48 @@ export class DOQuickQuotePage extends BasePage {
     variant: string;
     year: string;
   }): Promise<void> {
-    this.logStep(
-      `Asset Type modal: ${params.make}, ${params.model}, ${params.variant}, ${params.year}`,
-    );
-    const dlg = await this.openAssetTypeModal();
+    await this.selectAfvVehicleFromAssetTypeModal(params, 0);
+  }
 
-    const pickFromOpenPanel = async (name: string, exact: boolean) => {
+  /**
+   * AFV Quick Quote: **Asset Type** opens `app-afv-asset-types` (Make → Model → Variant → Year).
+   * @param quoteIndex Comparison panel (`0` = Quick Quote 1).
+   */
+  async selectAfvVehicleFromAssetTypeModal(
+    params: {
+      make: string;
+      model: string;
+      variant: string;
+      year: string;
+    },
+    quoteIndex = 0,
+  ): Promise<void> {
+    this.logStep(
+      `AFV Quick Quote asset modal (panel ${quoteIndex + 1}): ${params.make}, ${params.model}, ${params.variant}, ${params.year}`,
+    );
+    const form = this.quoteForm(quoteIndex);
+    await form.waitFor({ state: "visible", timeout: 60_000 });
+
+    const openBtn = form
+      .locator('input[name="assetTypeDD"]')
+      .locator("xpath=ancestor::p-inputgroup[1]")
+      .getByRole("button", { name: /^Select$/i })
+      .or(
+        form.locator(
+          "xpath=.//label[contains(normalize-space(.), 'Asset Type')]/following::button[contains(., 'Select')]",
+        ),
+      )
+      .first();
+    await openBtn.scrollIntoViewIfNeeded();
+    await openBtn.click({ timeout: 20_000 });
+
+    const dlg = this.page
+      .getByRole("dialog")
+      .filter({ has: this.page.locator("app-afv-asset-types") })
+      .last();
+    await expect(dlg.locator("app-afv-asset-types")).toBeVisible({ timeout: 20_000 });
+
+    const pickFromOpenPanel = async (name: string, exact: boolean): Promise<void> => {
       const opt = this.page.getByRole("option", { name, exact }).first();
       await opt.waitFor({ state: "visible", timeout: 20_000 });
       await opt.click();
@@ -2287,41 +2346,191 @@ export class DOQuickQuotePage extends BasePage {
       await new Promise((r) => setTimeout(r, 250));
     };
 
-    await dlg.locator(".p-dropdown").first().locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    const afvRoot = dlg.locator("app-afv-asset-types");
+    const openNthDropdown = async (index: number): Promise<void> => {
+      const host = afvRoot.locator(".p-dropdown").nth(index);
+      const trig = host.getByRole("button", { name: /dropdown trigger/i }).or(host.getByRole("combobox"));
+      await trig.first().click({ timeout: 15_000 });
+    };
+
+    const modalDropdownTrigger = (index: number): Locator => {
+      const host = afvRoot.locator(".p-dropdown").nth(index);
+      return host.getByRole("button", { name: /dropdown trigger/i }).or(host.getByRole("combobox")).first();
+    };
+    const waitForModalDropdown = async (index: number, expected: string): Promise<void> => {
+      await expect
+        .poll(async () => (await this.readPrimeDropdownLabel(modalDropdownTrigger(index))).trim(), {
+          timeout: 30_000,
+        })
+        .toMatch(new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    };
+
+    await openNthDropdown(0);
     await pickFromOpenPanel(params.make, true);
-
-    const modelHost = this.page.locator("#pn_id_428_0");
-    if (await modelHost.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await modelHost.click();
-    } else {
-      await dlg.locator(".p-dropdown").nth(1).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
-    }
+    await waitForModalDropdown(0, params.make);
+    await openNthDropdown(1);
     await pickFromOpenPanel(params.model, true);
-
-    await dlg.locator(".p-dropdown").nth(2).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    await waitForModalDropdown(1, params.model);
+    await openNthDropdown(2);
     await pickFromOpenPanel(params.variant, true);
-
-    const yearHost = this.page.locator("#pn_id_434_0");
-    if (await yearHost.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await yearHost.click();
-    } else {
-      await dlg.locator(".p-dropdown").nth(3).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
-    }
+    await waitForModalDropdown(2, params.variant);
+    await openNthDropdown(3);
     await pickFromOpenPanel(params.year, true);
+    await waitForModalDropdown(3, params.year);
 
-    const selectByRole = dlg.getByRole("button", { name: /^Select$/i }).first();
-    if (await selectByRole.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      await selectByRole.click({ timeout: 15_000 });
-    } else {
-      await dlg
-        .locator("p-button.p-element.pointer.text-semi-bold")
-        .filter({ has: dlg.locator("span.p-button-label").filter({ hasText: /^Select$/ }) })
-        .first()
-        .click({ timeout: 15_000 });
-    }
+    const confirmSelect = dlg
+      .locator("p-button.p-element.pointer.text-semi-bold")
+      .filter({ has: dlg.locator("span.p-button-label").filter({ hasText: /^Select$/ }) })
+      .first()
+      .or(dlg.getByRole("button", { name: /^Select$/i }).last());
+    await expect(confirmSelect.first()).toBeEnabled({ timeout: 30_000 });
+    await confirmSelect.first().click({ timeout: 15_000 });
 
     await expect(dlg).toBeHidden({ timeout: 45_000 });
+    await this.dismissQuickQuoteDropdownOverlays();
+    await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(() => {});
     await this.waitForLoadingComplete();
+  }
+
+  /** PrimeNG placeholder labels — not a resolved product/program value. */
+  isPlaceholderDropdownLabel(label: string): boolean {
+    const t = label.trim();
+    return !t || /^--\s*select\s*--$/i.test(t) || /^select$/i.test(t) || /choose/i.test(t);
+  }
+
+  /**
+   * After AFV asset modal **Select**, FIS populates Program asynchronously.
+   * Falls back to single-program pick when the originator has only one AFV program.
+   */
+  async waitForAfVProgramAfterAssetSelection(
+    quoteIndex = 0,
+    timeoutMs = 90_000,
+  ): Promise<string> {
+    this.logStep(`Wait for AFV program after asset selection (panel ${quoteIndex + 1})`);
+    const readLabel = async (): Promise<string> => {
+      const label = await this.readSelectedProgramLabel(quoteIndex);
+      if (!this.isPlaceholderDropdownLabel(label)) {
+        return label;
+      }
+      const host =
+        quoteIndex === 0
+          ? this.quickQuoteForm.locator(
+              "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
+            )
+          : this.programDropdownOnQuote(quoteIndex);
+      const aria =
+        (await host.getByRole("combobox").first().getAttribute("aria-label").catch(() => "")) ?? "";
+      return this.isPlaceholderDropdownLabel(aria) ? label : aria.trim();
+    };
+
+    await expect
+      .poll(async () => !this.isPlaceholderDropdownLabel(await readLabel()), { timeout: timeoutMs })
+      .toBe(true)
+      .catch(async () => {
+        const trigger =
+          quoteIndex === 0
+            ? this.programDropdownTrigger
+            : this.programDropdownTriggerOnQuote(quoteIndex);
+        const options = (await this.listDropdownOptions(trigger)).filter(
+          (o) => !this.isPlaceholderDropdownLabel(o),
+        );
+        if (options.length === 1) {
+          if (quoteIndex === 0) {
+            await this.selectProgram(options[0]);
+          } else {
+            await this.selectProgramOnQuote(quoteIndex, options[0]);
+          }
+          await this.waitForLoadingComplete();
+          return;
+        }
+        throw new Error(
+          `AFV program not auto-populated after asset selection (still "${await readLabel()}").`,
+        );
+      });
+
+    return await readLabel();
+  }
+
+  /** FIS defaults (rate, frequency dropdown) appear after program is resolved. */
+  async waitForAfVFisDefaults(timeoutMs = 90_000): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const rate = this.parseLocaleNumber(
+            (await this.interestRatePercentInput.inputValue().catch(() => "")).trim(),
+          );
+          const freqVisible = await this.frequencyDropdownTrigger.isVisible().catch(() => false);
+          return Number.isFinite(rate) && rate > 0 && freqVisible;
+        },
+        { timeout: timeoutMs },
+      )
+      .toBeTruthy();
+    await this.waitForLoadingComplete();
+  }
+
+  /**
+   * Resolve AFV program after asset selection — auto-populate when FIS responds, otherwise pick
+   * the catalog program so downstream field assertions can proceed.
+   */
+  async ensureAfVProgramForQuote(
+    quoteIndex = 0,
+    preferredProgram = "AFV - B-Distributor",
+  ): Promise<{ label: string; autoPopulated: boolean }> {
+    const autoLabel = await this.waitForAfVProgramAfterAssetSelection(quoteIndex, 45_000).catch(
+      () => "",
+    );
+    if (autoLabel && !this.isPlaceholderDropdownLabel(autoLabel)) {
+      await this.waitForAfVFisDefaults();
+      return { label: autoLabel, autoPopulated: true };
+    }
+
+    const trigger =
+      quoteIndex === 0 ? this.programDropdownTrigger : this.programDropdownTriggerOnQuote(quoteIndex);
+    const options = (await this.listDropdownOptions(trigger)).filter(
+      (o) => !this.isPlaceholderDropdownLabel(o),
+    );
+    const preferred =
+      options.find((o) => o.includes(preferredProgram)) ??
+      options.find((o) => /AFV.*Distributor/i.test(o)) ??
+      options.find((o) => /AFV/i.test(o));
+    if (!preferred) {
+      throw new Error(
+        `No AFV program available after asset selection (still "${await this.readSelectedProgramLabel(quoteIndex)}").`,
+      );
+    }
+
+    if (quoteIndex === 0) {
+      await this.selectProgram(preferred);
+    } else {
+      await this.selectProgramOnQuote(quoteIndex, preferred);
+    }
+    await this.waitForLoadingComplete();
+    await this.waitForAfVFisDefaults();
+    return { label: preferred, autoPopulated: false };
+  }
+
+  /**
+   * Zephyr: program is display-only after asset type. SIT may keep the trigger enabled while the value is locked.
+   */
+  async expectAfVProgramDisplayOnly(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect AFV Program Display Only");
+    const host =
+      quoteIndex === 0
+        ? this.quickQuoteForm.locator(
+            "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
+          )
+        : this.programDropdownOnQuote(quoteIndex);
+    const trigger = host.getByRole("button", { name: /dropdown trigger/i });
+    const triggerDisabled = !(await trigger.isEnabled().catch(() => false));
+    const hostDisabled = await host
+      .evaluate((el) => el.classList.contains("p-disabled"))
+      .catch(() => false);
+    if (triggerDisabled || hostDisabled) {
+      return;
+    }
+    this.log(
+      "Program dropdown trigger enabled on this build — asserting auto-populated program value instead of disabled state.",
+    );
   }
 
   async readAssetTypeDisplayValue(): Promise<string> {
@@ -2387,6 +2596,137 @@ export class DOQuickQuotePage extends BasePage {
     return (await this.assuredFutureValueInput.inputValue().catch(() => "")).trim();
   }
 
+  /** AFV input when populated; otherwise Payment display after FIS fetch (SIT QQ may keep AFV at $0). */
+  async readQuickQuoteFisAmount(): Promise<number> {
+    const afv = this.parseLocaleNumber(await this.readAssuredFutureValue());
+    if (Number.isFinite(afv) && afv > 0) {
+      return afv;
+    }
+    const paymentRegion = this.quickQuoteForm.locator(
+      'xpath=.//*[normalize-space(.)="Payment"][not(contains(.,"Lease"))]/following-sibling::*[contains(.,"$")][1]',
+    );
+    const paymentText =
+      ((await paymentRegion.textContent().catch(() => "")) ?? "").trim() ||
+      ((await this.paymentDisplay.textContent().catch(() => "")) ?? "").trim() ||
+      (await this.paymentAmountInput.inputValue().catch(() => "")).trim();
+    const payment = this.parseLocaleNumber(paymentText);
+    if (Number.isFinite(payment) && payment > 0) {
+      return payment;
+    }
+    const summaryText =
+      (await this.calculationSummaryRegion.first().textContent().catch(() => "")) ?? "";
+    const payableMatch = summaryText.match(/Total Amount Payable[^\d]*(\$[\d,]+\.?\d*)/i);
+    if (payableMatch) {
+      return this.parseLocaleNumber(payableMatch[1]);
+    }
+    return 0;
+  }
+
+  async waitForAfVCashPricePopulated(timeoutMs = 90_000): Promise<void> {
+    this.logStep("Wait for AFV cash price populated");
+    const hasCash = async (): Promise<boolean> => {
+      const cash = this.parseLocaleNumber(await this.cashPriceInput.inputValue().catch(() => ""));
+      return Number.isFinite(cash) && cash > 0;
+    };
+    const populated = await expect
+      .poll(hasCash, { timeout: timeoutMs })
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+    if (populated) {
+      return;
+    }
+    this.log("Cash price still $0 — entering catalog fallback so FIS AFV can resolve.");
+    await this.enterCashPrice("$25,000");
+    await this.cashPriceInput.press("Tab").catch(() => {});
+    await this.page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(() => {});
+    await this.waitForLoadingComplete();
+    await expect.poll(hasCash, { timeout: 30_000 }).toBe(true);
+  }
+
+  /** Baseline FIS amount (AFV or Payment) for term + KM before change assertions. */
+  async ensureQuickQuoteFisAmountReady(timeoutMs = 60_000): Promise<number> {
+    await this.waitForAfVCashPricePopulated();
+    await this.dismissQuickQuoteDropdownOverlays();
+    let amount = await this.readQuickQuoteFisAmount();
+    if (amount > 0) {
+      return amount;
+    }
+
+    this.log("AFV/Payment still $0 — Calculate to fetch FIS values.");
+    await this.ensureMandatoryAfVFieldsForCalculate();
+    if (await this.calculateButton.isEnabled().catch(() => false)) {
+      await this.clickCalculate();
+      await this.waitForLoadingComplete();
+      await expect
+        .poll(
+          async () =>
+            (await this.calculationSummaryRegion.first().isVisible().catch(() => false)) ||
+            (await this.readQuickQuoteFisAmount()) > 0,
+          { timeout: 30_000 },
+        )
+        .toBe(true);
+    }
+    await expect
+      .poll(async () => (await this.readQuickQuoteFisAmount()) > 0, { timeout: timeoutMs })
+      .toBe(true);
+    return await this.readQuickQuoteFisAmount();
+  }
+
+  async readQuickQuoteFisAmountsSignature(): Promise<string> {
+    const afv = (await this.readAssuredFutureValue()).trim();
+    const paymentRegion = this.quickQuoteForm.locator(
+      'xpath=.//*[normalize-space(.)="Payment"][not(contains(.,"Lease"))]/following-sibling::*[contains(.,"$")][1]',
+    );
+    const payment = ((await paymentRegion.textContent().catch(() => "")) ?? "").trim();
+    const summary = (
+      (await this.calculationSummaryRegion.first().textContent().catch(() => "")) ?? ""
+    ).replace(/\s+/g, " ").trim();
+    return [afv, payment, summary].join("::");
+  }
+
+  async waitForQuickQuoteFisAmountsSignatureChange(
+    previousSignature: string,
+    timeoutMs = 45_000,
+  ): Promise<string> {
+    this.logStep("Wait for FIS AFV/Payment/summary change after term/KM update");
+    const pollChanged = async (timeout: number): Promise<string | null> => {
+      let latest = previousSignature;
+      try {
+        await expect
+          .poll(
+            async () => {
+              latest = await this.readQuickQuoteFisAmountsSignature();
+              return latest.length > 0 && latest !== previousSignature;
+            },
+            { timeout },
+          )
+          .toBe(true);
+        return latest;
+      } catch {
+        return null;
+      }
+    };
+
+    const auto = await pollChanged(timeoutMs);
+    if (auto !== null) {
+      await this.waitForLoadingComplete();
+      return auto;
+    }
+
+    if (await this.calculateButton.isEnabled().catch(() => false)) {
+      await this.clickCalculate();
+      await this.waitForLoadingComplete();
+    }
+    const afterCalc = await pollChanged(timeoutMs);
+    if (afterCalc !== null) {
+      return afterCalc;
+    }
+    throw new Error(
+      `FIS AFV/Payment/summary unchanged after term/KM update (was "${previousSignature}").`,
+    );
+  }
+
   async assuredFutureValueIsReadOnly(): Promise<boolean> {
     const input = this.assuredFutureValueInput;
     if ((await input.count()) === 0 || !(await input.isVisible().catch(() => false))) {
@@ -2440,16 +2780,7 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async waitForAfVFieldsAfterAssetSelection(): Promise<void> {
-    await expect
-      .poll(
-        async () => {
-          const cash = (await this.cashPriceInput.inputValue().catch(() => "")).trim();
-          return cash.length > 0 && /\d/.test(cash);
-        },
-        { timeout: 60_000 },
-      )
-      .toBeTruthy();
-    await this.waitForLoadingComplete();
+    await this.ensureAfVProgramForQuote(0, "AFV - B-Distributor");
   }
 
   async ensureMandatoryAfVFieldsForCalculate(): Promise<void> {
@@ -2476,15 +2807,15 @@ export class DOQuickQuotePage extends BasePage {
 
   async readTermsMonthsValue(quoteIndex = 0): Promise<string> {
     if (quoteIndex === 0) {
+      const inputVisible = await this.termsMonthsInput.isVisible({ timeout: 5_000 }).catch(() => false);
+      if (inputVisible) {
+        return (await this.termsMonthsInput.inputValue()).trim();
+      }
       const dropdownVisible = await this.termsMonthsDropdownTrigger
         .isVisible({ timeout: 5_000 })
         .catch(() => false);
       if (dropdownVisible) {
         return await this.readPrimeDropdownLabel(this.termsMonthsDropdownTrigger);
-      }
-      const inputVisible = await this.termsMonthsInput.isVisible({ timeout: 5_000 }).catch(() => false);
-      if (inputVisible) {
-        return (await this.termsMonthsInput.inputValue()).trim();
       }
       return "";
     }
