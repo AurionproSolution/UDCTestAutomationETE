@@ -2889,6 +2889,15 @@ export class DOAssetDetailsPage extends BasePage {
     return scope
       .getByRole("radio", { checked: true })
       .filter({ has: equalsIcon })
+      .first()
+      .or(
+        this.standardQuoteRoot()
+          .getByRole("radio", { checked: true })
+          .filter({ has: this.standardQuoteRoot().locator("i.pi.pi-equals") })
+          .first(),
+      );
+  }
+
   async expectPaymentScheduleSectionWithTableData(): Promise<void> {
     this.logStep("Expect Payment Schedule Section With Table Data");
     const root = this.standardQuoteRoot();

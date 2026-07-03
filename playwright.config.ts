@@ -8,8 +8,11 @@
  * @see https://playwright.dev/docs/test-configuration
  */
 
+import { config as loadDotenv } from "dotenv";
 import { defineConfig, devices } from "@playwright/test";
 import * as fs from "fs";
+
+loadDotenv();
 import type { OrtoniReportConfig } from "ortoni-report";
 import * as os from "os";
 import path from "path";

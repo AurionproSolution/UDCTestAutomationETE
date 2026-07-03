@@ -98,10 +98,11 @@ export function doPortalOAuthClientId(): string | undefined {
 
 /**
  * Base32 TOTP secret used for automated MFA during headed DO login.
- * SIT-only by design: for other environments this returns `undefined`.
+ * Enabled for SIT/QAT when DO_PORTAL_TOTP_SECRET is set in the environment.
  */
 export function doPortalTotpSecret(): string | undefined {
-  if (getCurrentEnv() !== "sit") return undefined;
+  const env = getCurrentEnv();
+  if (env !== "sit" && env !== "qat") return undefined;
   const fromEnv = process.env.DO_PORTAL_TOTP_SECRET?.trim();
   return fromEnv || undefined;
 }
