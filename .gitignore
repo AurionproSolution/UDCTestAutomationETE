@@ -28,6 +28,7 @@ results/
 .env
 .env.local
 .env.*.local
+config/secrets.local.json
 
 # Logs
 logs/

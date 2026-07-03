@@ -4,6 +4,9 @@
  * Override via env vars when discovery metadata differs per environment.
  */
 
+import * as fs from "fs";
+import * as path from "path";
+import { getDoPortalLoginData } from "../testData/do-portal/doLoginData";
 import { DO_BASE_URL, getCurrentEnv } from "./env";
 
 /** Playwright storageState path for the active TEST_ENV. */
@@ -93,6 +96,35 @@ export function doPortalTokenEndpointUrl(): string | undefined {
 export function doPortalOAuthClientId(): string | undefined {
   const fromEnv = process.env.DO_PORTAL_OAUTH_CLIENT_ID?.trim();
   if (fromEnv) return fromEnv;
+  return undefined;
+}
+
+/**
+ * Base32 TOTP secret used for automated MFA during headed DO login.
+ * SIT-only by design: for other environments this returns `undefined`.
+ * Priority: 1) DO_PORTAL_TOTP_SECRET env var, 2) loginData.json (committed),
+ * 3) config/secrets.local.json (optional local override).
+ */
+export function doPortalTotpSecret(): string | undefined {
+  if (getCurrentEnv() !== "sit") return undefined;
+
+  const fromEnv = process.env.DO_PORTAL_TOTP_SECRET?.trim();
+  if (fromEnv) return fromEnv;
+
+  const fromLoginData = getDoPortalLoginData().totpSecret?.trim();
+  if (fromLoginData) return fromLoginData;
+
+  try {
+    const secretsPath = path.join(__dirname, "secrets.local.json");
+    if (fs.existsSync(secretsPath)) {
+      const secrets = JSON.parse(fs.readFileSync(secretsPath, "utf-8"));
+      const secret = secrets?.sit?.totpSecret?.trim();
+      if (secret) return secret;
+    }
+  } catch {
+    // Ignore file read errors
+  }
+
   return undefined;
 }
 

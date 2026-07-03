@@ -193,8 +193,8 @@ test.describe("Settlement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3952"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const { settlementPage } = await openSettlementFromExistingQuote(page);
-      await settlementPage.expectSettlementDateIsToday();
+      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
+      await settlementPage.expectSettlementSearchScreenVisible();
     },
   );
 

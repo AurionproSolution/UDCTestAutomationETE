@@ -38,6 +38,7 @@
   ],
   "environments": {
     "sit": {
+      "totpSecret": "R2NSSLUZUHUVNMYWF5X2DE5TXEAPHK7R",
       "validUsers": [
         {
           "username": "deepak.paramanick1",

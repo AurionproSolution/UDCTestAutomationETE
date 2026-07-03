@@ -114,6 +114,9 @@ export class DODashboardPage extends BasePage {
     await this.page
       .waitForLoadState("domcontentloaded", { timeout: 30_000 })
       .catch(() => {});
+
+    await this.ensureDealerShellFromLandingIfNeeded();
+
     await this.page.waitForURL(/\/dealer(\/|$)/i, { timeout: 60_000 }).catch(() => {});
 
     // Top-level Prime **progressbar** (not always tied to `.app-loader-overlay`); cap wait so auth setup
@@ -136,6 +139,33 @@ export class DODashboardPage extends BasePage {
         "Verified dealer shell (Create Standard Quote visible; skipped strict enabled for auth save).",
       );
     }
+  }
+
+  /**
+   * After `storageState` restore the portal may stop on `/landing` (Select Application)
+   * even when IdP cookies are valid. Enter **Quotes & Applications** like post-MFA login.
+   */
+  async ensureDealerShellFromLandingIfNeeded(): Promise<void> {
+    const onLanding = /\/landing(\/|$|\?)/i.test(this.page.url());
+    const selectApp = this.page.getByText(/Select Application/i).first();
+    const onLauncher =
+      onLanding ||
+      (await selectApp.isVisible({ timeout: 2_000 }).catch(() => false));
+
+    if (!onLauncher) return;
+
+    this.log("App launcher detected — opening Quotes & Applications…");
+    const quoteAndApp = this.page
+      .getByRole("link", { name: /Quotes\s*&\s*Applications/i })
+      .first();
+    await expect(quoteAndApp).toBeVisible({ timeout: 60_000 });
+    await this.waitForAppLoaderOverlayGone(30_000);
+    await quoteAndApp.click({ timeout: 30_000 });
+    await this.waitForAppLoaderOverlayGone(90_000);
+    await this.page
+      .waitForURL(/\/dealer(\/|$)/i, { timeout: 60_000 })
+      .catch(() => {});
+    this.log("Entered dealer shell from app launcher.");
   }
 
   /**
@@ -429,6 +459,7 @@ export class DODashboardPage extends BasePage {
     this.logStep(`Open Standard Quote By Quote ID ${id}`);
     await this.waitForAppLoaderOverlayGone(30_000);
 
+<<<<<<< HEAD
     const quoteLink = this.page
       .locator(`:text-is("${id}")`)
       .or(this.page.getByText(id, { exact: true }))
@@ -437,6 +468,32 @@ export class DODashboardPage extends BasePage {
     await quoteLink.scrollIntoViewIfNeeded();
     await quoteLink.click({ timeout: 20_000 });
 
+=======
+    const row = this.page
+      .locator("table tbody tr")
+      .filter({ hasText: new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`) })
+      .first();
+    if (await row.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      const quoteIdCell = row
+        .locator("div.cursor-pointer.text-primary")
+        .filter({ hasText: new RegExp(id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") })
+        .first()
+        .or(row.getByRole("link").first())
+        .or(row.locator("a[href*='standard-quote']").first());
+      await quoteIdCell.scrollIntoViewIfNeeded();
+      await quoteIdCell.click({ timeout: 30_000 });
+    } else {
+      const quoteLink = this.page
+        .locator(`:text-is("${id}")`)
+        .or(this.page.getByText(id, { exact: true }))
+        .first();
+      await expect(quoteLink).toBeVisible({ timeout: 45_000 });
+      await quoteLink.scrollIntoViewIfNeeded();
+      await quoteLink.click({ timeout: 20_000 });
+    }
+
+    await this.waitForAppLoaderOverlayGone(120_000);
+>>>>>>> 878e3f75971d963311ffc3495ec5cd45139cf743
     await expect(
       this.page.locator("app-quote-details, app-standard-quote").first(),
     ).toBeVisible({ timeout: 120_000 });

@@ -4,6 +4,7 @@
  */
  
 import { expect, Locator, Page } from "@playwright/test";
+import speakeasy from "speakeasy";
 import { DO_BASE_URL } from "../../../config/env";
 import { CommonUtils } from "../../../utils/commonUtils";
 import { BasePage } from "../../common/BasePage";
@@ -117,6 +118,64 @@ export class DOLoginPage extends BasePage {
     await p.waitForLoadState("domcontentloaded").catch(() => {});
     return (await this.resolveIdpUsernameField(p)) !== null;
   }
+
+  private otpInputs(p: Page): Locator {
+    return p.locator(
+      [
+        "input.otp-input",
+        "input[name*='otp' i]",
+        "input[id*='otp' i]",
+        "input[autocomplete='one-time-code']",
+      ].join(", "),
+    );
+  }
+
+  private async fillTotpIfPrompted(surface: Page, totpSecret?: string): Promise<void> {
+    const otpInputs = this.otpInputs(surface);
+    const firstVisible = await otpInputs
+      .first()
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false);
+    if (!firstVisible) return;
+
+    if (!totpSecret) {
+      throw new Error(
+        "SIT OTP prompt detected, but DO_PORTAL_TOTP_SECRET is not set. Set it in your environment and retry.",
+      );
+    }
+
+    const otp = speakeasy.totp({
+      secret: totpSecret,
+      encoding: "base32",
+      step: 30,
+      digits: 6,
+    });
+
+    this.log("SIT OTP prompt detected; entering generated TOTP.");
+    const count = await otpInputs.count();
+    const visibleInputs: Locator[] = [];
+    for (let i = 0; i < count; i++) {
+      const input = otpInputs.nth(i);
+      if (await input.isVisible({ timeout: 500 }).catch(() => false)) {
+        visibleInputs.push(input);
+      }
+    }
+
+    if (visibleInputs.length > 1) {
+      const digits = otp.split("");
+      for (let index = 0; index < digits.length && index < visibleInputs.length; index++) {
+        await visibleInputs[index].focus();
+        await surface.keyboard.type(digits[index]);
+      }
+      await surface.waitForTimeout(500);
+      return;
+    }
+
+    const target = visibleInputs[0] ?? otpInputs.first();
+    await target.focus();
+    await target.fill(otp);
+    await surface.waitForTimeout(500);
+  }
  
   /**
    * After **Login with FIS**, the IdP form may be on this tab or a new one; the opener can close.
@@ -143,6 +202,36 @@ export class DOLoginPage extends BasePage {
   }
  
   /**
+   * Post-SSO **Select Application** launcher (no Login with FIS on screen).
+   */
+  async isAppLauncherVisible(): Promise<boolean> {
+    const selectApp = this.page.getByText(/Select Application/i).first();
+    const onLauncher =
+      (await selectApp.isVisible({ timeout: 3_000 }).catch(() => false)) &&
+      (await this.quoteAndAppButton.isVisible({ timeout: 2_000 }).catch(() => false));
+    return onLauncher;
+  }
+
+  /** From `/landing` — same step as after successful FIS sign-in. */
+  async enterDealerFromAppLauncher(): Promise<void> {
+    this.log("App launcher detected — opening Quotes & Applications…");
+    await expect(this.quoteAndAppButton).toBeVisible({ timeout: 60_000 });
+    await this.page
+      .locator(".app-loader-overlay, .p-progressspinner")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+    await this.clickElement(this.quoteAndAppButton, 30_000);
+    await this.page
+      .locator(".loading, .spinner, [data-testid='loading']")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+    await this.page.waitForURL(/\/dealer(\/|$)/i, { timeout: 60_000 }).catch(() => {});
+    this.log("Opened Quotes & Applications");
+  }
+
+  /**
    * Navigate to DO Portal login page
    */
   async navigate(urlOverride?: string): Promise<void> {
@@ -152,13 +241,28 @@ export class DOLoginPage extends BasePage {
     await this.navigateTo(targetUrl);
     // domcontentloaded returns before SPA/SSO shell paints the FIS button; wait for the real login entry.
     await this.page.waitForLoadState("load");
+
+    if (await this.isAppLauncherVisible()) {
+      this.log("App launcher visible — SSO session already active; skipping Login with FIS.");
+      return;
+    }
+
     await expect(this.loginWithFisButton).toBeVisible({ timeout: 90_000 });
   }
  
   /**
    * Login with credentials
    */
-  async login(username: string, password: string): Promise<void> {
+  async login(
+    username: string,
+    password: string,
+    options?: { totpSecret?: string },
+  ): Promise<void> {
+    if (await this.isAppLauncherVisible()) {
+      await this.enterDealerFromAppLauncher();
+      return;
+    }
+
     this.log(`Logging in as: ${username}`);
     this.log("Clicking Login with FIS button");
     await this.clickElement(this.loginWithFisButton, 90_000);
@@ -187,6 +291,7 @@ export class DOLoginPage extends BasePage {
     await passwordInput.waitFor({ state: "visible", timeout: 30_000 });
     await utils.fill(passwordInput, password);
     this.log("Entered password (value not logged).");
+    await this.fillTotpIfPrompted(surface, options?.totpSecret);
  
     // Blur so Angular/async validators can run and enable Sign in
     await passwordInput.press("Tab");
@@ -203,19 +308,38 @@ export class DOLoginPage extends BasePage {
  
     this.log("Clicking Sign in");
     await utils.click(signinButton);
- 
+
+    // Wait for loaders and app overlay to clear before dashboard interactions
     await surface
       .locator(".loading, .spinner, [data-testid='loading']")
       .first()
       .waitFor({ state: "hidden", timeout: 30_000 })
       .catch(() => {});
+    // Also wait for app-loader-overlay to be hidden (SIT specific)
+    await surface
+      .locator(".app-loader-overlay, .p-progressspinner")
+      .first()
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+    
+    // Verify we're on the DO portal dashboard (not still on FIS login)
+    await surface.waitForURL(/udc-test\.fiscloudservices\.com\/SITDOPortal/, { timeout: 30_000 }).catch(() => {});
+    const currentUrl = surface.url();
+    if (!currentUrl.includes("udc-test.fiscloudservices.com/SITDOPortal")) {
+      throw new Error(`Expected to be on DO Portal dashboard but current URL is: ${currentUrl}`);
+    }
     this.log("Verified dashboard is loaded or navigation completed");
- 
+
     this.log("Clicking Quotes & Applications from dashboard");
     const quoteAndApp = surface.getByRole("link", {
       name: /Quotes & Applications/i,
     });
     await expect(quoteAndApp).toBeVisible({ timeout: 90_000 });
+    // Ensure overlay is gone before clicking
+    await surface
+      .locator(".app-loader-overlay")
+      .waitFor({ state: "hidden", timeout: 15_000 })
+      .catch(() => {});
     await utils.click(quoteAndApp);
     await surface
       .locator(".loading, .spinner, [data-testid='loading']")
@@ -231,9 +355,12 @@ export class DOLoginPage extends BasePage {
   async loginWithTestData(testData: {
     username: string;
     password: string;
+    totpSecret?: string;
   }): Promise<void> {
     this.logStep("Login with test data");
-    await this.login(testData.username, testData.password);
+    await this.login(testData.username, testData.password, {
+      totpSecret: testData.totpSecret,
+    });
   }
  
   /**

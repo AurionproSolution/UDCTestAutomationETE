@@ -235,7 +235,9 @@ export class DOReferenceDetailsPage extends BasePage {
    * other builds use **Submit** only. Try advances in order, then **Submit** if Upload is not yet shown.
    */
   async advanceFromReferenceDetailsToPostSubmission(): Promise<void> {
-    const uploadBrowse = this.page.locator(':text-is("Browse Files")');
+    const uploadBrowse = this.page
+      .getByRole("button", { name: /^Browse Files$/i })
+      .or(this.page.locator(':text-is("Browse Files")'));
     const postSubmissionStep = this.page.getByText(/^Post Submission$/i).first();
 
     const footerAdvanceButtons: Locator[] = [

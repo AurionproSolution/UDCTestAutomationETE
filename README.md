@@ -39,7 +39,7 @@ udc-automation-tests/
 │   │   └── index.ts
 │   └── index.ts                    # Root barrel export
 ├── playwright/                     # Playwright-only helpers (not mixed into tests/do-portal in IDE)
-│   └── do-portal-auth.setup.ts     # Dependency project: login → playwright/.auth/do-portal.json
+│   └── do-portal-auth.setup.ts     # Dependency project: login → playwright/.auth/do-portal.<env>.json
 ├── tests/
 │   ├── do-portal/                  # DO Portal tests (specs only; auth setup lives in ./playwright)
 │   │   ├── dashboard/
@@ -98,8 +98,9 @@ If DO tests do not appear under **Testing**, see [docs/test-explorer.md](docs/te
 
 ## 🔐 DO portal authentication (session reuse)
 
-- All specs under `tests/do-portal/` run under project **`do-portal-chromium`** with a shared **`storageState`** file at `playwright/.auth/do-portal.json` (gitignored).
-- The session is created once by **`playwright/do-portal-auth.setup.ts`** (project `do-portal-auth-setup`), using `testData/do-portal/loginData.json` (OTP still applies at login time). Run it alone with **`npm run test:do:auth`** when you need to refresh `playwright/.auth/do-portal.json` without running the full DO suite.
+- All specs under `tests/do-portal/` run under project **`do-portal-chromium`** with an environment-scoped **`storageState`** file at `playwright/.auth/do-portal.<env>.json` (gitignored), e.g. `do-portal.sit.json`.
+- The session is created once by **`playwright/do-portal-auth.setup.ts`** (project `do-portal-auth-setup`), using `testData/do-portal/loginData.json`. Run it alone with **`npm run test:do:auth`** when you need to refresh DO auth storage without running the full DO suite.
+- For unattended **SIT** MFA, set **`DO_PORTAL_TOTP_SECRET`** (base32). OTP values are generated at runtime and never logged.
 - **Local / non-CI:** auth setup runs automatically before DO tests.
 - **CI (`CI=true`):** global DO auth is **off** by default (GitHub-hosted runners cannot complete OTP). Set **`PLAYWRIGHT_USE_DO_GLOBAL_AUTH=1`** when you have unattended auth (e.g. self-hosted runner or a checked-in non-prod storage file policy). Until then, PR smoke/regression jobs **exclude** `tests/do-portal/**`; the default matrix runs **RSS + CSS** only. Run DO with `npm run test:do` locally.
 - **Headed mode:** `playwright.config.ts` uses `headless: false` everywhere. On Linux CI, workflows use **`xvfb-run`** so Chromium can run headed.
@@ -297,10 +298,35 @@ test('should display dashboard @do', async ({ doAuthenticatedPage, doDashboardPa
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `TEST_ENV` | Test environment (dev/qat/uat/prod) | `qat` |
+| `TEST_ENV` | Test environment (dev/qat/sit/uat/prod) | `qat` |
 | `CI` | Set automatically on GitHub Actions | - |
 | `PLAYWRIGHT_IDE` | Set to `1` in VS Code/Cursor (`.vscode/settings.json`) for a **single** `udc-chromium` project so Test Explorer lists all portals under `tests/` | unset (multi-project config for CLI/CI) |
 | `PLAYWRIGHT_USE_DO_GLOBAL_AUTH` | On CI, set to `1` to run `playwright/do-portal-auth.setup.ts` and apply DO `storageState` for tag projects and DO matrix jobs | unset (DO auth off on CI) |
+| `DO_PORTAL_TOTP_SECRET` | Base32 TOTP secret used for automated DO MFA in SIT (`TEST_ENV=sit`). See [SIT TOTP Setup](#sit-totp-setup) below. | unset |
+
+### SIT TOTP Setup
+
+For automated TOTP/MFA login on SIT environment, configure the TOTP secret using one of these methods:
+
+**Option 1: Environment Variable (Recommended for CI/Local)**
+```powershell
+$env:TEST_ENV="sit"
+$env:DO_PORTAL_TOTP_SECRET="YOUR_BASE32_SECRET"
+npm run test:do:sit
+```
+
+**Option 2: Local Secrets File (Recommended for daily development)**
+```powershell
+# Copy the example file
+copy config/secrets.local.json.example config/secrets.local.json
+# Edit and add your TOTP secret
+```
+The `config/secrets.local.json` file is gitignored and will be used automatically when `TEST_ENV=sit`.
+
+**Option 3: Shared Team Secret (For teams with one shared SIT account)**
+Store the TOTP secret in your team's password manager (1Password, LastPass, etc.) and share the setup instructions. Each team member creates their own `config/secrets.local.json` with the shared secret.
+
+**Without TOTP Secret:** If no secret is configured, the test will stop at the OTP prompt during headed login - manually enter the code from your authenticator app.
 | `PLAYWRIGHT_SKIP_ORTONI` | Set to `1` to skip Ortoni reporter (IDE default) | unset (Ortoni enabled on CLI) |
 | `PLAYWRIGHT_SKIP_REPORT_BACKUP` | Set to `1` to skip automatic copy to `results/report-<timestamp>/` | unset (backup enabled on CLI) |
 
