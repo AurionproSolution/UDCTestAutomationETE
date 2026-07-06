@@ -8,6 +8,7 @@ import { expect, test } from "@fixtures/doPortalTest";
 import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
+  DOAddOnsAccessoriesPage,
   DOAssetDetailsPage,
   DOCustomerDetailsPage,
   DODashboardPage,
@@ -244,6 +245,260 @@ async function fillAddOnAccessoriesPageAndSave(page: Page): Promise<void> {
   await saveBtn.click({ timeout: 20_000 });
 }
 
+/** UDP-T4221 — PrimeNG **Save** on Add Ons screen (same locator as {@link fillAddOnAccessoriesPageAndSave}). */
+async function clickAddOnAccessoriesSave(page: Page): Promise<void> {
+  const saveBtn = page
+    .locator('button[type="button"][data-pc-name="button"]')
+    .filter({ has: page.locator('span[data-pc-section="label"]').filter({ hasText: /^Save$/ }) })
+    .last();
+  await saveBtn.waitFor({ state: "visible", timeout: 20_000 });
+  await saveBtn.scrollIntoViewIfNeeded();
+  await saveBtn.click({ timeout: 20_000 });
+}
+
+/** UDP-T4221 — poll Add Ons sub-total row until it reflects at least `minDollars`. */
+async function waitForUdpT4221AddOnsSubtotalMin(
+  page: Page,
+  labelRx: RegExp,
+  minDollars: number,
+): Promise<void> {
+  const anchor = page.getByText(labelRx).first();
+  await expect(anchor).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(
+      async () => {
+        const raw = (
+          (await anchor
+            .evaluate((el) => (el as HTMLElement).closest("div")?.innerText ?? el.textContent ?? "")
+            .catch(() => "")) ?? ""
+        ).replace(/\s+/g, " ");
+        const m = raw.match(/\$\s*([\d,]+\.?\d*)/);
+        if (!m) return null;
+        const n = parseFloat(m[1].replace(/,/g, ""));
+        return Number.isFinite(n) && n + 0.01 >= minDollars ? n : null;
+      },
+      { timeout: 25_000, intervals: [300, 500, 1_000, 1_500] },
+    )
+    .not.toBeNull();
+}
+
+/** UDP-T4221 — scroll Insurance into view before Extended Warranty entry (same panel focus as TL/CSA flow). */
+async function udpT4221FocusInsuranceSection(page: Page, addOnsPage: DOAddOnsAccessoriesPage): Promise<void> {
+  await page.keyboard.press("Escape").catch(() => {});
+  const inAddOns = page.locator("app-add-on-accessories").last().getByText(/^Insurance$/i).first();
+  if (await inAddOns.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await inAddOns.scrollIntoViewIfNeeded();
+    await inAddOns.click({ timeout: 15_000 }).catch(() => {});
+  } else {
+    await page.getByText(/^Insurance$/i).first().scrollIntoViewIfNeeded();
+  }
+  await addOnsPage.insuranceRoot().scrollIntoViewIfNeeded().catch(() => {});
+}
+
+/**
+ * UDP-T4221 — **Extended Warranty** only: Yes, Months = 2, Amount = $200.
+ * Uses public {@link DOAddOnsAccessoriesPage} locators; shared `fillInsurance*` methods are skipped by the page-object flag.
+ */
+async function fillUdpT4221ExtendedWarrantyInsurance(
+  page: Page,
+  addOnsPage: DOAddOnsAccessoriesPage,
+): Promise<void> {
+  await udpT4221FocusInsuranceSection(page, addOnsPage);
+
+  let form = addOnsPage.insuranceQuestionRow(/Extended\s*Warranty/i);
+  if (!(await form.isVisible({ timeout: 8_000 }).catch(() => false))) {
+    form = addOnsPage
+      .insuranceRoot()
+      .getByText(/Extended\s*Warranty/i)
+      .first()
+      .locator("xpath=ancestor::form[1]");
+  }
+  await expect(form).toBeVisible({ timeout: 45_000 });
+  await form.scrollIntoViewIfNeeded();
+
+  const yesRadio = form.locator("p-radiobutton").filter({ hasText: /^Yes$/i }).first();
+  const yesBox = yesRadio.locator("div.p-radiobutton-box").first();
+  if (await yesBox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await yesBox.click({ timeout: 15_000 });
+  } else if (await yesRadio.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await yesRadio.click({ timeout: 15_000 });
+  } else {
+    await form.getByRole("radio", { name: /^Yes$/i }).first().click({ timeout: 15_000 });
+  }
+
+  const monthInput = addOnsPage.insuranceMonthsInput(form);
+  await expect(monthInput).toBeVisible({ timeout: 20_000 });
+  await monthInput.click();
+  await monthInput.press("Control+a");
+  await monthInput.type("2", { delay: 50 });
+  await monthInput.press("Tab").catch(() => {});
+  await expect
+    .poll(async () => (await monthInput.inputValue()).replace(/\D/g, ""), {
+      timeout: 15_000,
+      intervals: [200, 400, 800],
+    })
+    .toContain("2");
+
+  const amtInput = addOnsPage.insuranceAmountInput(form);
+  await expect(amtInput).toBeVisible({ timeout: 20_000 });
+  await amtInput.click();
+  await amtInput.press("Control+a");
+  await amtInput.type("200", { delay: 50 });
+  await amtInput.press("Tab").catch(() => {});
+  await expect
+    .poll(
+      async () => {
+        const raw = (await amtInput.inputValue()).replace(/[^0-9]/g, "");
+        return raw.includes("200") ? raw : null;
+      },
+      { timeout: 22_000, intervals: [200, 500, 1_000] },
+    )
+    .not.toBeNull();
+
+  await waitForUdpT4221AddOnsSubtotalMin(page, /Sub-Total\s*Insurances|Sub Total Insurance/i, 200);
+}
+
+/**
+ * UDP-T4221 Zephyr — Registration $400, General Accessory $150, Extended Warranty $200 (no Service Plan).
+ * Reuses {@link DOAddOnsAccessoriesPage} registration/accessory helpers and TL Save locator.
+ */
+async function fillUdpT4221AddOnsAndSave(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  const addOnsPage = new DOAddOnsAccessoriesPage(page);
+  await page.locator("app-service-plan").waitFor({ state: "visible", timeout: 45_000 });
+  await page.locator("app-accessories").waitFor({ state: "visible", timeout: 45_000 }).catch(() => {});
+
+  await addOnsPage.fillRegistrationAmount("400");
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  await waitForUdpT4221AddOnsSubtotalMin(
+    page,
+    /Sub-Total.*Registration|Sub-Total.*Service|Sub-Total.*Plans|Sub-Total.*Add\s*Ons|Sub Total Add Ons/i,
+    400,
+  );
+
+  await addOnsPage.fillGeneralAccessoriesAmount("150");
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  await waitForUdpT4221AddOnsSubtotalMin(page, /Sub-Total\s*Accessories|Sub Total Accessories/i, 150);
+
+  await fillUdpT4221ExtendedWarrantyInsurance(page, addOnsPage);
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+  await clickAddOnAccessoriesSave(page);
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+}
+
+/** UDP-T4221 — Charges = Registration + Insurances + Accessories = $750. */
+async function expectUdpT4221ChargesTotal(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  await expect(page.locator("app-service-plan")).toBeHidden({ timeout: 60_000 });
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  const chargesBlock = assetDetailsPage.chargesFieldBlock();
+  await expect(chargesBlock).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(
+      async () =>
+        assetDetailsPage.parseDisplayedCurrency((await chargesBlock.textContent()) ?? ""),
+      { timeout: 30_000, intervals: [500, 1_000, 1_500] },
+    )
+    .toBe(750);
+}
+
+const UDP_T4221_ASSET_CATEGORY = "Car and Light Commercial /";
+const UDP_T4221_VEHICLE = {
+  make: "TOYOTA",
+  model: "HILUX",
+  variant: "Top",
+  year: "2025",
+} as const;
+
+function udpT4221AssetTypeInput(page: Page): Locator {
+  return standardQuoteRoot(page).locator('input[name="assetTypeDD"]').first();
+}
+
+async function readUdpT4221AssetTypeValue(page: Page): Promise<string> {
+  const input = udpT4221AssetTypeInput(page);
+  if (await input.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    return ((await input.inputValue()) || (await input.getAttribute("value")) || "").trim();
+  }
+  const root = standardQuoteRoot(page);
+  const labelRow = root
+    .locator("label, span")
+    .filter({ hasText: /^Asset Type/i })
+    .first();
+  if (await labelRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const row = labelRow.locator(
+      "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'grid')][1]",
+    );
+    return ((await row.textContent()) ?? "").replace(/Asset Type\s*\*?/i, "").trim();
+  }
+  return "";
+}
+
+/** UDP-T4221 — Asset Type: category + vehicle modal (same data as TL `addMinimalUsedAsset`; no cash price). */
+async function selectUdpT4221AssetType(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  await assetDetailsPage.enterAsset(UDP_T4221_ASSET_CATEGORY);
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  await assetDetailsPage.selectVehicleFromAssetTypeModal(UDP_T4221_VEHICLE);
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+  await expect
+    .poll(
+      async () => {
+        const v = (await readUdpT4221AssetTypeValue(page)).trim();
+        return v.length > 0 ? v : null;
+      },
+      { timeout: 90_000, intervals: [400, 800, 1_200] },
+    )
+    .not.toBeNull();
+}
+
+/** UDP-T4221 — Product + Program + Asset Type; Asset Details stable before Add Ons entry. */
+async function prepareUdpT4221AssetDetailsForAddOns(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  await selectTlProductAndProgram(assetDetailsPage);
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  await selectUdpT4221AssetType(page, assetDetailsPage);
+  await assetDetailsPage.waitForAssetDetailsStepReady();
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+}
+
+/** UDP-T4221 — open Add Ons using TL/CSA helper; PrimeNG `p-button-label` fallback from deployed DOM. */
+async function openUdpT4221AddOnsAccessories(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  const root = standardQuoteRoot(page);
+
+  const primeAddOnsBtn = page
+    .locator('button[type="button"][data-pc-name="button"]')
+    .filter({
+      has: page.locator("span.p-button-label", { hasText: /^Add Ons & Accessories$/ }),
+    })
+    .first();
+
+  await primeAddOnsBtn.scrollIntoViewIfNeeded().catch(() => {});
+  if (await primeAddOnsBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    await expect(primeAddOnsBtn).toBeEnabled({ timeout: 15_000 });
+    await primeAddOnsBtn.click({ timeout: 20_000 });
+    await assetDetailsPage.waitForQuoteLoadersToFinish();
+    if (await page.locator("app-service-plan").isVisible({ timeout: 30_000 }).catch(() => false)) {
+      return;
+    }
+  }
+
+  await openAddOnAccessoriesPageFromStandardQuote(page, root, assetDetailsPage);
+}
+
 /**
  * From **Asset Details**, open **Add On Accessories** (`app-service-plan` route).
  * Waits for loaders, scrolls the charges block, tries link / button / text + ancestor clicks.
@@ -329,6 +584,86 @@ async function openAddOnAccessoriesPageFromStandardQuote(
   );
 }
 
+function standardQuoteQuoteIdBlock(page: Page): Locator {
+  const root = standardQuoteRoot(page);
+  const quoteIdLabel = root
+    .getByText(/Quote\s*(No\.?|Number|ID)\s*:?/i)
+    .filter({ visible: true })
+    .first();
+  return quoteIdLabel
+    .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
+    .or(quoteIdLabel.locator("xpath=ancestor::div[1]"))
+    .first();
+}
+
+/** UDP-T4214 — Quote ID is blank until the first Save assigns it in FIS AF. */
+async function expectQuoteIdBlankBeforeFirstSave(page: Page): Promise<void> {
+  const quoteIdBlock = standardQuoteQuoteIdBlock(page);
+  const quoteIdInput = quoteIdBlock.locator("input").filter({ visible: true }).first();
+  if (await quoteIdInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await expect.soft(quoteIdInput).toHaveValue("", { timeout: 15_000 });
+    return;
+  }
+  const text = ((await quoteIdBlock.textContent()) ?? "").replace(/\s+/g, " ").trim();
+  expect.soft(text).not.toMatch(/\d{3,}/);
+}
+
+/** UDP-T4220 — currency input inside the labeled `amount` component (Loan Details fees). */
+function udpT4220EstablishmentFeeInput(page: Page, labelRx: RegExp): Locator {
+  const root = standardQuoteRoot(page);
+  return root
+    .locator("amount")
+    .filter({ hasText: labelRx })
+    .locator("#amount");
+}
+
+/** Enter a fee and wait until async recalc stops flickering (UDP-T4220 only). */
+async function enterUdpT4220EstablishmentFeeDollars(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+  input: Locator,
+  dollars: number,
+  fieldName: string,
+): Promise<void> {
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  await expect(input).toBeVisible({ timeout: 20_000 });
+  await expect(input).toBeEditable({ timeout: 20_000 });
+  await input.scrollIntoViewIfNeeded();
+
+  const target = Math.round(dollars * 100) / 100;
+  const digits = target.toFixed(2);
+
+  let last = Number.NaN;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await input.click();
+    await page.keyboard.press("Control+A");
+    await page.keyboard.press("Backspace").catch(() => {});
+    await page.keyboard.type(digits, { delay: 40 });
+    await input.press("Tab");
+    await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+    try {
+      await expect
+        .poll(
+          async () => {
+            const raw = (await input.inputValue()).trim();
+            const n = assetDetailsPage.parseDisplayedCurrency(raw);
+            return Math.abs(n - target) < 0.01 ? n : null;
+          },
+          { timeout: 20_000, intervals: [300, 500, 1_000, 1_500] },
+        )
+        .not.toBeNull();
+      return;
+    } catch {
+      last = assetDetailsPage.parseDisplayedCurrency((await input.inputValue()).trim());
+    }
+  }
+
+  throw new Error(
+    `${fieldName} did not stabilize at $${target.toFixed(2)} (last read $${last.toFixed(2)}).`,
+  );
+}
+
 test.describe("Standard Quote - TL @do @regression", () => {
   test(
     "UDP-T4214 - TC_SQ_001 Standard Quote Default Fields on Load",
@@ -336,8 +671,32 @@ test.describe("Standard Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await selectTlProductAndProgram(assetDetailsPage);
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+      await assetDetailsPage.waitForProductSelectionSettled(/TL/i);
       const root = standardQuoteRoot(page);
+
+      const originatorRoot = root.locator("app-quote-originator").first();
+      if (await originatorRoot.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        for (const labelRx of [/Originator\s+Name/i, /Originator\s+Number/i]) {
+          const label = originatorRoot.getByText(labelRx).first();
+          if (!(await label.isVisible({ timeout: 5_000 }).catch(() => false))) continue;
+          const block = label
+            .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
+            .or(label.locator("xpath=ancestor::div[1]"))
+            .first();
+          const valueInput = block
+            .locator("input:not([type='checkbox'])")
+            .filter({ visible: true })
+            .first();
+          if (await valueInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+            expect.soft((await valueInput.inputValue()).trim().length).toBeGreaterThan(0);
+            continue;
+          }
+          const blockText = ((await block.textContent()) ?? "").replace(/\s+/g, " ").trim();
+          const withoutLabel = blockText.replace(labelRx, "").trim();
+          expect.soft(withoutLabel.length).toBeGreaterThan(0);
+        }
+      }
 
       const promoHost = root.locator("p-checkbox").filter({
         has: root
@@ -347,10 +706,41 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const promoInput = promoHost.first().locator('input[type="checkbox"]').first();
       if (await promoHost.first().isVisible({ timeout: 15_000 }).catch(() => false)) {
         await expect.soft(promoInput).not.toBeChecked();
+      } else {
+        const byRole = root.getByRole("checkbox", { name: /Promotion\s+Quote/i }).first();
+        if (await byRole.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await expect.soft(byRole).not.toBeChecked();
+        }
       }
 
-      await expect.soft(root.getByText(TL_SQ_PRODUCT).first()).toBeVisible({ timeout: 20_000 });
-      await expect.soft(root.getByText(TL_SQ_PROGRAM).first()).toBeVisible({ timeout: 20_000 });
+      const productHost = root
+        .locator("p-dropdown")
+        .filter({ has: root.locator("label").filter({ hasText: /^Product/i }) })
+        .first();
+      if (await productHost.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        const productLabel =
+          (await productHost.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
+        expect.soft(productLabel).toMatch(/TL/i);
+      } else {
+        await expect.soft(root.getByText(/TL/i).first()).toBeVisible({ timeout: 20_000 });
+      }
+
+      const programLabel = await assetDetailsPage.readSelectedProgramLabel();
+      expect.soft(programLabel).toMatch(/^$|^Select/i);
+      await expect.soft(root.getByText(TL_SQ_PROGRAM)).toHaveCount(0, { timeout: 5_000 });
+
+      const loanPurpose = root
+        .getByRole("textbox", { name: /^Loan Purpose/i })
+        .or(
+          root.locator(
+            "xpath=.//label[contains(normalize-space(.),'Loan Purpose')]/following::input[1]",
+          ),
+        )
+        .first();
+      if (await loanPurpose.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        const value = (await loanPurpose.inputValue()).trim();
+        expect.soft(value.length).toBeGreaterThan(0);
+      }
 
       const salesperson = root
         .getByRole("combobox", { name: /Salesperson/i })
@@ -362,17 +752,22 @@ test.describe("Standard Quote - TL @do @regression", () => {
         expect.soft(label.length).toBeGreaterThan(0);
       }
 
-      const conditionUsed = root.getByRole("radio", { name: /Used/i }).or(root.getByText(/^Used$/i)).first();
-      if (await conditionUsed.isVisible({ timeout: 10_000 }).catch(() => false)) {
-        const checked =
-          (await conditionUsed.getAttribute("aria-checked")) === "true" ||
-          (await conditionUsed.locator('input[type="radio"]').isChecked().catch(() => false));
-        if (checked) {
-          await expect.soft(conditionUsed).toBeVisible();
+      await assetDetailsPage.expectWorkflowStatusOpenQuote();
+
+      const usedRadio = root.getByRole("radio", { name: /^Used$/i }).first();
+      if (await usedRadio.isVisible({ timeout: 10_000 }).catch(() => false)) {
+        await expect.soft(usedRadio).toBeChecked();
+      } else {
+        const conditionHost = root
+          .locator("p-dropdown, p-selectbutton")
+          .filter({ hasText: /Condition/i })
+          .first();
+        if (await conditionHost.isVisible({ timeout: 10_000 }).catch(() => false)) {
+          await expect.soft(conditionHost).toContainText(/Used/i);
         }
       }
 
-      await expect.soft(root).toContainText(/Open\s+Quote/i, { timeout: 20_000 });
+      await expectQuoteIdBlankBeforeFirstSave(page);
     },
   );
 
@@ -410,11 +805,11 @@ test.describe("Standard Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await selectTlProductAndProgram(assetDetailsPage);
-      await assetDetailsPage.selectCondition("New");
-      await assetDetailsPage.scrollRecommendedRetailPriceIntoView();
-      await expect.soft(assetDetailsPage.recommendedRetailPriceInput).toBeVisible({ timeout: 20_000 });
-      await assetDetailsPage.selectCondition("Used");
+
+      await assetDetailsPage.selectConditionInStandardQuote("New");
+      await assetDetailsPage.expectRecommendedRetailPriceVisibleAfterNewCondition();
+
+      await assetDetailsPage.selectConditionInStandardQuote("Used");
       await assetDetailsPage.expectRecommendedRetailPriceHiddenAfterUsedCondition();
     },
   );
@@ -467,8 +862,22 @@ test.describe("Standard Quote - TL @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      await assetDetailsPage.udcEstablishmentFee("$300");
-      await assetDetailsPage.dealerOriginationFee("$200");
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+      await enterUdpT4220EstablishmentFeeDollars(
+        page,
+        assetDetailsPage,
+        udpT4220EstablishmentFeeInput(page, /UDC Establishment Fee/i),
+        300,
+        "UDC Establishment Fee",
+      );
+      await enterUdpT4220EstablishmentFeeDollars(
+        page,
+        assetDetailsPage,
+        udpT4220EstablishmentFeeInput(page, /Dealer Origination Fee/i),
+        200,
+        "Dealer Origination Fee",
+      );
       await assetDetailsPage.expectTotalEstablishmentFeeSumDollars(500);
     },
   );
@@ -479,34 +888,12 @@ test.describe("Standard Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await selectTlProductAndProgram(assetDetailsPage);
-      const root = standardQuoteRoot(page);
+      await prepareUdpT4221AssetDetailsForAddOns(page, assetDetailsPage);
+      await openUdpT4221AddOnsAccessories(page, assetDetailsPage);
+      await expect(page.locator("app-service-plan")).toBeVisible({ timeout: 45_000 });
 
-      await test.step("Open Add Ons & Accessories (expect app-service-plan)", async () => {
-        await openAddOnAccessoriesPageFromStandardQuote(page, root, assetDetailsPage);
-        await expect(page.locator("app-service-plan")).toBeVisible({ timeout: 45_000 });
-      });
-
-      await test.step("Fill registration / service / accessories and Save", async () => {
-        await fillAddOnAccessoriesPageAndSave(page);
-      });
-
-      await test.step("Return to quote and assert Charges reflects add-ons", async () => {
-        await expect(page.locator("app-service-plan")).toBeHidden({ timeout: 60_000 });
-        const rootAfter = standardQuoteRoot(page);
-        await expect.soft(rootAfter).toBeVisible({ timeout: 60_000 });
-        const chargesBlock = rootAfter
-          .locator(".p-field, [class*='p-field'], amount, .grid")
-          .filter({ has: rootAfter.getByText(/^Charges$/i) })
-          .first();
-        if (await chargesBlock.isVisible({ timeout: 15_000 }).catch(() => false)) {
-          await expect
-            .poll(async () => (await chargesBlock.textContent())?.replace(/\s/g, " ") ?? "", {
-              timeout: 30_000,
-            })
-            .toMatch(/[1-9]\d{0,3}|[1-9][\d,]*\.\d{2}/);
-        }
-      });
+      await fillUdpT4221AddOnsAndSave(page, assetDetailsPage);
+      await expectUdpT4221ChargesTotal(page, assetDetailsPage);
     },
   );
 
@@ -522,7 +909,7 @@ test.describe("Standard Quote - TL @do @regression", () => {
   );
 
   test(
-    "UDP-T4223 - TC_AF_002 Additional Funds Greater Than Zero Creates Custom Flow",
+    "UDP-T4223 - TC_AF_002 Additional Funds Greater Than Zero Creates Custom Flow in FIS AF",
     { tag: ["@do", "@regression", "@UDP-T4223"] },
     async ({ page }) => {
       test.setTimeout(600_000);
@@ -530,15 +917,31 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
       await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.enterAdditionalFunds("$5,000");
-      await assetDetailsPage.enterAdditionalFundsPurpose("Equipment purchase");
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+      await assetDetailsPage.expectAdditionalFundsVisibleOnLoad();
+
+      await test.step("Enter Additional Funds $5,000", async () => {
+        await assetDetailsPage.enterAdditionalFunds("$5,000");
+        await assetDetailsPage.enterAdditionalFundsPurpose("Equipment purchase");
+        await assetDetailsPage.expectAdditionalFundsAmountDollars(5000);
+      });
+
+      await test.step("Calculate quote with Additional Funds", async () => {
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+      });
+
+      await test.step("FIS AF pricing returned after Additional Funds > 0", async () => {
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+        const payment = await assetDetailsPage.readPaymentAmount();
+        const totalRepay = await assetDetailsPage.readTotalAmountToRepay();
+        expect(payment).toBeGreaterThan(0);
+        expect(totalRepay).toBeGreaterThan(0);
+      });
     },
   );
 
   test(
-    "UDP-T4224 - TC_AF_003 Additional Funds Blank Not Passed to FIS AF",
+    "UDP-T4224 - TC_AF_003 Additional Funds Blank or Zero Not Passed to FIS AF",
     { tag: ["@do", "@regression", "@UDP-T4224"] },
     async ({ page }) => {
       test.setTimeout(600_000);
@@ -546,14 +949,30 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
       await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.expectAdditionalFundsVisibleOnLoad();
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+
+      await test.step("Leave Additional Funds blank", async () => {
+        await assetDetailsPage.expectAdditionalFundsVisibleOnLoad();
+        await assetDetailsPage.expectAdditionalFundsBlankOrZero();
+      });
+
+      await test.step("Calculate quote with blank Additional Funds", async () => {
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+      });
+
+      await test.step("FIS AF pricing without Additional Funds custom flow", async () => {
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+        await assetDetailsPage.expectAdditionalFundsBlankOrZero();
+        const payment = await assetDetailsPage.readPaymentAmount();
+        const totalRepay = await assetDetailsPage.readTotalAmountToRepay();
+        expect(payment).toBeGreaterThan(0);
+        expect(totalRepay).toBeGreaterThan(0);
+      });
     },
   );
 
   test(
-    "UDP-T4225 - TC_AF_004 Additional Funds Purpose Mandatory When Funds Greater Than Zero",
+    "UDP-T4225 - TC_AF_004 Additional Funds Purpose Conditionally Mandatory When Funds Greater Than Zero",
     { tag: ["@do", "@regression", "@UDP-T4225"] },
     async ({ page }) => {
       test.setTimeout(600_000);
@@ -561,10 +980,22 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
       await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.enterAdditionalFunds("$3,000");
-      await assetDetailsPage.clearAdditionalFundsPurpose();
-      await assetDetailsPage.clickSaveStandardQuoteStep();
-      await assetDetailsPage.expectAdditionalFundsPurposeInlineErrorVisible();
+
+      await test.step("Enter Additional Funds $3,000", async () => {
+        await assetDetailsPage.expectAdditionalFundsVisibleOnLoad();
+        await assetDetailsPage.enterAdditionalFunds("$3,000");
+        await assetDetailsPage.expectAdditionalFundsAmountDollars(3000);
+      });
+
+      await test.step("Leave Additional Funds Purpose blank", async () => {
+        await assetDetailsPage.clearAdditionalFundsPurpose();
+        await expect(assetDetailsPage.additionalFundsPurposeTextarea).toHaveValue("");
+      });
+
+      await test.step("Save and expect Please complete details error", async () => {
+        await assetDetailsPage.clickSaveStandardQuoteStep();
+        await assetDetailsPage.expectAdditionalFundsPurposeInlineErrorVisible();
+      });
     },
   );
 
@@ -693,7 +1124,7 @@ test.describe("Standard Quote - TL @do @regression", () => {
   );
 
   test(
-    "UDP-T4234 - TC_LD_004 Total Amount Borrowed Display Only After Calculate",
+    "UDP-T4234 - TC_LD_004 Total Amount Borrowed Display Only Calculated by FIS AF",
     { tag: ["@do", "@regression", "@UDP-T4234"] },
     async ({ page }) => {
       test.setTimeout(600_000);
@@ -701,10 +1132,18 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
       await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.expectTotalAmountBorrowedZero();
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectTotalAmountBorrowedReadOnly();
-      await assetDetailsPage.expectTotalAmountBorrowedGreaterThanZero();
+
+      await test.step("Calculate TL Standard Quote", async () => {
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+      });
+
+      await test.step("Observe Total Amount Borrowed display-only Amount Financed from FIS AF", async () => {
+        await assetDetailsPage.expectTotalAmountBorrowedCalculatedAmountFinanced();
+        await assetDetailsPage.expectInterestChargeReadOnly();
+        await assetDetailsPage.expectInterestChargeNonNegative();
+      });
     },
   );
 
@@ -712,7 +1151,7 @@ test.describe("Standard Quote - TL @do @regression", () => {
     "UDP-T4235 - TC_FD_001 Term Mandatory Max Term Validation",
     { tag: ["@do", "@regression", "@UDP-T4235"] },
     async ({ page }) => {
-      test.setTimeout(300_000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);

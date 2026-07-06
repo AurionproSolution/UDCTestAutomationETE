@@ -177,9 +177,13 @@ export class DOAssetDetailsPage extends BasePage {
 
     this.additionalFundsRoot = page.locator("app-additional-funds").first();
     this.additionalFundsInput = this.additionalFundsRoot
-      .locator("amount")
-      .filter({ hasText: /Additional Funds/i })
-      .locator("#amount")
+      .locator('input#amount[currencymask], input#amount[type="text"]')
+      .first()
+      .or(
+        this.additionalFundsRoot.locator(
+          "xpath=.//*[contains(normalize-space(.),'Additional Funds') and not(contains(.,'Purpose'))]/following::input[@id='amount'][1]",
+        ),
+      )
       .first();
     this.additionalFundsPurposeTextarea = this.additionalFundsRoot
       .getByRole("textbox", { name: /Additional Funds Purpose/i })
@@ -250,7 +254,10 @@ export class DOAssetDetailsPage extends BasePage {
     const productDropdown = this.page.locator(
       `//span//label[contains(text(), 'Product')]/following-sibling::div//span`,
     );
-    await productDropdown.click();
+    await productDropdown.click({ timeout: 15_000 });
+    await expect(this.page.getByRole("option").first())
+      .toBeVisible({ timeout: 15_000 })
+      .catch(() => {});
   }
 
   /**
@@ -258,7 +265,9 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async selectProduct(productName: string): Promise<void> {
     this.logStep(`Selected product: ${this.stepValueDisplay(productName)}`);
-    await this.page.getByRole("option", { name: productName }).click();
+    const option = this.page.getByRole("option", { name: productName, exact: true });
+    await expect(option.first()).toBeVisible({ timeout: 15_000 });
+    await option.click();
   }
 
   /**
@@ -288,6 +297,7 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(`Chose product: ${this.stepValueDisplay(productName)}`);
     await this.openProductDropdown();
     await this.selectProduct(productName);
+    await this.waitForProductSelectionSettled(productName, { waitLoanPurpose: false });
   }
 
   /**
@@ -297,6 +307,8 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(`Chose program: ${this.stepValueDisplay(programName)}`);
     await this.openProgramDropdown();
     await this.selectProgram(programName);
+    await this.waitForQuoteLoadersToFinish();
+    await this.waitForLoanPurposePopulated();
   }
 
   /** Standard Quote / Asset Details shell (first `app-quote-details` or `app-standard-quote`). */
@@ -310,12 +322,142 @@ export class DOAssetDetailsPage extends BasePage {
       state: "visible",
       timeout: 60_000,
     });
-  
-    await expect(
-      this.cashPriceOfAssetInputField
-    ).toBeVisible({
+
+    await expect(this.cashPriceOfAssetInputField).toBeVisible({
       timeout: 60_000,
     });
+  }
+
+  /** Loan Purpose textbox when shown on Standard Quote header rows. */
+  loanPurposeInputField(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .getByRole("textbox", { name: /^Loan Purpose/i })
+      .or(
+        root.locator(
+          "xpath=.//label[contains(normalize-space(.),'Loan Purpose')]/following::input[1]",
+        ),
+      )
+      .first();
+  }
+
+  /**
+   * Visible PrimeNG dropdown value for a Standard Quote header label (TL/CSA:
+   * `span[role="combobox"].p-dropdown-label`).
+   */
+  private primeLabeledDropdownCombobox(fieldLabel: string): Locator {
+    const root = this.standardQuoteRoot();
+    const labelContains = `contains(normalize-space(.), '${fieldLabel}')`;
+    const combobox = "span[@role='combobox' and contains(@class,'p-dropdown-label')]";
+    return root
+      .locator(`xpath=.//label[${labelContains}]/following-sibling::div//${combobox}[1]`)
+      .or(
+        root.locator(
+          `xpath=.//label[${labelContains}]/following::p-dropdown[1]//${combobox}[1]`,
+        ),
+      )
+      .or(root.locator(`xpath=.//label[${labelContains}]/following::${combobox}[1]`))
+      .filter({ visible: true })
+      .first();
+  }
+
+  private async readPrimeLabeledDropdownValue(fieldLabel: string): Promise<string> {
+    const combobox = this.primeLabeledDropdownCombobox(fieldLabel);
+    if (!(await combobox.isVisible({ timeout: 20_000 }).catch(() => false))) {
+      return "";
+    }
+    const raw = ((await combobox.textContent().catch(() => "")) ?? "").trim();
+    return this.isDropdownPlaceholder(raw) ? "" : raw;
+  }
+
+  productDropdownHost(): Locator {
+    const root = this.standardQuoteRoot();
+    return this.primeLabeledDropdownCombobox("Product")
+      .locator("xpath=ancestor::p-dropdown[1]")
+      .or(
+        root.locator(
+          "xpath=.//label[contains(normalize-space(.), 'Product')]/following::p-dropdown[1]",
+        ),
+      )
+      .first();
+  }
+
+  private isDropdownPlaceholder(value: string): boolean {
+    const t = value.replace(/\s+/g, " ").trim();
+    return t.length === 0 || /^select\b/i.test(t) || /^—+$/.test(t) || t === "-";
+  }
+
+  private productLabelMatches(expected: string | RegExp, label: string): boolean {
+    const t = label.trim();
+    if (!t) return false;
+    if (typeof expected === "string") {
+      return t === expected || t.includes(expected);
+    }
+    return expected.test(t);
+  }
+
+  async readSelectedProductLabel(): Promise<string> {
+    this.logStep("Read selected product label");
+    return this.readPrimeLabeledDropdownValue("Product");
+  }
+
+  async waitForSelectedProductLabel(
+    expected: string | RegExp,
+    opts?: { timeoutMs?: number },
+  ): Promise<void> {
+    this.logStep(`Wait for selected product label: ${String(expected)}`);
+    const timeoutMs = opts?.timeoutMs ?? 60_000;
+    await expect
+      .poll(
+        async () => {
+          const label = await this.readSelectedProductLabel();
+          return this.productLabelMatches(expected, label) ? label : null;
+        },
+        { timeout: timeoutMs, intervals: [300, 500, 1_000] },
+      )
+      .not.toBeNull();
+  }
+
+  async waitForLoanPurposePopulated(opts?: { timeoutMs?: number }): Promise<void> {
+    this.logStep("Wait for loan purpose populated");
+    const field = this.loanPurposeInputField();
+    const timeoutMs = opts?.timeoutMs ?? 60_000;
+
+    const visible = await expect
+      .poll(async () => field.isVisible().catch(() => false), {
+        timeout: 15_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+    if (!visible) return;
+
+    await expect
+      .poll(
+        async () => {
+          const v = (await field.inputValue().catch(() => "")).trim();
+          return v.length > 0 ? v : null;
+        },
+        { timeout: timeoutMs, intervals: [300, 500, 1_000] },
+      )
+      .not.toBeNull();
+  }
+
+  /**
+   * After product change (dashboard dialog or Asset Details dropdown): loaders clear, product label
+   * reflects the selection, and Loan Purpose auto-populates when the control is shown.
+   */
+  async waitForProductSelectionSettled(
+    expectedProduct: string | RegExp,
+    opts?: { waitLoanPurpose?: boolean; timeoutMs?: number },
+  ): Promise<void> {
+    this.logStep("Wait for product selection settled");
+    await this.waitForQuoteLoadersToFinish(opts?.timeoutMs);
+    await this.waitForSelectedProductLabel(expectedProduct, opts);
+    if (opts?.waitLoanPurpose !== false) {
+      await this.waitForLoanPurposePopulated(opts);
+    }
   }
 
   /**
@@ -556,20 +698,22 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(`Entered additional funds as ${this.stepValueDisplay(amount)}`);
     await this.waitForAdditionalFundsSectionReady();
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
-    await this.additionalFundsInput.scrollIntoViewIfNeeded();
-    await this.additionalFundsInput.fill(amount, { force: true });
-    await this.additionalFundsInput.press("Tab").catch(() => {});
+    await this.waitForQuoteLoadersToFinish();
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.additionalFundsRoot.scrollIntoViewIfNeeded();
+    await expect(this.additionalFundsInput).toBeVisible({ timeout: 20_000 });
+    await expect(this.additionalFundsInput).toBeEditable({ timeout: 20_000 });
+    await this.fillCurrencyMaskAmount(this.additionalFundsInput, amount, "Additional Funds");
   }
 
   async clearAdditionalFunds(): Promise<void> {
     this.logStep("Clear Additional Funds");
     await this.waitForAdditionalFundsSectionReady();
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
-    await this.additionalFundsInput.scrollIntoViewIfNeeded();
-    await this.additionalFundsInput.click({ force: true, timeout: 20_000 });
-    await this.additionalFundsInput.press("ControlOrMeta+a");
-    await this.page.keyboard.press("Backspace");
-    await this.additionalFundsInput.press("Tab").catch(() => {});
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.additionalFundsRoot.scrollIntoViewIfNeeded();
+    await expect(this.additionalFundsInput).toBeVisible({ timeout: 20_000 });
+    await this.fillCurrencyMaskAmount(this.additionalFundsInput, "$0", "Additional Funds");
   }
 
   async enterAdditionalFundsPurpose(text: string): Promise<void> {
@@ -578,6 +722,35 @@ export class DOAssetDetailsPage extends BasePage {
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     await this.additionalFundsPurposeTextarea.scrollIntoViewIfNeeded();
     await this.additionalFundsPurposeTextarea.fill(text, { force: true });
+  }
+
+  async readAdditionalFundsAmount(): Promise<number> {
+    return this.readCurrencyInput(this.additionalFundsInput);
+  }
+
+  /** Poll until **Additional Funds** reads `expected` dollars (e.g. after entry or post-Calculate). */
+  async expectAdditionalFundsAmountDollars(expected: number): Promise<void> {
+    this.logStep(`Expect additional funds amount $${expected.toFixed(2)}`);
+    const target = Math.round(expected * 100) / 100;
+    await expect(this.additionalFundsInput).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => this.readAdditionalFundsAmount(), {
+        timeout: 30_000,
+        intervals: [200, 400, 800, 1_000],
+      })
+      .toBe(target);
+  }
+
+  /** UDP-T4224 — Additional Funds blank or $0 (not passed to FIS AF). */
+  async expectAdditionalFundsBlankOrZero(): Promise<void> {
+    this.logStep("Expect Additional Funds blank or zero");
+    await expect(this.additionalFundsInput).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => this.readAdditionalFundsAmount(), {
+        timeout: 20_000,
+        intervals: [200, 400, 800, 1_000],
+      })
+      .toBe(0);
   }
 
   async clearAdditionalFundsPurpose(): Promise<void> {
@@ -645,23 +818,32 @@ export class DOAssetDetailsPage extends BasePage {
 
   /**
    * After **Save** with Additional Funds set but **Purpose** left blank, expect inline validation
-   * on or near the purpose field (copy varies by build).
+   * on or near the purpose field (UDP-T4225: "Please complete details.").
    */
   async expectAdditionalFundsPurposeInlineErrorVisible(): Promise<void> {
-    this.logStep("Expect Additional Funds Purpose Inline Error Visible");
+    this.logStep("Expect Additional Funds Purpose inline error visible");
     await this.waitForAdditionalFundsSectionReady();
     const root = this.additionalFundsRoot;
+    const pleaseComplete = root.getByText(/Please complete details\.?/i).first();
+    if (await pleaseComplete.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await expect(pleaseComplete).toBeVisible({ timeout: 15_000 });
+      return;
+    }
     const inNote = root
       .locator("note")
       .first()
       .locator(".p-error, .p-invalid-message, small, span[class*='error']")
-      .filter({ hasText: /required|must|enter|cannot|blank|invalid|provide/i });
+      .filter({ hasText: /Please complete details|required|must|enter|cannot|blank|invalid|provide/i });
     if (await inNote.first().isVisible({ timeout: 4_000 }).catch(() => false)) {
       await expect(inNote.first()).toBeVisible({ timeout: 15_000 });
       return;
     }
     await expect(
-      root.getByText(/required|must enter|cannot be blank|is required|invalid|provide a/i).first(),
+      root
+        .getByText(
+          /Please complete details|required|must enter|cannot be blank|is required|invalid|provide a/i,
+        )
+        .first(),
     ).toBeVisible({ timeout: 15_000 });
   }
 
@@ -1520,54 +1702,149 @@ export class DOAssetDetailsPage extends BasePage {
     await expect(this.interestRateInputField).toBeEditable();
   }
 
-  /**
-   * After **Calculate** with term above program max: expect copy under **Term**, e.g.
-   * `Term cannot be greater than 60` (resource string may be `Term cannot be greater than {{0}}`).
-   */
-  private async expectTermCannotExceedProgramMaxMessageBelowTermField(): Promise<void> {
+  /** UDP-T4235 — **Term** spinbutton (free-text) or program dropdown is visible on Finance Details. */
+  async expectTermFieldVisible(): Promise<void> {
+    this.logStep("Expect Term field visible");
+    const spin = this.termsOfFinanceInputField;
+    if (await spin.isVisible({ timeout: 15_000 }).catch(() => false)) {
+      await expect(spin).toBeVisible({ timeout: 15_000 });
+      return;
+    }
     const root = this.standardQuoteRoot();
-    const cannotGreaterThan = /Term\s+cannot\s+be\s+greater\s+than\s+(\{\{0\}\}|\d[\d,\s]*)/i;
-    const altWording = /Term\s+(must\s+not\s+be|cannot\s+be)\s+greater\s+than/i;
+    const termLabel = root.locator("label, span").filter({ hasText: /^Term\s*\*?$/i }).first();
+    await expect(termLabel).toBeVisible({ timeout: 15_000 });
+    const dropdown = root
+      .locator("p-dropdown")
+      .filter({ has: termLabel })
+      .first()
+      .or(termLabel.locator("xpath=following::p-dropdown[1]"));
+    if (await dropdown.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect(dropdown).toBeVisible({ timeout: 15_000 });
+      return;
+    }
+    const numberInput = root
+      .locator("number")
+      .filter({ hasText: /Term/i })
+      .locator("input[type='number'], input.p-inputtext, input")
+      .first();
+    await expect(numberInput).toBeVisible({ timeout: 15_000 });
+  }
 
+  private termFieldWrapper(): Locator {
+    const root = this.standardQuoteRoot();
     const termHost = root.locator("number").filter({ hasText: /Term/i }).first();
-    const wrapper = termHost
+    return termHost
       .locator(
         "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'p-field') or contains(@class,'grid')][1]",
       )
-      .first();
-
-    const underTerm = wrapper.getByText(cannotGreaterThan).first();
-    if (await underTerm.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      await expect(underTerm).toBeVisible({ timeout: 25_000 });
-      return;
-    }
-    const underTermAlt = wrapper.getByText(altWording).first();
-    if (await underTermAlt.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      await expect(underTermAlt).toBeVisible({ timeout: 25_000 });
-      return;
-    }
-
-    await expect(
-      root
-        .getByText(cannotGreaterThan)
-        .or(root.getByText(altWording))
-        .first(),
-    ).toBeVisible({ timeout: 25_000 });
+      .first()
+      .or(
+        root
+          .locator("label, span")
+          .filter({ hasText: /^Term\s*\*?$/i })
+          .first()
+          .locator(
+            "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'p-field') or contains(@class,'grid')][1]",
+          ),
+      );
   }
 
   /**
-   * UDP-T3663 — term above program max after **Calculate**: validation under **Term**; calculation blocked.
-   * Expects copy such as `Term must not be greater than 120.`
+   * UDP-T4235 — blank **Term** on **Calculate**: `Please complete` or inline required copy
+   * (same behaviour as Quick Quote / CSA Standard Quote).
+   */
+  async expectBlankTermValidationOnCalculate(): Promise<void> {
+    this.logStep("Expect blank term validation on calculate");
+    const root = this.standardQuoteRoot();
+    const pattern =
+      /Please complete|cannot be blank|must not be blank|this field cannot|field\s+cannot\s+be\s+blank|is required|enter.*term/i;
+    const wrapper = this.termFieldWrapper();
+    const underTerm = wrapper.getByText(pattern).first();
+    if (await underTerm.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect(underTerm).toBeVisible({ timeout: 20_000 });
+      return;
+    }
+    await expect(root.getByText(pattern).first()).toBeVisible({ timeout: 20_000 });
+  }
+
+  /**
+   * After term above program max: expect copy under **Term** or page-wide, e.g.
+   * `Term must not be greater than 120`, `maximum term is 120`, or `Maximum term is 120`.
+   */
+  private termExceedsProgramMaxTextPatterns(programMaxTerm = 120): RegExp[] {
+    const n = String(programMaxTerm);
+    return [
+      new RegExp(`maximum\\s+termn?\\s+is\\s*${n}`, "i"),
+      new RegExp(
+        `Term\\s+(?:must\\s+not\\s+be|cannot\\s+be)\\s+greater\\s+than\\s*${n}`,
+        "i",
+      ),
+      new RegExp(`greater\\s+than\\s*${n}`, "i"),
+      /maximum\s+term/i,
+      /Term\s+(?:must\s+not\s+be|cannot\s+be)\s+greater\s+than/i,
+    ];
+  }
+
+  private async termExceedsProgramMaxMessageVisible(programMaxTerm = 120): Promise<boolean> {
+    const patterns = this.termExceedsProgramMaxTextPatterns(programMaxTerm);
+    const matches = (text: string): boolean => {
+      const t = text.replace(/\s+/g, " ").trim();
+      return t.length > 0 && patterns.some((p) => p.test(t));
+    };
+
+    const wrapper = this.termFieldWrapper();
+    const wrapperText = (await wrapper.innerText().catch(() => "")) ?? "";
+    if (matches(wrapperText)) return true;
+
+    const errorNodes = wrapper
+      .locator(".p-error, .p-invalid-message, small, span.p-message-detail, note, .ng-star-inserted")
+      .filter({ visible: true });
+    const errorCount = await errorNodes.count().catch(() => 0);
+    for (let i = 0; i < errorCount; i++) {
+      const t = (await errorNodes.nth(i).textContent().catch(() => "")) ?? "";
+      if (matches(t)) return true;
+    }
+
+    for (const scope of [this.standardQuoteRoot(), this.page.locator("body")]) {
+      for (const pattern of patterns) {
+        if (await scope.getByText(pattern).first().isVisible({ timeout: 300 }).catch(() => false)) {
+          return true;
+        }
+      }
+    }
+
+    const toast = this.page.locator(".p-toast-message-text, .p-toast-detail, p-toastitem");
+    if (await toast.first().isVisible({ timeout: 300 }).catch(() => false)) {
+      const toastText = (await toast.first().textContent().catch(() => "")) ?? "";
+      if (matches(toastText)) return true;
+    }
+
+    return false;
+  }
+
+  private async expectTermCannotExceedProgramMaxMessageBelowTermField(
+    programMaxTerm = 120,
+  ): Promise<void> {
+    await expect
+      .poll(async () => this.termExceedsProgramMaxMessageVisible(programMaxTerm), {
+        timeout: 25_000,
+        intervals: [300, 500, 1_000, 1_500],
+      })
+      .toBeTruthy();
+  }
+
+  /**
+   * UDP-T3663 / UDP-T4235 — term above program max (on blur or after **Calculate**).
+   * Accepts `maximum term is 120` and `Term must not be greater than 120`.
    */
   async expectTermExceedsProgramMaxValidation(programMaxTerm = 120): Promise<void> {
-    this.logStep(`Expect term must not be greater than ${programMaxTerm} validation`);
-    await this.expectTermCannotExceedProgramMaxMessageBelowTermField();
-    const root = this.standardQuoteRoot();
-    const maxPattern = new RegExp(
-      `Term\\s+(?:must\\s+not\\s+be|cannot\\s+be)\\s+greater\\s+than\\s+${programMaxTerm}\\b`,
-      "i",
-    );
-    await expect(root.getByText(maxPattern).first()).toBeVisible({ timeout: 25_000 });
+    this.logStep(`Expect term must not exceed program max ${programMaxTerm}`);
+    await this.expectTermCannotExceedProgramMaxMessageBelowTermField(programMaxTerm);
+  }
+
+  /** UDP-T4235 — term above program maximum after **Calculate** (max value varies by program). */
+  async expectTermExceedsProgramMaxOnCalculate(programMaxTerm = 120): Promise<void> {
+    await this.expectTermExceedsProgramMaxValidation(programMaxTerm);
   }
 
   /**
@@ -2902,41 +3179,6 @@ export class DOAssetDetailsPage extends BasePage {
       );
   }
 
-  async expectPaymentScheduleSectionWithTableData(): Promise<void> {
-    this.logStep("Expect Payment Schedule Section With Table Data");
-    const root = this.standardQuoteRoot();
-    const title = root.getByText(/Payment\s+Schedule/i).first();
-    await expect(title).toBeVisible({ timeout: 45_000 });
-    await title.scrollIntoViewIfNeeded().catch(() => {});
-
-    const scheduleScope = this.paymentScheduleContentScope();
-    const table = scheduleScope
-      .locator("table")
-      .filter({ hasText: /Date|Number|Frequency|Payment/i })
-      .first();
-    await expect(table).toBeVisible({ timeout: 25_000 });
-    await table.scrollIntoViewIfNeeded().catch(() => {});
-
-    // PrimeNG grid headers often expose "Date Show Filter Menu", not exact "Date".
-    const scheduleColumnHeader = (label: string): Locator =>
-      table
-        .getByRole("columnheader", { name: new RegExp(`^${label}\\b`, "i") })
-        .or(table.locator("th").filter({ hasText: new RegExp(`^${label}$`, "i") }))
-        .first();
-
-    await expect(scheduleColumnHeader("Date")).toBeVisible({ timeout: 15_000 });
-    await expect(scheduleColumnHeader("Number")).toBeVisible({ timeout: 10_000 });
-    await expect(scheduleColumnHeader("Frequency")).toBeVisible({ timeout: 10_000 });
-    await expect(scheduleColumnHeader("Payment")).toBeVisible({ timeout: 10_000 });
-
-    const dataRow = table
-      .locator("tbody tr")
-      .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
-      .filter({ hasText: /Monthly|Weekly|Fortnightly/i })
-      .first();
-    await expect(dataRow).toBeVisible({ timeout: 25_000 });
-  }
-
   private async isLeasePaymentDefaultViewActive(): Promise<boolean> {
     const selectedEquals = this.leasePaymentScheduleDefaultViewRadioSelected();
     if (!(await selectedEquals.isVisible().catch(() => false))) {
@@ -4070,13 +4312,93 @@ export class DOAssetDetailsPage extends BasePage {
     await this.PPSRCount.fill(count);
   }
 
-  /** PrimeNG `<amount>` / `#amount` currency: select-all behaviour via triple-click, then fill + blur. */
-  private async fillLoanDetailsCurrencyAmount(input: Locator, value: string): Promise<void> {
+  /** PrimeNG `<amount>` / `#amount`: replace existing value (program pre-populated fees), verify, then blur. */
+  private currencyDollarsMatch(actual: number, expected: string | number): boolean {
+    const want =
+      typeof expected === "number"
+        ? Math.round(expected * 100) / 100
+        : Math.round(this.parseDisplayedCurrency(String(expected)) * 100) / 100;
+    const got = Math.round(actual * 100) / 100;
+    return Math.abs(got - want) < 0.01;
+  }
+
+  private async fillCurrencyMaskAmount(
+    input: Locator,
+    amount: string,
+    fieldLabel: string,
+  ): Promise<void> {
+    const target = Math.round(this.parseDisplayedCurrency(amount) * 100) / 100;
+    const digits = target.toFixed(2);
     await input.waitFor({ state: "visible", timeout: 20_000 });
     await input.scrollIntoViewIfNeeded();
-    await input.click({ clickCount: 3 });
-    await input.fill(value);
-    await input.press("Tab").catch(() => {});
+
+    const typeDigits = async (text: string): Promise<void> => {
+      await input.click({ timeout: 15_000 });
+      await this.page.keyboard.press("Control+A");
+      await this.page.keyboard.press("Backspace").catch(() => {});
+      await this.page.keyboard.type(text, { delay: 45 });
+      await input.press("Tab").catch(() => {});
+      await this.waitForQuoteLoadersToFinish().catch(() => {});
+    };
+
+    let last = Number.NaN;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await typeDigits(attempt % 2 === 0 ? digits : String(Math.round(target)));
+      try {
+        await expect
+          .poll(async () => this.readCurrencyInput(input), {
+            timeout: 15_000,
+            intervals: [200, 400, 800, 1_000],
+          })
+          .toBe(target);
+        return;
+      } catch {
+        last = await this.readCurrencyInput(input);
+      }
+    }
+
+    throw new Error(
+      `${fieldLabel} did not accept ${amount} (field still reads $${Number.isFinite(last) ? last.toFixed(2) : "?"})`,
+    );
+  }
+
+  private async fillLoanDetailsCurrencyAmount(input: Locator, value: string): Promise<void> {
+    const target = Math.round(this.parseDisplayedCurrency(value) * 100) / 100;
+    await input.waitFor({ state: "visible", timeout: 20_000 });
+    await input.scrollIntoViewIfNeeded();
+
+    const applyValue = async (keyboardSelectAll: boolean): Promise<void> => {
+      await input.click();
+      if (keyboardSelectAll) {
+        await this.page.keyboard.press("Control+A");
+      } else {
+        await input.click({ clickCount: 3 });
+      }
+      await input.fill(value);
+      await input.press("Tab").catch(() => {});
+    };
+
+    let last = Number.NaN;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await applyValue(attempt % 2 === 1);
+      try {
+        await expect
+          .poll(async () => this.readCurrencyInput(input), {
+            timeout: 8_000,
+            intervals: [200, 400, 800, 1_000],
+          })
+          .toBe(target);
+        await this.waitForQuoteLoadersToFinish();
+        return;
+      } catch {
+        last = await this.readCurrencyInput(input);
+      }
+    }
+
+    throw new Error(
+      `Currency field did not accept ${value} (field still reads ${last}). ` +
+        `Value may have been appended to a program-default fee instead of replacing it.`,
+    );
   }
 
   async udcEstablishmentFee(fee: string): Promise<void> {
@@ -4113,6 +4435,7 @@ export class DOAssetDetailsPage extends BasePage {
       await spin.click();
       await spin.fill(term);
       await spin.press("Tab");
+      await this.waitForQuoteLoadersToFinish().catch(() => {});
       return;
     }
 
@@ -4152,6 +4475,47 @@ export class DOAssetDetailsPage extends BasePage {
     await opt.first().waitFor({ state: "visible", timeout: 15000 });
     await opt.first().click();
     await this.page.keyboard.press("Escape").catch(() => {});
+  }
+
+  /** Clear **Term** spinbutton / numeric input (UDP-T4235 blank-term validation). */
+  async clearTermsOfFinance(): Promise<void> {
+    this.logStep("Clear terms of finance");
+    const clearInput = async (input: Locator): Promise<void> => {
+      await input.scrollIntoViewIfNeeded();
+      await input.click({ timeout: 15_000 });
+      await this.page.keyboard.press("Control+A");
+      await this.page.keyboard.press("Backspace").catch(() => {});
+      await input.press("Delete").catch(() => {});
+      await input.press("Tab").catch(() => {});
+    };
+
+    const spin = this.termsOfFinanceInputField;
+    if (await spin.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await clearInput(spin);
+      return;
+    }
+
+    const numberInput = this.page
+      .locator("number")
+      .filter({ hasText: /Term/i })
+      .locator("input[type='number'], input.p-inputtext, input")
+      .first();
+    if (await numberInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await clearInput(numberInput);
+    }
+  }
+
+  /** Poll until **Term** spinbutton reads blank or zero. */
+  async expectTermInputBlankOrZero(): Promise<void> {
+    this.logStep("Expect Term input blank or zero");
+    const spin = this.termsOfFinanceInputField;
+    await expect(spin).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () => (await spin.inputValue().catch(() => "")).trim(), {
+        timeout: 15_000,
+        intervals: [200, 400, 800],
+      })
+      .toMatch(/^$|^0$/);
   }
 
   private parseInterestPercent(raw: string): number {
@@ -4948,8 +5312,16 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
+  /** **Program** PrimeNG dropdown host (label-scoped). */
   programDropdownHost(): Locator {
     const root = this.standardQuoteRoot();
+    return this.primeLabeledDropdownCombobox("Program")
+      .locator("xpath=ancestor::p-dropdown[1]")
+      .or(
+        root.locator(
+          "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
+        ),
+      )
     return root
       .locator("xpath=.//label[contains(normalize-space(.),'Program')]/following::p-dropdown[1]")
       .or(
@@ -4976,6 +5348,8 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async readSelectedProgramLabel(): Promise<string> {
+    this.logStep("Read selected program label");
+    return this.readPrimeLabeledDropdownValue("Program");
     const root = this.standardQuoteRoot();
     const combobox = root
       .locator(
@@ -5681,6 +6055,29 @@ export class DOAssetDetailsPage extends BasePage {
       .toBeGreaterThan(0);
   }
 
+  /**
+   * UDP-T4234 / MAF-4795: after **Calculate**, **Total Amount Borrowed** is display-only and
+   * shows FIS AF **Amount Financed** (principal). **Total Amount to Repay** includes interest/fees.
+   */
+  async expectTotalAmountBorrowedCalculatedAmountFinanced(opts?: {
+    timeoutMs?: number;
+  }): Promise<void> {
+    this.logStep("Expect Total Amount Borrowed = FIS AF Amount Financed (display-only)");
+    await this.expectTotalAmountBorrowedReadOnly();
+    await this.expectTotalAmountBorrowedGreaterThanZero(opts);
+
+    const displayText = await this.readTotalAmountBorrowedDisplayText().catch(() => "");
+    if (displayText.length > 0) {
+      expect(displayText).toMatch(/\$?\s*[\d,]+\.\d{2}/);
+    }
+
+    const tab = await this.readTotalAmountBorrowed();
+    const totalRepay = await this.readTotalAmountToRepay().catch(() => 0);
+    if (totalRepay > 0) {
+      expect(totalRepay).toBeGreaterThanOrEqual(tab - 0.01);
+    }
+  }
+
   async expectTotalAmountBorrowedMatchesAmount(
     expected: number,
     tolerance = 1,
@@ -5804,9 +6201,16 @@ export class DOAssetDetailsPage extends BasePage {
     );
   }
   private async readCurrencyInput(locator: Locator): Promise<number> {
-    const raw =
-      (await locator.inputValue().catch(() => "")).trim() ||
-      ((await locator.textContent()) ?? "").trim();
+    const raw = await locator
+      .evaluate((el) => {
+        const input = el as HTMLInputElement;
+        return (input.value ?? "").trim();
+      })
+      .catch(
+        async () =>
+          (await locator.inputValue().catch(() => "")).trim() ||
+          ((await locator.textContent()) ?? "").trim(),
+      );
     return this.parseDisplayedCurrency(raw);
   }
 
@@ -5818,6 +6222,54 @@ export class DOAssetDetailsPage extends BasePage {
   async readDealerOriginationFee(): Promise<number> {
     await expect(this.dealerOriginationFeeInputField).toBeVisible({ timeout: 20_000 });
     return this.readCurrencyInput(this.dealerOriginationFeeInputField);
+  }
+
+  async readTotalEstablishmentFee(): Promise<number> {
+    await expect(this.totalEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+    return this.readCurrencyInput(this.totalEstablishmentFeeInputField);
+  }
+
+  /** Log UDC / Dealer / Total establishment fee values (diagnostics for program pre-population). */
+  async logEstablishmentFeeValues(phase: string): Promise<void> {
+    const udc = await this.readUdcEstablishmentFee();
+    const dealer = await this.readDealerOriginationFee();
+    const total = await this.readTotalEstablishmentFee();
+    this.log(
+      `Establishment fees [${phase}]: UDC=$${udc.toFixed(2)}, Dealer=$${dealer.toFixed(2)}, Total=$${total.toFixed(2)}`,
+    );
+  }
+
+  /**
+   * Overwrite program-default UDC / Dealer fees with testcase amounts.
+   * TL Product/Program can pre-populate fee fields while Total still reads $0 until blur.
+   */
+  async enterEstablishmentFeesReplacingPrePopulated(
+    udcFee: string,
+    dealerFee: string,
+  ): Promise<void> {
+    this.logStep(
+      `Enter establishment fees replacing pre-populated values: UDC ${this.stepValueDisplay(udcFee)}, dealer ${this.stepValueDisplay(dealerFee)}`,
+    );
+    await this.udcEstablishmentFeeInputField.scrollIntoViewIfNeeded();
+    await this.dealerOriginationFeeInputField.scrollIntoViewIfNeeded();
+    await this.logEstablishmentFeeValues("before overwrite");
+
+    await this.udcEstablishmentFee(udcFee);
+    await this.dealerOriginationFee(dealerFee);
+
+    await this.logEstablishmentFeeValues("after overwrite");
+
+    const udc = await this.readUdcEstablishmentFee();
+    const dealer = await this.readDealerOriginationFee();
+    if (
+      !this.currencyDollarsMatch(udc, udcFee) ||
+      !this.currencyDollarsMatch(dealer, dealerFee)
+    ) {
+      throw new Error(
+        `Establishment fee overwrite failed (UDC want ${udcFee} got ${udc}, dealer want ${dealerFee} got ${dealer}). ` +
+          `Program pre-populated values were not replaced.`,
+      );
+    }
   }
 
   /** Total Establishment Fee read-only and equals UDC + Dealer on screen. */

@@ -291,6 +291,8 @@ export class DODashboardPage extends BasePage {
     const option = dialog.getByText(/Term\s*Loan/i).first();
     await option.waitFor({ state: "attached" });
     await option.click({ force: false });
+    await expect(dialog).toBeHidden({ timeout: 60_000 });
+    await this.waitForAppLoaderOverlayGone(120_000);
   }
 
   /**
