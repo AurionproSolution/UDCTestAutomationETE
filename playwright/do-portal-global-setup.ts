@@ -7,8 +7,7 @@
 import type { FullConfig } from "@playwright/test";
 import { logTestStep } from "../utils/testStepLog";
 import {
-  evaluateDoPortalSession,
-  refreshAccessTokenFromFile,
+  trySilentRefreshSession,
 } from "./do-portal-session.helper";
 
 async function globalSetup(_config: FullConfig): Promise<void> {
@@ -16,19 +15,7 @@ async function globalSetup(_config: FullConfig): Promise<void> {
     !process.env.CI || process.env.PLAYWRIGHT_USE_DO_GLOBAL_AUTH === "1";
   if (!useGlobalDoAuth) return;
 
-  let evaluation = evaluateDoPortalSession();
-
-  if (evaluation.action === "mfa" && evaluation.tokens?.refreshToken) {
-    const refreshed = await refreshAccessTokenFromFile();
-    if (refreshed.ok) {
-      evaluation = evaluateDoPortalSession();
-      if (evaluation.action === "reuse") {
-        logTestStep(`DO auth (globalSetup): silently refreshed — ${evaluation.reason}`);
-        return;
-      }
-    }
-    logTestStep(`DO auth (globalSetup): silent refresh failed — ${refreshed.message}`);
-  }
+  let evaluation = await trySilentRefreshSession();
 
   if (evaluation.action === "reuse") {
     logTestStep(`DO auth (globalSetup): ${evaluation.reason}`);
@@ -36,7 +23,7 @@ async function globalSetup(_config: FullConfig): Promise<void> {
   }
 
   logTestStep(
-    `DO auth (globalSetup): ${evaluation.reason} — MFA will run in the test browser.`,
+    `DO auth (globalSetup): ${evaluation.reason} — coordinated MFA will run in the test browser if needed.`,
   );
 }
 

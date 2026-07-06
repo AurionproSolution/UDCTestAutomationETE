@@ -4,12 +4,12 @@
  * MFA/TOTP happens here only — runtime refresh uses refresh_token (see do-portal-session.helper).
  */
 
-import { chromium, type Page } from "@playwright/test";
+import { chromium, type BrowserContext, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { doPortalTotpSecret } from "../config/do-portal-auth.config";
+import { doPortalTotpSecret, DO_PORTAL_MFA_LOCK_WAIT_MS } from "../config/do-portal-auth.config";
 import { DO_BASE_URL, DO_DEALER_STANDARD_QUOTE_URL, getCurrentEnv } from "../config/env";
-import { DOLoginPage } from "../pages";
+import { DOLoginPage, DODashboardPage } from "../pages";
 import { getDoPortalLoginData } from "../testData/do-portal/doLoginData";
 import { logTestStep } from "../utils/testStepLog";
 import {
@@ -18,6 +18,8 @@ import {
   readStorageStateFile,
   recordTokenEndpointFromUrl,
   refreshAccessTokenFromFile,
+  applyDoPortalAuthToContext,
+  trySilentRefreshSession,
 } from "./do-portal-session.helper";
 
 export function getDoPortalAuthFile(): string {
@@ -40,6 +42,16 @@ function attachTokenDiscoveryListeners(page: Page): void {
   });
 }
 
+function findPortalPageInContext(context: BrowserContext): Page | undefined {
+  const portalPattern = /fiscloudservices\.com\/SITDOPortal/i;
+  for (const pg of context.pages()) {
+    if (!pg.isClosed() && portalPattern.test(pg.url())) {
+      return pg;
+    }
+  }
+  return undefined;
+}
+
 export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
   const authFile = getDoPortalAuthFile();
   const loginData = getDoPortalLoginData();
@@ -60,13 +72,102 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
     ...loginData.validUsers[0],
     totpSecret,
   });
-  await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
-  await page.waitForLoadState("domcontentloaded");
+
+  const portalPage = findPortalPageInContext(page.context()) ?? page;
+  await portalPage.bringToFront().catch(() => {});
+  await portalPage.goto(DO_DEALER_STANDARD_QUOTE_URL());
+  const dashboardPage = new DODashboardPage(portalPage);
+  await dashboardPage.waitForAuthenticatedDashboard({ requireCtaEnabled: false });
+
   logTestStep(`Saving DO portal storage state to ${authFile}`);
-  await page.context().storageState({ path: authFile });
+  await portalPage.context().storageState({ path: authFile });
 
   const state = readStorageStateFile(authFile);
   if (state) discoverAndSaveAuthMeta(state, { stampSessionSavedAt: true });
+
+  const evaluation = evaluateDoPortalSession(authFile);
+  if (evaluation.action !== "reuse" && evaluation.action !== "refresh") {
+    throw new Error(
+      `DO auth saved but session is not reusable: ${evaluation.reason}`,
+    );
+  }
+}
+
+/**
+ * Ensures a reusable DO session for parallel tests with a single shared credential.
+ * 1. Silent refresh_token grant when JWT ages out (no FIS login).
+ * 2. Coordinated MFA — only one worker logs in; others wait and reuse the saved file.
+ */
+export async function ensureDoPortalAuthSession(page: Page): Promise<void> {
+  const authFile = getDoPortalAuthFile();
+  const lockPath = `${authFile}.mfa.lock`;
+  const deadline = Date.now() + DO_PORTAL_MFA_LOCK_WAIT_MS;
+
+  const syncBrowserFromFile = async (): Promise<void> => {
+    await applyDoPortalAuthToContext(page.context());
+  };
+
+  let evaluation = await trySilentRefreshSession(authFile);
+  if (evaluation.action === "reuse") {
+    await syncBrowserFromFile();
+    logTestStep(`DO auth: ${evaluation.reason}`);
+    return;
+  }
+
+  while (Date.now() < deadline) {
+    evaluation = await trySilentRefreshSession(authFile);
+    if (evaluation.action === "reuse") {
+      await syncBrowserFromFile();
+      logTestStep(`DO auth: ${evaluation.reason}`);
+      return;
+    }
+
+    let acquiredLock = false;
+    try {
+      const fd = fs.openSync(lockPath, "wx");
+      fs.writeFileSync(fd, String(process.pid), "utf8");
+      fs.closeSync(fd);
+      acquiredLock = true;
+    } catch {
+      await new Promise((r) => setTimeout(r, 250));
+      continue;
+    }
+
+    try {
+      evaluation = await trySilentRefreshSession(authFile);
+      if (evaluation.action === "reuse") {
+        await syncBrowserFromFile();
+        logTestStep(`DO auth: ${evaluation.reason}`);
+        return;
+      }
+
+      logTestStep(`DO auth: ${evaluation.reason} — running coordinated MFA login.`);
+      await page.context().clearCookies();
+      await loginDoPortalAndSaveStorage(page);
+
+      evaluation = evaluateDoPortalSession(authFile);
+      if (evaluation.action !== "reuse") {
+        throw new Error(
+          `DO portal session is not reusable after MFA login: ${evaluation.reason}`,
+        );
+      }
+      await syncBrowserFromFile();
+      logTestStep(`DO auth: MFA login complete — ${evaluation.reason}`);
+      return;
+    } finally {
+      if (acquiredLock) {
+        try {
+          fs.unlinkSync(lockPath);
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  throw new Error(
+    `Timed out after ${DO_PORTAL_MFA_LOCK_WAIT_MS / 1000}s waiting for DO portal auth (parallel MFA lock).`,
+  );
 }
 
 /**
@@ -76,30 +177,19 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
  * - Expired access + no refresh → full MFA login.
  */
 export async function ensureDoPortalAuthStorage(page?: Page): Promise<void> {
-  const evaluation = evaluateDoPortalSession();
+  if (page) {
+    await ensureDoPortalAuthSession(page);
+    return;
+  }
+
+  const evaluation = await trySilentRefreshSession();
 
   if (evaluation.action === "reuse") {
     logTestStep(`DO auth: reusing session (${evaluation.reason})`);
     return;
   }
 
-  if (evaluation.tokens?.refreshToken) {
-    const refreshed = await refreshAccessTokenFromFile();
-    if (refreshed.ok) {
-      const afterRefresh = evaluateDoPortalSession();
-      if (afterRefresh.action === "reuse") {
-        logTestStep(`DO auth: silently refreshed session (${afterRefresh.reason})`);
-        return;
-      }
-    }
-    logTestStep(`DO silent file refresh failed: ${refreshed.message}`);
-  }
-
-  logTestStep(`DO auth: ${evaluation.reason} — running MFA login.`);
-  if (page) {
-    await loginDoPortalAndSaveStorage(page);
-    return;
-  }
+  logTestStep(`DO auth: ${evaluation.reason} — running headed MFA login.`);
   await runHeadedLoginAndSave();
 }
 

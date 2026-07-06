@@ -35,9 +35,18 @@ export const DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS = Number(
   process.env.DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS ?? 2 * 60 * 1000,
 );
 
-/** Max age of a saved MFA session before forcing re-login (Test Explorer / CLI reuse gate). */
+/**
+ * Proactively refresh access_token (via refresh_token grant) when the session is older than this.
+ * Does NOT trigger FIS MFA — only silent OAuth refresh. JWT lifetime is ~20 min; default 15 min
+ * refreshes before expiry so parallel workers keep one shared session without re-login.
+ */
 export const DO_PORTAL_MAX_SESSION_REUSE_AGE_MS = Number(
   process.env.DO_PORTAL_MAX_SESSION_REUSE_AGE_MS ?? 15 * 60 * 1000,
+);
+
+/** Max wait for another parallel worker to finish the single coordinated MFA login. */
+export const DO_PORTAL_MFA_LOCK_WAIT_MS = Number(
+  process.env.DO_PORTAL_MFA_LOCK_WAIT_MS ?? 5 * 60 * 1000,
 );
 
 /** Auto-start keepalive when test timeout exceeds this (15 min). */
@@ -142,6 +151,8 @@ export interface DoPortalAuthMeta {
   portalBaseUrl?: string;
   /** ISO timestamp when MFA login last saved storage state. */
   sessionSavedAt?: string;
+  /** ISO timestamp when silent refresh_token grant last updated storage (keepalive / file refresh). */
+  lastRefreshedAt?: string;
   /** ISO timestamp from JWT iat. */
   accessTokenIssuedAt?: string;
   /** ISO timestamp from JWT exp. */
