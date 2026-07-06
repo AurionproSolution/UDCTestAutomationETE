@@ -123,7 +123,41 @@ test.describe("do-portal-session.helper", () => {
     expect(result.ageMinutes).toBe(10);
   });
 
-  test("evaluateDoPortalSessionFromState requires MFA when session saved 16 min ago", () => {
+  test("evaluateDoPortalSessionFromState requires silent refresh when session saved 16 min ago", () => {
+    const nowMs = BASE_NOW_MS;
+    const savedAt = new Date(nowMs - 16 * 60_000).toISOString();
+    const jwt = makeTestJwt(
+      Math.floor((nowMs - 16 * 60_000) / 1000),
+      Math.floor((nowMs + 4 * 60_000) / 1000),
+    );
+    const meta: DoPortalAuthMeta = {
+      discoveredAt: savedAt,
+      sessionSavedAt: savedAt,
+      accessTokenKeys: ["cookie:mfe_access_token"],
+      refreshTokenKeys: ["cookie:refresh_token"],
+      oidcUserKeys: [],
+      origins: [],
+    };
+
+    const state = {
+      ...cookieState(jwt),
+      cookies: [
+        ...cookieState(jwt).cookies,
+        {
+          name: "refresh_token",
+          value: "rt-abc",
+          domain: "testportaludc.aurionpro.com",
+          path: "/",
+        },
+      ],
+    };
+
+    const result = evaluateDoPortalSessionFromState(state, meta, { nowMs });
+    expect(result.action).toBe("refresh");
+    expect(result.reason).toContain("proactive silent refresh");
+  });
+
+  test("evaluateDoPortalSessionFromState requires MFA when session saved 16 min ago without refresh_token", () => {
     const nowMs = BASE_NOW_MS;
     const savedAt = new Date(nowMs - 16 * 60_000).toISOString();
     const jwt = makeTestJwt(
@@ -141,7 +175,7 @@ test.describe("do-portal-session.helper", () => {
 
     const result = evaluateDoPortalSessionFromState(cookieState(jwt), meta, { nowMs });
     expect(result.action).toBe("mfa");
-    expect(result.reason).toContain("16 min ago");
+    expect(result.reason).toContain("no refresh_token");
   });
 
   test("evaluateDoPortalSessionFromState requires MFA when JWT expired", () => {
@@ -160,7 +194,7 @@ test.describe("do-portal-session.helper", () => {
       nowMs,
     });
     expect(result.action).toBe("mfa");
-    expect(result.reason).toBe("JWT expired.");
+    expect(result.reason).toContain("no refresh_token");
   });
 
   test("discoverTokensFromStorageState finds flat access_token keys", () => {

@@ -16,7 +16,6 @@ import {
   DO_PORTAL_ACCESS_TOKEN_KEYS,
   DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX,
   DO_PORTAL_KEEPALIVE_INTERVAL_MS,
-  DO_PORTAL_LONG_TEST_TIMEOUT_MS,
   DO_PORTAL_MAX_SESSION_REUSE_AGE_MS,
   DO_PORTAL_REFRESH_TOKEN_COOKIE_NAMES,
   DO_PORTAL_REFRESH_TOKEN_KEYS,
@@ -83,7 +82,7 @@ export interface KeepaliveOptions {
 }
 
 export interface DoPortalSessionEvaluation {
-  action: "reuse" | "mfa";
+  action: "reuse" | "refresh" | "mfa";
   reason: string;
   ageMinutes?: number;
   expiresAt?: string;
@@ -91,8 +90,10 @@ export interface DoPortalSessionEvaluation {
 }
 
 export interface DiscoverAuthMetaOptions {
-  /** Set sessionSavedAt to now (MFA login only — not keepalive saves). */
+  /** Set sessionSavedAt to now (MFA login only — not keepalive / silent refresh). */
   stampSessionSavedAt?: boolean;
+  /** Set lastRefreshedAt to now after silent refresh_token grant or keepalive save. */
+  stampLastRefreshedAt?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -411,10 +412,16 @@ function resolveSessionSavedAtMs(
   tokens: DiscoveredTokens | undefined,
   filePath = getDoPortalAuthFile(),
 ): number | undefined {
+  const candidates: number[] = [];
+  if (meta?.lastRefreshedAt) {
+    const parsed = Date.parse(meta.lastRefreshedAt);
+    if (!Number.isNaN(parsed)) candidates.push(parsed);
+  }
   if (meta?.sessionSavedAt) {
     const parsed = Date.parse(meta.sessionSavedAt);
-    if (!Number.isNaN(parsed)) return parsed;
+    if (!Number.isNaN(parsed)) candidates.push(parsed);
   }
+  if (candidates.length) return Math.max(...candidates);
   if (tokens?.accessToken) {
     const iatMs = parseJwtIssuedMs(tokens.accessToken);
     if (iatMs) return iatMs;
@@ -423,6 +430,17 @@ function resolveSessionSavedAtMs(
     return fs.statSync(filePath).mtimeMs;
   }
   return undefined;
+}
+
+function sessionNeedsProactiveRefresh(
+  meta: DoPortalAuthMeta | undefined,
+  tokens: DiscoveredTokens | undefined,
+  nowMs: number,
+  filePath = getDoPortalAuthFile(),
+): boolean {
+  const savedAtMs = resolveSessionSavedAtMs(meta, tokens, filePath);
+  if (savedAtMs === undefined) return false;
+  return nowMs - savedAtMs > DO_PORTAL_MAX_SESSION_REUSE_AGE_MS;
 }
 
 export function evaluateDoPortalSessionFromState(
@@ -463,36 +481,45 @@ export function evaluateDoPortalSessionFromState(
 
   const expMs = parseJwtExpiryMs(tokens.accessToken);
   const expiresAt = expMs ? new Date(expMs).toISOString() : undefined;
-
-  if (isAccessTokenExpiringSoon(tokens.accessToken, DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS, nowMs)) {
-    const expired = expMs !== undefined && expMs <= nowMs;
-    return {
-      action: "mfa",
-      reason: expired ? "JWT expired." : "JWT expiring soon.",
-      expiresAt,
-      tokens,
-    };
-  }
-
   const savedAtMs = resolveSessionSavedAtMs(meta, tokens, filePath);
-  if (savedAtMs === undefined) {
-    return {
-      action: "mfa",
-      reason: "Session save time unknown — MFA login required.",
-      expiresAt,
-      tokens,
-    };
-  }
-
-  const ageMs = nowMs - savedAtMs;
-  const ageMinutes = Math.round(ageMs / 60_000);
+  const ageMinutes =
+    savedAtMs !== undefined ? Math.round((nowMs - savedAtMs) / 60_000) : undefined;
   const maxAgeMinutes = Math.round(DO_PORTAL_MAX_SESSION_REUSE_AGE_MS / 60_000);
 
-  if (ageMs > DO_PORTAL_MAX_SESSION_REUSE_AGE_MS) {
+  const jwtExpiringSoon = isAccessTokenExpiringSoon(
+    tokens.accessToken,
+    DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS,
+    nowMs,
+  );
+  const proactiveRefresh = sessionNeedsProactiveRefresh(meta, tokens, nowMs, filePath);
+
+  if (jwtExpiringSoon || proactiveRefresh) {
+    const expired = expMs !== undefined && expMs <= nowMs;
+    if (tokens.refreshToken) {
+      const reason = expired
+        ? "JWT expired — silent refresh_token grant required."
+        : jwtExpiringSoon
+          ? "JWT expiring soon — silent refresh_token grant required."
+          : `Session age ${ageMinutes ?? "?"} min exceeds ${maxAgeMinutes} min — proactive silent refresh.`;
+      return { action: "refresh", reason, ageMinutes, expiresAt, tokens };
+    }
     return {
       action: "mfa",
-      reason: `Session saved ${ageMinutes} min ago (max ${maxAgeMinutes} min).`,
+      reason: expired
+        ? "JWT expired and no refresh_token — MFA login required."
+        : jwtExpiringSoon
+          ? "JWT expiring soon and no refresh_token — MFA login required."
+          : `Session age ${ageMinutes ?? "?"} min exceeds ${maxAgeMinutes} min and no refresh_token — MFA login required.`,
       ageMinutes,
+      expiresAt,
+      tokens,
+    };
+  }
+
+  if (savedAtMs === undefined) {
+    return {
+      action: "reuse",
+      reason: `JWT valid until ${expiresAt ?? "unknown"} (session age unknown).`,
       expiresAt,
       tokens,
     };
@@ -500,7 +527,7 @@ export function evaluateDoPortalSessionFromState(
 
   return {
     action: "reuse",
-    reason: `Session saved ${ageMinutes} min ago, JWT valid until ${expiresAt ?? "unknown"}.`,
+    reason: `Session fresh (${ageMinutes ?? "?"} min), JWT valid until ${expiresAt ?? "unknown"}.`,
     ageMinutes,
     expiresAt,
     tokens,
@@ -521,6 +548,14 @@ export function evaluateDoPortalSession(
 
 export function hasReusableDoPortalSession(filePath = getDoPortalAuthFile()): boolean {
   return evaluateDoPortalSession(filePath).action === "reuse";
+}
+
+/** Auth file exists and contains tokens (may need silent refresh before reuse). */
+export function hasUsableDoPortalAuthFile(filePath = getDoPortalAuthFile()): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  const state = readStorageStateFile(filePath);
+  if (!state) return false;
+  return discoverTokensFromStorageState(state, readAuthMeta()) !== undefined;
 }
 
 export async function getTokensFromPage(page: Page): Promise<DiscoveredTokens | undefined> {
@@ -622,6 +657,9 @@ export function discoverAndSaveAuthMeta(
     sessionSavedAt: options.stampSessionSavedAt
       ? nowIso
       : previousMeta?.sessionSavedAt,
+    lastRefreshedAt: options.stampLastRefreshedAt
+      ? nowIso
+      : previousMeta?.lastRefreshedAt,
     accessTokenIssuedAt: iatMs ? new Date(iatMs).toISOString() : previousMeta?.accessTokenIssuedAt,
     accessTokenExpiresAt: expMs ? new Date(expMs).toISOString() : previousMeta?.accessTokenExpiresAt,
     tokenEndpointUrl: doPortalTokenEndpointUrl() ?? previousMeta?.tokenEndpointUrl,
@@ -812,14 +850,16 @@ export async function refreshAccessToken(page: Page): Promise<TokenRefreshResult
     return { ok: false, message: "No access token found in browser cookies or localStorage." };
   }
 
-  if (!isAccessTokenExpiringSoon(tokens.accessToken)) {
+  const jwtExpiringSoon = isAccessTokenExpiringSoon(tokens.accessToken);
+  const proactiveRefresh = sessionNeedsProactiveRefresh(meta, tokens);
+  if (!jwtExpiringSoon && !proactiveRefresh) {
     return { ok: true, message: "Access token still valid.", tokens };
   }
 
   if (await tryAppNativeSilentRefresh(page)) {
     const refreshed = await getTokensFromPage(page);
     if (refreshed && !isAccessTokenExpiringSoon(refreshed.accessToken)) {
-      await saveDoPortalStorageState(page.context());
+      await saveDoPortalStorageState(page.context(), { stampLastRefreshedAt: true });
       logTestStep("DO session: app-native silent token refresh succeeded.");
       return { ok: true, message: "App-native silent refresh.", tokens: refreshed };
     }
@@ -869,7 +909,7 @@ export async function refreshAccessToken(page: Page): Promise<TokenRefreshResult
 
   await applyTokensToPage(page, tokens, response.access_token, response.refresh_token);
   const updated = await getTokensFromPage(page);
-  await saveDoPortalStorageState(page.context());
+  await saveDoPortalStorageState(page.context(), { stampLastRefreshedAt: true });
   logTestStep("DO session: silent refresh_token exchange succeeded.");
   return {
     ok: true,
@@ -951,7 +991,11 @@ export async function refreshAccessTokenFromFile(
       return { ok: false, message: "No tokens found in storage state file." };
     }
 
-    if (!isAccessTokenExpiringSoon(tokens.accessToken)) {
+    const metaNow = readAuthMeta();
+    const jwtExpiringSoon = isAccessTokenExpiringSoon(tokens.accessToken);
+    const proactiveRefresh = sessionNeedsProactiveRefresh(metaNow, tokens);
+
+    if (!jwtExpiringSoon && !proactiveRefresh) {
       return { ok: true, message: "File access token still valid.", tokens };
     }
 
@@ -1007,6 +1051,7 @@ export async function refreshAccessTokenFromFile(
         response.refresh_token ?? tokens.refreshToken,
       );
       writeStorageStateFile(state, filePath);
+      discoverAndSaveAuthMeta(state, { stampLastRefreshedAt: true });
       logTestStep("DO session: refreshed access token in storage state file.");
       return { ok: true, message: "File refresh succeeded.", tokens };
     } finally {
@@ -1074,6 +1119,31 @@ export async function applyDoPortalAuthToContext(
   }
 }
 
+/**
+ * Silent refresh_token grant when JWT is expiring or session age exceeds the proactive threshold.
+ * Never opens FIS MFA.
+ */
+export async function trySilentRefreshSession(
+  filePath = getDoPortalAuthFile(),
+): Promise<DoPortalSessionEvaluation> {
+  let evaluation = evaluateDoPortalSession(filePath);
+  if (evaluation.action === "reuse") {
+    return evaluation;
+  }
+  if (evaluation.action === "refresh" && evaluation.tokens?.refreshToken) {
+    const refreshed = await refreshAccessTokenFromFile(filePath);
+    if (refreshed.ok) {
+      evaluation = evaluateDoPortalSession(filePath);
+      if (evaluation.action === "reuse") {
+        logTestStep(`DO auth: silent refresh succeeded — ${evaluation.reason}`);
+      }
+      return evaluation;
+    }
+    logTestStep(`DO auth: silent refresh failed — ${refreshed.message}`);
+  }
+  return evaluation;
+}
+
 // ---------------------------------------------------------------------------
 // Keepalive
 // ---------------------------------------------------------------------------
@@ -1090,13 +1160,21 @@ export function startDoPortalSessionKeepAlive(
     if (stopped || page.isClosed()) return;
     try {
       const tokens = await getTokensFromPage(page);
-      if (!tokens || isAccessTokenExpiringSoon(tokens.accessToken, expiryBufferMs)) {
+      const meta = readAuthMeta();
+      const jwtExpiringSoon =
+        !tokens || isAccessTokenExpiringSoon(tokens.accessToken, expiryBufferMs);
+      const proactiveRefresh =
+        !!tokens && sessionNeedsProactiveRefresh(meta, tokens);
+      if (jwtExpiringSoon || proactiveRefresh) {
         const result = await refreshAccessToken(page);
-        if (!result.ok) {
+        if (result.ok) {
+          logTestStep("DO session keepalive: refreshed JWT and saved storage state.");
+        } else {
           logTestStep(`DO session keepalive: ${result.message}`);
         }
       } else {
-        await saveDoPortalStorageState(page.context());
+        await saveDoPortalStorageState(page.context(), { stampLastRefreshedAt: true });
+        logTestStep("DO session keepalive: re-saved storage state (JWT still valid).");
       }
     } catch (err) {
       logTestStep(

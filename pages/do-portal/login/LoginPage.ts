@@ -43,7 +43,7 @@ export class DOLoginPage extends BasePage {
     this.proceedButton = page.getByRole("button", { name: "Proceed" });
     this.passwordInput = page.getByRole("textbox", { name: "Password" });
     this.yesThisIsMyComputerRadio = page.getByRole("radio", {
-      name: "Yes, this is my computer",
+      name: /yes,?\s*this is my (computer|mobile device)/i,
     });
     /** IdP / marketing shell: entry may be button or link; copy varies (Login with FIS, Sign in with FIS, spacing). */
     this.loginWithFisButton = page
@@ -130,13 +130,19 @@ export class DOLoginPage extends BasePage {
     );
   }
 
-  private async fillTotpIfPrompted(surface: Page, totpSecret?: string): Promise<void> {
+  private deviceTrustRadio(p: Page): Locator {
+    return p.getByRole("radio", {
+      name: /yes,?\s*this is my (computer|mobile device)/i,
+    });
+  }
+
+  private async fillTotpIfPrompted(surface: Page, totpSecret?: string): Promise<boolean> {
     const otpInputs = this.otpInputs(surface);
     const firstVisible = await otpInputs
       .first()
       .isVisible({ timeout: 3_000 })
       .catch(() => false);
-    if (!firstVisible) return;
+    if (!firstVisible) return false;
 
     if (!totpSecret) {
       throw new Error(
@@ -168,13 +174,28 @@ export class DOLoginPage extends BasePage {
         await surface.keyboard.type(digits[index]);
       }
       await surface.waitForTimeout(500);
-      return;
+      return true;
     }
 
     const target = visibleInputs[0] ?? otpInputs.first();
     await target.focus();
     await target.fill(otp);
     await surface.waitForTimeout(500);
+    return true;
+  }
+
+  /** FIS may skip device-trust when the browser is already trusted. */
+  private async selectDeviceTrustIfPrompted(surface: Page): Promise<void> {
+    const radio = this.deviceTrustRadio(surface).first();
+    const visible = await radio.isVisible({ timeout: 3_000 }).catch(() => false);
+    if (!visible) {
+      this.log("Device-trust prompt not shown — skipping.");
+      return;
+    }
+
+    this.log("Selecting device-trust option (Yes, this is my computer / mobile device)");
+    await radio.click({ timeout: 10_000 });
+    await expect(radio).toBeChecked({ timeout: 5_000 }).catch(() => {});
   }
  
   /**
@@ -212,22 +233,45 @@ export class DOLoginPage extends BasePage {
     return onLauncher;
   }
 
-  /** From `/landing` — same step as after successful FIS sign-in. */
-  async enterDealerFromAppLauncher(): Promise<void> {
+  /**
+   * After FIS sign-in the IdP tab may close; the portal may be on another tab in the same context.
+   */
+  private async waitForPortalPageAfterSignIn(timeoutMs = 90_000): Promise<Page> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      for (const pg of this.page.context().pages()) {
+        if (pg.isClosed()) continue;
+        const url = pg.url();
+        if (/udc-test\.fiscloudservices\.com\/SITDOPortal/i.test(url)) {
+          await pg.bringToFront().catch(() => {});
+          return pg;
+        }
+      }
+      await this.page.waitForTimeout(300);
+    }
+    throw new Error(
+      "Expected DO Portal URL after FIS sign-in on an open browser tab (check popup blocker / SSO redirect).",
+    );
+  }
+
+  private async enterDealerFromAppLauncherOn(page: Page): Promise<void> {
     this.log("App launcher detected — opening Quotes & Applications…");
-    await expect(this.quoteAndAppButton).toBeVisible({ timeout: 60_000 });
-    await this.page
+    const quoteAndApp = page.getByRole("link", {
+      name: /Quotes & Applications/i,
+    });
+    await expect(quoteAndApp).toBeVisible({ timeout: 60_000 });
+    await page
       .locator(".app-loader-overlay, .p-progressspinner")
       .first()
       .waitFor({ state: "hidden", timeout: 30_000 })
       .catch(() => {});
-    await this.clickElement(this.quoteAndAppButton, 30_000);
-    await this.page
+    await quoteAndApp.click({ timeout: 30_000 });
+    await page
       .locator(".loading, .spinner, [data-testid='loading']")
       .first()
       .waitFor({ state: "hidden", timeout: 30_000 })
       .catch(() => {});
-    await this.page.waitForURL(/\/dealer(\/|$)/i, { timeout: 60_000 }).catch(() => {});
+    await page.waitForURL(/\/dealer(\/|$)/i, { timeout: 60_000 }).catch(() => {});
     this.log("Opened Quotes & Applications");
   }
 
@@ -291,17 +335,15 @@ export class DOLoginPage extends BasePage {
     await passwordInput.waitFor({ state: "visible", timeout: 30_000 });
     await utils.fill(passwordInput, password);
     this.log("Entered password (value not logged).");
-    await this.fillTotpIfPrompted(surface, options?.totpSecret);
- 
+
     // Blur so Angular/async validators can run and enable Sign in
-    await passwordInput.press("Tab");
-    this.log("Selecting 'Yes, this is my computer'");
-    const yesThisIsMyComputerRadio = surface.getByRole("radio", {
-      name: "Yes, this is my computer",
-    });
-    await utils.click(yesThisIsMyComputerRadio);
-    await expect(yesThisIsMyComputerRadio).toBeChecked({ timeout: 15_000 });
- 
+    await passwordInput.press("Tab").catch(() => {});
+
+    await this.fillTotpIfPrompted(surface, options?.totpSecret);
+    await this.selectDeviceTrustIfPrompted(surface);
+    // Some FIS flows show OTP only after device-trust selection.
+    await this.fillTotpIfPrompted(surface, options?.totpSecret);
+
     this.log("Waiting for Sign in button to become enabled");
     const signinButton = surface.getByRole("button", { name: "Sign in" });
     await expect(signinButton).toBeEnabled({ timeout: 90_000 });
@@ -309,44 +351,32 @@ export class DOLoginPage extends BasePage {
     this.log("Clicking Sign in");
     await utils.click(signinButton);
 
-    // Wait for loaders and app overlay to clear before dashboard interactions
-    await surface
-      .locator(".loading, .spinner, [data-testid='loading']")
+    const portalPage = await this.waitForPortalPageAfterSignIn();
+    await portalPage
+      .locator(".loading, .spinner, [data-testid='loading'], .app-loader-overlay, .p-progressspinner")
       .first()
       .waitFor({ state: "hidden", timeout: 30_000 })
       .catch(() => {});
-    // Also wait for app-loader-overlay to be hidden (SIT specific)
-    await surface
-      .locator(".app-loader-overlay, .p-progressspinner")
-      .first()
-      .waitFor({ state: "hidden", timeout: 30_000 })
-      .catch(() => {});
-    
-    // Verify we're on the DO portal dashboard (not still on FIS login)
-    await surface.waitForURL(/udc-test\.fiscloudservices\.com\/SITDOPortal/, { timeout: 30_000 }).catch(() => {});
-    const currentUrl = surface.url();
-    if (!currentUrl.includes("udc-test.fiscloudservices.com/SITDOPortal")) {
-      throw new Error(`Expected to be on DO Portal dashboard but current URL is: ${currentUrl}`);
-    }
-    this.log("Verified dashboard is loaded or navigation completed");
 
-    this.log("Clicking Quotes & Applications from dashboard");
-    const quoteAndApp = surface.getByRole("link", {
-      name: /Quotes & Applications/i,
-    });
-    await expect(quoteAndApp).toBeVisible({ timeout: 90_000 });
-    // Ensure overlay is gone before clicking
-    await surface
-      .locator(".app-loader-overlay")
-      .waitFor({ state: "hidden", timeout: 15_000 })
-      .catch(() => {});
-    await utils.click(quoteAndApp);
-    await surface
-      .locator(".loading, .spinner, [data-testid='loading']")
-      .first()
-      .waitFor({ state: "hidden", timeout: 30_000 })
-      .catch(() => {});
-    this.log("Opened Quotes & Applications");
+    this.log("Verified portal shell after FIS sign-in");
+
+    const selectApp = portalPage.getByText(/Select Application/i).first();
+    const onLauncher =
+      (await selectApp.isVisible({ timeout: 5_000 }).catch(() => false)) &&
+      (await portalPage
+        .getByRole("link", { name: /Quotes & Applications/i })
+        .isVisible({ timeout: 3_000 })
+        .catch(() => false));
+
+    if (onLauncher) {
+      this.log("Clicking Quotes & Applications from app launcher");
+      await this.enterDealerFromAppLauncherOn(portalPage);
+    }
+  }
+
+  /** From `/landing` — same step as after successful FIS sign-in. */
+  async enterDealerFromAppLauncher(): Promise<void> {
+    await this.enterDealerFromAppLauncherOn(this.page);
   }
  
   /**
