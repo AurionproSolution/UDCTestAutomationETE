@@ -293,6 +293,16 @@ export class DODashboardPage extends BasePage {
     await option.click({ force: false });
   }
 
+  /** Select Operating Lease from the Create Standard Quote product dialog. */
+  async selectOperatingLeaseProduct(): Promise<void> {
+    this.logStep("Select Operating Lease product");
+    const dialog = this.page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    const option = dialog.getByText(/Operating\s*Lease/i).first();
+    await option.waitFor({ state: "attached" });
+    await option.click({ force: false });
+  }
+
   /**
    * Verify dashboard is loaded
    */

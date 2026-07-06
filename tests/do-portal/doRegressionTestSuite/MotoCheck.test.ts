@@ -611,8 +611,8 @@ function enterNumberInput(dlg: Locator): Locator {
     .or(dlg.locator("text").filter({ hasText: /^Enter Number/i }).locator("#text").first())
     .or(
       dlg
-        .getByText(/Enter Number/i)
-        .first()
+    .getByText(/Enter Number/i)
+    .first()
         .locator("xpath=following::input[@id='text' and contains(@class,'p-inputtext')][1]"),
     )
     .or(dlg.locator("input#text.p-inputtext.p-component").first())

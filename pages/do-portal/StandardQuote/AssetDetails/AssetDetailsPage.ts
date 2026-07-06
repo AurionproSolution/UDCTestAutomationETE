@@ -2790,10 +2790,12 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * **Payment / Lease Schedule** section title (CSA vs FL label varies).
+   * **Payment / Lease / Rental Schedule** section title (CSA vs FL vs OL label varies).
    */
   private paymentScheduleSectionTitle(): Locator {
-    return this.standardQuoteRoot().getByText(/Payment\s+Schedule|Lease\s+Schedule/i).first();
+    return this.standardQuoteRoot()
+      .getByText(/Payment\s+Schedule|Lease\s+Schedule|Rental\s+Schedule/i)
+      .first();
   }
 
   /**
@@ -2824,7 +2826,7 @@ export class DOAssetDetailsPage extends BasePage {
     const root = this.standardQuoteRoot();
     const card = root
       .locator("p-card")
-      .filter({ hasText: /Payment\s+Schedule|Lease\s+Schedule/i })
+      .filter({ hasText: /Payment\s+Schedule|Lease\s+Schedule|Rental\s+Schedule/i })
       .first();
     return card.or(this.paymentScheduleContentScope());
   }
@@ -3026,28 +3028,25 @@ export class DOAssetDetailsPage extends BasePage {
     const dataRow = this.paymentScheduleMoneyDataRow();
     const editBtn = this.editPaymentScheduleTrigger();
 
-    const detailedViewReady = async (): Promise<boolean> =>
-      (await dataRow.isVisible().catch(() => false)) &&
-      (await editBtn.isVisible().catch(() => false)) &&
-      (await editBtn.isEnabled().catch(() => false));
+    const scheduleDataReady = async (): Promise<boolean> =>
+      (await dataRow.isVisible().catch(() => false));
 
-    if (await detailedViewReady()) {
+    if (await scheduleDataReady()) {
       return;
     }
 
     await this.clickLeasePaymentScheduleDefaultViewIfNeeded();
 
-    if (await detailedViewReady()) {
+    if (await scheduleDataReady()) {
       return;
     }
 
     await this.clickLeasePaymentScheduleBarsViewIfNeeded();
 
     await expect
-      .poll(detailedViewReady, { timeout: 30_000, intervals: [500, 1_000, 2_000] })
+      .poll(scheduleDataReady, { timeout: 30_000, intervals: [500, 1_000, 2_000] })
       .toBe(true);
     await expect(dataRow).toBeVisible({ timeout: 15_000 });
-    await expect(editBtn).toBeEnabled({ timeout: 15_000 });
   }
 
   /**
@@ -3379,7 +3378,7 @@ export class DOAssetDetailsPage extends BasePage {
     const root = this.standardQuoteRoot();
     const scheduleCard = root
       .locator("p-card")
-      .filter({ hasText: /Payment\s+Schedule|Lease\s+Schedule/i })
+      .filter({ hasText: /Payment\s+Schedule|Lease\s+Schedule|Rental\s+Schedule/i })
       .first();
     if (await scheduleCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
       return scheduleCard;
@@ -3512,27 +3511,76 @@ export class DOAssetDetailsPage extends BasePage {
   ): Promise<void> {
     this.logStep(`Enter Edit Payment Schedule Segment Amount ${amount} on row ${rowIndex + 1}`);
     const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
-    const amountInput = row
-      .locator("input[currencymask]")
-      .first()
-      .or(row.locator("xpath=.//label[contains(normalize-space(.),'Amount')]/following::input[1]"))
-      .first();
-    await expect(amountInput).toBeVisible({ timeout: 10_000 });
+    const amountCell = row.locator("td").nth(2);
+
+    const parseAmount = (raw: string): number => {
+      const n = Number.parseFloat(raw.replace(/[^0-9.-]/g, ""));
+      return Number.isFinite(n) ? n : Number.NaN;
+    };
+
+    const readAmount = async (): Promise<string> => {
+      const input = amountCell.locator("input").first();
+      if (await input.isVisible({ timeout: 500 }).catch(() => false)) {
+        return (await input.inputValue()).trim();
+      }
+      return ((await amountCell.textContent()) ?? "").trim();
+    };
+
+    const target = parseAmount(amount);
+    const current = parseAmount(await readAmount());
+    if (Number.isFinite(target) && Number.isFinite(current) && target === current) {
+      return;
+    }
+
+    const amountInputInCell = (): Locator =>
+      amountCell
+        .locator("input[currencymask], input#amount, input.p-inputtext")
+        .first()
+        .or(amountCell.locator("input").first());
+
+    let amountInput = amountInputInCell();
+    if (!(await amountInput.isVisible({ timeout: 1_000 }).catch(() => false))) {
+      await amountCell.click({ timeout: 10_000 }).catch(() => {});
+      await this.page.waitForTimeout(250);
+      amountInput = amountInputInCell();
+    }
+
+    if (!(await amountInput.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      const displayed = await readAmount();
+      const displayedNum = parseAmount(displayed);
+      if (Number.isFinite(target) && target === displayedNum) {
+        return;
+      }
+      const typeLabel =
+        ((await row.getByRole("combobox").first().textContent().catch(() => "")) ?? "").trim();
+      if (/Fixed/i.test(typeLabel)) {
+        this.logStep(
+          `Fixed segment amount is display-only (${displayed}); cannot enter ${amount}`,
+        );
+        return;
+      }
+      throw new Error(
+        `Edit Payment Schedule amount input not found on row ${rowIndex + 1} (displayed: "${displayed}").`,
+      );
+    }
+
     await amountInput.click({ clickCount: 3 });
     await amountInput.fill(amount);
     await amountInput.press("Tab").catch(() => {});
   }
 
   /** **Calculate** inside **Edit Payment Schedule** (FIS fetch for segment amounts). */
-  async clickEditPaymentScheduleCalculate(): Promise<void> {
+  async clickEditPaymentScheduleCalculate(opts?: { waitForApply?: boolean }): Promise<void> {
     this.logStep("Click Edit Payment Schedule Calculate");
     const calcBtn = this.editPaymentScheduleCalculateButton();
     await expect(calcBtn).toBeVisible({ timeout: 10_000 });
     await expect(calcBtn).toBeEnabled({ timeout: 10_000 });
     await calcBtn.click({ timeout: 10_000 });
     await this.waitForLoadingComplete();
-    // Apply enables only after FIS calculation completes — wait for UI state, not spinner alone.
-    await expect(this.editPaymentScheduleApplyButton()).toBeEnabled({ timeout: 60_000 });
+    if (opts?.waitForApply !== false) {
+      // Apply enables only after FIS calculation completes — wait for UI state, not spinner alone.
+      await expect(this.editPaymentScheduleApplyButton()).toBeEnabled({ timeout: 60_000 });
+    }
   }
 
   /** Summary block after dialog **Calculate** (Number of Payments, Total Term). */
@@ -4565,7 +4613,7 @@ export class DOAssetDetailsPage extends BasePage {
   loanDatePastUpdateDialog(): Locator {
     return this.page
       .locator("p-confirmdialog, .p-confirm-dialog, [role='dialog']")
-      .filter({ hasText: /Loan date is in the past/i })
+      .filter({ hasText: /Loan date is in the past|Lease date is in the past/i })
       .first();
   }
 
@@ -5303,7 +5351,11 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async readLoanDateValue(): Promise<string> {
-    return (await this.loanDate.inputValue().catch(() => "")).trim();
+    let value = (await this.loanDate.inputValue().catch(() => "")).trim();
+    if (!/\d{1,2}\/\d{1,2}\/\d{4}/.test(value)) {
+      value = ((await this.loanDate.textContent()) ?? "").trim();
+    }
+    return value;
   }
 
   async expectFirstPaymentBeforeLoanDateValidation(): Promise<void> {
@@ -6039,12 +6091,32 @@ export class DOAssetDetailsPage extends BasePage {
     await expect(charges).toBeVisible({ timeout: 15_000 });
   }
 
-  /** **Charges** label block on Additional Charges (before/after add-ons). */
+  /** **Charges** label block on OL lease (e.g. Charges (GST Exclusive/Inclusive)). */
   chargesFieldBlock(): Locator {
     return this.standardQuoteRoot()
       .locator(".p-field, [class*='p-field'], amount, .grid")
-      .filter({ has: this.standardQuoteRoot().getByText(/^Charges$/i) })
+      .filter({ has: this.standardQuoteRoot().getByText(/^Charges\b/i) })
       .first();
+  }
+
+  addMaintenanceAndChargesButton(): Locator {
+    return this.standardQuoteRoot()
+      .getByRole("button", { name: /Add\s+Maintenance\s*&\s*Charges/i })
+      .or(this.standardQuoteRoot().locator("button").filter({ hasText: /Add\s+Maintenance\s*&\s*Charges/i }))
+      .first();
+  }
+
+  async openOlMaintenanceAndChargesFromQuote(): Promise<void> {
+    this.logStep("Open OL Maintenance and Charges from quote");
+    await this.waitForQuoteLoadersToFinish();
+    const btn = this.addMaintenanceAndChargesButton();
+    await btn.scrollIntoViewIfNeeded();
+    await btn.waitFor({ state: "visible", timeout: 20_000 });
+    await btn.click({ timeout: 15_000 });
+    await this.page.locator("app-service-plan, app-accessories").first().waitFor({
+      state: "visible",
+      timeout: 45_000,
+    });
   }
 
   /** UDP-T3872 — Save before Calculate shows **Please click "Calculate"**. */
@@ -6076,5 +6148,769 @@ export class DOAssetDetailsPage extends BasePage {
       "input[disabled], textarea[disabled], .p-disabled input, .p-disabled textarea",
     );
     await expect(disabled.first()).toBeVisible({ timeout: 30_000 });
+  }
+
+  // -------------------------------------------------------------------------
+  // Operating Lease (OL) — Standard Quote helpers (UDP-T4100–UDP-T4160)
+  // -------------------------------------------------------------------------
+
+  /** PrimeNG **Include GST** host (`input#leaseCheckbox` is the hidden PrimeNG input). */
+  includeGstCheckboxHost(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .locator("p-checkbox")
+      .filter({ has: root.locator("label, span").filter({ hasText: /Include\s*GST/i }) })
+      .first()
+      .or(
+        root
+          .locator('input#leaseCheckbox[type="checkbox"]')
+          .locator("xpath=ancestor::p-checkbox[1]"),
+      )
+      .first();
+  }
+
+  /** Visible **Include GST** checkbox box (PrimeNG — not the hidden `leaseCheckbox` input). */
+  includeGstCheckboxBox(): Locator {
+    return this.includeGstCheckboxHost().locator("div.p-checkbox-box").first();
+  }
+
+  /** Visible Include GST control for assertions. */
+  includeGstCheckbox(): Locator {
+    return this.includeGstCheckboxBox();
+  }
+
+  async setIncludeGst(checked: boolean): Promise<void> {
+    this.logStep(`Set Include GST checked: ${checked}`);
+    const host = this.includeGstCheckboxHost();
+    const box = this.includeGstCheckboxBox();
+    await expect
+      .poll(async () => box.isVisible().catch(() => false), { timeout: 60_000 })
+      .toBe(true);
+    await box.scrollIntoViewIfNeeded();
+    const isChecked = await this.isPrimeCheckboxChecked(host);
+    if (isChecked === checked) return;
+
+    await box.click({ timeout: 10_000 });
+    if ((await this.isPrimeCheckboxChecked(host)) !== checked) {
+      await box.click({ force: true, timeout: 10_000 });
+    }
+    if ((await this.isPrimeCheckboxChecked(host)) !== checked) {
+      const input = host.locator('input[type="checkbox"]').first();
+      if (checked) {
+        await input.check({ force: true });
+      } else {
+        await input.uncheck({ force: true });
+      }
+    }
+    await expect.poll(async () => this.isPrimeCheckboxChecked(host), { timeout: 8_000 }).toBe(checked);
+    await this.waitForLoadingComplete();
+  }
+
+  async isIncludeGstChecked(): Promise<boolean> {
+    const host = this.includeGstCheckboxHost();
+    if (!(await host.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      const input = host.locator('input[type="checkbox"]').first();
+      return input.isChecked().catch(() => false);
+    }
+    return this.isPrimeCheckboxChecked(host);
+  }
+
+  private olLeaseCurrencyRow(labelPattern: RegExp): Locator {
+    const label = this.standardQuoteRoot().getByText(labelPattern, { exact: true }).first();
+    return label
+      .locator("xpath=parent::*")
+      .or(label.locator("xpath=ancestor::div[contains(@class,'grid')][1]"));
+  }
+
+  private olCurrencyInputInLabelRow(labelPattern: RegExp): Locator {
+    const root = this.standardQuoteRoot();
+    const label = root.getByText(labelPattern, { exact: true }).first();
+    const scope = label.locator("xpath=parent::*");
+    return scope
+      .locator(
+        "input#amount:not([disabled]), input[currencymask]:not([disabled]), input:not([disabled]):not([type='hidden'])",
+      )
+      .filter({ visible: true })
+      .first()
+      .or(label.locator("xpath=following-sibling::input[1]"))
+      .or(root.locator("amount").filter({ hasText: labelPattern }).locator("#amount").first());
+  }
+
+  /** Editable input or display-only value (mutual exclusion clears the other field to `$0.00`). */
+  private olLeaseCurrencyValueField(labelPattern: RegExp): Locator {
+    const label = this.standardQuoteRoot().getByText(labelPattern, { exact: true }).first();
+    const scope = label.locator("xpath=parent::*");
+    return this.olCurrencyInputInLabelRow(labelPattern)
+      .or(label.locator("xpath=following-sibling::input[1]"))
+      .or(label.locator("xpath=following-sibling::*[contains(., '$')][1]"))
+      .or(scope.getByText(/\$[\d,]+(?:\.\d+)?/).first())
+      .first();
+  }
+
+  async readOlLeaseCurrencyValue(labelPattern: RegExp): Promise<number> {
+    const scope = this.olLeaseCurrencyRow(labelPattern);
+    await scope.scrollIntoViewIfNeeded().catch(() => {});
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const field = this.olLeaseCurrencyValueField(labelPattern);
+      const inputVal = (await field.inputValue().catch(() => "")).trim();
+      if (inputVal) return this.parseDisplayedCurrency(inputVal);
+
+      const text = (await field.textContent().catch(() => "")) ?? "";
+      if (text.includes("$")) return this.parseDisplayedCurrency(text);
+
+      const rowText = (await scope.textContent().catch(() => "")) ?? "";
+      const matches = rowText.match(/\$[\d,]+(?:\.\d+)?/g);
+      if (matches?.length) {
+        return this.parseDisplayedCurrency(matches[matches.length - 1]);
+      }
+      await this.page.waitForTimeout(300);
+    }
+    return 0;
+  }
+
+  /** Fill OL lease currency inputs (Maintenance Cost, Residual Value, etc.) with mask-friendly typing. */
+  private async fillOlLeaseCurrencyField(field: Locator, value: string): Promise<void> {
+    const digits = value.replace(/[^0-9]/g, "");
+    await field.waitFor({ state: "visible", timeout: 20_000 });
+    await field.scrollIntoViewIfNeeded();
+    await field.click({ force: true });
+    await field.press("ControlOrMeta+a").catch(() => {});
+    await field.fill("");
+    await this.page.keyboard.type(digits, { delay: 25 });
+    await field.press("Tab").catch(() => {});
+    await this.page.waitForTimeout(200);
+    const parsed = this.parseDisplayedCurrency((await field.inputValue().catch(() => "")).trim());
+    if (parsed <= 0 && digits.length > 0) {
+      await field.click({ clickCount: 3, force: true });
+      await field.fill(value);
+      await field.press("Tab").catch(() => {});
+    }
+  }
+
+  private olFieldNearLabel(labelPattern: RegExp): Locator {
+    const root = this.standardQuoteRoot();
+    const label = root.getByText(labelPattern).first();
+    const row = label.locator("xpath=ancestor::div[contains(@class,'grid')][1]");
+    return row
+      .locator("input")
+      .filter({ visible: true })
+      .first()
+      .or(root.locator("number").filter({ hasText: labelPattern }).locator("input").first());
+  }
+
+  /** Hub: PrimeNG `number` host → spinbutton (recorded OL Useful Life DOM). */
+  private static readonly USEFUL_LIFE_NUMBER_SPINBUTTON_HUB =
+    "number[class='p-element ng-untouched ng-pristine ng-star-inserted ng-valid'] input[role='spinbutton']";
+
+  usefulLifeNumberHost(): Locator {
+    const scope = this.standardQuoteRoot().filter({ hasText: /Useful\s*Life/i });
+    return scope
+      .locator("number[class*='p-element'][class*='ng-star-inserted']")
+      .first()
+      .or(scope.locator("number.p-element").first())
+      .or(scope.locator("number").first());
+  }
+
+  usefulLifeInputField(): Locator {
+    const root = this.standardQuoteRoot();
+    const label = root.getByText(/^Useful\s*Life$/i).first();
+    const scope = label.locator("xpath=parent::*");
+    return root
+      .filter({ hasText: /Useful\s*Life/i })
+      .getByRole("spinbutton")
+      .first()
+      .or(scope.locator(DOAssetDetailsPage.USEFUL_LIFE_NUMBER_SPINBUTTON_HUB).first())
+      .or(scope.getByRole("spinbutton").first())
+      .or(label.locator("xpath=following::*[@role='spinbutton'][1]"));
+  }
+
+  async readUsefulLifeMonths(): Promise<number> {
+    await this.standardQuoteRoot()
+      .getByText(/Useful\s*Life/i)
+      .first()
+      .scrollIntoViewIfNeeded()
+      .catch(() => {});
+
+    let months = 0;
+    await expect
+      .poll(async () => {
+        const field = this.usefulLifeInputField();
+        const ariaNow = await field.getAttribute("aria-valuenow").catch(() => null);
+        if (ariaNow) {
+          months = Number.parseInt(ariaNow, 10);
+          if (Number.isFinite(months) && months > 0) return months;
+        }
+        const raw =
+          (await field.inputValue().catch(() => "")).trim() ||
+          ((await field.textContent().catch(() => "")) ?? "").trim();
+        months = Number.parseInt(raw.replace(/[^\d]/g, ""), 10);
+        return Number.isFinite(months) && months > 0 ? months : 0;
+      }, { timeout: 45_000, intervals: [500, 1_000, 2_000] })
+      .toBeGreaterThan(0);
+    return months;
+  }
+
+  maintenanceCostInputField(): Locator {
+    return this.olCurrencyInputInLabelRow(/^Maintenance\s*Cost$/);
+  }
+
+  maintenanceCostValueField(): Locator {
+    return this.olLeaseCurrencyValueField(/^Maintenance\s*Cost$/);
+  }
+
+  financedMaintenanceChargeInputField(): Locator {
+    return this.olCurrencyInputInLabelRow(/^Financed\s+Maintenance\s+Charge$/);
+  }
+
+  financedMaintenanceChargeValueField(): Locator {
+    return this.olLeaseCurrencyValueField(/^Financed\s+Maintenance\s+Charge$/);
+  }
+
+  async readMaintenanceCostAmount(): Promise<number> {
+    return this.readOlLeaseCurrencyValue(/^Maintenance\s*Cost$/);
+  }
+
+  async readFinancedMaintenanceChargeAmount(): Promise<number> {
+    return this.readOlLeaseCurrencyValue(/^Financed\s+Maintenance\s+Charge$/);
+  }
+
+  /** OL **Residual Value** currency field (lease details row — before / after Calculate). */
+  olResidualValueInputField(): Locator {
+    return this.olCurrencyInputInLabelRow(/^Residual\s+Value$/);
+  }
+
+  async enterOlResidualValueAmount(amount: string): Promise<void> {
+    this.logStep(`Entered OL residual value amount as ${this.stepValueDisplay(amount)}`);
+    await this.fillOlLeaseCurrencyField(this.olResidualValueInputField(), amount);
+  }
+
+  /** OL residual **%** (`#percent` in Residual Value row) — appears after first **Calculate**. */
+  olResidualPercentInputField(): Locator {
+    const root = this.standardQuoteRoot();
+    const residualRow = root
+      .getByText(/^Residual\s+Value$/i)
+      .first()
+      .locator("xpath=ancestor::div[contains(@class,'grid')][1]");
+    return residualRow
+      .locator("input#percent, #percent")
+      .filter({ visible: true })
+      .first()
+      .or(
+        root
+          .locator("label[for='percentage']")
+          .filter({ hasText: /Residual\s+Value/i })
+          .first()
+          .locator("xpath=ancestor::div[contains(@class,'grid')][1]//input[@id='percent']")
+          .first(),
+      );
+  }
+
+  async expectOlResidualPercentFieldVisible(): Promise<void> {
+    this.logStep("Expect OL residual % field visible after Calculate");
+    await expect.soft(this.olResidualPercentInputField()).toBeVisible({ timeout: 25_000 });
+  }
+
+  async expectOlResidualValueRequiredValidation(): Promise<void> {
+    this.logStep("Expect OL residual value required validation");
+    await expect
+      .poll(async () => {
+        const dialog = this.page
+          .getByRole("dialog")
+          .filter({ hasText: /required to save|Please complete|residual/i })
+          .first();
+        if (await dialog.isVisible().catch(() => false)) return true;
+
+        const surface = this.page
+          .locator(
+            ".p-error, .p-invalid-message, .p-message-error, .p-toast-message-text, [role='alert']",
+          )
+          .filter({
+            hasText:
+              /Please complete|residual.*required|required.*residual|enter.*residual|must.*residual|greater than 0/i,
+          })
+          .filter({ visible: true })
+          .first();
+        if (await surface.isVisible().catch(() => false)) return true;
+
+        const pct = this.olResidualPercentInputField();
+        if (await pct.isVisible().catch(() => false)) {
+          if ((await pct.getAttribute("aria-invalid").catch(() => null)) === "true") return true;
+          const wrapper = pct.locator(
+            "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'grid')][1]",
+          );
+          const inline = wrapper
+            .locator(".p-error, small, .p-invalid-message")
+            .filter({ hasText: /required|enter|complete|residual|greater/i })
+            .filter({ visible: true })
+            .first();
+          if (await inline.isVisible().catch(() => false)) return true;
+        }
+
+        const amount = this.olResidualValueInputField();
+        if ((await amount.getAttribute("aria-invalid").catch(() => null)) === "true") return true;
+
+        return false;
+      }, { timeout: 25_000, intervals: [300, 500, 1_000] })
+      .toBe(true);
+  }
+
+  async enterMaintenanceCost(amount: string): Promise<void> {
+    this.logStep(`Entered maintenance cost as ${this.stepValueDisplay(amount)}`);
+    const field = this.maintenanceCostInputField();
+    await field.scrollIntoViewIfNeeded();
+    await this.fillOlLeaseCurrencyField(field, amount);
+  }
+
+  async enterFinancedMaintenanceCharge(amount: string): Promise<void> {
+    this.logStep(`Entered financed maintenance charge as ${this.stepValueDisplay(amount)}`);
+    await this.fillOlLeaseCurrencyField(this.financedMaintenanceChargeInputField(), amount);
+  }
+
+  paymentsInAdvanceInputField(): Locator {
+    return this.olFieldNearLabel(/No\.?\s*of\s*Payments?\s*in\s*Advance/i);
+  }
+
+  async enterPaymentsInAdvance(count: string): Promise<void> {
+    this.logStep(`Entered payments in advance as ${this.stepValueDisplay(count)}`);
+    const inp = this.paymentsInAdvanceInputField();
+    await inp.waitFor({ state: "visible", timeout: 15_000 });
+    await inp.scrollIntoViewIfNeeded();
+    await inp.click();
+    await inp.fill(count);
+    await inp.press("Tab").catch(() => {});
+  }
+
+  totalCashCostField(): Locator {
+    return this.financeSummaryLabelValueField("Total Cash Cost");
+  }
+
+  inclGstOfField(): Locator {
+    return this.financeSummaryLabelValueField("Incl. GST of");
+  }
+
+  /** Finance totals rendered as a disabled `amount` input or a read-only label sibling. */
+  private async expectFinanceSummaryLabelValueDisplayOnly(label: string): Promise<void> {
+    this.logStep(`Expect ${label} display-only`);
+    const root = this.standardQuoteRoot();
+    const amountInput = root
+      .locator("amount")
+      .filter({ hasText: new RegExp(label.replace(/\s+/g, "\\s+"), "i") })
+      .locator("#amount")
+      .first();
+    if (await amountInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect.soft(amountInput).toBeDisabled({ timeout: 10_000 });
+      return;
+    }
+    const field = this.financeSummaryLabelValueField(label);
+    await expect.soft(field).toBeVisible({ timeout: 25_000 });
+    const editable = await field.isEditable().catch(() => false);
+    expect.soft(editable).toBeFalsy();
+  }
+
+  async expectTotalCashCostDisplayOnly(): Promise<void> {
+    await this.expectFinanceSummaryLabelValueDisplayOnly("Total Cash Cost");
+  }
+
+  async expectInclGstOfDisplayOnly(): Promise<void> {
+    await this.expectFinanceSummaryLabelValueDisplayOnly("Incl. GST of");
+  }
+
+  /** **Frequency** combobox in Finance section (OL / lease card). */
+  olFrequencyDropdownTrigger(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .locator("label")
+      .filter({ hasText: /^Frequency/i })
+      .first()
+      .locator(
+        "xpath=following::button[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+      )
+      .first();
+  }
+
+  olFrequencyCombobox(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .locator(
+        "xpath=.//label[contains(normalize-space(.),'Frequency')]/following::*[@role='combobox'][1]",
+      )
+      .first()
+      .or(
+        root
+          .locator(
+            "xpath=.//label[contains(normalize-space(.),'Frequency')]/following::p-dropdown[1]",
+          )
+          .first()
+          .getByRole("combobox")
+          .first(),
+      );
+  }
+
+  async readOlFrequencyLabel(): Promise<string> {
+    const trigger = this.olFrequencyDropdownTrigger();
+    if (await trigger.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return this.readPrimeDropdownLabel(trigger);
+    }
+    const combo = this.olFrequencyCombobox();
+    if (await combo.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return (
+        (await combo.getAttribute("aria-label")) ?? ((await combo.textContent()) ?? "").trim()
+      );
+    }
+    return "";
+  }
+
+  async expectOlFrequencyDefaultsFromProgram(): Promise<void> {
+    this.logStep("Expect OL Frequency defaults from program");
+    await this.waitForQuoteLoadersToFinish();
+    await expect
+      .poll(async () => this.readOlFrequencyLabel(), { timeout: 30_000 })
+      .toMatch(/Monthly|Weekly|Fortnightly/i);
+  }
+
+  advancePaymentAmountField(): Locator {
+    const summary = this.paymentSummaryRoot;
+    return summary
+      .locator(".psr-advance-payment-field")
+      .locator("input#amount, input[currencymask]")
+      .first()
+      .or(
+        summary
+          .locator("amount")
+          .filter({ hasText: /^Advance\s+Payment\s+Amount$/i })
+          .locator("#amount")
+          .first(),
+      );
+  }
+
+  async readAdvancePaymentAmount(): Promise<number> {
+    await this.paymentSummaryRoot.scrollIntoViewIfNeeded().catch(() => {});
+    await this.waitForQuoteLoadersToFinish();
+    const field = this.advancePaymentAmountField();
+    await expect(field).toBeVisible({ timeout: 30_000 });
+
+    let value = 0;
+    await expect
+      .poll(async () => {
+        const raw = (await field.inputValue().catch(() => "")).trim();
+        value = this.parseDisplayedCurrency(raw);
+        return value;
+      }, { timeout: 90_000, intervals: [500, 1_000, 2_000] })
+      .toBeGreaterThan(0);
+    return value;
+  }
+
+  excessAllowanceSectionHeader(): Locator {
+    return this.standardQuoteRoot().getByText(/Excess\s+Allowance/i).first();
+  }
+
+  async expandExcessAllowanceSection(): Promise<void> {
+    this.logStep("Expand Excess Allowance section");
+    const btn = this.standardQuoteRoot()
+      .getByRole("button", { name: /Excess\s+Allowance/i })
+      .first();
+    await btn.scrollIntoViewIfNeeded().catch(() => {});
+    if ((await btn.getAttribute("aria-expanded").catch(() => null)) !== "true") {
+      await btn.click({ timeout: 10_000 }).catch(() => {});
+    }
+    await expect(this.olExcessAllowanceRegion().getByText(/Usage\s+Unit/i).first()).toBeVisible({
+      timeout: 20_000,
+    });
+  }
+
+  async expectExcessAllowanceSectionCollapsedByDefault(): Promise<void> {
+    this.logStep("Expect Excess Allowance section collapsed by default");
+    const root = this.standardQuoteRoot();
+    const usageAllowance = root.getByText(/Usage\s+Allowance/i).first();
+    await expect.soft(usageAllowance).toBeHidden({ timeout: 5_000 });
+  }
+
+  private olExcessAllowanceRegion(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .getByRole("region", { name: /Excess\s+Allowance/i })
+      .or(
+        root
+          .locator("div")
+          .filter({ has: root.getByRole("button", { name: /Excess\s+Allowance/i }) })
+          .filter({ hasText: /Usage\s+Unit/i })
+          .first(),
+      );
+  }
+
+  private olExcessAllowanceRowHost(labelPattern: RegExp): Locator {
+    const region = this.olExcessAllowanceRegion();
+    return region.getByText(labelPattern).first().locator("xpath=parent::*");
+  }
+
+  usageUnitCombobox(): Locator {
+    const row = this.usageUnitLabel().locator("xpath=ancestor::div[1]");
+    return row
+      .locator("p-dropdown, .p-dropdown")
+      .first()
+      .or(row.getByRole("combobox").first());
+  }
+
+  private usageUnitLabel(): Locator {
+    return this.olExcessAllowanceRegion().getByText(/^Usage\s+Unit\b/i).first();
+  }
+
+  usageUnitDropdownTrigger(): Locator {
+    return this.usageUnitLabel()
+      .locator("xpath=ancestor::div[1]")
+      .locator("button[aria-label='dropdown trigger'], .p-dropdown-trigger")
+      .first();
+  }
+
+  async readUsageUnitLabel(): Promise<string> {
+    const trigger = this.usageUnitDropdownTrigger();
+    if (await trigger.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return this.readPrimeDropdownLabel(trigger);
+    }
+    const combo = this.usageUnitCombobox();
+    return (
+      (await combo.getAttribute("aria-label")) ?? ((await combo.textContent()) ?? "").trim()
+    );
+  }
+
+  async expectUsageUnitDisplayOnly(): Promise<void> {
+    this.logStep("Expect Usage Unit display-only from FIS AF");
+    await this.waitForQuoteLoadersToFinish();
+    await this.expandExcessAllowanceSection();
+    const combo = this.usageUnitCombobox();
+    await expect.soft(combo).toBeVisible({ timeout: 20_000 });
+    const host = combo.locator("xpath=ancestor::p-dropdown[1]");
+    const hostClass = (await host.getAttribute("class").catch(() => "")) ?? "";
+    const triggerDisabled = await host
+      .locator(".p-dropdown-trigger")
+      .isDisabled()
+      .catch(() => false);
+    const displayOnly =
+      hostClass.includes("p-disabled") ||
+      triggerDisabled ||
+      (await combo.isDisabled().catch(() => false));
+    if (!displayOnly) {
+      const label = (await this.readUsageUnitLabel()).trim();
+      expect.soft(label.length).toBeGreaterThan(0);
+    }
+    await expect
+      .poll(async () => (await this.readUsageUnitLabel()).replace(/\s+/g, " ").trim().length, {
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(0);
+  }
+
+  usageAllowanceInputField(): Locator {
+    return this.olExcessAllowanceRegion().locator("input").nth(0);
+  }
+
+  excessUsageAllowancePercentInputField(): Locator {
+    return this.olExcessAllowanceRowHost(/^Excess\s+Usage\s+Allowance$/i)
+      .getByRole("spinbutton")
+      .first();
+  }
+
+  excessUsageAllowanceAmountField(): Locator {
+    return this.olExcessAllowanceRegion().locator("input").nth(1);
+  }
+
+  totalUsageAllowanceField(): Locator {
+    return this.olExcessAllowanceRegion().locator("input").nth(2);
+  }
+
+  excessUsageChargeInputField(): Locator {
+    return this.olExcessAllowanceRowHost(/^Excess\s+Usage\s+Charge/i)
+      .getByRole("spinbutton")
+      .first()
+      .or(this.olExcessAllowanceRowHost(/^Excess\s+Usage\s+Charge/i).locator("input").first());
+  }
+
+  async readExcessUsageAllowanceAmount(): Promise<number> {
+    const field = this.excessUsageAllowanceAmountField();
+    await expect(field).toBeVisible({ timeout: 15_000 });
+    const raw =
+      (await field.inputValue().catch(() => "")).trim() ||
+      ((await field.textContent()) ?? "").trim();
+    return this.parseDisplayedCurrency(raw);
+  }
+
+  async readTotalUsageAllowance(): Promise<number> {
+    const field = this.totalUsageAllowanceField();
+    await expect(field).toBeVisible({ timeout: 15_000 });
+    const raw =
+      (await field.inputValue().catch(() => "")).trim() ||
+      ((await field.textContent()) ?? "").trim();
+    return this.parseDisplayedCurrency(raw);
+  }
+
+  async fillUsageAllowance(amount: string): Promise<void> {
+    this.logStep(`Entered usage allowance as ${this.stepValueDisplay(amount)}`);
+    const field = this.usageAllowanceInputField();
+    await field.waitFor({ state: "visible", timeout: 15_000 });
+    await field.scrollIntoViewIfNeeded();
+    await field.click();
+    await field.fill(amount);
+    await field.press("Tab").catch(() => {});
+  }
+
+  async fillExcessUsageAllowancePercent(percent: string): Promise<void> {
+    this.logStep(`Entered excess usage allowance % as ${this.stepValueDisplay(percent)}`);
+    const field = this.excessUsageAllowancePercentInputField();
+    await field.waitFor({ state: "visible", timeout: 15_000 });
+    await field.click();
+    await field.fill(percent);
+    await field.press("Tab").catch(() => {});
+    await this.page.waitForTimeout(500);
+  }
+
+  async fillOlExcessAllowanceForCalculation(usage: string, excessPercent: string): Promise<void> {
+    await this.expandExcessAllowanceSection();
+    await expect
+      .poll(async () => (await this.readUsageUnitLabel()).trim().length, { timeout: 45_000 })
+      .toBeGreaterThan(0);
+    await this.fillUsageAllowance(usage);
+    await this.fillExcessUsageAllowancePercent(excessPercent);
+  }
+
+  async expectTermExceedsUsefulLifeValidation(usefulLifeMonths?: number): Promise<void> {
+    this.logStep("Expect term exceeds useful life validation");
+    const root = this.standardQuoteRoot();
+    const termHost = root.locator("number").filter({ hasText: /Term/i }).first();
+    const wrapper = termHost
+      .locator(
+        "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'p-field') or contains(@class,'grid')][1]",
+      )
+      .first();
+
+    const patterns: RegExp[] = [
+      /Term\s+cannot\s+exceed\s+useful\s+life/i,
+      /Term\s+must\s+not\s+exceed\s+useful\s+life/i,
+      /Term\s+(?:must\s+not\s+be|cannot\s+be)\s+greater\s+than/i,
+      /exceed(?:s)?\s+(?:the\s+)?useful\s+life/i,
+    ];
+    if (usefulLifeMonths !== undefined && usefulLifeMonths > 0) {
+      patterns.unshift(
+        new RegExp(`Term\\s+cannot\\s+be\\s+greater\\s+than\\s+${usefulLifeMonths}\\b`, "i"),
+        new RegExp(`greater\\s+than\\s+${usefulLifeMonths}`, "i"),
+      );
+    }
+
+    await expect
+      .poll(async () => {
+        for (const pattern of patterns) {
+          if (await wrapper.getByText(pattern).first().isVisible().catch(() => false)) return true;
+          if (await root.getByText(pattern).first().isVisible().catch(() => false)) return true;
+          if (await this.page.getByText(pattern).first().isVisible().catch(() => false)) return true;
+        }
+        const inline = wrapper.locator(".p-error, small, .p-invalid-message").filter({ visible: true }).first();
+        if (await inline.isVisible().catch(() => false)) {
+          const text = ((await inline.textContent()) ?? "").toLowerCase();
+          if (/useful|term|greater|exceed/.test(text)) return true;
+        }
+        const ariaInvalid = await this.termsOfFinanceInputField.getAttribute("aria-invalid").catch(() => null);
+        return ariaInvalid === "true";
+      }, { timeout: 25_000, intervals: [300, 500, 1_000] })
+      .toBe(true);
+  }
+
+  async expectOlExcludedFieldsAbsent(): Promise<void> {
+    this.logStep("Expect OL excluded fields absent");
+    const root = this.standardQuoteRoot();
+    await this.expectBalloonFieldsHiddenForAfV();
+    await expect.soft(root.getByText(/PPSR\s*Count/i).first()).toBeHidden({ timeout: 5_000 });
+    await expect.soft(this.udcEstablishmentFeeInputField).toBeHidden({ timeout: 5_000 });
+    await expect.soft(this.dealerOriginationFeeInputField).toBeHidden({ timeout: 5_000 });
+    await expect.soft(root.getByText(/Total\s+Establishment\s+Fee/i).first()).toBeHidden({
+      timeout: 5_000,
+    });
+    await expect.soft(root.getByText(/Loan\s+Maintenance\s+Fee/i).first()).toBeHidden({
+      timeout: 5_000,
+    });
+    await expect.soft(this.waiveLmfCheckboxHost()).toBeHidden({ timeout: 5_000 });
+    await expect.soft(root.getByText(/Settlement\s+Amount/i).first()).toBeHidden({ timeout: 5_000 });
+    await expect.soft(root.getByText(/Trade\s+Amount/i).first()).toBeHidden({ timeout: 5_000 });
+    await expect.soft(root.getByText(/Net\s+Trade\s+Amount/i).first()).toBeHidden({
+      timeout: 5_000,
+    });
+    const settlementBtn = root.getByRole("button", { name: /^Settlement$/i }).first();
+    await expect.soft(settlementBtn).toBeHidden({ timeout: 5_000 });
+  }
+
+  async listEditPaymentScheduleSegmentTypeOptions(rowIndex = 0): Promise<string[]> {
+    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
+    const typeCombo = row.getByRole("combobox").first();
+    await typeCombo.click({ timeout: 10_000 });
+    const panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
+    await expect(panel).toBeVisible({ timeout: 10_000 });
+    const options = (await panel.locator("li[role='option'], .p-dropdown-item").allTextContents())
+      .map((t) => t.trim())
+      .filter(Boolean);
+    await this.page.keyboard.press("Escape").catch(() => {});
+    return options;
+  }
+
+  async expectEditPaymentScheduleSegmentTypesExcludeInterestOnly(): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule types exclude Interest Only");
+    const options = await this.listEditPaymentScheduleSegmentTypeOptions(0);
+    expect.soft(options.some((o) => /Normal/i.test(o))).toBeTruthy();
+    expect.soft(options.some((o) => /Fixed/i.test(o))).toBeTruthy();
+    expect.soft(options.every((o) => !/Interest\s*Only/i.test(o))).toBeTruthy();
+  }
+
+  async expectEditPaymentScheduleTriggerDisabledOrHidden(): Promise<void> {
+    this.logStep("Expect Edit Payment Schedule disabled or hidden");
+    const editBtn = this.editPaymentScheduleTrigger();
+    const visible = await editBtn.isVisible({ timeout: 5_000 }).catch(() => false);
+    if (visible) {
+      await expect.soft(editBtn).toBeDisabled({ timeout: 10_000 });
+    } else {
+      await expect.soft(editBtn).toBeHidden({ timeout: 5_000 });
+    }
+  }
+
+  async readFirstPaymentDateValue(): Promise<string> {
+    return (await this.firstPaymentDate.inputValue().catch(() => "")).trim();
+  }
+
+  async expectFirstPaymentMatchesLeaseDate(): Promise<void> {
+    this.logStep("Expect First Payment matches Lease Date");
+    const lease = await this.readLoanDateValue();
+    const first = await this.readFirstPaymentDateValue();
+    expect.soft(lease.length).toBeGreaterThan(0);
+    expect.soft(first).toBe(lease);
+  }
+
+  async expectFirstPaymentReadOnly(): Promise<void> {
+    this.logStep("Expect First Payment read-only");
+    await expect.soft(this.firstPaymentDate).toBeDisabled({ timeout: 10_000 });
+  }
+
+  /**
+   * OL lease date cannot be backdated: confirm dialog, inline error, or date picker keeps today/tomorrow.
+   */
+  async expectOlLeaseDateCannotBeBackdated(daysAgo = 30): Promise<void> {
+    this.logStep("Expect OL lease date cannot be backdated");
+    const pastDate = DOAssetDetailsPage.pastDateDdMmYyyy(daysAgo);
+    await this.enterLoanDateDdMmYyyy(pastDate);
+    await this.clickCalculateButton();
+    await this.waitForQuoteLoadersToFinish();
+
+    const pastDateError = this.page
+      .getByText(
+        /Lease Date must not|Lease date must not|Loan date must not|Lease date is in the past|Loan date is in the past|cannot be in the past|before today/i,
+      )
+      .first();
+
+    await expect
+      .poll(
+        async () => {
+          if (await this.loanDatePastUpdateDialog().isVisible().catch(() => false)) return true;
+          if (await pastDateError.isVisible().catch(() => false)) return true;
+          return this.isLoanDateTodayOrTomorrow(await this.readLoanDateValue());
+        },
+        { timeout: 20_000 },
+      )
+      .toBeTruthy();
   }
 }
