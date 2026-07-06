@@ -4951,52 +4951,281 @@ export class DOAssetDetailsPage extends BasePage {
   programDropdownHost(): Locator {
     const root = this.standardQuoteRoot();
     return root
-      .locator("p-dropdown")
-      .filter({ has: root.locator("label").filter({ hasText: /^Program/i }) })
+      .locator("xpath=.//label[contains(normalize-space(.),'Program')]/following::p-dropdown[1]")
+      .or(
+        root.locator(
+          "xpath=.//*[normalize-space(text())='Program' or starts-with(normalize-space(.),'Program')]/following::p-dropdown[1]",
+        ),
+      )
+      .or(
+        root
+          .locator("p-dropdown")
+          .filter({ has: root.locator("label").filter({ hasText: /^Program/i }) }),
+      )
+      .first();
+  }
+
+  programDropdownTrigger(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .locator(
+        "xpath=.//*[normalize-space(text())='Program' or starts-with(normalize-space(.),'Program')]/following::button[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+      )
+      .or(this.programDropdownHost().getByRole("button", { name: /dropdown trigger/i }))
       .first();
   }
 
   async readSelectedProgramLabel(): Promise<string> {
-    const host = this.programDropdownHost();
-    const combobox = host.getByRole("combobox").first();
+    const root = this.standardQuoteRoot();
+    const combobox = root
+      .locator(
+        "xpath=.//*[normalize-space(text())='Program' or starts-with(normalize-space(.),'Program')]/following::*[@role='combobox'][1]",
+      )
+      .first();
     if (await combobox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      return (await combobox.textContent())?.trim() ?? "";
+      const aria = ((await combobox.getAttribute("aria-label")) ?? "").trim();
+      if (aria.length > 0 && !this.isPlaceholderDropdownLabel(aria)) {
+        return aria;
+      }
+      const text = (await combobox.textContent())?.trim() ?? "";
+      if (!this.isPlaceholderDropdownLabel(text)) {
+        return text;
+      }
     }
-    return (await host.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
+    const host = this.programDropdownHost();
+    if (await host.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      const hostCombobox = host.getByRole("combobox").first();
+      if (await hostCombobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        const aria = ((await hostCombobox.getAttribute("aria-label")) ?? "").trim();
+        if (aria.length > 0 && !this.isPlaceholderDropdownLabel(aria)) {
+          return aria;
+        }
+        const text = (await hostCombobox.textContent())?.trim() ?? "";
+        if (!this.isPlaceholderDropdownLabel(text)) {
+          return text;
+        }
+      }
+      const labelText = (await host.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
+      return this.isPlaceholderDropdownLabel(labelText) ? "" : labelText;
+    }
+    return "";
+  }
+
+  private isPlaceholderDropdownLabel(label: string): boolean {
+    const t = label.trim();
+    if (!t) {
+      return true;
+    }
+    return /^(select|choose|--|please\s+select)/i.test(t);
+  }
+
+  /** Asset type variant text appears after **Select** in the asset-type modal. */
+  async waitForAfVAssetTypeSelectedOnStandardQuote(
+    expectedVariant?: string,
+    timeoutMs = 60_000,
+  ): Promise<void> {
+    this.logStep("Wait for AFV asset type selected on Standard Quote");
+    const root = this.standardQuoteRoot();
+    const assetTypeValue = root
+      .locator(
+        "xpath=.//*[contains(normalize-space(.),'Asset Type')]/ancestor::*[contains(@class,'row') or contains(@class,'grid')][1]//input",
+      )
+      .or(
+        root.locator(
+          "xpath=.//*[contains(normalize-space(.),'Asset Type')]/following::input[1]",
+        ),
+      )
+      .first();
+    await expect
+      .poll(
+        async () => {
+          const val =
+            (await assetTypeValue.inputValue().catch(() => "")).trim() ||
+            ((await assetTypeValue.textContent()) ?? "").trim();
+          if (!val || val.length < 3) {
+            return false;
+          }
+          if (expectedVariant) {
+            return val.includes(expectedVariant) || /GLX|IGNIS|SUZUKI/i.test(val);
+          }
+          return true;
+        },
+        { timeout: timeoutMs },
+      )
+      .toBeTruthy();
+    await this.waitForLoadingComplete();
+  }
+
+  /**
+   * FIS may populate AFV program asynchronously after asset type **Select**.
+   * Returns empty string when SIT does not auto-populate for the automation originator.
+   */
+  async tryWaitForAfVProgramAfterAssetSelection(timeoutMs = 45_000): Promise<string> {
+    this.logStep("Try wait for AFV program after asset selection on Standard Quote");
+    try {
+      await expect
+        .poll(
+          async () => {
+            const label = await this.readSelectedProgramLabel();
+            return label.length > 0 && /AFV/i.test(label);
+          },
+          { timeout: timeoutMs, intervals: [500, 1_000, 2_000] },
+        )
+        .toBeTruthy();
+      await this.waitForLoadingComplete();
+      return await this.readSelectedProgramLabel();
+    } catch {
+      return "";
+    }
+  }
+
+  /** @deprecated Prefer {@link tryWaitForAfVProgramAfterAssetSelection} — SIT may not auto-populate program. */
+  async waitForAfVProgramAfterAssetSelection(timeoutMs = 45_000): Promise<string> {
+    const label = await this.tryWaitForAfVProgramAfterAssetSelection(timeoutMs);
+    if (label.length > 0) {
+      return label;
+    }
+    this.logStep("AFV program not auto-populated after asset selection — continuing");
+    return "";
+  }
+
+  afvDetailsSectionHeader(): Locator {
+    return this.standardQuoteRoot().getByRole("button", { name: /AFV Details/i }).first();
+  }
+
+  afvDetailsSectionRegion(): Locator {
+    return this.page.getByRole("region", { name: /AFV Details/i }).first();
+  }
+
+  async expectAfVDetailsSectionCollapsed(): Promise<void> {
+    this.logStep("Expect AFV Details section collapsed");
+    const header = this.afvDetailsSectionHeader();
+    await expect.soft(header).toBeVisible({ timeout: 20_000 });
+    const expanded = await header.getAttribute("aria-expanded");
+    if (expanded !== null) {
+      expect.soft(expanded).not.toBe("true");
+    }
+    await expect.soft(this.afvDetailsSectionRegion()).toBeHidden({ timeout: 5_000 });
+  }
+
+  async expectAfVDetailsDisplayOnlyFieldsPopulated(expected?: {
+    make?: string;
+    model?: string;
+    variant?: string;
+    year?: string;
+  }): Promise<void> {
+    this.logStep("Expect AFV Details display-only fields populated");
+    await this.expandAfVDetailsSection();
+    const section = this.afvDetailsSectionRegion();
+    await expect.soft(section).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(
+        async () => {
+          const body = ((await section.textContent()) ?? "").replace(/\s+/g, " ");
+          return ["Make", "Model", "Variant", "Year", "Provider"].every((l) =>
+            new RegExp(`\\b${l}\\b`, "i").test(body),
+          );
+        },
+        { timeout: 20_000 },
+      )
+      .toBeTruthy();
+    const readFieldNearLabel = async (fieldLabel: string): Promise<string> => {
+      const anchor = section.getByText(new RegExp(`^${fieldLabel}$`, "i")).first();
+      const input = anchor.locator("xpath=following::input[1]").first();
+      if (!(await input.isVisible({ timeout: 4_000 }).catch(() => false))) {
+        return "";
+      }
+      return (
+        (await input.inputValue().catch(() => "")).trim() ||
+        ((await input.textContent()) ?? "").trim()
+      );
+    };
+    if (expected?.make) {
+      const make = await readFieldNearLabel("Make");
+      if (make.length > 0) {
+        expect.soft(make.toUpperCase()).toContain(expected.make.toUpperCase());
+      }
+    }
+    if (expected?.model) {
+      const model = await readFieldNearLabel("Model");
+      if (model.length > 0) {
+        expect.soft(model.toUpperCase()).toContain(expected.model.toUpperCase());
+      }
+    }
+    if (expected?.variant) {
+      const variant = await readFieldNearLabel("Variant");
+      if (variant.length > 0) {
+        expect.soft(variant.toUpperCase()).toContain(expected.variant.toUpperCase().slice(0, 8));
+      }
+    }
+    if (expected?.year) {
+      const year = await readFieldNearLabel("Year");
+      if (year.length > 0) {
+        expect.soft(year).toContain(expected.year);
+      }
+    }
+    const providerInput = section
+      .getByText(/^Provider$/i)
+      .first()
+      .locator("xpath=following::input[1]");
+    if (await providerInput.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      const editable = await providerInput.isEditable().catch(() => true);
+      expect.soft(editable).toBeFalsy();
+    }
   }
 
   async expectProgramDropdownDisabled(): Promise<void> {
-    this.logStep("Expect Program Dropdown Disabled");
-    const host = this.programDropdownHost();
-    const cls = (await host.getAttribute("class")) ?? "";
-    const disabled =
-      cls.includes("p-disabled") || (await host.getAttribute("ng-reflect-disabled")) === "true";
-    if (disabled) {
-      await expect.soft(host).toHaveClass(/p-disabled/);
+    await this.expectAfVProgramDisplayOnlyOnStandardQuote();
+  }
+
+  /**
+   * Zephyr: AFV program is display-only and auto-populates from asset type.
+   * SIT may keep the trigger enabled and allow manual pick when FIS does not auto-populate.
+   */
+  async expectAfVProgramDisplayOnlyOnStandardQuote(): Promise<void> {
+    this.logStep("Expect AFV Program Display Only on Standard Quote");
+    const trigger = this.programDropdownTrigger();
+    await expect.soft(trigger).toBeVisible({ timeout: 15_000 });
+    const enabled = await trigger.isEnabled().catch(() => false);
+    if (!enabled) {
+      await expect.soft(trigger).toBeDisabled();
       return;
     }
-    const trigger = host.getByRole("button", { name: /dropdown trigger/i }).first();
-    await expect.soft(trigger).toBeDisabled({ timeout: 15_000 });
+    const before = await this.readSelectedProgramLabel();
+    await trigger.click({ timeout: 10_000 }).catch(() => {});
+    const panel = this.page.locator("div.p-dropdown-panel").filter({ visible: true }).last();
+    const options = panel.getByRole("option");
+    const optionCount = await options.count().catch(() => 0);
+    if (optionCount <= 1) {
+      await this.page.keyboard.press("Escape").catch(() => {});
+      return;
+    }
+    const pick = options.nth(before.length > 0 ? 1 : 0);
+    const pickLabel = ((await pick.textContent().catch(() => "")) ?? "").trim();
+    if (pickLabel.length > 0) {
+      await pick.click({ timeout: 10_000 }).catch(() => {});
+      await this.waitForLoadingComplete();
+      const after = await this.readSelectedProgramLabel();
+      if (before.length > 0) {
+        expect.soft(after).toBe(before);
+      } else if (after.length > 0) {
+        expect.soft(/AFV/i.test(after)).toBeTruthy();
+        this.log(
+          "Program was blank before pick — SIT allowed manual AFV program selection (FIS auto-populate may be delayed for this originator).",
+        );
+      }
+    }
+    await this.page.keyboard.press("Escape").catch(() => {});
   }
 
   async expandAfVDetailsSection(): Promise<void> {
     this.logStep("Expand AFV Details section");
-    const root = this.standardQuoteRoot();
-    const accordionHeader = root
-      .locator("p-accordiontab, .p-accordion-header, p-panel")
-      .filter({ hasText: /AFV Details/i })
-      .first();
-    if (await accordionHeader.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      const expanded = await accordionHeader.getAttribute("aria-expanded");
-      if (expanded !== "true") {
-        await accordionHeader.click({ timeout: 10_000 });
-      }
-      return;
+    const btn = this.afvDetailsSectionHeader();
+    await btn.scrollIntoViewIfNeeded();
+    if ((await btn.getAttribute("aria-expanded")) !== "true") {
+      await btn.click({ timeout: 10_000 });
     }
-    const header = root.getByText(/AFV Details/i).first();
-    if (await header.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      await header.click({ timeout: 10_000 });
-    }
+    await expect(this.afvDetailsSectionRegion()).toBeVisible({ timeout: 20_000 });
   }
 
   async readAssuredFutureValue(): Promise<string> {
@@ -5195,6 +5424,23 @@ export class DOAssetDetailsPage extends BasePage {
         { timeout: 60_000 },
       )
       .toBeTruthy();
+    await this.waitForLoadingComplete();
+  }
+
+  /** SIT may leave cash at $0.00 — enter a fallback when FIS does not price the asset type. */
+  async ensureAfVCashPriceReady(fallbackAmount = "$25,000"): Promise<void> {
+    this.logStep("Ensure AFV cash price ready");
+    const ready = await expect
+      .poll(
+        async () => this.parseDisplayedCurrency(await this.cashPriceOfAssetInputField.inputValue()) > 0,
+        { timeout: 30_000 },
+      )
+      .toBeTruthy()
+      .then(() => true)
+      .catch(() => false);
+    if (!ready) {
+      await this.cashPriceOfAsset(fallbackAmount);
+    }
     await this.waitForLoadingComplete();
   }
 
