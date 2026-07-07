@@ -19,12 +19,37 @@ interface LmfConfig {
   lmfConfigured: { product: string; program: string };
   lmfZeroConfigured: { product: string; program: string };
   quickQuote: { product: string; program: string; standardQuoteProgram?: string };
+  tlLmf?: {
+    withLmf: { product: string; program: string };
+    withoutLmf: { product: string; program: string };
+  };
 }
 
 const CONFIG_PATH = path.join(process.cwd(), "testData", "do-portal", "lmf-config.json");
 
 export function loadLmfConfig(): LmfConfig {
   return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as LmfConfig;
+}
+
+export function loadTlLmfPrograms(): {
+  withLmf: { product: string; program: string };
+  withoutLmf: { product: string; program: string };
+} {
+  const cfg = loadLmfConfig();
+  const tl = cfg.tlLmf;
+  return {
+    withLmf: {
+      product: process.env.TL_LMF_PRODUCT?.trim() || tl?.withLmf?.product || "TL-C-Assigned",
+      program: process.env.TL_LMF_PROGRAM?.trim() || tl?.withLmf?.program || "Term Loan Personal - MV Dealer",
+    },
+    withoutLmf: {
+      product: process.env.TL_NO_LMF_PRODUCT?.trim() || tl?.withoutLmf?.product || "TL-B-Assigned",
+      program:
+        process.env.TL_NO_LMF_PROGRAM?.trim() ||
+        tl?.withoutLmf?.program ||
+        "Term Loan Business - MV Dealer",
+    },
+  };
 }
 
 export function authorisedDealer(): string {

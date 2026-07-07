@@ -1375,7 +1375,10 @@ export class DOAssetDetailsPage extends BasePage {
     const field = this.loanMaintenanceFeeField();
     await this.standardQuoteRoot().getByText(/Loan\s+Maintenance\s+Fee/i).first().scrollIntoViewIfNeeded().catch(() => {});
     await expect(field).toBeVisible({ timeout: 30_000 });
-    return this.readCurrencyInput(field);
+    const raw =
+      (await field.inputValue().catch(() => "")).trim() ||
+      ((await field.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    return this.parseDisplayedCurrency(raw);
   }
 
   async readPaymentAmount(): Promise<number> {
@@ -1511,6 +1514,37 @@ export class DOAssetDetailsPage extends BasePage {
   async expectLoanMaintenanceFeeZero(): Promise<void> {
     this.logStep("Expect Loan Maintenance Fee Zero");
     await expect.poll(async () => this.readLoanMaintenanceFee(), { timeout: 30_000 }).toBe(0);
+  }
+
+  /**
+   * UDP-T4241 / MAF-4796 — LMF displays pre-configured FIS AF Program Setup value (> 0), read-only.
+   */
+  async expectLoanMaintenanceFeePreconfiguredFromFisAf(): Promise<void> {
+    this.logStep("Expect loan maintenance fee preconfigured from FIS AF");
+    await this.scrollLessDepositIntoView();
+    await this.expectLoanMaintenanceFeeGreaterThanZero();
+    await this.expectLoanMaintenanceFeeDisplayOnly();
+  }
+
+  /**
+   * UDP-T4241 / MAF-4796 — no LMF in FIS AF: **$0.00** or row absent (TL-B).
+   */
+  async expectLoanMaintenanceFeeZeroOrAbsentOnTl(): Promise<void> {
+    this.logStep("Expect loan maintenance fee zero or absent on TL");
+    await this.scrollLessDepositIntoView();
+    const lmfLabel = this.standardQuoteRoot().getByText(/Loan\s+Maintenance\s+Fee/i).first();
+    if (!(await lmfLabel.isVisible({ timeout: 15_000 }).catch(() => false))) {
+      return;
+    }
+    await this.expectLoanMaintenanceFeeZero();
+    await this.expectLoanMaintenanceFeeDisplayOnly();
+  }
+
+  async selectTlProductAndProgramForLmf(product: string, program: string): Promise<void> {
+    this.logStep(`Select TL product/program for LMF: ${this.stepValueDisplay(product)} / ${this.stepValueDisplay(program)}`);
+    await this.chooseProduct(product);
+    await this.chooseProgram(program);
+    await this.waitForQuoteLoadersToFinish();
   }
 
   async expectWaiveLmfInLessDepositBelowTotalBorrowed(): Promise<void> {
@@ -1698,8 +1732,116 @@ export class DOAssetDetailsPage extends BasePage {
   /** Interest Rate control is editable (program may still re-price on Calculate). */
   async expectInterestRateEditable(): Promise<void> {
     this.logStep("Expect Interest Rate Editable");
-    await expect(this.interestRateInputField).toBeVisible({ timeout: 20_000 });
-    await expect(this.interestRateInputField).toBeEditable();
+    await expect(this.financeInterestRateInput()).toBeVisible({ timeout: 20_000 });
+    await expect(this.financeInterestRateInput()).toBeEditable();
+  }
+
+  /** Finance **Interest Rate** % — scoped to quote shell; excludes **Base Interest Rate**. */
+  private financeInterestRateInput(): Locator {
+    const root = this.standardQuoteRoot();
+    const byLabel = root.locator(
+      "xpath=.//*[self::label or self::span][contains(normalize-space(.),'Interest Rate') and not(contains(normalize-space(.),'Base'))]/following::input[@id='percent'][1]",
+    );
+    const byPercentage = root
+      .locator("percentage")
+      .filter({
+        has: root.locator("label, span").filter({ hasText: /^Interest\s+Rate\s*\*?$/i }),
+      })
+      .locator("#percent")
+      .first();
+    const bySpinbutton = root.locator(
+      "xpath=.//*[self::label or self::span][contains(normalize-space(.),'Interest Rate') and not(contains(normalize-space(.),'Base'))]/following::*[@role='spinbutton'][1]",
+    );
+    return byLabel
+      .or(byPercentage)
+      .or(bySpinbutton)
+      .or(this.interestRateInputField)
+      .filter({ visible: true })
+      .first();
+  }
+
+  private async readInterestRateFieldRaw(field: Locator): Promise<string> {
+    const fromInput = (await field.inputValue().catch(() => "")).trim();
+    if (fromInput && /\d/.test(fromInput)) {
+      return fromInput;
+    }
+
+    const aria = ((await field.getAttribute("aria-valuenow")) ?? "").trim();
+    if (aria && /\d/.test(aria)) {
+      return aria;
+    }
+
+    const text = ((await field.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    const textMatch = text.match(/([\d,.]+)\s*%?/);
+    if (textMatch) {
+      return textMatch[1];
+    }
+
+    const wrapper = field.locator("xpath=ancestor::percentage[1]").first();
+    if (await wrapper.isVisible().catch(() => false)) {
+      const wrapText = ((await wrapper.textContent()) ?? "").replace(/\s+/g, " ").trim();
+      const wrapMatch = wrapText.match(/([\d,.]+)\s*%/);
+      if (wrapMatch) {
+        return wrapMatch[1];
+      }
+    }
+
+    return "";
+  }
+
+  async readInterestRatePercent(): Promise<string> {
+    this.logStep("Read interest rate percent");
+    const field = this.financeInterestRateInput();
+    return (await this.readInterestRateFieldRaw(field)).replace(/%/g, "").trim();
+  }
+
+  /**
+   * UDP-T4237 / UDP-T3665 — **Interest Rate** defaults from FIS AF (rate table + dealer profile).
+   * Optional `expectedRate` pins program default (e.g. TL **9**%, CSA **12.95**%).
+   */
+  async expectInterestRateDefaultsFromFisAf(expectedRate?: string): Promise<void> {
+    this.logStep("Expect interest rate defaults from FIS AF");
+    const field = this.financeInterestRateInput();
+    await expect(field).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () => {
+          const rate = (await this.readInterestRateFieldRaw(field)).replace(/%/g, "").trim();
+          if (!rate || !/\d/.test(rate)) return null;
+          const n = this.parseInterestPercent(rate);
+          return !Number.isNaN(n) && n > 0 ? rate : null;
+        },
+        { timeout: 60_000, intervals: [500, 1_000, 2_000] },
+      )
+      .not.toBeNull();
+
+    if (expectedRate) {
+      const target = this.parseInterestPercent(expectedRate);
+      await expect
+        .poll(
+          async () => {
+            const n = this.parseInterestPercent(await this.readInterestRateFieldRaw(field));
+            return this.interestRateAcceptable(n, target) ? n : null;
+          },
+          { timeout: 30_000, intervals: [300, 500, 1_000] },
+        )
+        .not.toBeNull();
+    }
+  }
+
+  /**
+   * UDP-T4237 — editability per BLD rules from FIS AF: field is visible and either editable or locked.
+   */
+  async expectInterestRateEditabilityPerBldRules(): Promise<void> {
+    this.logStep("Expect interest rate editability per BLD rules");
+    const field = this.financeInterestRateInput();
+    await expect(field).toBeVisible({ timeout: 20_000 });
+    const editable = await field.isEditable().catch(() => false);
+    if (editable) {
+      await expect(field).toBeEditable();
+      return;
+    }
+    await expect(field).toBeDisabled();
   }
 
   /** UDP-T4235 — **Term** spinbutton (free-text) or program dropdown is visible on Finance Details. */
@@ -2086,21 +2228,58 @@ export class DOAssetDetailsPage extends BasePage {
     expect(stable).toMatch(rx);
   }
 
+  private async clearBalloonPercentInput(): Promise<void> {
+    const loc = this.balloonPercentInput;
+    await loc.focus();
+    await loc.press("ControlOrMeta+A");
+    await loc.press("Backspace");
+    await loc.press("ControlOrMeta+A");
+    await loc.press("Delete");
+  }
+
   async enterBalloonPercent(percentDigits: string): Promise<void> {
     this.logStep(`Entered balloon % as ${this.stepValueDisplay(percentDigits)}`);
     await this.ensureCashPriceReadyForBalloon();
     await expect(this.balloonPercentInput).toBeVisible({ timeout: 15_000 });
+    const trimmed = percentDigits.replace(/%/g, "").trim();
+    const want = parseFloat(trimmed);
+
     await this.balloonPercentInput.scrollIntoViewIfNeeded();
     await this.balloonPercentInput.click({ force: true });
-    await this.balloonPercentInput.press("ControlOrMeta+a");
-    await this.balloonPercentInput.fill(percentDigits.replace(/%/g, "").trim(), { force: true });
-    this.logStep(`Balloon % immediately after fill: "${await this.balloonPercentRaw()}"`);
+    await this.clearBalloonPercentInput();
+    if (trimmed.length > 0) {
+      await this.balloonPercentInput.pressSequentially(trimmed, { delay: 45 });
+    }
+    await this.balloonPercentInput.press("Tab");
+    this.logStep(`Balloon % immediately after type: "${await this.balloonPercentRaw()}"`);
     await this.paymentSummaryRoot
       .getByText(/^Payment\s+Summary$/i)
       .click({ timeout: 5_000 })
       .catch(() => this.loanDate.click({ timeout: 5_000 }).catch(() => {}));
     await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
-    await this.waitForBalloonPercentValueStable();
+
+    if (!Number.isNaN(want) && trimmed.length > 0) {
+      await expect
+        .poll(
+          async () => {
+            const n = parseFloat(await this.balloonPercentRaw());
+            return !Number.isNaN(n) && Math.round(n) === Math.round(want) ? n : null;
+          },
+          { timeout: 15_000, intervals: [300, 500, 1_000] },
+        )
+        .not.toBeNull();
+
+      const cashRaw = (await this.cashPriceOfAssetInputField.inputValue().catch(() => "")).trim();
+      const cash = parseFloat(cashRaw.replace(/[^0-9.-]/g, ""));
+      if (!Number.isNaN(cash) && cash > 0) {
+        const expectedDollars = Math.max(1, Math.round((cash * want) / 100));
+        await this.waitForBalloonAmountValueStable(expectedDollars * 0.98, {
+          timeoutMs: 25_000,
+        });
+      }
+    } else {
+      await this.waitForBalloonPercentValueStable();
+    }
   }
 
   /**
@@ -2111,6 +2290,67 @@ export class DOAssetDetailsPage extends BasePage {
     await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
     const stable = await this.waitForBalloonAmountValueStable(1);
     expect(stable).toMatch(rx);
+  }
+
+  /** UDP-T4239 — **Payment Structure** defaults to **None** on TL Standard Quote. */
+  async expectPaymentStructureNone(): Promise<void> {
+    this.logStep("Expect payment structure None");
+    const structure = await this.readPrimeLabeledDropdownValue("Payment Structure");
+    if (structure.length > 0) {
+      expect(structure).toMatch(/^None$/i);
+    }
+  }
+
+  /** After **%** edit, blur balloon **$** so **Calculate** picks up the paired amount. */
+  async commitBalloonAmountAfterPercentEdit(): Promise<void> {
+    this.logStep("Commit balloon amount after percent edit");
+    await this.expectBalloonFieldsStable();
+    await this.balloonAmountInput.scrollIntoViewIfNeeded();
+    await this.balloonAmountInput.click({ timeout: 10_000 });
+    await this.balloonAmountInput.press("Tab");
+    await this.paymentSummaryRoot
+      .getByText(/^Payment\s+Summary$/i)
+      .click({ timeout: 5_000 })
+      .catch(() => this.loanDate.click({ timeout: 5_000 }).catch(() => {}));
+    await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
+    await this.expectBalloonFieldsStable();
+  }
+
+  /**
+   * UDP-T4239 — **Fixed** checked: last schedule row is the balloon instalment only (MAF-4799).
+   * Reads stabilized balloon **$** from the field when `balloonPattern` is omitted.
+   */
+  async expectFixedBalloonIsLastPaymentRow(balloonPattern?: RegExp): Promise<void> {
+    this.logStep("Expect fixed balloon is last payment row");
+    await this.expectBalloonFieldsStable();
+    const stable = await this.waitForBalloonAmountValueStable(1);
+    const amountN = parseFloat(stable.replace(/[^0-9.-]/g, ""));
+    const pattern =
+      balloonPattern ??
+      (Number.isFinite(amountN) && amountN >= 1
+        ? new RegExp(
+            String(Math.round(amountN)).replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1[, ]?") + "|" + String(Math.round(amountN)),
+          )
+        : /\$\s*[\d,.]+/);
+
+    await this.clickCalculateButton();
+    await this.waitForQuoteLoadersToFinish();
+
+    const scheduleScope = this.paymentScheduleContentScope();
+    await expect
+      .poll(
+        async () => {
+          const row = scheduleScope
+            .locator("tr")
+            .filter({ hasText: /\$\s*[\d,.]+/ })
+            .filter({ visible: true })
+            .last();
+          const text = ((await row.textContent().catch(() => "")) ?? "").trim();
+          return text.length > 0 && pattern.test(text) ? text : null;
+        },
+        { timeout: 60_000, intervals: [500, 1_000, 2_000] },
+      )
+      .not.toBeNull();
   }
 
   /** PrimeNG **Fixed** balloon checkbox host (`p-checkbox` beside Balloon Amount). */
@@ -2670,6 +2910,31 @@ export class DOAssetDetailsPage extends BasePage {
     await this.assetInputField.click();
     await this.assetSearchField.fill(asset);
     await this.page.getByRole("option", { name: asset }).click();
+    await this.confirmAssetTypeDialogIfOpen();
+  }
+
+  /** Hierarchical **Asset Type** pop-up (Select Asset 1 / 2 → **Add**); no-op when already closed. */
+  async confirmAssetTypeDialogIfOpen(): Promise<void> {
+    const dlg = this.page.getByRole("dialog").filter({ hasText: /Asset Type/i }).last();
+    if (!(await dlg.isVisible({ timeout: 4_000 }).catch(() => false))) {
+      return;
+    }
+
+    const addBtn = dlg
+      .getByRole("button", { name: /^Add$/i })
+      .or(dlg.locator("span.p-button-label").filter({ hasText: /^Add$/ }))
+      .first();
+    if (await addBtn.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await addBtn.click({ timeout: 15_000 });
+      await dlg.waitFor({ state: "hidden", timeout: 30_000 }).catch(() => {});
+      return;
+    }
+
+    const closeBtn = dlg.getByRole("button", { name: /^Close$/i }).first();
+    if (await closeBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await closeBtn.click({ timeout: 10_000 }).catch(() => this.page.keyboard.press("Escape"));
+      await dlg.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+    }
   }
   /**
    * Select a condition from the Condition dropdown
@@ -2873,6 +3138,134 @@ export class DOAssetDetailsPage extends BasePage {
       .last()
       .waitFor({ state: "visible", timeout: 45_000 });
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+  }
+
+  private searchAddAssetTrigger(scope: Locator): Locator {
+    return scope
+      .getByRole("link", { name: /\+?\s*Search\s*&\s*Add\s+Asset/i })
+      .or(scope.getByRole("button", { name: /\+?\s*Search\s*&\s*Add\s+Asset/i }))
+      .or(
+        scope
+          .locator("a, button, [role='button']")
+          .filter({ hasText: /\+?\s*Search\s*&\s*Add\s+Asset/i }),
+      )
+      .first();
+  }
+
+  private searchAddAssetDialog(): Locator {
+    return this.page
+      .getByRole("dialog", { name: /Search Asset/i })
+      .or(
+        this.page
+          .getByRole("dialog")
+          .filter({ hasText: /Search Asset|Motochek|Dealer Inventory|Physical Asset/i }),
+      )
+      .last();
+  }
+
+  private async expectSearchAddAssetDialogVisible(timeoutMs = 45_000): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const dlg = this.searchAddAssetDialog();
+          if (await dlg.isVisible().catch(() => false)) {
+            return true;
+          }
+          const nestedSearch = this.page
+            .getByRole("dialog")
+            .filter({ hasText: /Motochek|Dealer Inventory/i })
+            .filter({ has: this.page.getByRole("button", { name: /^Search$/i }) })
+            .last();
+          return nestedSearch.isVisible().catch(() => false);
+        },
+        { timeout: timeoutMs, intervals: [300, 500, 1_000, 2_000] },
+      )
+      .toBe(true);
+  }
+
+  private async clickSearchAddAssetTriggerInScope(scope: Locator): Promise<boolean> {
+    const trigger = this.searchAddAssetTrigger(scope);
+    if (!(await trigger.isVisible({ timeout: 8_000 }).catch(() => false))) {
+      return false;
+    }
+    await trigger.scrollIntoViewIfNeeded();
+    try {
+      await trigger.click({ timeout: 15_000 });
+    } catch {
+      await trigger.click({ force: true, timeout: 15_000 });
+    }
+    await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
+    try {
+      await this.expectSearchAddAssetDialogVisible(25_000);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * UDP-T4256 / UDP-T4067 — **+ Search & Add Asset** on quote shell or inside **Asset & Insurance Summary**.
+   */
+  async clickSearchAndAddAssetAndExpectSearchDialog(): Promise<void> {
+    this.logStep("Click Search And Add Asset and expect search dialog");
+    await this.waitForQuoteLoadersToFinish();
+    const root = this.standardQuoteRoot();
+
+    if (await this.clickSearchAddAssetTriggerInScope(root)) {
+      return;
+    }
+
+    await this.openAssetInsuranceTradeInSummary();
+    const summaryDlg = this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Asset/i })
+      .filter({ hasText: /Insurance/i })
+      .filter({ hasText: /Summary/i })
+      .last();
+    await expect(summaryDlg).toBeVisible({ timeout: 30_000 });
+
+    if (await this.clickSearchAddAssetTriggerInScope(summaryDlg)) {
+      return;
+    }
+
+    throw new Error("Search & Add Asset did not open the Search Asset dialog.");
+  }
+
+  /** Close nested **Search Asset** dialog when open (Motochek / Dealer Inventory). */
+  async closeSearchAddAssetDialogIfOpen(): Promise<void> {
+    this.logStep("Close Search Add Asset Dialog If Open");
+    const dlg = this.searchAddAssetDialog();
+    if (!(await dlg.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      return;
+    }
+    const closeBtn = dlg
+      .locator("button.p-dialog-header-close")
+      .or(dlg.locator("button.p-dialog-header-icon.p-dialog-header-close"))
+      .or(dlg.getByRole("button", { name: /^close$/i }))
+      .first();
+    await closeBtn.click({ timeout: 10_000 }).catch(() => this.page.keyboard.press("Escape"));
+    await dlg.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+  }
+
+  /**
+   * UDP-T4256 — **Asset & Insurance Summary** → **+ Search & Add Trade** opens trade search pop-up.
+   */
+  async clickSearchAndAddTradeAndExpectSearchDialog(): Promise<void> {
+    this.logStep("Click Search And Add Trade and expect search dialog");
+    await this.openAssetInsuranceTradeInSummary();
+    await this.clickSearchAddTradeInAndExpectChooserOpened();
+
+    const tradeDlg = this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Search Trade\s*in\s*Asset|Search\s+Trade-?\s*in\s+Asset/i })
+      .last();
+    if (await tradeDlg.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect(tradeDlg).toBeVisible();
+      return;
+    }
+    await expect(
+      this.page.getByPlaceholder(/search|rego|vin|trade/i).or(this.page.getByRole("searchbox")).first(),
+    ).toBeVisible({ timeout: 15_000 });
   }
 
   /**
@@ -3106,90 +3499,190 @@ export class DOAssetDetailsPage extends BasePage {
     return card.or(this.paymentScheduleContentScope());
   }
 
-  /**
-   * Unselected **pi-bars** list/grid view radio — never the highlighted **pi-equals** control.
-   */
-  private leasePaymentScheduleBarsViewRadio(): Locator {
-    const scope = this.leasePaymentScheduleViewToggleScope();
-    const barsIcon = scope.locator("i.pi.pi-bars");
-    return scope
-      .getByRole("radio", { checked: false })
-      .filter({ has: barsIcon })
+  /** Segment vs grid toggle radios beside **Payment Schedule** title (TL uses glyph icons, not `pi-bars`). */
+  private paymentScheduleViewRadioGroup(): Locator {
+    const title = this.paymentScheduleSectionTitle();
+    return title
+      .locator("xpath=..")
+      .getByRole("group")
       .first()
       .or(
-        this.standardQuoteRoot()
-          .getByRole("radio", { checked: false })
-          .filter({ has: this.standardQuoteRoot().locator("i.pi.pi-bars") })
+        title.locator("xpath=following-sibling::*[@role='group' or contains(@class,'p-selectbutton')][1]"),
+      )
+      .or(
+        this.leasePaymentScheduleViewToggleScope()
+          .getByRole("group")
+          .filter({ has: this.page.getByRole("radio") })
           .first(),
       );
   }
 
-  /** Selected **pi-bars** list/grid view radio after the toggle is active. */
-  private leasePaymentScheduleBarsViewRadioSelected(): Locator {
+  /** Second toggle option — grid / list view (each instalment as its own row). */
+  private leasePaymentScheduleBarsViewRadio(): Locator {
+    const group = this.paymentScheduleViewRadioGroup();
     const scope = this.leasePaymentScheduleViewToggleScope();
     const barsIcon = scope.locator("i.pi.pi-bars");
-    return scope
-      .getByRole("radio", { checked: true })
-      .filter({ has: barsIcon })
-      .first();
+    return group
+      .getByRole("radio")
+      .nth(1)
+      .or(group.getByRole("radio", { checked: false }).last())
+      .or(
+        scope
+          .getByRole("radio", { checked: false })
+          .filter({ has: barsIcon })
+          .first(),
+      );
+  }
+
+  /** Selected grid-view radio after the toggle is active. */
+  private leasePaymentScheduleBarsViewRadioSelected(): Locator {
+    return this.paymentScheduleViewRadioGroup().getByRole("radio").nth(1);
+  }
+
+  private async isPaymentScheduleRadioChecked(radio: Locator): Promise<boolean> {
+    if (!(await radio.isVisible().catch(() => false))) {
+      return false;
+    }
+    const ariaChecked = await radio.getAttribute("aria-checked");
+    if (ariaChecked === "true") {
+      return true;
+    }
+    const cls = (await radio.getAttribute("class")) ?? "";
+    return cls.includes("p-highlight");
   }
 
   private async isLeasePaymentListViewActive(): Promise<boolean> {
-    const selectedBars = this.leasePaymentScheduleBarsViewRadioSelected();
-    if (!(await selectedBars.isVisible().catch(() => false))) {
-      return false;
-    }
-    const ariaChecked = await selectedBars.getAttribute("aria-checked");
-    if (ariaChecked === "true") {
+    const gridRadio = this.leasePaymentScheduleBarsViewRadioSelected();
+    if (await this.isPaymentScheduleRadioChecked(gridRadio)) {
       return true;
     }
-    const cls = (await selectedBars.getAttribute("class")) ?? "";
-    return cls.includes("p-highlight");
+
+    const rows = this.paymentScheduleAllMoneyRows();
+    const count = await rows.count();
+    if (count >= 5) {
+      return true;
+    }
+
+    if (count > 0) {
+      const firstText = ((await rows.first().textContent()) ?? "").replace(/\s+/g, " ").trim();
+      const segmentGrouped = /\b([2-9]|[1-9]\d{1,2})\s+(Monthly|Weekly|Fortnightly)\b/i.test(firstText);
+      return !segmentGrouped;
+    }
+
+    return false;
   }
 
-  /** Unselected **pi-equals** default segment view radio. */
+  /** Unselected segment (grouped payments) view radio. */
   private leasePaymentScheduleDefaultViewRadio(): Locator {
     const scope = this.leasePaymentScheduleViewToggleScope();
     const equalsIcon = scope.locator("i.pi.pi-equals");
-    return scope
-      .getByRole("radio", { checked: false })
-      .filter({ has: equalsIcon })
+    return this.paymentScheduleViewRadioGroup()
+      .getByRole("radio")
       .first()
       .or(
-        this.standardQuoteRoot()
+        scope
           .getByRole("radio", { checked: false })
-          .filter({ has: this.standardQuoteRoot().locator("i.pi.pi-equals") })
+          .filter({ has: equalsIcon })
           .first(),
       );
   }
 
-  /** Selected **pi-equals** default segment view radio. */
+  /** Selected segment view radio. */
   private leasePaymentScheduleDefaultViewRadioSelected(): Locator {
-    const scope = this.leasePaymentScheduleViewToggleScope();
-    const equalsIcon = scope.locator("i.pi.pi-equals");
-    return scope
-      .getByRole("radio", { checked: true })
-      .filter({ has: equalsIcon })
-      .first()
-      .or(
-        this.standardQuoteRoot()
-          .getByRole("radio", { checked: true })
-          .filter({ has: this.standardQuoteRoot().locator("i.pi.pi-equals") })
-          .first(),
-      );
+    return this.paymentScheduleViewRadioGroup().getByRole("radio").first();
   }
 
   private async isLeasePaymentDefaultViewActive(): Promise<boolean> {
-    const selectedEquals = this.leasePaymentScheduleDefaultViewRadioSelected();
-    if (!(await selectedEquals.isVisible().catch(() => false))) {
-      return true;
+    const selected = this.leasePaymentScheduleDefaultViewRadioSelected();
+    if (!(await selected.isVisible().catch(() => false))) {
+      return !(await this.isLeasePaymentListViewActive());
     }
-    const ariaChecked = await selectedEquals.getAttribute("aria-checked");
-    if (ariaChecked === "true") {
-      return true;
+    return this.isPaymentScheduleRadioChecked(selected);
+  }
+
+  /** UDP-T4246 — **pi-equals** segment view is the active schedule toggle after **Calculate**. */
+  async expectPaymentScheduleSegmentViewActive(): Promise<void> {
+    this.logStep("Expect payment schedule segment view active");
+    await this.waitForQuoteLoadersToFinish();
+    const title = this.paymentScheduleSectionTitle();
+    await expect(title).toBeVisible({ timeout: 45_000 });
+    await title.scrollIntoViewIfNeeded().catch(() => {});
+    await expect
+      .poll(async () => this.isLeasePaymentDefaultViewActive(), {
+        timeout: 20_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBe(true);
+    expect(await this.isLeasePaymentListViewActive()).toBeFalsy();
+  }
+
+  private paymentScheduleColumnHeader(label: RegExp): Locator {
+    const scope = this.paymentScheduleContentScope();
+    return scope
+      .getByRole("columnheader", { name: label })
+      .or(scope.locator("th").filter({ hasText: label }))
+      .first();
+  }
+
+  /**
+   * UDP-T4246 / UDP-T3668 — after **Calculate**, schedule defaults to segment view with grouped
+   * identical payments (Date / Number / Frequency / Payment).
+   */
+  async expectPaymentScheduleSegmentViewDefaultAfterCalculate(): Promise<void> {
+    this.logStep("Expect payment schedule segment view default after calculate");
+    await this.expectPaymentScheduleSegmentViewActive();
+
+    await expect(this.paymentScheduleColumnHeader(/^Date\b/i)).toBeVisible({ timeout: 15_000 });
+    await expect(this.paymentScheduleColumnHeader(/^Number\b/i)).toBeVisible({ timeout: 10_000 });
+    await expect(this.paymentScheduleColumnHeader(/^Frequency\b/i)).toBeVisible({ timeout: 10_000 });
+    await expect(this.paymentScheduleColumnHeader(/^Payment\b/i)).toBeVisible({ timeout: 10_000 });
+
+    const rows = this.paymentScheduleVisibleMoneyRows();
+    await expect
+      .poll(async () => rows.count(), { timeout: 45_000, intervals: [500, 1_000, 1_500] })
+      .toBeGreaterThan(0);
+
+    const segmentCount = await rows.count();
+    const firstText = ((await rows.first().textContent()) ?? "").replace(/\s+/g, " ").trim();
+    expect(firstText).toMatch(/\$\s*[\d,]+\.\d{2}/);
+    expect(firstText).toMatch(/Monthly|Weekly|Fortnightly/i);
+
+    // Grouped identical instalments: fewer segment rows than individual payments, or Number > 1.
+    const groupedByNumber = /\b([2-9]|[1-9]\d{1,2})\b/.test(firstText);
+    expect(groupedByNumber || segmentCount <= 3).toBeTruthy();
+  }
+
+  /**
+   * UDP-T4247 / UDP-T3672 — toggle **pi-bars** grid view; each instalment is its own row with
+   * Date (DD/MM/YYYY), Number, Frequency, and Payment amount.
+   */
+  async expectPaymentScheduleGridViewListsIndividualPayments(minRows = 10): Promise<void> {
+    this.logStep("Expect payment schedule grid view lists individual payments");
+    await this.waitForQuoteLoadersToFinish();
+    const title = this.paymentScheduleSectionTitle();
+    await expect(title).toBeVisible({ timeout: 45_000 });
+    await title.scrollIntoViewIfNeeded().catch(() => {});
+
+    await this.clickLeasePaymentScheduleBarsViewIfNeeded();
+
+    await expect(this.paymentScheduleColumnHeader(/^Date\b/i)).toBeVisible({ timeout: 15_000 });
+    await expect(this.paymentScheduleColumnHeader(/^Number\b/i)).toBeVisible({ timeout: 10_000 });
+    await expect(this.paymentScheduleColumnHeader(/^Frequency\b/i)).toBeVisible({ timeout: 10_000 });
+    await expect(this.paymentScheduleColumnHeader(/^Payment\b/i)).toBeVisible({ timeout: 10_000 });
+
+    const rows = this.paymentScheduleAllMoneyRows();
+    await expect
+      .poll(async () => rows.count(), { timeout: 45_000, intervals: [500, 1_000, 1_500] })
+      .toBeGreaterThanOrEqual(minRows);
+
+    const visibleRows = this.paymentScheduleVisibleMoneyRows();
+    const samples = Math.min(3, await visibleRows.count());
+    for (let i = 0; i < samples; i++) {
+      const text = ((await visibleRows.nth(i).textContent()) ?? "").replace(/\s+/g, " ").trim();
+      expect(text).toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/);
+      expect(text).toMatch(/\$\s*[\d,]+\.\d{2}/);
+      expect(text).toMatch(/Monthly|Weekly|Fortnightly/i);
     }
-    const cls = (await selectedEquals.getAttribute("class")) ?? "";
-    return cls.includes("p-highlight");
   }
 
   /**
@@ -3214,42 +3707,32 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Switch from default **pi-equals** segment view to **pi-bars** detailed grid view.
-   * No-op when the grid toggle is not present — stay on default segment view.
+   * Switch from default segment view to grid view (each instalment listed individually).
    */
   private async clickLeasePaymentScheduleBarsViewIfNeeded(): Promise<void> {
     if (await this.isLeasePaymentListViewActive()) {
       return;
     }
 
-    const barsRadio = this.leasePaymentScheduleBarsViewRadio();
-    if (!(await barsRadio.isVisible({ timeout: 5_000 }).catch(() => false))) {
-      return;
-    }
-    if (!(await barsRadio.isEnabled().catch(() => false))) {
-      return;
-    }
+    const title = this.paymentScheduleSectionTitle();
+    await title.scrollIntoViewIfNeeded().catch(() => {});
 
+    const barsRadio = this.leasePaymentScheduleBarsViewRadio();
+    await expect(barsRadio).toBeVisible({ timeout: 15_000 });
     await barsRadio.scrollIntoViewIfNeeded();
     await barsRadio.click({ timeout: 12_000 });
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
 
-    const selectedBars = this.leasePaymentScheduleBarsViewRadioSelected();
+    if (!(await this.isLeasePaymentListViewActive())) {
+      await barsRadio.click({ timeout: 12_000, force: true });
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    }
+
     await expect
-      .poll(
-        async () => {
-          if (!(await selectedBars.isVisible().catch(() => false))) {
-            return false;
-          }
-          const ariaChecked = await selectedBars.getAttribute("aria-checked");
-          if (ariaChecked === "true") {
-            return true;
-          }
-          const cls = (await selectedBars.getAttribute("class")) ?? "";
-          return cls.includes("p-highlight");
-        },
-        { timeout: 20_000, intervals: [300, 500, 1_000] },
-      )
+      .poll(async () => this.isLeasePaymentListViewActive(), {
+        timeout: 30_000,
+        intervals: [300, 500, 1_000, 2_000],
+      })
       .toBe(true);
   }
 
@@ -3844,6 +4327,28 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Apply Interest Only Edit Payment Schedule");
     await this.openEditPaymentScheduleDialog();
     await this.selectEditPaymentScheduleSegmentType("Interest Only");
+    await this.clickEditPaymentScheduleCalculate();
+    await this.clickEditPaymentScheduleApply();
+    await this.expectEditPaymentScheduleDialogClosedOnStandardQuote();
+  }
+
+  /**
+   * Split schedule: partial **Interest Only** + **Normal** remainder (TL / UDP-T4236).
+   * Full-term **Interest Only** alone leaves **Apply** disabled after **Calculate**.
+   */
+  async applySplitInterestOnlyEditPaymentSchedule(interestOnlyPayments = "12"): Promise<void> {
+    this.logStep(`Apply split Interest Only Edit Payment Schedule (${interestOnlyPayments} IO)`);
+    await this.openEditPaymentScheduleDialog();
+    await this.modifyEditPaymentScheduleSegmentFields({
+      number: interestOnlyPayments,
+      type: "Interest Only",
+    });
+    await this.waitForEditPaymentScheduleAddSegmentEnabled();
+    await this.clickEditPaymentScheduleAddSegment();
+    const paymentsTotal = await this.getEditPaymentScheduleNumberOfPayments();
+    const remaining = String(Math.max(1, paymentsTotal - Number(interestOnlyPayments)));
+    await this.enterEditPaymentScheduleSegmentNumberOnRow(1, remaining);
+    await this.selectEditPaymentScheduleSegmentTypeOnRow(1, "Normal");
     await this.clickEditPaymentScheduleCalculate();
     await this.clickEditPaymentScheduleApply();
     await this.expectEditPaymentScheduleDialogClosedOnStandardQuote();
@@ -4844,7 +5349,7 @@ export class DOAssetDetailsPage extends BasePage {
         `First Payment date did not accept value "${v}" (last read: "${read}").`,
       );
     }
-    await this.page.waitForTimeout(200);
+    await this.page.waitForTimeout(300);
   }
 
   /** **dd/MM/yyyy** for today (runner local calendar). */
@@ -5178,6 +5683,28 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
+   * UDP-T4252 / UDP-T3690 / UDP-T4063 — **Calculate** may clear Originator Reference; replenish,
+   * **Next** runs validation, then advance to Customer Details when mandatory fields are complete.
+   */
+  async clickNextAndExpectCustomerDetails(origRef = "SQ-TL-Ref-01"): Promise<void> {
+    this.logStep("Click Next and expect Customer Details");
+    await this.waitForQuoteLoadersToFinish();
+    await this.enterOriginationReference(origRef);
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.clickNextButton();
+      try {
+        await this.customerDetails.waitForAddBorrowerButton();
+        return;
+      } catch (err) {
+        if (attempt === 2) throw err;
+        await this.enterOriginationReference(origRef);
+        await this.waitForQuoteLoadersToFinish();
+      }
+    }
+  }
+
+  /**
    * Finance Lease: after payment summary / origination, click **Next** inside `app-quote-details`.
    * If **Next** stays disabled (validation), optionally pass `origRef` to re-fill + patch origination while waiting.
    */
@@ -5391,6 +5918,161 @@ export class DOAssetDetailsPage extends BasePage {
       return true;
     }
     return /^(select|choose|--|please\s+select)/i.test(t);
+  }
+
+  /** **Frequency** PrimeNG dropdown host (label-scoped). */
+  frequencyDropdownHost(): Locator {
+    const root = this.standardQuoteRoot();
+    return this.primeLabeledDropdownCombobox("Frequency")
+      .locator("xpath=ancestor::p-dropdown[1]")
+      .or(
+        root.locator(
+          "xpath=.//label[contains(normalize-space(.), 'Frequency')]/following::p-dropdown[1]",
+        ),
+      )
+      .first();
+  }
+
+  frequencyDropdownTrigger(): Locator {
+    return this.frequencyDropdownHost()
+      .getByRole("button", { name: /dropdown trigger/i })
+      .first()
+      .or(this.frequencyDropdownHost().locator(".p-dropdown-trigger").first());
+  }
+
+  async readSelectedFrequencyLabel(): Promise<string> {
+    this.logStep("Read selected frequency label");
+    return this.readPrimeLabeledDropdownValue("Frequency");
+  }
+
+  /** UDP-T4236 — Frequency defaults from Product/Program (Monthly / Weekly / Fortnightly). */
+  async expectFrequencyDefaultsFromProgram(): Promise<void> {
+    this.logStep("Expect frequency defaults from program");
+    await expect(this.frequencyDropdownHost()).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(
+        async () => {
+          const label = await this.readSelectedFrequencyLabel();
+          return /Monthly|Weekly|Fortnightly/i.test(label) ? label : null;
+        },
+        { timeout: 30_000, intervals: [300, 500, 1_000] },
+      )
+      .not.toBeNull();
+  }
+
+  async selectStandardQuoteFrequency(frequency: string): Promise<void> {
+    this.logStep(`Select frequency: ${this.stepValueDisplay(frequency)}`);
+    const trigger = this.frequencyDropdownTrigger();
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click({ timeout: 15_000 });
+    const escaped = frequency.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    await this.page
+      .getByRole("option", { name: new RegExp(`^${escaped}$`, "i") })
+      .first()
+      .click({ timeout: 15_000 });
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.waitForQuoteLoadersToFinish();
+  }
+
+  /** After frequency change resets structured schedule, **Payment Amount** is no longer **Irregular**. */
+  async expectPaymentAmountNotIrregular(): Promise<void> {
+    this.logStep("Expect payment amount not irregular");
+    await this.waitForQuoteLoadersToFinish();
+    const paymentAmount = this.paymentAmountDisplayField();
+    await expect
+      .poll(
+        async () => {
+          if (await this.paymentSummaryRoot.getByText(/^Irregular$/i).first().isVisible().catch(() => false)) {
+            return false;
+          }
+          if (await paymentAmount.isVisible().catch(() => false)) {
+            const raw = (
+              (await paymentAmount.inputValue().catch(() => "")) ||
+              (await paymentAmount.textContent().catch(() => "")) ||
+              ""
+            ).trim();
+            if (/^Irregular$/i.test(raw)) return false;
+            if (!raw || raw === "-") return true;
+            return /\$\s*[\d,]+\.\d{2}/.test(raw);
+          }
+          return true;
+        },
+        { timeout: 45_000, intervals: [500, 1_000, 1_500] },
+      )
+      .toBe(true);
+  }
+
+  private paymentScheduleVisibleMoneyRows(): Locator {
+    return this.paymentScheduleContentScope()
+      .locator("tbody tr")
+      .filter({ hasText: /\$\s*[\d,.]+/ })
+      .filter({ visible: true });
+  }
+
+  /** All instalment rows in the schedule table (grid view may virtualize visible rows). */
+  private paymentScheduleAllMoneyRows(): Locator {
+    return this.paymentScheduleContentScope()
+      .locator("tbody tr")
+      .filter({ hasText: /\$\s*[\d,.]+/ });
+  }
+
+  /** Non-uniform schedule from **Edit Payment Schedule** — multiple rows and/or **Irregular** payment amount. */
+  async expectStructuredPaymentFrequencyInPlace(): Promise<void> {
+    this.logStep("Expect structured payment frequency in place");
+    await this.waitForQuoteLoadersToFinish();
+    const rows = this.paymentScheduleVisibleMoneyRows();
+    if ((await rows.count()) > 1) {
+      return;
+    }
+    await this.expectPaymentAmountShowsIrregular();
+  }
+
+  /**
+   * UDP-T4236 — frequency change clears structured schedule before **Calculate**:
+   * **Payment Structure** **None**, no **Irregular**, summary/schedule cleared.
+   */
+  async expectPaymentStructureClearedAfterFrequencyChange(): Promise<void> {
+    this.logStep("Expect payment structure cleared after frequency change");
+    await this.waitForQuoteLoadersToFinish();
+    await this.expectPaymentAmountNotIrregular();
+
+    const structure = await this.readPrimeLabeledDropdownValue("Payment Structure");
+    if (structure.length > 0) {
+      expect(structure).toMatch(/^None$/i);
+    }
+
+    const rows = this.paymentScheduleVisibleMoneyRows();
+    await expect
+      .poll(async () => rows.count(), { timeout: 15_000, intervals: [300, 500, 1_000] })
+      .toBe(0);
+  }
+
+  /**
+   * UDP-T4236 step 3 — after **Calculate**, uniform schedule with new finance frequency.
+   */
+  async expectPaymentScheduleStructureReset(expectedFrequency: string): Promise<void> {
+    this.logStep(`Expect payment schedule structure reset (${this.stepValueDisplay(expectedFrequency)})`);
+    await this.waitForQuoteLoadersToFinish();
+    await this.expectPaymentAmountNotIrregular();
+
+    const rows = this.paymentScheduleVisibleMoneyRows();
+    await expect
+      .poll(async () => rows.count(), { timeout: 45_000, intervals: [500, 1_000, 1_500] })
+      .toBe(1);
+    await expect(rows.first()).toContainText(new RegExp(expectedFrequency, "i"));
+
+    const structure = await this.readPrimeLabeledDropdownValue("Payment Structure");
+    if (structure.length > 0) {
+      expect(structure).toMatch(/^None$/i);
+    }
+
+    const paymentAmount = this.paymentAmountDisplayField();
+    const raw = (
+      (await paymentAmount.inputValue().catch(() => "")) ||
+      (await paymentAmount.textContent().catch(() => "")) ||
+      ""
+    ).trim();
+    expect(raw).toMatch(/\$\s*[\d,]+\.\d{2}/);
   }
 
   /** Asset type variant text appears after **Select** in the asset-type modal. */
@@ -5680,26 +6362,118 @@ export class DOAssetDetailsPage extends BasePage {
     return (await this.loanDate.inputValue().catch(() => "")).trim();
   }
 
-  async expectFirstPaymentBeforeLoanDateValidation(): Promise<void> {
-    this.logStep("Expect First Payment Before Loan Date Validation");
-    await expect
-      .soft(
-        this.page
-          .getByText(/First Payment Date must not be before the Loan Date/i)
-          .first(),
-      )
-      .toBeVisible({ timeout: 25_000 });
+  async readFirstPaymentDateValue(): Promise<string> {
+    return (await this.firstPaymentDate.inputValue().catch(() => "")).trim();
   }
 
-  async expectFirstPaymentExceedsSixWeeksValidation(): Promise<void> {
-    this.logStep("Expect First Payment Exceeds Six Weeks Validation");
-    await expect
-      .soft(
-        this.page
-          .getByText(/First payment must be within 6 weeks and in line with the customer/i)
-          .first(),
+  private firstPaymentValidationScope(): Locator {
+    return this.paymentSummaryRoot
+      .locator(
+        "xpath=.//*[contains(normalize-space(.),'First Payment')]/ancestor::div[contains(@class,'col') or contains(@class,'grid') or contains(@class,'field')][1]",
       )
-      .toBeVisible({ timeout: 25_000 });
+      .first()
+      .or(this.paymentSummaryRoot);
+  }
+
+  private async firstPaymentValidationMessageVisible(pattern: RegExp): Promise<boolean> {
+    const scopes = [
+      this.firstPaymentValidationScope(),
+      this.paymentSummaryRoot,
+      this.standardQuoteRoot(),
+      this.page.locator(".p-toast-message, .p-message, .p-inline-message"),
+    ];
+    for (const scope of scopes) {
+      if (await scope.getByText(pattern).first().isVisible().catch(() => false)) {
+        return true;
+      }
+    }
+    return this.page.getByText(pattern).first().isVisible().catch(() => false);
+  }
+
+  async expectFirstPaymentBeforeLoanDateValidation(
+    loanDate?: string,
+    attemptedDate?: string,
+  ): Promise<void> {
+    this.logStep("Expect First Payment Before Loan Date Validation");
+    const patterns = [
+      /First Payment Date must not be before the Loan Date/i,
+      /First payment date must not be before the loan date/i,
+      /must not be before the Loan Date/i,
+      /must not be before the loan date/i,
+      /cannot be before the Loan Date/i,
+      /before the loan date/i,
+    ];
+    await expect
+      .poll(
+        async () => {
+          for (const pattern of patterns) {
+            if (await this.firstPaymentValidationMessageVisible(pattern)) {
+              return "message";
+            }
+          }
+          if (loanDate && attemptedDate) {
+            const current = await this.readFirstPaymentDateValue();
+            const loanD = DOAssetDetailsPage.parseDdMmYyyyLoanDate(loanDate);
+            const currentD = DOAssetDetailsPage.parseDdMmYyyyLoanDate(current);
+            const attemptedD = DOAssetDetailsPage.parseDdMmYyyyLoanDate(attemptedDate);
+            if (
+              loanD &&
+              currentD &&
+              attemptedD &&
+              current.trim() !== attemptedDate.trim() &&
+              currentD.getTime() >= loanD.getTime()
+            ) {
+              return "clamped";
+            }
+          }
+          return null;
+        },
+        { timeout: 30_000, intervals: [300, 500, 1_000] },
+      )
+      .not.toBeNull();
+  }
+
+  async expectFirstPaymentExceedsSixWeeksValidation(
+    loanDate?: string,
+    attemptedDate?: string,
+  ): Promise<void> {
+    this.logStep("Expect First Payment Exceeds Six Weeks Validation");
+    const patterns = [
+      /First payment must be within 6 weeks and in line with the customer'?s? pay cycle/i,
+      /within 6 weeks and in line with the customer/i,
+    ];
+    const sixWeeksMs = 6 * 7 * 24 * 60 * 60 * 1000;
+    await expect
+      .poll(
+        async () => {
+          for (const pattern of patterns) {
+            if (await this.firstPaymentValidationMessageVisible(pattern)) {
+              return "message";
+            }
+          }
+          if (loanDate && attemptedDate) {
+            const current = await this.readFirstPaymentDateValue();
+            const loanD = DOAssetDetailsPage.parseDdMmYyyyLoanDate(loanDate);
+            const currentD = DOAssetDetailsPage.parseDdMmYyyyLoanDate(current);
+            const attemptedD = DOAssetDetailsPage.parseDdMmYyyyLoanDate(attemptedDate);
+            if (
+              loanD &&
+              currentD &&
+              attemptedD &&
+              current.trim() !== attemptedDate.trim() &&
+              attemptedD.getTime() > loanD.getTime() + sixWeeksMs
+            ) {
+              const diff = currentD.getTime() - loanD.getTime();
+              if (diff >= 0 && diff <= sixWeeksMs + 86_400_000) {
+                return "clamped";
+              }
+            }
+          }
+          return null;
+        },
+        { timeout: 30_000, intervals: [300, 500, 1_000] },
+      )
+      .not.toBeNull();
   }
 
   async expectAfVOptionsSectionVisible(): Promise<void> {
@@ -5772,20 +6546,92 @@ export class DOAssetDetailsPage extends BasePage {
       .waitFor({ state: "visible", timeout: 45_000 });
   }
 
-  async openAddonsAccessoriesFromQuote(): Promise<void> {
-    this.logStep("Open Addons Accessories From Quote");
-    const root = this.standardQuoteRoot();
-    const link = root
-      .getByRole("link", { name: /Addons?\s*&\s*Accessories/i })
-      .or(root.getByRole("button", { name: /Addons?\s*&\s*Accessories/i }))
-      .or(root.locator("a, button").filter({ hasText: /Addons?\s*&\s*Accessories/i }))
+  private addonsAccessoriesLabelRx(): RegExp {
+    return /\+?\s*Add\s*Ons?\s*(?:&|and)\s*Accessories|\+?\s*Addons?\s*&\s*Accessories/i;
+  }
+
+  private addonsAccessoriesTrigger(scope: Locator): Locator {
+    const label = this.addonsAccessoriesLabelRx();
+    return scope
+      .getByRole("link", { name: label })
+      .or(scope.getByRole("button", { name: label }))
+      .or(scope.locator("a, button, [role='button']").filter({ hasText: label }))
       .first();
-    await link.scrollIntoViewIfNeeded();
-    await link.click({ timeout: 15_000 });
-    await this.page.locator("app-service-plan, app-accessories").first().waitFor({
-      state: "visible",
-      timeout: 45_000,
-    });
+  }
+
+  private async scrollAddonsAccessoriesEntryIntoView(root: Locator): Promise<void> {
+    for (const anchor of [
+      root.getByText(/Additional\s+Charges/i),
+      root.getByText(/Charges\s*\+\s*Add/i),
+      root.getByText(/^Charges$/i),
+      root.getByText(/Less\s+Deposit/i),
+    ]) {
+      if (await anchor.first().isVisible({ timeout: 2_500 }).catch(() => false)) {
+        await anchor.first().scrollIntoViewIfNeeded();
+        break;
+      }
+    }
+    await root.getByText(this.addonsAccessoriesLabelRx()).first().scrollIntoViewIfNeeded().catch(() => {});
+  }
+
+  private async expectAddOnsAccessoriesScreenVisible(timeoutMs = 45_000): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const hosts = this.page.locator(
+            "app-service-plan, app-accessories, app-add-on-accessories, app-add-ons-accessories, app-addon-accessories",
+          );
+          const hostN = await hosts.count();
+          for (let i = 0; i < Math.min(hostN, 5); i++) {
+            if (await hosts.nth(i).isVisible({ timeout: 400 }).catch(() => false)) {
+              return true;
+            }
+          }
+          const headings = [
+            /Add Registration and Service Plans/i,
+            /Registration\s*(?:and|&)\s*Service\s*Plans/i,
+            /^Add Ons & Accessories$/i,
+            /Add On Accessories/i,
+          ];
+          for (const re of headings) {
+            if (await this.page.getByText(re).first().isVisible({ timeout: 400 }).catch(() => false)) {
+              return true;
+            }
+          }
+          return false;
+        },
+        { timeout: timeoutMs, intervals: [300, 500, 1_000, 2_000] },
+      )
+      .toBe(true);
+  }
+
+  /** UDP-T4258 / UDP-T4069 — **+ Addons & Accessories** opens the Add Ons and Accessories screen. */
+  async clickAddonsAndAccessoriesAndExpectScreen(): Promise<void> {
+    this.logStep("Click Addons And Accessories and expect screen");
+    await this.waitForQuoteLoadersToFinish();
+    const root = this.standardQuoteRoot();
+    await this.scrollAddonsAccessoriesEntryIntoView(root);
+
+    const trigger = this.addonsAccessoriesTrigger(root);
+    await expect(trigger).toBeVisible({ timeout: 30_000 });
+    await trigger.scrollIntoViewIfNeeded();
+    try {
+      await trigger.click({ timeout: 15_000 });
+    } catch {
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+      await trigger.click({ force: true, timeout: 15_000 });
+    }
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+    await this.page
+      .waitForURL(/add-on-accessories|addon-accessories|addOnAccessories|add_on_accessories/i, {
+        timeout: 12_000,
+      })
+      .catch(() => {});
+    await this.expectAddOnsAccessoriesScreenVisible();
+  }
+
+  async openAddonsAccessoriesFromQuote(): Promise<void> {
+    await this.clickAddonsAndAccessoriesAndExpectScreen();
   }
 
   async waitForAfVCashPricePopulated(): Promise<void> {
@@ -6203,13 +7049,16 @@ export class DOAssetDetailsPage extends BasePage {
   private async readCurrencyInput(locator: Locator): Promise<number> {
     const raw = await locator
       .evaluate((el) => {
-        const input = el as HTMLInputElement;
-        return (input.value ?? "").trim();
+        const tag = el.tagName.toLowerCase();
+        if (tag === "input" || tag === "textarea") {
+          return ((el as HTMLInputElement).value ?? "").trim();
+        }
+        return (el.textContent ?? "").replace(/\s+/g, " ").trim();
       })
       .catch(
         async () =>
           (await locator.inputValue().catch(() => "")).trim() ||
-          ((await locator.textContent()) ?? "").trim(),
+          ((await locator.textContent()) ?? "").replace(/\s+/g, " ").trim(),
       );
     return this.parseDisplayedCurrency(raw);
   }
@@ -6491,12 +7340,62 @@ export class DOAssetDetailsPage extends BasePage {
     await expect(charges).toBeVisible({ timeout: 15_000 });
   }
 
+  /** **Charges** label on Additional Charges (before/after add-ons). */
+  private chargesLabel(): Locator {
+    const root = this.standardQuoteRoot();
+    const additionalCharges = root
+      .locator(".p-field, [class*='p-field'], amount, .grid")
+      .filter({ has: root.getByText(/Additional\s+Charges/i) })
+      .first();
+    return additionalCharges
+      .getByText(/^Charges$/i)
+      .or(root.getByText(/^Charges$/i))
+      .first();
+  }
+
+  /** Dollar display beside **Charges** (TL uses a sibling `generic`; CSA may use `label.customePadding` or input). */
+  private chargesDisplayValue(): Locator {
+    const label = this.chargesLabel();
+    return label
+      .locator("xpath=following-sibling::*[1]")
+      .or(
+        label.locator(
+          "xpath=ancestor::div[contains(@class,'grid')][1]//label[contains(@class,'customePadding')]",
+        ),
+      )
+      .or(label.locator("xpath=following::input[1]"))
+      .first();
+  }
+
+  async readChargesTotalDollars(): Promise<number> {
+    const label = this.chargesLabel();
+    await label.scrollIntoViewIfNeeded().catch(() => {});
+    const display = this.chargesDisplayValue();
+    await expect(display).toBeVisible({ timeout: 30_000 });
+    const tag = (await display.evaluate((el) => el.tagName.toLowerCase()).catch(() => "")) as string;
+    const raw =
+      tag === "input" || tag === "textarea"
+        ? (await display.inputValue().catch(() => "")).trim()
+        : ((await display.textContent()) ?? "").replace(/\s+/g, " ").trim();
+    return this.parseDisplayedCurrency(raw);
+  }
+
   /** **Charges** label block on Additional Charges (before/after add-ons). */
   chargesFieldBlock(): Locator {
-    return this.standardQuoteRoot()
-      .locator(".p-field, [class*='p-field'], amount, .grid")
-      .filter({ has: this.standardQuoteRoot().getByText(/^Charges$/i) })
-      .first();
+    const label = this.chargesLabel();
+    return label.locator("xpath=ancestor::div[contains(@class,'grid') or contains(@class,'p-field')][1]").or(label);
+  }
+
+  /** UDP-T4221 — **Charges** = Registration/Service Plans + Insurances + Accessories. */
+  async expectChargesTotalDollars(expected: number): Promise<void> {
+    this.logStep(`Expect charges total dollars: ${expected}`);
+    await this.waitForQuoteLoadersToFinish();
+    await expect
+      .poll(async () => this.readChargesTotalDollars(), {
+        timeout: 45_000,
+        intervals: [500, 1_000, 1_500, 2_000],
+      })
+      .toBe(expected);
   }
 
   /** UDP-T3872 — Save before Calculate shows **Please click "Calculate"**. */

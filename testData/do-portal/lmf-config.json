@@ -16,5 +16,17 @@
     "program": "CSA Personal - MV Dealer",
     "standardQuoteProgram": "MYUDC-C-CSA- Assigned MV",
     "note": "QQ Create Quote lands on Webform (Waive LMF hidden). Re-select standardQuoteProgram on SQ for authorised waive UI."
+  },
+  "tlLmf": {
+    "withLmf": {
+      "product": "TL-C-Assigned",
+      "program": "Term Loan Personal - MV Dealer",
+      "note": "FIS AF Program Setup with LMF > 0. Override TL_LMF_PRODUCT / TL_LMF_PROGRAM on SIT if needed."
+    },
+    "withoutLmf": {
+      "product": "TL-B-Assigned",
+      "program": "Term Loan Business - MV Dealer",
+      "note": "No LMF in FIS AF — row absent or $0.00. Override TL_NO_LMF_PRODUCT / TL_NO_LMF_PROGRAM."
+    }
   }
 }
