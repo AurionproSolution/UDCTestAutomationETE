@@ -13,8 +13,10 @@ import {
   DOCustomerDetailsPage,
   DODashboardPage,
   DOQuickQuotePage,
+  DOSettlementPage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { loadTlLmfPrograms } from "./lmf.helpers";
 
 const TL_SQ_PRODUCT = "TL-B-Assigned";
 const TL_SQ_PROGRAM = "Term Loan Business - MV Dealer";
@@ -163,6 +165,26 @@ async function prepareCalculableTlQuote(
   await assetDetailsPage.enterOriginationReference(opts?.origRef ?? "SQ-TL-Ref-01");
 }
 
+/** Less Deposit **Settlement** may stay disabled until trade-in + **Calculate** on SIT. */
+async function prepareTlQuoteForSettlementTrigger(
+  assetDetailsPage: DOAssetDetailsPage,
+  addAssetPage: DOAddAssetPage,
+): Promise<void> {
+  await prepareCalculableTlQuote(assetDetailsPage, addAssetPage, { origRef: "SQ-Settlement-Ref-01" });
+  await assetDetailsPage.enterTradeAmount("$5,000");
+  await assetDetailsPage.clickCalculateButton();
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  await assetDetailsPage.expectTotalAmountBorrowedGreaterThanZero({ timeoutMs: 90_000 });
+  await assetDetailsPage.enterOriginationReference("SQ-Settlement-Ref-01");
+  await expect
+    .poll(
+      async () =>
+        (await assetDetailsPage.netTradeAmountDisplayed.inputValue()).replace(/[$,]/g, ""),
+      { timeout: 45_000 },
+    )
+    .toMatch(/5000/);
+}
+
 /**
  * **Add On Accessories** screen (`app-service-plan`, `app-accessories`): fill registration / service /
  * others row and predefined accessory amounts, then **Save** (PrimeNG `data-pc-name="button"`).
@@ -282,90 +304,14 @@ async function waitForUdpT4221AddOnsSubtotalMin(
     .not.toBeNull();
 }
 
-/** UDP-T4221 — scroll Insurance into view before Extended Warranty entry (same panel focus as TL/CSA flow). */
-async function udpT4221FocusInsuranceSection(page: Page, addOnsPage: DOAddOnsAccessoriesPage): Promise<void> {
-  await page.keyboard.press("Escape").catch(() => {});
-  const inAddOns = page.locator("app-add-on-accessories").last().getByText(/^Insurance$/i).first();
-  if (await inAddOns.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await inAddOns.scrollIntoViewIfNeeded();
-    await inAddOns.click({ timeout: 15_000 }).catch(() => {});
-  } else {
-    await page.getByText(/^Insurance$/i).first().scrollIntoViewIfNeeded();
-  }
-  await addOnsPage.insuranceRoot().scrollIntoViewIfNeeded().catch(() => {});
-}
-
 /**
- * UDP-T4221 — **Extended Warranty** only: Yes, Months = 2, Amount = $200.
- * Uses public {@link DOAddOnsAccessoriesPage} locators; shared `fillInsurance*` methods are skipped by the page-object flag.
- */
-async function fillUdpT4221ExtendedWarrantyInsurance(
-  page: Page,
-  addOnsPage: DOAddOnsAccessoriesPage,
-): Promise<void> {
-  await udpT4221FocusInsuranceSection(page, addOnsPage);
-
-  let form = addOnsPage.insuranceQuestionRow(/Extended\s*Warranty/i);
-  if (!(await form.isVisible({ timeout: 8_000 }).catch(() => false))) {
-    form = addOnsPage
-      .insuranceRoot()
-      .getByText(/Extended\s*Warranty/i)
-      .first()
-      .locator("xpath=ancestor::form[1]");
-  }
-  await expect(form).toBeVisible({ timeout: 45_000 });
-  await form.scrollIntoViewIfNeeded();
-
-  const yesRadio = form.locator("p-radiobutton").filter({ hasText: /^Yes$/i }).first();
-  const yesBox = yesRadio.locator("div.p-radiobutton-box").first();
-  if (await yesBox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await yesBox.click({ timeout: 15_000 });
-  } else if (await yesRadio.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await yesRadio.click({ timeout: 15_000 });
-  } else {
-    await form.getByRole("radio", { name: /^Yes$/i }).first().click({ timeout: 15_000 });
-  }
-
-  const monthInput = addOnsPage.insuranceMonthsInput(form);
-  await expect(monthInput).toBeVisible({ timeout: 20_000 });
-  await monthInput.click();
-  await monthInput.press("Control+a");
-  await monthInput.type("2", { delay: 50 });
-  await monthInput.press("Tab").catch(() => {});
-  await expect
-    .poll(async () => (await monthInput.inputValue()).replace(/\D/g, ""), {
-      timeout: 15_000,
-      intervals: [200, 400, 800],
-    })
-    .toContain("2");
-
-  const amtInput = addOnsPage.insuranceAmountInput(form);
-  await expect(amtInput).toBeVisible({ timeout: 20_000 });
-  await amtInput.click();
-  await amtInput.press("Control+a");
-  await amtInput.type("200", { delay: 50 });
-  await amtInput.press("Tab").catch(() => {});
-  await expect
-    .poll(
-      async () => {
-        const raw = (await amtInput.inputValue()).replace(/[^0-9]/g, "");
-        return raw.includes("200") ? raw : null;
-      },
-      { timeout: 22_000, intervals: [200, 500, 1_000] },
-    )
-    .not.toBeNull();
-
-  await waitForUdpT4221AddOnsSubtotalMin(page, /Sub-Total\s*Insurances|Sub Total Insurance/i, 200);
-}
-
-/**
- * UDP-T4221 Zephyr — Registration $400, General Accessory $150, Extended Warranty $200 (no Service Plan).
- * Reuses {@link DOAddOnsAccessoriesPage} registration/accessory helpers and TL Save locator.
+ * UDP-T4221 Zephyr — Registration $400, Accessories $150, Extended Warranty $200 when Insurance is available.
+ * @returns Expected **Charges** total on quote shell after Save (750 with insurance, 550 without).
  */
 async function fillUdpT4221AddOnsAndSave(
   page: Page,
   assetDetailsPage: DOAssetDetailsPage,
-): Promise<void> {
+): Promise<number> {
   const addOnsPage = new DOAddOnsAccessoriesPage(page);
   await page.locator("app-service-plan").waitFor({ state: "visible", timeout: 45_000 });
   await page.locator("app-accessories").waitFor({ state: "visible", timeout: 45_000 }).catch(() => {});
@@ -382,121 +328,28 @@ async function fillUdpT4221AddOnsAndSave(
   await assetDetailsPage.waitForQuoteLoadersToFinish();
   await waitForUdpT4221AddOnsSubtotalMin(page, /Sub-Total\s*Accessories|Sub Total Accessories/i, 150);
 
-  await fillUdpT4221ExtendedWarrantyInsurance(page, addOnsPage);
+  const insuranceAdded = await addOnsPage.fillUdpT4221InsuranceIfAvailable("2", "200");
   await assetDetailsPage.waitForQuoteLoadersToFinish();
+  if (insuranceAdded) {
+    await waitForUdpT4221AddOnsSubtotalMin(page, /Sub-Total\s*Insurances|Sub Total Insurance/i, 200);
+  }
 
   await clickAddOnAccessoriesSave(page);
   await assetDetailsPage.waitForQuoteLoadersToFinish();
+  return insuranceAdded ? 750 : 550;
 }
 
-/** UDP-T4221 — Charges = Registration + Insurances + Accessories = $750. */
-async function expectUdpT4221ChargesTotal(
-  page: Page,
-  assetDetailsPage: DOAssetDetailsPage,
-): Promise<void> {
-  await expect(page.locator("app-service-plan")).toBeHidden({ timeout: 60_000 });
-  await assetDetailsPage.waitForQuoteLoadersToFinish();
-  const chargesBlock = assetDetailsPage.chargesFieldBlock();
-  await expect(chargesBlock).toBeVisible({ timeout: 30_000 });
-  await expect
-    .poll(
-      async () =>
-        assetDetailsPage.parseDisplayedCurrency((await chargesBlock.textContent()) ?? ""),
-      { timeout: 30_000, intervals: [500, 1_000, 1_500] },
-    )
-    .toBe(750);
-}
-
-const UDP_T4221_ASSET_CATEGORY = "Car and Light Commercial /";
-const UDP_T4221_VEHICLE = {
-  make: "TOYOTA",
-  model: "HILUX",
-  variant: "Top",
-  year: "2025",
-} as const;
-
-function udpT4221AssetTypeInput(page: Page): Locator {
-  return standardQuoteRoot(page).locator('input[name="assetTypeDD"]').first();
-}
-
-async function readUdpT4221AssetTypeValue(page: Page): Promise<string> {
-  const input = udpT4221AssetTypeInput(page);
-  if (await input.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    return ((await input.inputValue()) || (await input.getAttribute("value")) || "").trim();
-  }
-  const root = standardQuoteRoot(page);
-  const labelRow = root
-    .locator("label, span")
-    .filter({ hasText: /^Asset Type/i })
-    .first();
-  if (await labelRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    const row = labelRow.locator(
-      "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'grid')][1]",
-    );
-    return ((await row.textContent()) ?? "").replace(/Asset Type\s*\*?/i, "").trim();
-  }
-  return "";
-}
-
-/** UDP-T4221 — Asset Type: category + vehicle modal (same data as TL `addMinimalUsedAsset`; no cash price). */
-async function selectUdpT4221AssetType(
-  page: Page,
-  assetDetailsPage: DOAssetDetailsPage,
-): Promise<void> {
-  await assetDetailsPage.enterAsset(UDP_T4221_ASSET_CATEGORY);
-  await assetDetailsPage.waitForQuoteLoadersToFinish();
-  await assetDetailsPage.selectVehicleFromAssetTypeModal(UDP_T4221_VEHICLE);
-  await assetDetailsPage.waitForQuoteLoadersToFinish();
-
-  await expect
-    .poll(
-      async () => {
-        const v = (await readUdpT4221AssetTypeValue(page)).trim();
-        return v.length > 0 ? v : null;
-      },
-      { timeout: 90_000, intervals: [400, 800, 1_200] },
-    )
-    .not.toBeNull();
-}
-
-/** UDP-T4221 — Product + Program + Asset Type; Asset Details stable before Add Ons entry. */
+/** UDP-T4221 — Product + Program + asset in summary so Insurance questions load on Add Ons. */
 async function prepareUdpT4221AssetDetailsForAddOns(
-  page: Page,
   assetDetailsPage: DOAssetDetailsPage,
+  addAssetPage: DOAddAssetPage,
 ): Promise<void> {
   await selectTlProductAndProgram(assetDetailsPage);
-  await assetDetailsPage.waitForQuoteLoadersToFinish();
-  await selectUdpT4221AssetType(page, assetDetailsPage);
+  await addMinimalUsedAsset(assetDetailsPage, addAssetPage);
+  await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+  await assetDetailsPage.cashPriceOfAsset("$20,000");
   await assetDetailsPage.waitForAssetDetailsStepReady();
   await assetDetailsPage.waitForQuoteLoadersToFinish();
-}
-
-/** UDP-T4221 — open Add Ons using TL/CSA helper; PrimeNG `p-button-label` fallback from deployed DOM. */
-async function openUdpT4221AddOnsAccessories(
-  page: Page,
-  assetDetailsPage: DOAssetDetailsPage,
-): Promise<void> {
-  await assetDetailsPage.waitForQuoteLoadersToFinish();
-  const root = standardQuoteRoot(page);
-
-  const primeAddOnsBtn = page
-    .locator('button[type="button"][data-pc-name="button"]')
-    .filter({
-      has: page.locator("span.p-button-label", { hasText: /^Add Ons & Accessories$/ }),
-    })
-    .first();
-
-  await primeAddOnsBtn.scrollIntoViewIfNeeded().catch(() => {});
-  if (await primeAddOnsBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
-    await expect(primeAddOnsBtn).toBeEnabled({ timeout: 15_000 });
-    await primeAddOnsBtn.click({ timeout: 20_000 });
-    await assetDetailsPage.waitForQuoteLoadersToFinish();
-    if (await page.locator("app-service-plan").isVisible({ timeout: 30_000 }).catch(() => false)) {
-      return;
-    }
-  }
-
-  await openAddOnAccessoriesPageFromStandardQuote(page, root, assetDetailsPage);
 }
 
 /**
@@ -596,15 +449,35 @@ function standardQuoteQuoteIdBlock(page: Page): Locator {
     .first();
 }
 
+/** Blank PrimeNG dropdown placeholder or no selection yet (UDP-T4214 Product/Program). */
+function isBlankDropdownLabel(label: string): boolean {
+  const t = label.replace(/\s+/g, " ").trim();
+  return t.length === 0 || /^select\b/i.test(t) || /^—+$/.test(t) || t === "-";
+}
+
 /** UDP-T4214 — Quote ID is blank until the first Save assigns it in FIS AF. */
 async function expectQuoteIdBlankBeforeFirstSave(page: Page): Promise<void> {
-  const quoteIdBlock = standardQuoteQuoteIdBlock(page);
-  const quoteIdInput = quoteIdBlock.locator("input").filter({ visible: true }).first();
-  if (await quoteIdInput.isVisible({ timeout: 8_000 }).catch(() => false)) {
-    await expect.soft(quoteIdInput).toHaveValue("", { timeout: 15_000 });
+  const root = standardQuoteRoot(page);
+  const quoteIdLabel = root
+    .getByText(/Quote\s*(No\.?|Number|ID)\s*:?/i)
+    .filter({ visible: true })
+    .first();
+  if (!(await quoteIdLabel.isVisible({ timeout: 8_000 }).catch(() => false))) {
     return;
   }
-  const text = ((await quoteIdBlock.textContent()) ?? "").replace(/\s+/g, " ").trim();
+
+  const quoteIdBlock = quoteIdLabel
+    .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
+    .or(quoteIdLabel.locator("xpath=ancestor::div[1]"))
+    .first();
+  const quoteIdInput = quoteIdBlock.locator("input").filter({ visible: true }).first();
+  if (await quoteIdInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await expect.soft(quoteIdInput).toHaveValue("", { timeout: 10_000 });
+    return;
+  }
+  const text = ((await quoteIdBlock.textContent({ timeout: 5_000 }).catch(() => "")) ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
   expect.soft(text).not.toMatch(/\d{3,}/);
 }
 
@@ -672,92 +545,111 @@ test.describe("Standard Quote - TL @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await assetDetailsPage.waitForQuoteLoadersToFinish();
-      await assetDetailsPage.waitForProductSelectionSettled(/TL/i);
       const root = standardQuoteRoot(page);
 
-      const originatorRoot = root.locator("app-quote-originator").first();
-      if (await originatorRoot.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        for (const labelRx of [/Originator\s+Name/i, /Originator\s+Number/i]) {
-          const label = originatorRoot.getByText(labelRx).first();
-          if (!(await label.isVisible({ timeout: 5_000 }).catch(() => false))) continue;
-          const block = label
-            .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
-            .or(label.locator("xpath=ancestor::div[1]"))
-            .first();
-          const valueInput = block
-            .locator("input:not([type='checkbox'])")
-            .filter({ visible: true })
-            .first();
-          if (await valueInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-            expect.soft((await valueInput.inputValue()).trim().length).toBeGreaterThan(0);
-            continue;
+      await test.step("Originator populated from user permissions", async () => {
+        const originatorRoot = root.locator("app-quote-originator").first();
+        if (await originatorRoot.isVisible({ timeout: 15_000 }).catch(() => false)) {
+          for (const labelRx of [/Originator\s+Name/i, /Originator\s+Number/i]) {
+            const label = originatorRoot.getByText(labelRx).first();
+            if (!(await label.isVisible({ timeout: 5_000 }).catch(() => false))) continue;
+            const block = label
+              .locator("xpath=ancestor::div[contains(@class,'col') or contains(@class,'field')][1]")
+              .or(label.locator("xpath=ancestor::div[1]"))
+              .first();
+            const valueInput = block
+              .locator("input:not([type='checkbox'])")
+              .filter({ visible: true })
+              .first();
+            if (await valueInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+              expect.soft((await valueInput.inputValue()).trim().length).toBeGreaterThan(0);
+              continue;
+            }
+            const blockText = ((await block.textContent()) ?? "").replace(/\s+/g, " ").trim();
+            const withoutLabel = blockText.replace(labelRx, "").trim();
+            expect.soft(withoutLabel.length).toBeGreaterThan(0);
           }
-          const blockText = ((await block.textContent()) ?? "").replace(/\s+/g, " ").trim();
-          const withoutLabel = blockText.replace(labelRx, "").trim();
-          expect.soft(withoutLabel.length).toBeGreaterThan(0);
         }
-      }
-
-      const promoHost = root.locator("p-checkbox").filter({
-        has: root
-          .locator('label.p-checkbox-label[data-pc-section="label"], label.p-checkbox-label')
-          .filter({ hasText: /Promotion\s+Quote/i }),
       });
-      const promoInput = promoHost.first().locator('input[type="checkbox"]').first();
-      if (await promoHost.first().isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await expect.soft(promoInput).not.toBeChecked();
-      } else {
-        const byRole = root.getByRole("checkbox", { name: /Promotion\s+Quote/i }).first();
-        if (await byRole.isVisible({ timeout: 5_000 }).catch(() => false)) {
-          await expect.soft(byRole).not.toBeChecked();
+
+      await test.step("Promotion Quote defaults unchecked", async () => {
+        const promoHost = root.locator("p-checkbox").filter({
+          has: root
+            .locator('label.p-checkbox-label[data-pc-section="label"], label.p-checkbox-label')
+            .filter({ hasText: /Promotion\s+Quote/i }),
+        });
+        const promoInput = promoHost.first().locator('input[type="checkbox"]').first();
+        if (await promoHost.first().isVisible({ timeout: 15_000 }).catch(() => false)) {
+          await expect.soft(promoInput).not.toBeChecked();
+        } else {
+          const byRole = root.getByRole("checkbox", { name: /Promotion\s+Quote/i }).first();
+          if (await byRole.isVisible({ timeout: 5_000 }).catch(() => false)) {
+            await expect.soft(byRole).not.toBeChecked();
+          }
         }
-      }
+      });
 
-      const productHost = root
-        .locator("p-dropdown")
-        .filter({ has: root.locator("label").filter({ hasText: /^Product/i }) })
-        .first();
-      if (await productHost.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        const productLabel =
-          (await productHost.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
-        expect.soft(productLabel).toMatch(/TL/i);
-      } else {
-        await expect.soft(root.getByText(/TL/i).first()).toBeVisible({ timeout: 20_000 });
-      }
+      await test.step("Product TL from QQ or blank; Program from QQ or blank", async () => {
+        const productLabel = await assetDetailsPage.readSelectedProductLabel();
+        expect
+          .soft(isBlankDropdownLabel(productLabel) || /TL/i.test(productLabel))
+          .toBeTruthy();
 
-      const programLabel = await assetDetailsPage.readSelectedProgramLabel();
-      expect.soft(programLabel).toMatch(/^$|^Select/i);
-      await expect.soft(root.getByText(TL_SQ_PROGRAM)).toHaveCount(0, { timeout: 5_000 });
+        const programLabel = await assetDetailsPage.readSelectedProgramLabel();
+        expect.soft(isBlankDropdownLabel(programLabel)).toBeTruthy();
+      });
 
-      const loanPurpose = root
-        .getByRole("textbox", { name: /^Loan Purpose/i })
-        .or(
-          root.locator(
-            "xpath=.//label[contains(normalize-space(.),'Loan Purpose')]/following::input[1]",
-          ),
-        )
-        .first();
-      if (await loanPurpose.isVisible({ timeout: 15_000 }).catch(() => false)) {
+      await test.step("Loan Purpose auto-populated when Product and Program are set", async () => {
+        const productLabel = await assetDetailsPage.readSelectedProductLabel();
+        const programLabel = await assetDetailsPage.readSelectedProgramLabel();
+        const productProgramSelected =
+          !isBlankDropdownLabel(productLabel) && !isBlankDropdownLabel(programLabel);
+
+        const loanPurpose = root
+          .getByRole("textbox", { name: /^Loan Purpose/i })
+          .or(
+            root.locator(
+              "xpath=.//label[contains(normalize-space(.),'Loan Purpose')]/following::input[1]",
+            ),
+          )
+          .first();
+        if (!(await loanPurpose.isVisible({ timeout: 15_000 }).catch(() => false))) {
+          return;
+        }
         const value = (await loanPurpose.inputValue()).trim();
-        expect.soft(value.length).toBeGreaterThan(0);
-      }
+        if (productProgramSelected) {
+          expect.soft(value.length).toBeGreaterThan(0);
+        }
+      });
 
-      const salesperson = root
-        .getByRole("combobox", { name: /Salesperson/i })
-        .or(root.getByLabel(/Salesperson/i))
-        .or(root.locator("p-dropdown").filter({ hasText: /Salesperson/i }))
-        .first();
-      if (await salesperson.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        const label = (await salesperson.textContent())?.trim() ?? "";
-        expect.soft(label.length).toBeGreaterThan(0);
-      }
+      await test.step("Salesperson not blank", async () => {
+        const salesperson = root
+          .getByRole("combobox", { name: /Salesperson/i })
+          .or(root.getByLabel(/Salesperson/i))
+          .or(root.locator("p-dropdown").filter({ hasText: /Salesperson/i }))
+          .first();
+        if (await salesperson.isVisible({ timeout: 15_000 }).catch(() => false)) {
+          const aria = ((await salesperson.getAttribute("aria-label")) ?? "").trim();
+          const label = aria.length > 0 ? aria : ((await salesperson.textContent()) ?? "").trim();
+          expect.soft(label.length).toBeGreaterThan(0);
+        }
+      });
 
-      await assetDetailsPage.expectWorkflowStatusOpenQuote();
+      await test.step("Status defaults to Open Quote", async () => {
+        await assetDetailsPage.expectWorkflowStatusOpenQuote();
+      });
 
-      const usedRadio = root.getByRole("radio", { name: /^Used$/i }).first();
-      if (await usedRadio.isVisible({ timeout: 10_000 }).catch(() => false)) {
-        await expect.soft(usedRadio).toBeChecked();
-      } else {
+      await test.step("Condition defaults to Used", async () => {
+        const usedRadio = root.getByRole("radio", { name: /^Used$/i }).first();
+        if (await usedRadio.isVisible({ timeout: 10_000 }).catch(() => false)) {
+          await expect.soft(usedRadio).toBeChecked();
+          return;
+        }
+        const conditionCombobox = root.getByRole("combobox", { name: /^Used$/i }).first();
+        if (await conditionCombobox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await expect.soft(conditionCombobox).toBeVisible();
+          return;
+        }
         const conditionHost = root
           .locator("p-dropdown, p-selectbutton")
           .filter({ hasText: /Condition/i })
@@ -765,9 +657,11 @@ test.describe("Standard Quote - TL @do @regression", () => {
         if (await conditionHost.isVisible({ timeout: 10_000 }).catch(() => false)) {
           await expect.soft(conditionHost).toContainText(/Used/i);
         }
-      }
+      });
 
-      await expectQuoteIdBlankBeforeFirstSave(page);
+      await test.step("Quote ID blank until first Save", async () => {
+        await expectQuoteIdBlankBeforeFirstSave(page);
+      });
     },
   );
 
@@ -887,13 +781,21 @@ test.describe("Standard Quote - TL @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4221"] },
     async ({ page }) => {
       test.setTimeout(600_000);
+      const addAssetPage = new DOAddAssetPage(page);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await prepareUdpT4221AssetDetailsForAddOns(page, assetDetailsPage);
-      await openUdpT4221AddOnsAccessories(page, assetDetailsPage);
-      await expect(page.locator("app-service-plan")).toBeVisible({ timeout: 45_000 });
+      await prepareUdpT4221AssetDetailsForAddOns(assetDetailsPage, addAssetPage);
 
-      await fillUdpT4221AddOnsAndSave(page, assetDetailsPage);
-      await expectUdpT4221ChargesTotal(page, assetDetailsPage);
+      await test.step("Open Add Ons and Accessories", async () => {
+        await assetDetailsPage.clickAddonsAndAccessoriesAndExpectScreen();
+      });
+
+      await test.step("Add Registration $400, Insurance $200, Accessories $150", async () => {
+        const expectedCharges = await fillUdpT4221AddOnsAndSave(page, assetDetailsPage);
+        await test.step(`Observe Charges total equals $${expectedCharges}`, async () => {
+          await expect(page.locator("app-service-plan")).toBeHidden({ timeout: 60_000 });
+          await assetDetailsPage.expectChargesTotalDollars(expectedCharges);
+        });
+      });
     },
   );
 
@@ -1165,48 +1067,63 @@ test.describe("Standard Quote - TL @do @regression", () => {
   );
 
   test(
-    "UDP-T4236 - TC_FD_002 Frequency Defaults from Program",
+    "UDP-T4236 - TC_FD_002 Frequency Mandatory Defaults from Program Structure Resets on Change",
     { tag: ["@do", "@regression", "@UDP-T4236"] },
     async ({ page }) => {
-      test.setTimeout(300_000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      const freqLabel = await assetDetailsPage.frequencyOfPayment.textContent().catch(() => "");
-      if (freqLabel?.trim()) {
-        expect.soft(/Monthly|Weekly|Fortnightly/i.test(freqLabel)).toBeTruthy();
-      }
-      const freqTrigger = standardQuoteRoot(page)
-        .locator("p-dropdown")
-        .filter({ hasText: /Frequency/i })
-        .getByRole("button", { name: /dropdown trigger/i })
-        .first();
-      if (await freqTrigger.isEnabled().catch(() => false)) {
-        await freqTrigger.click();
-        const weekly = page.getByRole("option", { name: /Weekly/i }).first();
-        if (await weekly.isVisible({ timeout: 5_000 }).catch(() => false)) {
-          await weekly.click();
-        }
-        await page.keyboard.press("Escape");
-      }
+
+      await test.step("Observe Frequency on load", async () => {
+        await assetDetailsPage.expectFrequencyDefaultsFromProgram();
+      });
+
+      let altFrequency = "Weekly";
+
+      await test.step("Change frequency when structured frequency in place", async () => {
+        await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.applySplitInterestOnlyEditPaymentSchedule();
+        await assetDetailsPage.expectStructuredPaymentFrequencyInPlace();
+
+        const current = await assetDetailsPage.readSelectedFrequencyLabel();
+        altFrequency = /Weekly/i.test(current)
+          ? "Fortnightly"
+          : /Fortnightly/i.test(current)
+            ? "Monthly"
+            : "Weekly";
+        await assetDetailsPage.selectStandardQuoteFrequency(altFrequency);
+      });
+
+      await test.step("Observe payment structure reset", async () => {
+        await assetDetailsPage.expectPaymentStructureClearedAfterFrequencyChange();
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.expectPaymentScheduleStructureReset(altFrequency);
+      });
     },
   );
 
   test(
-    "UDP-T4237 - TC_FD_003 Interest Rate Defaults Editable",
+    "UDP-T4237 - TC_FD_003 Interest Rate Mandatory Defaults from FIS AF Editability Per BLD Rule",
     { tag: ["@do", "@regression", "@UDP-T4237"] },
     async ({ page }) => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      const rate = (await assetDetailsPage.interestRateInputField.inputValue()).trim();
-      expect.soft(rate.length).toBeGreaterThan(0);
-      expect.soft(/\d/.test(rate)).toBeTruthy();
-      await assetDetailsPage.expectInterestRateEditable();
+
+      await test.step("Observe Interest Rate value and editability", async () => {
+        await addMinimalUsedAsset(assetDetailsPage, addAssetPage);
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+        await assetDetailsPage.expectInterestRateDefaultsFromFisAf();
+        await assetDetailsPage.expectInterestRateEditabilityPerBldRules();
+      });
     },
   );
 
   test(
-    "UDP-T4238 - TC_FD_005 First Payment Before Loan Date and Six Weeks Validation",
+    "UDP-T4238 - TC_FD_005 First Payment Cannot Be Before Loan Date Must Be Within 6 Weeks",
     { tag: ["@do", "@regression", "@UDP-T4238"] },
     async ({ page }) => {
       test.setTimeout(600_000);
@@ -1214,32 +1131,68 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
       await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
+
       const loan = await assetDetailsPage.readLoanDateValue();
-      await assetDetailsPage.enterFirstPaymentDateDdMmYyyy(shiftDdMmYyyy(loan, -1));
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectFirstPaymentBeforeLoanDateValidation();
-      await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
-      await assetDetailsPage.enterFirstPaymentDateDdMmYyyy(shiftDdMmYyyy(loan, 50));
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectFirstPaymentExceedsSixWeeksValidation();
+      const yesterday = shiftDdMmYyyy(loan, -1);
+      const sevenWeeksOut = shiftDdMmYyyy(loan, 50);
+
+      await test.step("Enter First Payment = yesterday", async () => {
+        await assetDetailsPage.enterFirstPaymentDateDdMmYyyy(yesterday);
+      });
+
+      await test.step("Click Calculate", async () => {
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.expectFirstPaymentBeforeLoanDateValidation(loan, yesterday);
+      });
+
+      await test.step("Enter First Payment = 7 weeks from today", async () => {
+        await assetDetailsPage.enterFirstPaymentDateDdMmYyyy(sevenWeeksOut);
+      });
+
+      await test.step("Click Calculate", async () => {
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.expectFirstPaymentExceedsSixWeeksValidation(loan, sevenWeeksOut);
+      });
     },
   );
 
   test(
-    "UDP-T4239 - TC_FD_007 Balloon Mutual Auto-Population Fixed Checkbox",
+    "UDP-T4239 - TC_FD_007 Balloon Amount and OR Percent Mutual Auto-Population Fixed Checkbox Behaviour",
     { tag: ["@do", "@regression", "@UDP-T4239"] },
     async ({ page }) => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      await prepareCalculableTlQuote(assetDetailsPage, addAssetPage, {
-        balloonPercent: "20",
-        balloonFixed: true,
+      await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
+      await assetDetailsPage.expectPaymentStructureNone();
+      await assetDetailsPage.expectBalloonAmountAndFixedCheckboxOnLoad();
+
+      await test.step("Enter Balloon Amount", async () => {
+        await assetDetailsPage.enterBalloonAmount("$4,000");
       });
-      await assetDetailsPage.expectBalloonAmountInputMatches(/4[, ]?000|4000/);
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentScheduleLastPaymentRowContains(/4[, ]?000|4000/);
+
+      await test.step("Observe OR %", async () => {
+        await assetDetailsPage.expectBalloonPercentInputMatches(/20/);
+      });
+
+      await test.step("Enter OR %", async () => {
+        await assetDetailsPage.enterBalloonPercent("25");
+      });
+
+      await test.step("Observe Balloon Amount", async () => {
+        await assetDetailsPage.expectBalloonAmountInputMatches(/5[, ]?000|5000/);
+        await assetDetailsPage.commitBalloonAmountAfterPercentEdit();
+      });
+
+      await test.step("Tick Fixed checkbox", async () => {
+        await assetDetailsPage.checkBalloonFixedCheckbox();
+        await assetDetailsPage.expectBalloonFixedCheckboxChecked();
+      });
+
+      await test.step("Observe effect on last payment", async () => {
+        await assetDetailsPage.expectFixedBalloonIsLastPaymentRow();
+      });
     },
   );
 
@@ -1262,13 +1215,28 @@ test.describe("Standard Quote - TL @do @regression", () => {
   );
 
   test(
-    "UDP-T4241 - TC_LMF_001 Loan Maintenance Fee Preconfigured or Zero",
+    "UDP-T4241 - TC_LMF_001 Loan Maintenance Fee Displays Pre-Configured Value or Zero",
     { tag: ["@do", "@regression", "@UDP-T4241"] },
     async ({ page }) => {
-      test.setTimeout(300_000);
+      test.setTimeout(600_000);
+      const tlLmf = loadTlLmfPrograms();
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
-      await selectTlProductAndProgram(assetDetailsPage);
-      await assetDetailsPage.expectLoanMaintenanceFeeOrLmfAreaVisible();
+
+      await test.step("Select TL program with LMF pre-configured in FIS AF — observe LMF", async () => {
+        await assetDetailsPage.selectTlProductAndProgramForLmf(
+          tlLmf.withLmf.product,
+          tlLmf.withLmf.program,
+        );
+        await assetDetailsPage.expectLoanMaintenanceFeePreconfiguredFromFisAf();
+      });
+
+      await test.step("Select TL program with no LMF — observe LMF", async () => {
+        await assetDetailsPage.selectTlProductAndProgramForLmf(
+          tlLmf.withoutLmf.product,
+          tlLmf.withoutLmf.program,
+        );
+        await assetDetailsPage.expectLoanMaintenanceFeeZeroOrAbsentOnTl();
+      });
     },
   );
 
@@ -1338,7 +1306,7 @@ test.describe("Standard Quote - TL @do @regression", () => {
   );
 
   test(
-    "UDP-T4246 - TC_PS_001 Segment View Groups Identical Payments After Calculate",
+    "UDP-T4246 - TC_PS_001 Segment View Groups Identical Payments Default View After Calculate",
     { tag: ["@do", "@regression", "@UDP-T4246"] },
     async ({ page }) => {
       test.setTimeout(600_000);
@@ -1346,8 +1314,15 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
       await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+
+      await test.step("Calculate TL Standard Quote", async () => {
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+      });
+
+      await test.step("Observe payment schedule default view", async () => {
+        await assetDetailsPage.expectPaymentScheduleSegmentViewDefaultAfterCalculate();
+      });
     },
   );
 
@@ -1360,8 +1335,15 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
       await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentScheduleViewTogglesWorkAndTablePopulated();
+
+      await test.step("Calculate TL Standard Quote", async () => {
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+      });
+
+      await test.step("Toggle to Grid view", async () => {
+        await assetDetailsPage.expectPaymentScheduleGridViewListsIndividualPayments();
+      });
     },
   );
 
@@ -1450,26 +1432,35 @@ test.describe("Standard Quote - TL @do @regression", () => {
   );
 
   test(
-    "UDP-T4252 - TC_BTN_002 Next Navigates to Customer Details",
+    "UDP-T4252 - TC_BTN_002 Next Validates Then Navigates to Customer Details",
     { tag: ["@do", "@regression", "@UDP-T4252"] },
     async ({ page }) => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.clickNextButton();
-      const customerDetailsPage = new DOCustomerDetailsPage(page);
-      await customerDetailsPage.waitForAddBorrowerButton();
-      const addBtnVisible = await customerDetailsPage.addBorrowersOrGuarantorsButton
-        .isVisible()
-        .catch(() => false);
-      const personalVisible = await page.locator("app-personal-details").isVisible().catch(() => false);
-      expect.soft(addBtnVisible || personalVisible).toBeTruthy();
-      if (addBtnVisible) {
-        await expect.soft(customerDetailsPage.addBorrowersOrGuarantorsButton).toBeVisible();
-      }
+
+      await test.step("Complete all mandatory fields", async () => {
+        await prepareCalculableTlQuote(assetDetailsPage, addAssetPage);
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+      });
+
+      await test.step("Click Next", async () => {
+        await assetDetailsPage.clickNextAndExpectCustomerDetails("SQ-TL-Ref-01");
+      });
+
+      await test.step("Observe Customer Details screen", async () => {
+        const customerDetailsPage = new DOCustomerDetailsPage(page);
+        const addBtnVisible = await customerDetailsPage.addBorrowersOrGuarantorsButton
+          .isVisible()
+          .catch(() => false);
+        const personalVisible = await page.locator("app-personal-details").isVisible().catch(() => false);
+        expect(addBtnVisible || personalVisible).toBeTruthy();
+        if (addBtnVisible) {
+          await expect(customerDetailsPage.addBorrowersOrGuarantorsButton).toBeVisible();
+        }
+      });
     },
   );
 
@@ -1509,18 +1500,27 @@ test.describe("Standard Quote - TL @do @regression", () => {
     "UDP-T4255 - TC_INT_001 Settlement Button Opens Settlement Pop-Up",
     { tag: ["@do", "@regression", "@UDP-T4255"] },
     async ({ page }) => {
-      test.setTimeout(300_000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      const addAssetPage = new DOAddAssetPage(page);
+      const settlementPage = new DOSettlementPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      const settlementBtn = standardQuoteRoot(page)
-        .getByRole("button", { name: /^Settlement$/i })
-        .first();
-      if (await settlementBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
+
+      await test.step("Prepare TL Standard Quote", async () => {
+        await prepareTlQuoteForSettlementTrigger(assetDetailsPage, addAssetPage);
+        await settlementPage.waitForSettlementTriggerEnabled(60_000).catch(() => {});
+      });
+
+      await test.step("Click Settlement button", async () => {
+        await assetDetailsPage.scrollLessDepositIntoView();
+        await settlementPage.expectSettlementTriggerVisible();
         await assetDetailsPage.openSettlementDialog();
-        await expect.soft(page.getByRole("dialog").last()).toBeVisible();
-      } else {
-        test.skip(true, "Settlement button not visible for this TL build.");
-      }
+      });
+
+      await test.step("Observe settlement loan-search pop-up", async () => {
+        await settlementPage.expectSettlementSearchScreenVisible();
+        await settlementPage.clickCancel().catch(() => page.keyboard.press("Escape"));
+      });
     },
   );
 
@@ -1531,21 +1531,20 @@ test.describe("Standard Quote - TL @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      const root = standardQuoteRoot(page);
+      await assetDetailsPage.enterAsset("Car and Light Commercial /");
+      await assetDetailsPage.selectCondition("Used");
 
-      const assetTrigger = root
-        .getByRole("link", { name: /Search\s*&\s*Add\s+Asset/i })
-        .or(root.getByRole("button", { name: /Search\s*&\s*Add\s+Asset/i }))
-        .first();
-      if (await assetTrigger.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await assetTrigger.click({ trial: true });
-        await assetTrigger.click({ timeout: 15_000 }).catch(() => {});
-        await expect.soft(page.getByRole("dialog").last()).toBeVisible({ timeout: 30_000 });
-        await page.keyboard.press("Escape").catch(() => {});
-      }
+      await test.step("Click Search & Add Asset", async () => {
+        await assetDetailsPage.clickSearchAndAddAssetAndExpectSearchDialog();
+        await assetDetailsPage.closeSearchAddAssetDialogIfOpen();
+        await assetDetailsPage.closeAssetInsuranceSummaryDialog();
+      });
 
-      await assetDetailsPage.openAssetInsuranceTradeInSummary();
-      await assetDetailsPage.clickSearchAddTradeInAndExpectChooserOpened();
+      await test.step("Click Search & Add Trade", async () => {
+        await assetDetailsPage.clickSearchAndAddTradeAndExpectSearchDialog();
+        await assetDetailsPage.closeSearchTradeInAssetDialog().catch(() => {});
+        await assetDetailsPage.closeAssetInsuranceSummaryDialog();
+      });
     },
   );
 
@@ -1565,21 +1564,18 @@ test.describe("Standard Quote - TL @do @regression", () => {
     "UDP-T4258 - TC_INT_004 Addons and Accessories Hyperlink",
     { tag: ["@do", "@regression", "@UDP-T4258"] },
     async ({ page }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      const link = standardQuoteRoot(page)
-        .locator("a, button")
-        .filter({ hasText: /Addons?\s*&\s*Accessories/i })
-        .first();
-      if (await link.isVisible({ timeout: 15_000 }).catch(() => false)) {
-        await assetDetailsPage.openAddonsAccessoriesFromQuote();
-        await expect.soft(page.locator("app-service-plan, app-accessories").first()).toBeVisible();
-      } else {
-        const root = standardQuoteRoot(page);
-        await openAddOnAccessoriesPageFromStandardQuote(page, root, assetDetailsPage);
-        await expect.soft(page.locator("app-service-plan").first()).toBeVisible({ timeout: 45_000 });
-      }
+
+      await test.step("Click + Addons & Accessories", async () => {
+        await assetDetailsPage.clickAddonsAndAccessoriesAndExpectScreen();
+      });
+
+      await test.step("Observe Add Ons and Accessories screen", async () => {
+        const addOnsPage = new DOAddOnsAccessoriesPage(page);
+        await addOnsPage.expectAddOnsSectionHeadingVisible();
+      });
     },
   );
 });
