@@ -1113,7 +1113,7 @@ test.describe("Standard Quote - OL @do @regression", () => {
       await assetDetailsPage.openEditPaymentScheduleDialog();
       const term = await assetDetailsPage.getEditPaymentScheduleFinanceTermMonths();
       await assetDetailsPage.enterEditPaymentScheduleSegmentNumber(String(term + 10));
-      await assetDetailsPage.clickEditPaymentScheduleCalculate();
+      await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
       await assetDetailsPage.expectEditPaymentScheduleSegmentExceedsTermMessage();
     },
   );

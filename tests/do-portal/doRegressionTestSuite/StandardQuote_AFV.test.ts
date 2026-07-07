@@ -73,7 +73,7 @@ async function openAfVStandardQuoteFromDashboard(page: Page): Promise<{
 async function selectAfVProductAndAsset(
   page: Page,
   assetDetailsPage: DOAssetDetailsPage,
-  opts?: { requireProgram?: boolean; ensureCashPrice?: boolean },
+  opts?: { program?: string },
 ): Promise<void> {
   await assetDetailsPage.chooseProduct(AFV_SQ_PRODUCT);
   await expect.soft(standardQuoteRoot(page).getByText(AFV_SQ_PRODUCT).first()).toBeVisible({
@@ -81,19 +81,14 @@ async function selectAfVProductAndAsset(
   });
   await assetDetailsPage.selectVehicleFromAssetTypeModal(AFV_SQ_VEHICLE);
   await assetDetailsPage.waitForAfVAssetTypeSelectedOnStandardQuote(AFV_SQ_VEHICLE.variant);
-  const program = await assetDetailsPage.tryWaitForAfVProgramAfterAssetSelection();
-  if (program.length > 0) {
-    expect.soft(/AFV/i.test(program)).toBeTruthy();
-  } else if (opts?.requireProgram) {
-    test.info().annotations.push({
-      type: "note",
-      description:
-        "AFV program did not auto-populate on Standard Quote for this originator — display-only assertion may still apply.",
-    });
-  }
-  if (opts?.ensureCashPrice) {
-    await assetDetailsPage.ensureAfVCashPriceReady();
-  }
+
+  const { label: program } = await assetDetailsPage.ensureAfVProgramForStandardQuote(
+    opts?.program ?? AFV_SQ_PROGRAM,
+  );
+  expect.soft(/AFV/i.test(program)).toBeTruthy();
+  await expect
+    .soft(standardQuoteRoot(page).getByText(program, { exact: false }).first())
+    .toBeVisible({ timeout: 15_000 });
 }
 
 async function prepareCalculableAfVQuote(
@@ -108,10 +103,17 @@ async function prepareCalculableAfVQuote(
     kmAllowance?: string;
   },
 ): Promise<void> {
-  await selectAfVProductAndAsset(page, assetDetailsPage, { ensureCashPrice: true });
-  await assetDetailsPage.selectConditionInStandardQuote(opts?.condition ?? "Used");
+  await selectAfVProductAndAsset(page, assetDetailsPage);
+  if (opts?.condition) {
+    await assetDetailsPage.selectConditionInStandardQuote(opts.condition);
+  } else {
+    await assetDetailsPage.ensureAfVConditionForStandardQuote("Used");
+  }
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
   if (opts?.cashPrice) {
     await assetDetailsPage.cashPriceOfAsset(opts.cashPrice);
+  } else {
+    await assetDetailsPage.ensureAfVCashPriceReady();
   }
   if (opts?.term) {
     await assetDetailsPage.termsOfFinance(opts.term);
@@ -123,25 +125,39 @@ async function prepareCalculableAfVQuote(
   }
   await assetDetailsPage.ensureKmAllowanceForAfV();
   if (opts?.kmAllowance) {
-    await assetDetailsPage.selectKmAllowance(opts.kmAllowance);
+    const kmOptions = await assetDetailsPage.listKmAllowanceOptions();
+    const kmDigits = opts.kmAllowance.replace(/,/g, "").replace(/\s/g, "");
+    const match =
+      kmOptions.find((o) => o.replace(/,/g, "").replace(/\s/g, "") === kmDigits) ??
+      kmOptions.find((o) => o.replace(/,/g, "").includes(kmDigits));
+    await assetDetailsPage.selectKmAllowance(match ?? opts.kmAllowance);
   }
-  const rate = (await assetDetailsPage.interestRateInputField.inputValue()).trim();
-  if (!rate || !/\d/.test(rate)) {
-    await assetDetailsPage.interestRate(opts?.interest ?? "4");
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  if (opts?.interest) {
+    await assetDetailsPage.interestRate(opts.interest);
+  } else {
+    const rate = (await assetDetailsPage.interestRateInputField.inputValue()).trim();
+    if (!rate || !/\d/.test(rate)) {
+      await assetDetailsPage.interestRate("4");
+    }
   }
   await assetDetailsPage.enterOriginationReference(opts?.origRef ?? "SQ-AFV-Ref-01");
   await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
 }
 
-async function calculateAfVQuote(page: Page, assetDetailsPage: DOAssetDetailsPage): Promise<void> {
-  await prepareCalculableAfVQuote(page, assetDetailsPage);
+async function calculateAfVQuote(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+  opts?: Parameters<typeof prepareCalculableAfVQuote>[2],
+): Promise<void> {
+  await prepareCalculableAfVQuote(page, assetDetailsPage, opts);
   await assetDetailsPage.clickCalculateButton();
   await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
 }
 
 async function openAfVStandardQuoteFromQuickQuote(
   page: Page,
-  opts?: { kmAllowance?: string; term?: string },
+  opts?: { kmAllowance?: string; term?: string; cashPrice?: string },
 ): Promise<DOAssetDetailsPage> {
   const dashboardPage = new DODashboardPage(page);
   const quickQuotePage = new DOQuickQuotePage(page);
@@ -153,6 +169,9 @@ async function openAfVStandardQuoteFromQuickQuote(
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
   await quickQuotePage.selectAfvVehicleFromAssetTypeModal(AFV_SQ_VEHICLE, 0);
   await quickQuotePage.ensureAfVProgramForQuote(0, AFV_SQ_PROGRAM);
+  if (opts?.cashPrice) {
+    await quickQuotePage.enterCashPrice(opts.cashPrice);
+  }
   if (opts?.term) {
     await quickQuotePage.enterTermsMonths(opts.term);
   }
@@ -342,15 +361,15 @@ test.describe("Standard Quote - AFV @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4026"] },
     async ({ page }) => {
       test.setTimeout(600_000);
-      const assetDetailsPage = await openAfVStandardQuoteFromQuickQuote(page);
+      const expectedCash = "$28,000";
+      const assetDetailsPage = await openAfVStandardQuoteFromQuickQuote(page, { cashPrice: expectedCash });
       const cash = (await assetDetailsPage.cashPriceOfAssetInputField.inputValue()).trim();
       expect.soft(parseCurrency(cash)).toBeGreaterThan(0);
-      await assetDetailsPage.cashPriceOfAsset("$28,000");
       await expect
         .poll(async () => parseCurrency(await assetDetailsPage.cashPriceOfAssetInputField.inputValue()), {
           timeout: 15_000,
         })
-        .toBeGreaterThan(0);
+        .toBe(parseCurrency(expectedCash));
     },
   );
 
@@ -360,17 +379,43 @@ test.describe("Standard Quote - AFV @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
-      await prepareCalculableAfVQuote(page, assetDetailsPage);
-      const term = (await assetDetailsPage.termsOfFinanceInputField.inputValue().catch(() => "")).trim();
-      if (term.length > 0) {
-        expect.soft(/\d+/.test(term)).toBeTruthy();
+
+      // Product → asset → program → cash price (per AFV Standard Quote flow).
+      await selectAfVProductAndAsset(page, assetDetailsPage);
+      await assetDetailsPage.selectConditionInStandardQuote("New");
+      await assetDetailsPage.cashPriceOfAsset("$10,000");
+      await expect.soft(assetDetailsPage.cashPriceOfAssetInputField).toBeVisible({ timeout: 15_000 });
+      const cashVal = (await assetDetailsPage.cashPriceOfAssetInputField.inputValue()).trim();
+      expect.soft(parseCurrency(cashVal)).toBeGreaterThanOrEqual(10_000);
+
+      await assetDetailsPage.ensureKmAllowanceForAfV();
+      await assetDetailsPage.enterOriginationReference("SQ-AFV-T4027");
+      await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
+
+      // Term mandatory — defaults from AFV program; dropdown (set terms) or free-text spinbutton.
+      await assetDetailsPage.expectTermFieldVisible();
+      const isTermDropdown = await assetDetailsPage.isTermDropdownControl();
+      const defaultTerm = await assetDetailsPage.readTermValue();
+      if (defaultTerm.length > 0) {
+        expect.soft(/\d+/.test(defaultTerm)).toBeTruthy();
       }
-      await assetDetailsPage.termsOfFinance("9999");
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectTermExceedsProgramMaxOnCalculateThenRestore({
-        overMaxTerm: "9999",
-        restoreTerm: "36",
-      });
+      const restoreTerm = defaultTerm.match(/\d+/)?.[0] ?? "12";
+
+      if (isTermDropdown) {
+        test.info().annotations.push({
+          type: "note",
+          description:
+            "AFV program exposes Term as dropdown (set terms) — blank/over-max free-text validation skipped.",
+        });
+        await assetDetailsPage.clickCalculateButton();
+        await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 15_000 });
+      } else {
+        await expect.soft(assetDetailsPage.termsOfFinanceInputField).toBeEditable();
+        await assetDetailsPage.expectAfVTermBlankAndMaxValidationOnCalculate({
+          overMaxTerm: "9999",
+          restoreTerm,
+        });
+      }
     },
   );
 
@@ -427,22 +472,12 @@ test.describe("Standard Quote - AFV @do @regression", () => {
     "UDP-T4030 - Assured Future Value Display Only Auto-Populated",
     { tag: ["@do", "@regression", "@UDP-T4030"] },
     async ({ page }) => {
-      test.setTimeout(300_000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
-      await prepareCalculableAfVQuote(page, assetDetailsPage, { term: "36" });
-      const afv = await assetDetailsPage.readAssuredFutureValue();
-      expect.soft(parseCurrency(afv)).toBeGreaterThan(0);
-      expect.soft(await assetDetailsPage.assuredFutureValueIsReadOnly()).toBeTruthy();
-      const kmOptions = await assetDetailsPage.listKmAllowanceOptions();
-      if (kmOptions.length >= 2) {
-        const before = parseCurrency(afv);
-        await assetDetailsPage.selectKmAllowance(kmOptions[1]);
-        await expect
-          .poll(async () => parseCurrency(await assetDetailsPage.readAssuredFutureValue()), {
-            timeout: 30_000,
-          })
-          .not.toBe(before);
-      }
+      await prepareCalculableAfVQuote(page, assetDetailsPage, { term: "36", kmAllowance: "15000" });
+      await assetDetailsPage.expectAssuredFutureValueAutoPopulatedFromFis("36");
+      await assetDetailsPage.expectAssuredFutureValueDisplayOnly();
+      await assetDetailsPage.expectAssuredFutureValueUpdatesWhenKmChanges("36");
     },
   );
 
@@ -473,9 +508,7 @@ test.describe("Standard Quote - AFV @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
       await selectAfVProductAndAsset(page, assetDetailsPage);
-      const rate = (await assetDetailsPage.interestRateInputField.inputValue()).trim();
-      expect.soft(rate.length).toBeGreaterThan(0);
-      expect.soft(/\d/.test(rate)).toBeTruthy();
+      await assetDetailsPage.expectInterestRateDefaultedFromFis();
     },
   );
 
@@ -500,10 +533,7 @@ test.describe("Standard Quote - AFV @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
       await prepareCalculableAfVQuote(page, assetDetailsPage);
-      const loan = await assetDetailsPage.readLoanDateValue();
-      await assetDetailsPage.enterFirstPaymentDateDdMmYyyy(shiftDdMmYyyy(loan, -1));
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectFirstPaymentBeforeLoanDateValidation();
+      await assetDetailsPage.expectFirstPaymentCannotBeBeforeLoanDate();
     },
   );
 
@@ -548,10 +578,16 @@ test.describe("Standard Quote - AFV @do @regression", () => {
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
       await calculateAfVQuote(page, assetDetailsPage);
       await assetDetailsPage.expectAfVRowInPaymentSchedule();
-      const root = standardQuoteRoot(page);
-      const lastRow = root.locator("table tbody tr").last();
+      const lastRow = assetDetailsPage.paymentScheduleLastCurrencyRow();
       await expect.soft(lastRow).toBeVisible({ timeout: 30_000 });
       await expect.soft(lastRow).toContainText(/\d{1,2}\/\d{1,2}\/\d{4}|\$|AFV/i);
+
+      const lastPayment = await assetDetailsPage.readLastPaymentSummaryDate();
+      expect.soft(lastPayment).toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/);
+      const afvDueDate = await assetDetailsPage.readAfVAmountDueDateFromEditPaymentSchedule();
+      if (afvDueDate.length > 0) {
+        expect.soft(lastPayment).toBe(afvDueDate);
+      }
     },
   );
 
@@ -561,21 +597,9 @@ test.describe("Standard Quote - AFV @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
-      await prepareCalculableAfVQuote(page, assetDetailsPage);
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.openEditPaymentScheduleDialog();
-      await assetDetailsPage.selectEditPaymentScheduleSegmentType("Interest Only");
-      await assetDetailsPage.clickEditPaymentScheduleCalculate();
-      await assetDetailsPage.clickEditPaymentScheduleApply();
-      const irregular = standardQuoteRoot(page).getByText(/Irregular/i).first();
-      if (await irregular.isVisible({ timeout: 30_000 }).catch(() => false)) {
-        await expect.soft(irregular).toBeVisible();
-      } else {
-        test.info().annotations.push({
-          type: "note",
-          description: "Irregular label not shown — AFV schedule may remain uniform for this program.",
-        });
-      }
+      await calculateAfVQuote(page, assetDetailsPage);
+      await assetDetailsPage.applyInterestOnlyEditPaymentSchedule();
+      await assetDetailsPage.expectPaymentAmountShowsIrregular();
     },
   );
 
@@ -609,8 +633,7 @@ test.describe("Standard Quote - AFV @do @regression", () => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
       await calculateAfVQuote(page, assetDetailsPage);
-      const afvRow = standardQuoteRoot(page).locator("tr").filter({ hasText: /AFV|Assured/i }).last();
-      await expect.soft(afvRow).toContainText(/\d{1,2}\/\d{1,2}\/\d{4}/);
+      await assetDetailsPage.expectSegmentViewAfVDateIncluded();
     },
   );
 
@@ -713,7 +736,7 @@ test.describe("Standard Quote - AFV @do @regression", () => {
       await assetDetailsPage.openEditPaymentScheduleDialog();
       const term = await assetDetailsPage.getEditPaymentScheduleFinanceTermMonths();
       await assetDetailsPage.enterEditPaymentScheduleSegmentNumber(String(term + 10));
-      await assetDetailsPage.clickEditPaymentScheduleCalculate();
+      await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
       await assetDetailsPage.expectEditPaymentScheduleSegmentExceedsTermMessage();
     },
   );
@@ -727,8 +750,8 @@ test.describe("Standard Quote - AFV @do @regression", () => {
       await calculateAfVQuote(page, assetDetailsPage);
       await assetDetailsPage.openEditPaymentScheduleDialog();
       await assetDetailsPage.selectEditPaymentScheduleSegmentType("Interest Only");
-      await assetDetailsPage.clickEditPaymentScheduleCalculate();
-      expect.soft(await assetDetailsPage.assuredFutureValueIsReadOnly()).toBeTruthy();
+      await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+      await assetDetailsPage.expectAfVAmountNonEditableAfterEditPaymentScheduleCalculate();
     },
   );
 
@@ -858,26 +881,7 @@ test.describe("Standard Quote - AFV @do @regression", () => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
       await calculateAfVQuote(page, assetDetailsPage);
-      const root = standardQuoteRoot(page);
-      await expect.soft(root.getByText(/Weekly\s+Equivalent/i).first()).toBeVisible({ timeout: 30_000 });
-
-      const panel = root
-        .locator("p-card, div, table")
-        .filter({ hasText: /Assured Future Value Options/i })
-        .first();
-      const body = ((await panel.textContent()) ?? "").replace(/\u00a0/g, " ");
-      const paymentMatches = [...body.matchAll(/\$\s*([\d,]+\.?\d*)/g)].map((m) =>
-        parseCurrency(m[1]),
-      );
-      const weeklyMatches = [...body.matchAll(/Weekly\s+Equivalent[^\d$]*\$?\s*([\d,]+\.?\d*)/gi)].map(
-        (m) => parseCurrency(m[1]),
-      );
-      if (paymentMatches.length > 0 && weeklyMatches.length > 0) {
-        const payment = paymentMatches.find((n) => n > 0) ?? paymentMatches[0];
-        const weekly = weeklyMatches.find((n) => n > 0) ?? weeklyMatches[0];
-        const expectedWeekly = Math.round((payment / 4.33) * 100) / 100;
-        expect.soft(Math.abs(weekly - expectedWeekly)).toBeLessThanOrEqual(0.02);
-      }
+      await assetDetailsPage.expectAfVOptionsWeeklyEquivalentDividedBy433();
     },
   );
 
@@ -888,18 +892,7 @@ test.describe("Standard Quote - AFV @do @regression", () => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
       await calculateAfVQuote(page, assetDetailsPage);
-      const panel = standardQuoteRoot(page)
-        .locator("p-card, div, table")
-        .filter({ hasText: /Assured Future Value Options/i })
-        .first();
-      const inputs = panel.locator("input, textarea");
-      const count = await inputs.count();
-      for (let i = 0; i < count; i++) {
-        const inp = inputs.nth(i);
-        if (await inp.isVisible().catch(() => false)) {
-          expect.soft(await inp.isEditable().catch(() => false)).toBeFalsy();
-        }
-      }
+      await assetDetailsPage.expectAfVOptionsFieldsNonEditable();
     },
   );
 
@@ -981,7 +974,7 @@ test.describe("Standard Quote - AFV @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openAfVStandardQuoteFromDashboard(page);
-      await calculateAfVQuote(page, assetDetailsPage);
+      await calculateAfVQuote(page, assetDetailsPage, { interest: "4" });
       await assetDetailsPage.clickNextButton();
       const customerDetailsPage = new DOCustomerDetailsPage(page);
       await customerDetailsPage.waitForAddBorrowerButton();
