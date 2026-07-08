@@ -7035,7 +7035,6 @@ export class DOAssetDetailsPage extends BasePage {
     expect.soft(editable || disabled).toBeTruthy();
   }
 
-  async expectFirstPaymentExceedsSixWeeksValidation(): Promise<void> {
   async expectFirstPaymentExceedsSixWeeksValidation(
     loanDate?: string,
     attemptedDate?: string,
@@ -8241,12 +8240,6 @@ export class DOAssetDetailsPage extends BasePage {
         intervals: [500, 1_000, 1_500, 2_000],
       })
       .toBe(expected);
-  /** **Charges** label block on OL lease (e.g. Charges (GST Exclusive/Inclusive)). */
-  chargesFieldBlock(): Locator {
-    return this.standardQuoteRoot()
-      .locator(".p-field, [class*='p-field'], amount, .grid")
-      .filter({ has: this.standardQuoteRoot().getByText(/^Charges\b/i) })
-      .first();
   }
 
   addMaintenanceAndChargesButton(): Locator {
@@ -9017,10 +9010,6 @@ export class DOAssetDetailsPage extends BasePage {
     } else {
       await expect.soft(editBtn).toBeHidden({ timeout: 5_000 });
     }
-  }
-
-  async readFirstPaymentDateValue(): Promise<string> {
-    return (await this.firstPaymentDate.inputValue().catch(() => "")).trim();
   }
 
   async expectFirstPaymentMatchesLeaseDate(): Promise<void> {
