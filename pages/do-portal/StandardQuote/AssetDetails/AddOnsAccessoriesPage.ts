@@ -424,23 +424,135 @@ export class DOAddOnsAccessoriesPage extends BasePage {
     await this.fillCurrencyLikeInput(this.registrationAmountInput(), amount, "registration");
   }
 
+  /** **Service Plan** row — not used by UDP-T4221; kept for other flows. */
+  private servicePlanAmountInput(): Locator {
+    const panel = this.registrationServicePanel();
+    return panel
+      .getByText(/^Service Plan$/i)
+      .first()
+      .locator(
+        "xpath=following::input[(@type='text' or not(@type)) and (contains(@class,'p-input') or @pinputtext or @currencymask)][1]",
+      );
+  }
+
+  private async extendedWarrantyScope(): Promise<Locator> {
+    const scopes = [this.insuranceRoot(), this.page.locator("app-add-on-accessories").last(), this.page];
+    for (const scope of scopes) {
+      const label = scope.getByText(/Extended\s*Warranty/i).first();
+      if (!(await label.isVisible({ timeout: 3_000 }).catch(() => false))) {
+        continue;
+      }
+      await label.scrollIntoViewIfNeeded();
+      const form = label.locator("xpath=ancestor::form[1]");
+      if (await form.isVisible({ timeout: 1_500 }).catch(() => false)) {
+        return form;
+      }
+      const grid = label.locator("xpath=ancestor::div[contains(@class,'grid')][1]");
+      if (await grid.isVisible({ timeout: 1_500 }).catch(() => false)) {
+        return grid;
+      }
+      return label.locator("xpath=ancestor::div[contains(@class,'col')][1]");
+    }
+    return this.page.getByText(/Extended\s*Warranty/i).first();
+  }
+
+  async isInsuranceAddOnsAvailable(): Promise<boolean> {
+    await this.page.getByText(/^Insurance$/i).first().scrollIntoViewIfNeeded().catch(() => {});
+    await this.insuranceRoot().scrollIntoViewIfNeeded().catch(() => {});
+    const rootText = ((await this.insuranceRoot().textContent()) ?? "").replace(/\s+/g, " ");
+    if (/No data available/i.test(rootText)) {
+      return false;
+    }
+    return this.page.getByText(/Extended\s*Warranty/i).first().isVisible({ timeout: 5_000 }).catch(() => false);
+  }
+
   /**
-   * **General Accessories** — default line **Bull Bar** (`amount` + `currencymask` in that `div.m-0.col-4.grid` row).
-   * Falls back to the first form row if the label differs by locale.
+   * UDP-T4221 — fill **Extended Warranty** when Insurance is configured; skip when panel shows **No data available**.
+   * @returns `true` when insurance was entered.
+   */
+  async fillUdpT4221InsuranceIfAvailable(months: string, amount: string): Promise<boolean> {
+    if (!(await this.isInsuranceAddOnsAvailable())) {
+      this.logStep("Insurance not available on Add Ons — skipping Extended Warranty");
+      return false;
+    }
+    await this.fillExtendedWarrantyInsuranceForT4221(months, amount);
+    return true;
+  }
+
+  /**
+   * UDP-T4221 — **Extended Warranty** Months + Amount only (no Service Plan); bypasses {@link SKIP_INSURANCE_ADDONS_AUTOMATION}.
+   */
+  async fillExtendedWarrantyInsuranceForT4221(months: string, amount: string): Promise<void> {
+    this.logStep(
+      `UDP-T4221 Extended Warranty insurance: ${this.stepValueDisplay(months)} mo / ${this.stepValueDisplay(amount)}`,
+    );
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.page.getByText(/^Insurance$/i).first().scrollIntoViewIfNeeded().catch(() => {});
+    await this.insuranceRoot().scrollIntoViewIfNeeded().catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+
+    const scope = await this.extendedWarrantyScope();
+    await expect(scope).toBeVisible({ timeout: 30_000 });
+
+    const yesRadio = scope.locator("p-radiobutton").filter({ hasText: /^Yes$/i }).first();
+    const yesBox = yesRadio.locator("div.p-radiobutton-box").first();
+    if (await yesBox.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await yesBox.click({ timeout: 15_000 });
+    } else if (await yesRadio.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      await yesRadio.click({ timeout: 15_000 });
+    }
+
+    const monthInput = this.insuranceMonthsInput(scope);
+    await expect(monthInput).toBeVisible({ timeout: 20_000 });
+    await monthInput.click();
+    await monthInput.press("Control+a");
+    await monthInput.type(months, { delay: 50 });
+    await monthInput.press("Tab").catch(() => {});
+    await expect
+      .poll(async () => (await monthInput.inputValue()).replace(/\D/g, ""), {
+        timeout: 15_000,
+        intervals: [200, 400, 800],
+      })
+      .toContain(months.replace(/\D/g, ""));
+
+    const amtInput = this.insuranceAmountInput(scope);
+    await expect(amtInput).toBeVisible({ timeout: 20_000 });
+    await amtInput.click();
+    await amtInput.press("Control+a");
+    await amtInput.type(amount.replace(/[^0-9]/g, ""), { delay: 50 });
+    await amtInput.press("Tab").catch(() => {});
+    await expect
+      .poll(
+        async () => {
+          const raw = (await amtInput.inputValue()).replace(/[^0-9]/g, "");
+          const digits = amount.replace(/[^0-9]/g, "");
+          return raw.includes(digits) ? raw : null;
+        },
+        { timeout: 22_000, intervals: [200, 500, 1_000] },
+      )
+      .not.toBeNull();
+  }
+
+  /**
+   * **General Accessories** — **General Accessory** on TL; **Bull Bar** on MV dealer builds.
    */
   async fillGeneralAccessoriesAmount(amount: string): Promise<void> {
     this.logStep(`Fill General Accessories amount: ${this.stepValueDisplay(amount)}`);
     await this.accessoriesPanel().scrollIntoViewIfNeeded().catch(() => {});
+    const general = this.accessoryAmountInputByLineLabel("General Accessory");
     const bull = this.accessoryAmountInputByLineLabel("Bull Bar");
-    const input =
-      (await bull.count()) > 0 && (await bull.isVisible({ timeout: 2_000 }).catch(() => false))
-        ? bull
-        : this.accessoriesPanel()
-            .locator("form div.m-0.col-4.grid")
-            .filter({ visible: true })
-            .first()
-            .locator("amount input[currencymask], amount input.p-inputtext, input[currencymask]")
-            .first();
+    let input = general;
+    if (!(await general.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      input =
+        (await bull.isVisible({ timeout: 2_000 }).catch(() => false))
+          ? bull
+          : this.accessoriesPanel()
+              .locator("form div.m-0.col-4.grid")
+              .filter({ visible: true })
+              .first()
+              .locator("amount input[currencymask], amount input.p-inputtext, input[currencymask]")
+              .first();
+    }
     await this.fillCurrencyLikeInput(input, amount, "accessories");
   }
 
