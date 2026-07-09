@@ -9,6 +9,10 @@ export type DOEditPaymentScheduleSegmentSnapshot = {
 };
 
 export class DOAssetDetailsPage extends BasePage {
+  /** FL `Asset Summary` button and legacy OL/CSA summary labels. */
+  private static readonly ASSET_SUMMARY_BUTTON_NAME =
+    /Asset(?:\s+Summary|\s*(?:,\s*|\s*&\s*)Insurance(?:\s*&\s*Trade-?\s*in|\s*Summary)?)/i;
+
   readonly dialogBox: Locator;
   readonly originationRefInput: Locator;
   readonly assetInputField: Locator;
@@ -68,15 +72,10 @@ export class DOAssetDetailsPage extends BasePage {
     this.conditionDropdown = page.locator(
       `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[6]`,
     );
-    /** OL / FL / CSA-B: label varies (`Asset & Insurance Summary`, `Asset, Insurance & Trade-in`, etc.). */
+    /** OL / FL / CSA-B: label varies (`Asset Summary`, `Asset & Insurance Summary`, etc.). */
     const quoteHost = page.locator("app-quote-details, app-standard-quote").first();
-    const assetInsuranceSummaryName =
-      /Asset\s*(?:,\s*|\s*&\s*)Insurance(?:\s*&\s*Trade-?\s*in|\s*Summary)?/i;
-    this.assetInsuranceTradeInSummaryHyperlink = quoteHost
-      .getByRole("button", { name: assetInsuranceSummaryName })
-      .or(quoteHost.getByRole("link", { name: assetInsuranceSummaryName }))
-      .or(quoteHost.locator("button, a, [role='button']").filter({ hasText: assetInsuranceSummaryName }))
-      .first();
+    this.assetInsuranceTradeInSummaryHyperlink =
+      this.assetSummaryOpenTrigger(quoteHost);
     this.assetyEditButton = page.locator(".cursor-pointer.fa-pen-to-square");
     this.assetSummaryCancelButton = page.locator(
       "//timesicon//*[name()='svg']",
@@ -1247,6 +1246,42 @@ export class DOAssetDetailsPage extends BasePage {
     });
   }
 
+  /** Expanded **Dealer Finance** block (FL may omit Establishment Fee Share). */
+  dealerFinancePanel(): Locator {
+    return this.standardQuoteRoot()
+      .getByRole("region")
+      .filter({ hasText: /Base\s+Interest\s+Rate/i })
+      .filter({ hasText: /Estimated\s+Commission\s*\/\s*Subsidy/i })
+      .first();
+  }
+
+  async readBaseInterestRatePercent(): Promise<string> {
+    const panel = this.dealerFinancePanel();
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    const baseLabel = panel.getByText(/^Base\s+Interest\s+Rate$/i).first();
+    const value = baseLabel.locator("xpath=following-sibling::*[1]");
+    if (await value.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return ((await value.textContent()) ?? "").trim();
+    }
+    const panelText = (await panel.innerText()).replace(/\r\n/g, "\n");
+    const match = panelText.match(/Base\s+Interest\s+Rate[\s\S]{0,80}?(\d+(?:\.\d+)?\s*%)/i);
+    return match?.[1]?.trim() ?? "";
+  }
+
+  /** **Base Interest Rate** in Dealer Finance is read-only (contract API value). */
+  async expectBaseInterestRateDisplayOnly(): Promise<void> {
+    this.logStep("Expect Base Interest Rate display-only");
+    const panel = this.dealerFinancePanel();
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    const baseLabel = panel.getByText(/^Base\s+Interest\s+Rate$/i).first();
+    await expect(baseLabel).toBeVisible();
+    const value = baseLabel.locator("xpath=following-sibling::*[1]");
+    await expect(value).toBeVisible({ timeout: 10_000 });
+    await expect(value).toHaveText(/\d+(?:\.\d+)?\s*%/);
+    await expect(panel.getByRole("spinbutton")).toHaveCount(0);
+    await expect(panel.getByRole("textbox")).toHaveCount(0);
+  }
+
   /**
    * After **Dealer Finance** is expanded: labels and values in the expanded block.
    * **Base Interest Rate** % is scenario-specific (shape-only). Commission and establishment
@@ -1255,13 +1290,7 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async expectDealerFinanceExpandedSummary(): Promise<void> {
     this.logStep("Expect Dealer Finance Expanded Summary");
-    const root = this.standardQuoteRoot();
-    const panel = root
-      .getByRole("region")
-      .filter({ hasText: /Base\s+Interest\s+Rate/i })
-      .filter({ hasText: /Estimated\s+Commission\s*\/\s*Subsidy/i })
-      .filter({ hasText: /Establishment\s+Fee\s+Share/i })
-      .first();
+    const panel = this.dealerFinancePanel();
     await expect(panel).toBeVisible({ timeout: 15_000 });
 
     const baseLabel = panel.getByText(/Base\s+Interest\s+Rate/i).first();
@@ -1276,7 +1305,6 @@ export class DOAssetDetailsPage extends BasePage {
     await expect(
       panel.getByText(/Estimated\s+Commission\s*\/\s*Subsidy/i).first(),
     ).toBeVisible();
-    await expect(panel.getByText(/Establishment\s+Fee\s+Share/i).first()).toBeVisible();
 
     const panelText = (await panel.innerText()).replace(/\r\n/g, "\n");
     // Currency (e.g. $130.00, $0.00), negative lead (e.g. -$297.63), or placeholder dash.
@@ -1288,12 +1316,16 @@ export class DOAssetDetailsPage extends BasePage {
         "i",
       ).test(panelText),
     ).toBeTruthy();
-    expect(
-      new RegExp(
-        `Establishment\\s+Fee\\s+Share[\\s\\S]{0,300}?(?:${pricedOrDash.source})`,
-        "i",
-      ).test(panelText),
-    ).toBeTruthy();
+
+    const establishmentLabel = panel.getByText(/Establishment\s+Fee\s+Share/i).first();
+    if (await establishmentLabel.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      expect(
+        new RegExp(
+          `Establishment\\s+Fee\\s+Share[\\s\\S]{0,300}?(?:${pricedOrDash.source})`,
+          "i",
+        ).test(panelText),
+      ).toBeTruthy();
+    }
   }
 
   /** PPSR Count spinbutton in Loan Details (`div.col-4…` per SelectorHub), with row fallback. */
@@ -3315,9 +3347,22 @@ export class DOAssetDetailsPage extends BasePage {
     await this.recommendedRetailPriceInput.fill(value);
   }
 
+  private assetSummaryOpenTrigger(quoteHost: Locator): Locator {
+    const name = DOAssetDetailsPage.ASSET_SUMMARY_BUTTON_NAME;
+    return quoteHost
+      .getByRole("button", { name })
+      .or(quoteHost.getByRole("link", { name }))
+      .or(
+        quoteHost
+          .locator("gen-button, p-button, button, a, [role='button']")
+          .filter({ hasText: name }),
+      )
+      .first();
+  }
+
   /**
-   * Opens **Asset / Insurance / Trade-in** summary (label varies: `Asset & Insurance Summary`,
-   * `Asset, Insurance & Trade-in`, etc.; control may be `button` or `link`).
+   * Opens **Asset / Insurance / Trade-in** summary (label varies: `Asset Summary`,
+   * `Asset & Insurance Summary`, `Asset, Insurance & Trade-in`, etc.).
    */
   async openAssetInsuranceTradeInSummary(): Promise<void> {
     this.logStep("Open Asset Insurance Trade In Summary");
@@ -3325,17 +3370,11 @@ export class DOAssetDetailsPage extends BasePage {
     await quote.waitFor({ state: "visible", timeout: 60_000 });
     await quote.scrollIntoViewIfNeeded().catch(() => {});
 
-    const assetInsuranceSummaryName =
-      /Asset\s*(?:,\s*|\s*&\s*)Insurance(?:\s*&\s*Trade-?\s*in|\s*Summary)?/i;
     const primary = this.assetInsuranceTradeInSummaryHyperlink;
     try {
       await primary.waitFor({ state: "visible", timeout: 45_000 });
     } catch {
-      const fallback = quote
-        .getByRole("button", { name: assetInsuranceSummaryName })
-        .or(quote.getByRole("link", { name: assetInsuranceSummaryName }))
-        .or(quote.locator("button, a, [role='button']").filter({ hasText: assetInsuranceSummaryName }))
-        .first();
+      const fallback = this.assetSummaryOpenTrigger(quote);
       await fallback.waitFor({ state: "visible", timeout: 30_000 });
       await fallback.scrollIntoViewIfNeeded();
       await fallback.click({ timeout: 15_000 });
@@ -4210,8 +4249,48 @@ export class DOAssetDetailsPage extends BasePage {
     const dialog = this.editPaymentScheduleDialog();
     return dialog
       .locator("table")
-      .filter({ has: dialog.locator("th").filter({ hasText: /^Type$/i }) })
+      .filter({ has: dialog.getByRole("columnheader", { name: /^Number/i }) })
+      .filter({ has: dialog.getByRole("columnheader", { name: /^Type/i }) })
       .first();
+  }
+
+  private editPaymentScheduleSegmentRowAt(rowIndex: number): Locator {
+    return this.editPaymentScheduleSegmentTable().locator("tbody tr").nth(rowIndex);
+  }
+
+  private async editPaymentScheduleSegmentColumnIndex(
+    column: "date" | "number" | "type" | "amount",
+  ): Promise<number> {
+    const table = this.editPaymentScheduleSegmentTable();
+    const headers = await table.locator("thead th").allTextContents();
+    let hasDate = false;
+    for (let i = 0; i < headers.length; i++) {
+      const norm = headers[i].replace(/\s+/g, " ").replace(/\*/g, "").trim();
+      if (/^Date$/i.test(norm)) hasDate = true;
+      if (column === "date" && /^Date$/i.test(norm)) return i;
+      if (column === "number" && /^Number$/i.test(norm)) return i;
+      if (column === "type" && /^Type$/i.test(norm)) return i;
+      if (column === "amount" && /^Amount$/i.test(norm)) return i;
+    }
+    if (hasDate) {
+      return ({ date: 0, number: 1, type: 2, amount: 3 } as const)[column];
+    }
+    return ({ date: -1, number: 0, type: 1, amount: 2 } as const)[column];
+  }
+
+  private async editPaymentScheduleSegmentAmountCell(row: Locator): Promise<Locator> {
+    const amountIdx = await this.editPaymentScheduleSegmentColumnIndex("amount");
+    return row.locator("td").nth(amountIdx);
+  }
+
+  private async editPaymentScheduleSegmentTypeCell(row: Locator): Promise<Locator> {
+    const typeIdx = await this.editPaymentScheduleSegmentColumnIndex("type");
+    return row.locator("td").nth(typeIdx);
+  }
+
+  private async editPaymentScheduleSegmentNumberCell(row: Locator): Promise<Locator> {
+    const numberIdx = await this.editPaymentScheduleSegmentColumnIndex("number");
+    return row.locator("td").nth(numberIdx);
   }
 
   /** Log every visible **Edit Payment Schedule** table row for locator diagnosis (UDP-T3669). */
@@ -4398,7 +4477,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** First segment row inside **Edit Payment Schedule** table. */
   private editPaymentScheduleSegmentRow(): Locator {
-    return this.editPaymentScheduleDialog().locator("table tbody tr").first();
+    return this.editPaymentScheduleSegmentRowAt(0);
   }
 
   private editPaymentScheduleApplyButton(): Locator {
@@ -4428,8 +4507,18 @@ export class DOAssetDetailsPage extends BasePage {
     typeLabel: string,
   ): Promise<void> {
     this.logStep(`Select Edit Payment Schedule Segment Type ${typeLabel} on row ${rowIndex + 1}`);
-    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
-    const typeCombo = row.getByRole("combobox").first();
+    const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
+    const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
+    const typeCombo = typeCell.getByRole("combobox").first();
+    if (!(await typeCombo.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      const displayed = ((await typeCell.textContent()) ?? "").trim();
+      if (new RegExp(typeLabel, "i").test(displayed)) {
+        return;
+      }
+      throw new Error(
+        `Edit Payment Schedule type dropdown not found on row ${rowIndex + 1} (displayed: "${displayed}").`,
+      );
+    }
     await typeCombo.click({ timeout: 10_000 });
     const typePattern = new RegExp(
       `^${typeLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
@@ -4451,8 +4540,8 @@ export class DOAssetDetailsPage extends BasePage {
     amount: string,
   ): Promise<void> {
     this.logStep(`Enter Edit Payment Schedule Segment Amount ${amount} on row ${rowIndex + 1}`);
-    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
-    const amountCell = row.locator("td").nth(2);
+    const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
+    const amountCell = await this.editPaymentScheduleSegmentAmountCell(row);
 
     const parseAmount = (raw: string): number => {
       const n = Number.parseFloat(raw.replace(/[^0-9.-]/g, ""));
@@ -4492,11 +4581,11 @@ export class DOAssetDetailsPage extends BasePage {
       if (Number.isFinite(target) && target === displayedNum) {
         return;
       }
-      const typeLabel =
-        ((await row.getByRole("combobox").first().textContent().catch(() => "")) ?? "").trim();
-      if (/Fixed/i.test(typeLabel)) {
+      const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
+      const typeLabel = ((await typeCell.textContent()) ?? "").trim();
+      if (/Fixed/i.test(typeLabel) && rowIndex === 0) {
         this.logStep(
-          `Fixed segment amount is display-only (${displayed}); cannot enter ${amount}`,
+          `FL first-row Fixed segment amount is display-only (${displayed}); cannot enter ${amount}`,
         );
         return;
       }
@@ -4544,9 +4633,20 @@ export class DOAssetDetailsPage extends BasePage {
     number: string,
   ): Promise<void> {
     this.logStep(`Enter Edit Payment Schedule Segment Number ${number} on row ${rowIndex + 1}`);
-    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
-    const numberInput = row.getByRole("spinbutton").first();
-    await expect(numberInput).toBeVisible({ timeout: 10_000 });
+    const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
+    const numberCell = await this.editPaymentScheduleSegmentNumberCell(row);
+    const numberInput = numberCell.getByRole("spinbutton").first();
+    if (!(await numberInput.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      const displayed = (
+        (await numberCell.textContent({ timeout: 5_000 }).catch(() => "")) ?? ""
+      ).trim();
+      if (displayed === number) {
+        return;
+      }
+      throw new Error(
+        `Edit Payment Schedule number input not found on row ${rowIndex + 1} (displayed: "${displayed}").`,
+      );
+    }
     await numberInput.fill(number);
     await numberInput.press("Tab").catch(() => {});
   }
@@ -4661,19 +4761,21 @@ export class DOAssetDetailsPage extends BasePage {
    * Edit segment fields only (no **Calculate**) — leaves unsaved changes for **Cancel** / **Reset** flows.
    */
   async modifyEditPaymentScheduleSegmentFields(opts?: {
+    rowIndex?: number;
     type?: string;
     number?: string;
     amount?: string;
   }): Promise<void> {
     this.logStep("Modify Edit Payment Schedule Segment Fields");
+    const rowIndex = opts?.rowIndex ?? 0;
     if (opts?.number) {
-      await this.enterEditPaymentScheduleSegmentNumber(opts.number);
+      await this.enterEditPaymentScheduleSegmentNumberOnRow(rowIndex, opts.number);
     }
     if (opts?.type) {
-      await this.selectEditPaymentScheduleSegmentType(opts.type);
+      await this.selectEditPaymentScheduleSegmentTypeOnRow(rowIndex, opts.type);
     }
     if (opts?.amount) {
-      await this.enterEditPaymentScheduleSegmentAmountOnRow(0, opts.amount);
+      await this.enterEditPaymentScheduleSegmentAmountOnRow(rowIndex, opts.amount);
     }
     if (opts?.number || opts?.type || opts?.amount) {
       const dialog = this.editPaymentScheduleDialog();
@@ -4683,6 +4785,45 @@ export class DOAssetDetailsPage extends BasePage {
         .click({ timeout: 5_000 })
         .catch(() => {});
     }
+  }
+
+  /**
+   * FL: add a non-first **Fixed** `$0` segment so Payment Amount becomes **Irregular** (UDP-T4310).
+   * Row 1 is locked **Fixed** (initial lease); row 2+ accepts **Fixed** with amount **0** only.
+   */
+  async applyFlFixedZeroSegmentForIrregularPayment(): Promise<void> {
+    this.logStep("Apply FL Fixed zero segment for irregular payment");
+    await this.openEditPaymentScheduleDialog();
+    await expect
+      .poll(async () => this.countEditPaymentScheduleSegmentRows(), {
+        timeout: 30_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBeGreaterThan(0);
+
+    const rowCount = await this.countEditPaymentScheduleSegmentRows();
+    if (rowCount >= 2) {
+      await this.modifyEditPaymentScheduleSegmentFields({
+        rowIndex: 1,
+        type: "Fixed",
+        amount: "0",
+      });
+    } else {
+      const term = await this.getEditPaymentScheduleFinanceTermMonths();
+      const chunk = Math.max(1, Math.min(12, term - 1));
+      await this.enterEditPaymentScheduleSegmentNumberOnRow(0, String(chunk));
+      await this.waitForEditPaymentScheduleAddSegmentEnabled();
+      await this.clickEditPaymentScheduleAddSegment();
+      await this.modifyEditPaymentScheduleSegmentFields({
+        rowIndex: 1,
+        type: "Fixed",
+        amount: "0",
+      });
+    }
+    await this.clickEditPaymentScheduleCalculate();
+    await this.clickEditPaymentScheduleApply();
+    await expect(this.editPaymentScheduleDialog()).toBeHidden({ timeout: 30_000 });
+    await this.waitForQuoteLoadersToFinish();
   }
 
   private editPaymentScheduleResetButton(): Locator {
@@ -4734,12 +4875,18 @@ export class DOAssetDetailsPage extends BasePage {
   async getEditPaymentScheduleSegmentRowSnapshot(
     rowIndex: number,
   ): Promise<DOEditPaymentScheduleSegmentSnapshot> {
-    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
-    const number = await row.getByRole("spinbutton").first().inputValue();
+    const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
+    const numberCell = await this.editPaymentScheduleSegmentNumberCell(row);
+    const numberInput = numberCell.getByRole("spinbutton").first();
+    const number = (await numberInput.isVisible().catch(() => false))
+      ? await numberInput.inputValue()
+      : ((await numberCell.textContent()) ?? "").trim();
+    const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
     const type = this.normalizeEditPaymentScheduleSegmentType(
-      (await row.getByRole("combobox").first().textContent()) ?? "",
+      (await typeCell.getByRole("combobox").first().textContent().catch(() => "")) ||
+        ((await typeCell.textContent()) ?? ""),
     );
-    const amountCell = row.locator("td").nth(2);
+    const amountCell = await this.editPaymentScheduleSegmentAmountCell(row);
     const amountInput = amountCell.locator("input").first();
     const amount = (await amountInput.isVisible().catch(() => false))
       ? await amountInput.inputValue()
@@ -4842,7 +4989,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Row count in the **Edit Payment Schedule** segment table. */
   async countEditPaymentScheduleSegmentRows(): Promise<number> {
-    return this.editPaymentScheduleDialog().locator("table tbody tr").count();
+    return this.editPaymentScheduleSegmentTable().locator("tbody tr").count();
   }
 
   /** **+ Add Segment** becomes enabled after reducing the first segment **Number**. */
@@ -4854,7 +5001,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   private editPaymentScheduleSegmentDeleteButton(rowIndex: number): Locator {
-    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
+    const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
     return row
       .locator("td")
       .last()
@@ -4942,7 +5089,7 @@ export class DOAssetDetailsPage extends BasePage {
   async addEditPaymentScheduleSegmentsUntilTermReached(): Promise<void> {
     this.logStep("Add Edit Payment Schedule Segments Until Term Reached");
     const term = await this.getEditPaymentScheduleFinanceTermMonths();
-    const rows = () => this.editPaymentScheduleDialog().locator("table tbody tr");
+    const rows = () => this.editPaymentScheduleSegmentTable().locator("tbody tr");
     const addBtn = this.editPaymentScheduleAddSegmentButton();
 
     if ((await rows().count()) === 1) {
@@ -8629,7 +8776,12 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   inclGstOfField(): Locator {
-    return this.financeSummaryLabelValueField("Incl. GST of");
+    const root = this.standardQuoteRoot();
+    const byLabelSibling = root
+      .getByText(/^Incl\.\s*GST\s+of$/i)
+      .first()
+      .locator("xpath=following-sibling::*[1]");
+    return byLabelSibling.or(this.financeSummaryLabelValueField("Incl. GST of")).first();
   }
 
   /** Finance totals rendered as a disabled `amount` input or a read-only label sibling. */
@@ -8981,8 +9133,19 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async listEditPaymentScheduleSegmentTypeOptions(rowIndex = 0): Promise<string[]> {
-    const row = this.editPaymentScheduleDialog().locator("table tbody tr").nth(rowIndex);
-    const typeCombo = row.getByRole("combobox").first();
+    const rowCount = await this.countEditPaymentScheduleSegmentRows();
+    let targetRow = rowIndex;
+    for (let i = rowIndex; i < rowCount; i++) {
+      const row = this.editPaymentScheduleSegmentRowAt(i);
+      const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
+      if (await typeCell.getByRole("combobox").first().isVisible({ timeout: 1_000 }).catch(() => false)) {
+        targetRow = i;
+        break;
+      }
+    }
+    const row = this.editPaymentScheduleSegmentRowAt(targetRow);
+    const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
+    const typeCombo = typeCell.getByRole("combobox").first();
     await typeCombo.click({ timeout: 10_000 });
     const panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
     await expect(panel).toBeVisible({ timeout: 10_000 });
