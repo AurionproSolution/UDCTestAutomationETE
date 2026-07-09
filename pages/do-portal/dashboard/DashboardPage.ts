@@ -431,6 +431,20 @@ export class DODashboardPage extends BasePage {
       .first();
   }
 
+  /** Click target for a grid row — numeric **Quote ID** cell, or orig-ref match when `referenceOrQuoteId` is the QID. */
+  private quoteGridOpenTargetInRow(row: Locator, referenceOrQuoteId: string): Locator {
+    const trimmed = referenceOrQuoteId.trim();
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const isNumericQuoteId = /^\d{3,}$/.test(trimmed);
+    const quoteIdPattern = isNumericQuoteId
+      ? new RegExp(`^\\s*${escaped}\\s*$`)
+      : /^\s*\d{3,}\s*$/;
+    return row
+      .locator("td.cursor-pointer.text-primary, td.text-primary.cursor-pointer")
+      .filter({ hasText: quoteIdPattern })
+      .first();
+  }
+
   /** **Quotes & Applications** listing — filter grid by **QID** / Quote ID, then **View**. */
   async searchDealerListingByQuoteId(quoteId: string): Promise<void> {
     const id = quoteId.trim();
@@ -555,18 +569,18 @@ export class DODashboardPage extends BasePage {
   }
 
   /** Open quote from grid by clicking the blue **Quote ID** cell. */
-  async openQuoteFromGridByReference(referenceOrQuoteId: string): Promise<void> {
+  async openQuoteFromGridByReference(
+    referenceOrQuoteId: string,
+    opts?: { skipSearch?: boolean },
+  ): Promise<void> {
     this.logStep(`Open Quote From Grid: ${this.stepValueDisplay(referenceOrQuoteId)}`);
-    await this.searchQuotesGrid(referenceOrQuoteId);
+    if (!opts?.skipSearch) {
+      await this.searchQuotesGrid(referenceOrQuoteId);
+    }
     const row = this.quoteGridRowByReference(referenceOrQuoteId);
     await expect(row).toBeVisible({ timeout: 45_000 });
-    const quoteIdCell = row
-      .locator("div.cursor-pointer.text-primary")
-      .filter({ hasText: new RegExp(referenceOrQuoteId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") })
-      .first()
-      .or(row.getByRole("link").first())
-      .or(row.locator("a[href*='standard-quote']").first());
-    await quoteIdCell.click({ timeout: 30_000 });
+    const openTarget = this.quoteGridOpenTargetInRow(row, referenceOrQuoteId);
+    await openTarget.click({ timeout: 30_000 });
     await this.waitForAppLoaderOverlayGone(120_000);
     await expect(
       this.page.locator("app-quote-details, app-standard-quote").first(),
@@ -687,7 +701,27 @@ export class DODashboardPage extends BasePage {
   async openOpenQuoteFromListing(quoteId: string): Promise<void> {
     await this.navigateToQuotesAndApplicationsListing();
     await this.selectDealerListingGridType(/^Quote/i);
+    await this.searchDealerListingByQuoteId(quoteId);
     await this.openStandardQuoteByQuoteId(quoteId);
+  }
+
+  /**
+   * **Quotes** grid → open **Open Quote** by origination reference (OL builds may omit Quote ID in header).
+   */
+  async openOpenQuoteFromListingByReference(originationReference: string): Promise<void> {
+    const ref = originationReference.trim();
+    await this.openQuotesAndApplications();
+    await this.selectDealerListingGridType(/^Quote/i);
+    await expect
+      .poll(
+        async () => {
+          await this.searchQuotesGrid(ref);
+          return await this.quoteGridRowByReference(ref).isVisible().catch(() => false);
+        },
+        { timeout: 90_000, intervals: [1_000, 2_000, 3_000] },
+      )
+      .toBe(true);
+    await this.openQuoteFromGridByReference(ref, { skipSearch: true });
   }
 
   /**
