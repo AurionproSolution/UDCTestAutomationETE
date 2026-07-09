@@ -1307,6 +1307,9 @@ test.describe("Standard Quote - OL @do @regression", () => {
       });
 
       await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
+      await assetDetailsPage.enterEditPaymentScheduleSegmentNumber(String(term + 10));
+      await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+      await assetDetailsPage.expectEditPaymentScheduleSegmentExceedsTermMessage();
     },
   );
 
