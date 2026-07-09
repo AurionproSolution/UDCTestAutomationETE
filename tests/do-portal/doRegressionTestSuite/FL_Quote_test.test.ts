@@ -866,10 +866,11 @@ test.describe("FL Quote Test Case @do @regression", () => {
       await expectDealerFinanceIfAccessible(page, assetDetailsPage);
       await assetDetailsPage.expectBaseInterestRateDisplayOnly();
       const baseRate = await assetDetailsPage.readBaseInterestRatePercent();
-      expect.soft(baseRate).toMatch(/\d+(?:\.\d+)?\s*%/);
+      expect.soft(Number.isFinite(baseRate)).toBeTruthy();
+      expect.soft(baseRate).toBeGreaterThan(0);
       test.info().annotations.push({
         type: "note",
-        description: `Base Interest Rate captured as ${baseRate}. Save/re-open retention (steps 3–5) requires FIS AF quote reload — same gap as UDP-T4118 (OL).`,
+        description: `Base Interest Rate captured as ${baseRate}%. Save/re-open retention (steps 3–5) requires FIS AF quote reload — same gap as UDP-T4118 (OL).`,
       });
     },
   );

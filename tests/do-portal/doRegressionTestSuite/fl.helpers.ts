@@ -316,7 +316,7 @@ export async function captureFlBaseInterestRateAfterCalculate(
 
   await assetDetailsPage.expandDealerFinanceSection();
   const rate = await assetDetailsPage.readBaseInterestRatePercent();
-  return rate || null;
+  return Number.isFinite(rate) ? `${rate}%` : null;
 }
 
 export async function fillAddOnAccessoriesAndSave(
