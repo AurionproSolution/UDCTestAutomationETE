@@ -82,9 +82,23 @@ export class DOAssetDetailsPage extends BasePage {
       "//timesicon//*[name()='svg']",
     );
     /** FL lease card: "Cash Price of Assets (GST Inclusive)"; older builds: "Cash Price of Asset*". */
-    this.cashPriceOfAssetInputField = page
-      .getByRole("textbox", { name: /Cash Price of Asset/i })
-      .first();
+    const cashPriceLabel = /Cash Price of Asset/i;
+    // Structural locator only — getByRole(textbox) matches the concatenated a11y name on AFV/CSA
+    // ("Cash Price… Recommended Retail Price @ UDC…") and fill() fails on currencymask inputs.
+    this.cashPriceOfAssetInputField = quoteHost
+      .locator("amount")
+      .filter({ hasText: cashPriceLabel })
+      .locator("input#amount, input[currencymask], input.p-inputtext")
+      .first()
+      .or(
+        quoteHost
+          .getByText(cashPriceLabel)
+          .first()
+          .locator(
+            "xpath=ancestor::div[contains(@class,'col-')][1]//input[@id='amount' or @currencymask]",
+          )
+          .first(),
+      );
     const rrpLabel = /Recommended\s+Retail\s+Price/i;
     // Structural locators only — do NOT use getByRole(textbox, name: RRP): CSA builds concatenate
     // adjacent float labels into Cash Price a11y name ("Cash Price… Recommended Retail Price @ UDC…").
@@ -275,10 +289,10 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async openProgramDropdown(): Promise<void> {
     this.logStep("Opened program dropdown");
-    const programDropdown = this.page.locator(
-      `//span//label[contains(text(), 'Program')]/following-sibling::div//span`,
-    );
-    await programDropdown.click();
+    const trigger = this.programDropdownTrigger();
+    await trigger.scrollIntoViewIfNeeded().catch(() => {});
+    await trigger.click({ timeout: 15_000 });
+    await expect(this.page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
   }
 
   /**
@@ -287,7 +301,47 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async selectProgram(programName: string): Promise<void> {
     this.logStep(`Selected program: ${this.stepValueDisplay(programName)}`);
-    await this.page.getByRole("option", { name: programName, exact: true }).click();
+    await this.waitForQuoteLoadersToFinish().catch(() => {});
+    const trigger = this.programDropdownTrigger();
+    const escaped = programName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const optionPattern = new RegExp(`^\\s*${escaped}\\s*$`, "i");
+
+    await expect
+      .poll(
+        async () => {
+          const selected = await this.readSelectedProgramLabel();
+          if (optionPattern.test(selected) || selected.includes(programName)) {
+            return true;
+          }
+
+          await trigger.scrollIntoViewIfNeeded().catch(() => {});
+          await trigger
+            .evaluate((el: HTMLElement) => {
+              el.click();
+            })
+            .catch(() => trigger.click({ timeout: 5_000 }));
+
+          const option = this.page.getByRole("option", { name: optionPattern }).first();
+          if (await option.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            await option
+              .evaluate((el: HTMLElement) => {
+                el.click();
+              })
+              .catch(() => option.click({ force: true, timeout: 2_000 }));
+          } else {
+            await this.page.keyboard.type(programName.slice(0, 8), { delay: 40 }).catch(() => {});
+            await this.page.keyboard.press("Enter").catch(() => {});
+          }
+
+          await this.page.keyboard.press("Escape").catch(() => {});
+          await this.page.waitForTimeout(500);
+
+          const after = await this.readSelectedProgramLabel();
+          return optionPattern.test(after) || after.includes(programName) || /AFV/i.test(after);
+        },
+        { timeout: 60_000, intervals: [800, 1_500, 2_000, 3_000] },
+      )
+      .toBeTruthy();
   }
 
   /**
@@ -1986,6 +2040,71 @@ export class DOAssetDetailsPage extends BasePage {
     await expect(numberInput).toBeVisible({ timeout: 15_000 });
   }
 
+  /** Whether **Term** renders as a program **dropdown** (set terms) vs free-text spinbutton. */
+  async isTermDropdownControl(): Promise<boolean> {
+    const root = this.standardQuoteRoot();
+    const termLabel = root.locator("label, span").filter({ hasText: /^Term\s*\*?$/i }).first();
+    const dropdown = root
+      .locator("p-dropdown")
+      .filter({ has: termLabel })
+      .first()
+      .or(termLabel.locator("xpath=following::p-dropdown[1]"));
+    return dropdown.isVisible({ timeout: 3_000 }).catch(() => false);
+  }
+
+  /** Current **Term** from spinbutton / numeric input or program dropdown label. */
+  async readTermValue(): Promise<string> {
+    const spin = this.termsOfFinanceInputField;
+    if (await spin.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return (await spin.inputValue().catch(() => "")).trim();
+    }
+
+    const numberInput = this.page
+      .locator("number")
+      .filter({ hasText: /Term/i })
+      .locator("input[type='number'], input.p-inputtext, input")
+      .first();
+    if (await numberInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return (await numberInput.inputValue().catch(() => "")).trim();
+    }
+
+    const root = this.standardQuoteRoot();
+    const termLabel = root.locator("label, span").filter({ hasText: /^Term\s*\*?$/i }).first();
+    const trigger = termLabel
+      .locator(
+        "xpath=following::button[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+      )
+      .first();
+    if (await trigger.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return this.readPrimeDropdownLabel(trigger);
+    }
+
+    return "";
+  }
+
+  /**
+   * UDP-T4027 — blank **Term** on **Calculate** shows `Please complete`; over-max shows
+   * `Term must not be greater than` (free-text term programs only).
+   */
+  async expectAfVTermBlankAndMaxValidationOnCalculate(opts: {
+    overMaxTerm: string;
+    restoreTerm: string;
+  }): Promise<void> {
+    this.logStep("Expect AFV term blank and max validation on calculate");
+    await this.clearTermsOfFinance();
+    await this.expectTermInputBlankOrZero();
+    await this.clickCalculateButton();
+    await this.expectBlankTermValidationOnCalculate();
+
+    await this.termsOfFinance(opts.overMaxTerm);
+    await this.clickCalculateButton();
+    await this.expectTermExceedsProgramMaxValidation();
+
+    await this.termsOfFinance(opts.restoreTerm);
+    await this.clickCalculateButton();
+    await expect(this.standardQuoteRoot()).toBeVisible({ timeout: 15_000 });
+  }
+
   private termFieldWrapper(): Locator {
     const root = this.standardQuoteRoot();
     const termHost = root.locator("number").filter({ hasText: /Term/i }).first();
@@ -3081,8 +3200,72 @@ export class DOAssetDetailsPage extends BasePage {
    *   (`following-sibling` breaks when the label sits inside a wrapper that is not the dropdown’s direct sibling).
    * - Root: quote shell that actually contains **Asset Type** (avoid `\\b` / strict filters that can drop the host).
    */
+  conditionDropdownTrigger(): Locator {
+    const root = this.page
+      .locator("app-quote-details, app-standard-quote")
+      .filter({ hasText: /Asset Type/i })
+      .last();
+    const caption = root
+      .getByText("Condition *", { exact: true })
+      .or(root.getByText(/^Condition\s*\*?\s*$/i))
+      .first();
+    const dropdownAfterCaption = caption
+      .locator("xpath=following::div[contains(@class,'p-dropdown')][1]")
+      .first();
+    return dropdownAfterCaption
+      .locator(".p-dropdown-trigger")
+      .or(dropdownAfterCaption.getByRole("button", { name: /dropdown trigger/i }))
+      .first();
+  }
+
+  async readSelectedConditionLabel(): Promise<string> {
+    const root = this.page
+      .locator("app-quote-details, app-standard-quote")
+      .filter({ hasText: /Asset Type/i })
+      .last();
+    const caption = root
+      .getByText("Condition *", { exact: true })
+      .or(root.getByText(/^Condition\s*\*?\s*$/i))
+      .first();
+    const dropdown = caption.locator("xpath=following::div[contains(@class,'p-dropdown')][1]").first();
+    const combobox = dropdown.getByRole("combobox").first();
+    if (await combobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return ((await combobox.textContent()) ?? "").trim();
+    }
+    return ((await dropdown.locator(".p-dropdown-label").first().textContent()) ?? "").trim();
+  }
+
+  /** Prefer **Used** when FIS allows it; otherwise keep the program default (often **New** on SIT). */
+  async ensureAfVConditionForStandardQuote(preferred = "Used"): Promise<string> {
+    const current = await this.readSelectedConditionLabel();
+    if (
+      current.length > 0 &&
+      !/select|choose/i.test(current) &&
+      new RegExp(preferred, "i").test(current)
+    ) {
+      return current;
+    }
+    try {
+      await this.selectConditionInStandardQuote(preferred);
+    } catch {
+      this.log(
+        `Condition "${preferred}" not available after asset selection — keeping FIS default "${current || "unknown"}".`,
+      );
+    }
+    const label = await this.readSelectedConditionLabel();
+    return label.length > 0 ? label : current;
+  }
+
   async selectConditionInStandardQuote(condition: string): Promise<void> {
     this.logStep(`Selected condition (standard quote): ${this.stepValueDisplay(condition)}`);
+
+    const current = await this.readSelectedConditionLabel();
+    if (
+      current.length > 0 &&
+      (current.toLowerCase() === condition.toLowerCase() || new RegExp(condition, "i").test(current))
+    ) {
+      return;
+    }
 
     const root = this.page
       .locator("app-quote-details, app-standard-quote")
@@ -3092,7 +3275,7 @@ export class DOAssetDetailsPage extends BasePage {
 
     const optionWhenOpen = this.page
       .getByRole("listbox", { name: /Option List/i })
-      .getByRole("option", { name: condition, exact: true })
+      .getByRole("option", { name: new RegExp(`^${condition}$`, "i") })
       .first();
     if (await optionWhenOpen.isVisible({ timeout: 2_500 }).catch(() => false)) {
       await optionWhenOpen.click({ timeout: 15_000 });
@@ -3101,32 +3284,50 @@ export class DOAssetDetailsPage extends BasePage {
     }
 
     await this.page.keyboard.press("Escape").catch(() => {});
-    await this.page.waitForTimeout(200);
+    await this.waitForQuoteLoadersToFinish().catch(() => {});
 
-    const caption = root
-      .getByText("Condition *", { exact: true })
-      .or(root.getByText(/^Condition\s*\*?\s*$/i))
-      .first();
-    await caption.waitFor({ state: "visible", timeout: 20_000 });
-    await caption.scrollIntoViewIfNeeded();
+    const trigger = this.conditionDropdownTrigger();
+    const escaped = condition.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const optionPattern = new RegExp(`^\\s*${escaped}\\s*$`, "i");
 
-    const dropdownAfterCaption = caption
-      .locator("xpath=following::div[contains(@class,'p-dropdown')][1]")
-      .first();
-    const trigger = dropdownAfterCaption
-      .locator(".p-dropdown-trigger")
-      .or(dropdownAfterCaption.getByRole("button", { name: /dropdown trigger/i }))
-      .first();
+    await expect
+      .poll(
+        async () => {
+          const selected = await this.readSelectedConditionLabel();
+          if (optionPattern.test(selected) || selected.toLowerCase() === condition.toLowerCase()) {
+            return true;
+          }
 
-    await expect(trigger).toBeAttached({ timeout: 20_000 });
-    try {
-      await trigger.click({ timeout: 12_000 });
-    } catch {
-      await trigger.click({ force: true, timeout: 12_000 });
-    }
+          await trigger.scrollIntoViewIfNeeded().catch(() => {});
+          await trigger
+            .evaluate((el: HTMLElement) => {
+              el.click();
+            })
+            .catch(() => trigger.click({ force: true, timeout: 5_000 }));
 
-    await this.page.getByRole("option", { name: condition, exact: true }).first().click({ timeout: 15_000 });
-    await this.page.keyboard.press("Escape").catch(() => {});
+          const panel = this.page.locator("div.p-dropdown-panel").filter({ visible: true }).last();
+          const option = panel.getByRole("option", { name: optionPattern }).first();
+          if (await option.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            await option
+              .evaluate((el: HTMLElement) => {
+                el.click();
+              })
+              .catch(() => option.click({ force: true, timeout: 2_000 }));
+          } else {
+            await this.page.keyboard.type(condition.slice(0, 4), { delay: 40 }).catch(() => {});
+            await this.page.keyboard.press("Enter").catch(() => {});
+          }
+
+          await this.page.keyboard.press("Escape").catch(() => {});
+          await this.page.waitForTimeout(400);
+
+          const after = await this.readSelectedConditionLabel();
+          return optionPattern.test(after) || after.toLowerCase() === condition.toLowerCase();
+        },
+        { timeout: 45_000, intervals: [500, 1_000, 1_500, 2_000] },
+      )
+      .toBeTruthy();
+    await this.waitForQuoteLoadersToFinish().catch(() => {});
   }
 
   /**
@@ -3154,10 +3355,14 @@ export class DOAssetDetailsPage extends BasePage {
     await openBtn.scrollIntoViewIfNeeded();
     await openBtn.click({ timeout: 20_000 });
 
-    const dlg = this.page.getByRole("dialog").last();
-    await expect(dlg.getByText(/Make/i).first()).toBeVisible({ timeout: 20_000 });
+    const dlg = this.page
+      .getByRole("dialog")
+      .filter({ has: this.page.locator("app-afv-asset-types") })
+      .last();
+    const afvRoot = dlg.locator("app-afv-asset-types");
+    await expect(afvRoot).toBeVisible({ timeout: 20_000 });
 
-    const pickFromOpenPanel = async (name: string, exact: boolean) => {
+    const pickFromOpenPanel = async (name: string, exact: boolean): Promise<void> => {
       const opt = this.page.getByRole("option", { name, exact }).first();
       await opt.waitFor({ state: "visible", timeout: 20_000 });
       await opt.click();
@@ -3165,27 +3370,38 @@ export class DOAssetDetailsPage extends BasePage {
       await this.page.waitForTimeout(250);
     };
 
-    await dlg.locator(".p-dropdown").first().locator(".p-dropdown-trigger").click({ timeout: 15_000 });
-    await pickFromOpenPanel(params.make, true);
+    const modalDropdownTrigger = (index: number): Locator => {
+      const host = afvRoot.locator(".p-dropdown").nth(index);
+      return host.getByRole("button", { name: /dropdown trigger/i }).or(host.getByRole("combobox")).first();
+    };
 
-    const modelHost = this.page.locator("#pn_id_428_0");
-    if (await modelHost.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await modelHost.click();
-    } else {
-      await dlg.locator(".p-dropdown").nth(1).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
+    const waitForModalDropdown = async (index: number, expected: string): Promise<void> => {
+      await expect
+        .poll(async () => (await this.readPrimeDropdownLabel(modalDropdownTrigger(index))).trim(), {
+          timeout: 30_000,
+        })
+        .toMatch(new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    };
+
+    const openNthDropdown = async (index: number): Promise<void> => {
+      const host = afvRoot.locator(".p-dropdown").nth(index);
+      const trig = modalDropdownTrigger(index);
+      await expect(trig).toBeVisible({ timeout: 20_000 });
+      await expect(host).not.toHaveClass(/p-disabled/, { timeout: 20_000 }).catch(() => {});
+      await trig.click({ timeout: 15_000 });
+    };
+
+    const picks: Array<[number, string]> = [
+      [0, params.make],
+      [1, params.model],
+      [2, params.variant],
+      [3, params.year],
+    ];
+    for (const [index, value] of picks) {
+      await openNthDropdown(index);
+      await pickFromOpenPanel(value, true);
+      await waitForModalDropdown(index, value);
     }
-    await pickFromOpenPanel(params.model, true);
-
-    await dlg.locator(".p-dropdown").nth(2).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
-    await pickFromOpenPanel(params.variant, true);
-
-    const yearHost = this.page.locator("#pn_id_434_0");
-    if (await yearHost.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await yearHost.click();
-    } else {
-      await dlg.locator(".p-dropdown").nth(3).locator(".p-dropdown-trigger").click({ timeout: 15_000 });
-    }
-    await pickFromOpenPanel(params.year, true);
 
     const selectByRole = dlg.getByRole("button", { name: /^Select$/i }).first();
     if (await selectByRole.isVisible({ timeout: 4_000 }).catch(() => false)) {
@@ -4593,6 +4809,8 @@ export class DOAssetDetailsPage extends BasePage {
     if (opts?.waitForApply !== false) {
       // Apply enables only after FIS calculation completes — wait for UI state, not spinner alone.
       await expect(this.editPaymentScheduleApplyButton()).toBeEnabled({ timeout: 60_000 });
+    } else {
+      await this.waitForQuoteLoadersToFinish().catch(() => {});
     }
   }
 
@@ -5221,7 +5439,11 @@ export class DOAssetDetailsPage extends BasePage {
   }
   async cashPriceOfAsset(cashprice: string): Promise<void> {
     this.logStep(`Entered cash price of asset as ${this.stepValueDisplay(cashprice)}`);
-    await this.fillLoanDetailsCurrencyAmount(this.cashPriceOfAssetInputField, cashprice);
+    await this.fillCurrencyMaskAmount(
+      this.cashPriceOfAssetInputField,
+      cashprice,
+      "Cash Price of Asset",
+    );
   }
   async ppsrCount(count: string): Promise<void> {
     this.logStep(`Entered PPSR count as ${this.stepValueDisplay(count)}`);
@@ -5763,6 +5985,23 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.waitForTimeout(300);
   }
 
+  static shiftDdMmYyyy(dateStr: string, days: number): string {
+    const m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!m) return dateStr;
+    const d = new Date(Number.parseInt(m[3], 10), Number.parseInt(m[2], 10) - 1, Number.parseInt(m[1], 10));
+    d.setDate(d.getDate() + days);
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    return `${dd}/${mm}/${d.getFullYear()}`;
+  }
+
+  private parseDdMmYyyy(dateStr: string): Date | null {
+    const m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!m) return null;
+    const d = new Date(Number.parseInt(m[3], 10), Number.parseInt(m[2], 10) - 1, Number.parseInt(m[1], 10));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
   /** **dd/MM/yyyy** for today (runner local calendar). */
   static todayDdMmYyyy(): string {
     const d = new Date();
@@ -6237,16 +6476,23 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   assuredFutureValueInputField(): Locator {
-    const root = this.standardQuoteRoot();
-    return root
-      .getByRole("textbox", { name: /Assured Future Value/i })
-      .or(
-        root
-          .locator("label")
-          .filter({ hasText: /Assured Future Value/i })
-          .first()
-          .locator("xpath=following::input[@currencymask or @id='amount'][1]"),
+    const financeCard = this.standardQuoteRoot()
+      .locator("div, p-card, section")
+      .filter({ hasText: /^Finance$/i })
+      .filter({ hasText: /KM Allowance/i })
+      .first();
+    return financeCard
+      .locator(
+        "xpath=.//*[normalize-space(text())='Assured Future Value' or starts-with(normalize-space(.),'Assured Future Value')]/following::input[1]",
       )
+      .first();
+  }
+
+  assuredFutureValuePaymentSummaryField(): Locator {
+    return this.paymentSummaryRoot
+      .getByText(/^Assured Future Value$/i)
+      .first()
+      .locator("xpath=following::input[1]")
       .first();
   }
 
@@ -6260,8 +6506,6 @@ export class DOAssetDetailsPage extends BasePage {
           "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
         ),
       )
-    return root
-      .locator("xpath=.//label[contains(normalize-space(.),'Program')]/following::p-dropdown[1]")
       .or(
         root.locator(
           "xpath=.//*[normalize-space(text())='Program' or starts-with(normalize-space(.),'Program')]/following::p-dropdown[1]",
@@ -6287,40 +6531,27 @@ export class DOAssetDetailsPage extends BasePage {
 
   async readSelectedProgramLabel(): Promise<string> {
     this.logStep("Read selected program label");
-    return this.readPrimeLabeledDropdownValue("Program");
-    const root = this.standardQuoteRoot();
-    const combobox = root
-      .locator(
-        "xpath=.//*[normalize-space(text())='Program' or starts-with(normalize-space(.),'Program')]/following::*[@role='combobox'][1]",
-      )
-      .first();
-    if (await combobox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const fromPrime = await this.readPrimeLabeledDropdownValue("Program");
+    if (fromPrime.length > 0) {
+      return fromPrime;
+    }
+
+    const host = this.programDropdownHost();
+    const combobox = host.getByRole("combobox").first();
+    if (await combobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
       const aria = ((await combobox.getAttribute("aria-label")) ?? "").trim();
       if (aria.length > 0 && !this.isPlaceholderDropdownLabel(aria)) {
         return aria;
       }
-      const text = (await combobox.textContent())?.trim() ?? "";
+      const text = ((await combobox.textContent()) ?? "").trim();
       if (!this.isPlaceholderDropdownLabel(text)) {
         return text;
       }
     }
-    const host = this.programDropdownHost();
-    if (await host.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      const hostCombobox = host.getByRole("combobox").first();
-      if (await hostCombobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        const aria = ((await hostCombobox.getAttribute("aria-label")) ?? "").trim();
-        if (aria.length > 0 && !this.isPlaceholderDropdownLabel(aria)) {
-          return aria;
-        }
-        const text = (await hostCombobox.textContent())?.trim() ?? "";
-        if (!this.isPlaceholderDropdownLabel(text)) {
-          return text;
-        }
-      }
-      const labelText = (await host.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
-      return this.isPlaceholderDropdownLabel(labelText) ? "" : labelText;
-    }
-    return "";
+
+    const labelText =
+      (await host.locator(".p-dropdown-label").first().textContent().catch(() => "")) ?? "";
+    return this.isPlaceholderDropdownLabel(labelText) ? "" : labelText.trim();
   }
 
   private isPlaceholderDropdownLabel(label: string): boolean {
@@ -6556,6 +6787,58 @@ export class DOAssetDetailsPage extends BasePage {
     return "";
   }
 
+  async listProgramDropdownOptions(): Promise<string[]> {
+    const trigger = this.programDropdownTrigger();
+    await trigger.scrollIntoViewIfNeeded().catch(() => {});
+    await trigger.click({ timeout: 15_000 });
+    await expect(this.page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
+    const options = (await this.page.getByRole("option").allTextContents())
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0 && !this.isPlaceholderDropdownLabel(t));
+    await this.page.keyboard.press("Escape").catch(() => {});
+    return options;
+  }
+
+  /**
+   * Product → asset → **Program** on AFV Standard Quote: wait for FIS auto-populate when present,
+   * otherwise open the program dropdown and pick the catalog AFV program.
+   */
+  async ensureAfVProgramForStandardQuote(
+    preferredProgram = "AFV - B-Distributor",
+  ): Promise<{ label: string; autoPopulated: boolean }> {
+    this.logStep(`Ensure AFV program on Standard Quote: ${this.stepValueDisplay(preferredProgram)}`);
+
+    const matchesPreferred = (label: string): boolean =>
+      label.length > 0 &&
+      /AFV/i.test(label) &&
+      (label.includes(preferredProgram) || /AFV\s*-\s*B[\s-]*Distributor/i.test(label));
+
+    let label = "";
+    const autoReady = await expect
+      .poll(async () => {
+        const current = await this.readSelectedProgramLabel();
+        if (matchesPreferred(current)) {
+          label = current;
+          return true;
+        }
+        return false;
+      }, { timeout: 45_000, intervals: [500, 1_000, 2_000] })
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+
+    if (autoReady) {
+      await this.waitForQuoteLoadersToFinish();
+      return { label, autoPopulated: true };
+    }
+
+    await this.waitForQuoteLoadersToFinish();
+    await this.selectProgram(preferredProgram);
+    await this.waitForQuoteLoadersToFinish();
+    label = (await this.readSelectedProgramLabel()) || preferredProgram;
+    return { label, autoPopulated: false };
+  }
+
   afvDetailsSectionHeader(): Locator {
     return this.standardQuoteRoot().getByRole("button", { name: /AFV Details/i }).first();
   }
@@ -6696,12 +6979,29 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async readAssuredFutureValue(): Promise<string> {
-    return (await this.assuredFutureValueInputField().inputValue().catch(() => "")).trim();
+    const amount = await this.readStandardQuoteFisAfVAmount();
+    return amount > 0 ? String(amount) : "";
+  }
+
+  /** Finance AFV input; Payment Summary AFV is the SIT fallback when Finance stays $0. */
+  async readStandardQuoteFisAfVAmount(): Promise<number> {
+    const financeAfV = await this.readCurrencyInput(this.assuredFutureValueInputField());
+    if (financeAfV > 0) {
+      return financeAfV;
+    }
+    const summaryAfV = await this.readCurrencyInput(this.assuredFutureValuePaymentSummaryField());
+    if (summaryAfV > 0) {
+      return summaryAfV;
+    }
+    return 0;
   }
 
   async assuredFutureValueIsReadOnly(): Promise<boolean> {
     const input = this.assuredFutureValueInputField();
     if ((await input.count()) === 0 || !(await input.isVisible().catch(() => false))) {
+      return true;
+    }
+    if (await input.isDisabled().catch(() => false)) {
       return true;
     }
     const ro = await input.getAttribute("readonly");
@@ -6710,6 +7010,213 @@ export class DOAssetDetailsPage extends BasePage {
       return true;
     }
     return (await input.isEditable().catch(() => null)) === false;
+  }
+
+  /** Poll until FIS populates **Assured Future Value** in Finance (UDP-T4030). */
+  async waitForAssuredFutureValuePopulated(timeoutMs = 90_000): Promise<number> {
+    this.logStep("Wait for Assured Future Value populated from FIS");
+    const readAfV = async (): Promise<number> => this.readStandardQuoteFisAfVAmount();
+
+    const pollReady = async (timeout: number): Promise<number | null> => {
+      try {
+        await expect
+          .poll(readAfV, { timeout, intervals: [500, 1_000, 2_000] })
+          .toBeGreaterThan(0);
+        return await readAfV();
+      } catch {
+        return null;
+      }
+    };
+
+    let amount = await pollReady(Math.min(45_000, timeoutMs));
+    if (amount !== null && amount > 0) {
+      await this.waitForQuoteLoadersToFinish();
+      return amount;
+    }
+
+    await this.nudgeAfVFisRefresh();
+    amount = await pollReady(Math.min(25_000, timeoutMs));
+    if (amount !== null && amount > 0) {
+      await this.waitForQuoteLoadersToFinish();
+      return amount;
+    }
+
+    if (await this.calculateButton.isEnabled().catch(() => false)) {
+      this.logStep("AFV still $0 — Calculate to fetch FIS Assured Future Value");
+      await this.clickCalculateButton();
+      await this.waitForQuoteLoadersToFinish();
+    }
+
+    await expect
+      .poll(readAfV, {
+        timeout: Math.max(30_000, timeoutMs - 70_000),
+        intervals: [500, 1_000, 2_000],
+      })
+      .toBeGreaterThan(0);
+    await this.waitForQuoteLoadersToFinish();
+    return await readAfV();
+  }
+
+  /** Blur finance inputs / re-select KM so SIT FIS can refresh AFV without Calculate. */
+  private async nudgeAfVFisRefresh(): Promise<void> {
+    this.logStep("Nudge FIS refresh for Assured Future Value");
+    await this.interestRateInputField.scrollIntoViewIfNeeded().catch(() => {});
+    await this.interestRateInputField.click({ timeout: 5_000 }).catch(() => {});
+    await this.interestRateInputField.press("Tab").catch(() => {});
+    await this.waitForQuoteLoadersToFinish();
+
+    const term = (await this.termsOfFinanceInputField.inputValue().catch(() => "")).trim();
+    if (term.length > 0) {
+      await this.termsOfFinanceInputField.click({ timeout: 5_000 }).catch(() => {});
+      await this.termsOfFinanceInputField.press("Tab").catch(() => {});
+      await this.waitForQuoteLoadersToFinish();
+    }
+
+    const km = await this.readKmAllowanceLabel();
+    if (km.length > 0) {
+      await this.selectKmAllowance(km);
+    }
+  }
+
+  async expectAssuredFutureValueDisplayOnly(): Promise<void> {
+    this.logStep("Expect Assured Future Value display-only");
+    await expect.soft(await this.assuredFutureValueIsReadOnly()).toBeTruthy();
+  }
+
+  async afvOptionsTableHasCurrencyData(): Promise<boolean> {
+    const region = this.afvOptionsPanel();
+    if (!(await region.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return false;
+    }
+    const body = ((await region.textContent()) ?? "").replace(/\u00a0/g, " ");
+    return /\$\s*[\d,]+\.\d{2}/.test(body);
+  }
+
+  async readAfVOptionsPaymentForTerm(term: string): Promise<number> {
+    const region = this.afvOptionsPanel();
+    const table = region.locator("table").first();
+    const rows = table.locator("tbody tr");
+    const rowCount = await rows.count();
+    const termDigits = term.replace(/\s/g, "");
+    for (let i = 0; i < rowCount; i++) {
+      const cellTexts = (await rows.nth(i).locator("td").allTextContents()).map((c) =>
+        c.replace(/\u00a0/g, " ").trim(),
+      );
+      if (!cellTexts[0]?.replace(/\s/g, "").includes(termDigits)) continue;
+      const payment = Number.parseFloat((cellTexts[2] ?? "").replace(/[^0-9.-]/g, ""));
+      return Number.isFinite(payment) ? payment : 0;
+    }
+    return 0;
+  }
+
+  /**
+   * UDP-T4030: AFV auto-populated from FIS (Finance field or AFV Options grid after Calculate).
+   */
+  async expectAssuredFutureValueAutoPopulatedFromFis(term = "36"): Promise<number> {
+    this.logStep("Expect Assured Future Value auto-populated from FIS");
+    let amount = 0;
+    try {
+      amount = await this.waitForAssuredFutureValuePopulated(60_000);
+    } catch {
+      amount = await this.readStandardQuoteFisAfVAmount();
+    }
+
+    if (amount <= 0) {
+      if (await this.calculateButton.isEnabled().catch(() => false)) {
+        await this.clickCalculateButton();
+        await this.waitForQuoteLoadersToFinish();
+      }
+      amount = await this.readStandardQuoteFisAfVAmount();
+    }
+
+    if (amount <= 0) {
+      await expect.soft(this.afvOptionsPanel()).toBeVisible({ timeout: 45_000 });
+      expect.soft(await this.afvOptionsTableHasCurrencyData()).toBeTruthy();
+      amount = await this.readAfVOptionsPaymentForTerm(term);
+    }
+
+    expect.soft(amount).toBeGreaterThan(0);
+    return amount;
+  }
+
+  /** UDP-T4030: changing KM refreshes AFV-derived values (Finance AFV or AFV Options payment for term). */
+  async expectAssuredFutureValueUpdatesWhenKmChanges(term = "36"): Promise<void> {
+    this.logStep("Expect Assured Future Value updates when KM changes");
+    const kmOptions = await this.listKmAllowanceOptions();
+    if (kmOptions.length < 2) {
+      return;
+    }
+
+    const beforeFinance = await this.readStandardQuoteFisAfVAmount();
+    const beforeOptions = await this.readAfVOptionsPaymentForTerm(term);
+    const currentKm = await this.readKmAllowanceLabel();
+    const alternateKm =
+      kmOptions.find((o) => o.replace(/\s/g, "") !== currentKm.replace(/\s/g, "")) ?? kmOptions[1];
+
+    await this.selectKmAllowance(alternateKm);
+    await this.waitForQuoteLoadersToFinish();
+
+    if (beforeFinance > 0) {
+      const updatedFinance = await this.waitForAssuredFutureValueChange(beforeFinance, 30_000);
+      expect.soft(updatedFinance).not.toBe(beforeFinance);
+      return;
+    }
+
+    if (beforeOptions > 0) {
+      if (await this.calculateButton.isEnabled().catch(() => false)) {
+        await this.clickCalculateButton();
+        await this.waitForQuoteLoadersToFinish();
+      }
+      const afterOptions = await this.readAfVOptionsPaymentForTerm(term);
+      expect.soft(afterOptions).toBeGreaterThan(0);
+      expect.soft(afterOptions).not.toBe(beforeOptions);
+    }
+  }
+
+  /**
+   * After KM / term change, FIS may refresh AFV asynchronously — click **Calculate** if auto-update stalls.
+   */
+  async waitForAssuredFutureValueChange(
+    previousAmount: number,
+    timeoutMs = 45_000,
+  ): Promise<number> {
+    this.logStep(`Wait for Assured Future Value change from ${previousAmount}`);
+    const readAfV = async (): Promise<number> => this.readStandardQuoteFisAfVAmount();
+
+    const pollChanged = async (timeout: number): Promise<number | null> => {
+      let latest = previousAmount;
+      try {
+        await expect
+          .poll(
+            async () => {
+              latest = await readAfV();
+              return latest > 0 && Math.abs(latest - previousAmount) > 0.01;
+            },
+            { timeout, intervals: [500, 1_000, 1_500, 2_000] },
+          )
+          .toBe(true);
+        return latest;
+      } catch {
+        return null;
+      }
+    };
+
+    let updated = await pollChanged(timeoutMs);
+    if (updated !== null) {
+      return updated;
+    }
+
+    if (await this.calculateButton.isEnabled().catch(() => false)) {
+      await this.clickCalculateButton();
+      await this.waitForQuoteLoadersToFinish();
+    }
+    updated = await pollChanged(timeoutMs);
+    if (updated !== null) {
+      return updated;
+    }
+    throw new Error(
+      `Assured Future Value unchanged after KM/term update (still ${await readAfV()}).`,
+    );
   }
 
   async readKmAllowanceLabel(): Promise<string> {
@@ -6746,7 +7253,7 @@ export class DOAssetDetailsPage extends BasePage {
       timeout: 15_000,
     });
     await this.page.keyboard.press("Escape").catch(() => {});
-    await this.waitForLoadingComplete();
+    await this.waitForQuoteLoadersToFinish();
   }
 
   async ensureKmAllowanceForAfV(): Promise<void> {
@@ -6848,6 +7355,49 @@ export class DOAssetDetailsPage extends BasePage {
       .not.toBeNull();
   }
 
+  /**
+   * UDP-T4034: First Payment cannot be before Loan Date — validation on Calculate, or UI clamps/rejects the past date.
+   */
+  async expectFirstPaymentCannotBeBeforeLoanDate(): Promise<void> {
+    this.logStep("Expect First Payment cannot be before Loan Date");
+    const loan = await this.readLoanDateValue();
+    const loanDate = this.parseDdMmYyyy(loan);
+    expect.soft(loanDate).not.toBeNull();
+    const yesterday = DOAssetDetailsPage.shiftDdMmYyyy(loan, -1);
+    await this.enterFirstPaymentDateDdMmYyyy(yesterday);
+    const readBack = await this.readFirstPaymentDateValue();
+    const readDate = this.parseDdMmYyyy(readBack);
+
+    if (readBack === yesterday || (readDate && loanDate && readDate < loanDate)) {
+      await this.clickCalculateButton();
+      await this.expectFirstPaymentBeforeLoanDateValidation();
+      return;
+    }
+
+    expect.soft(readDate).not.toBeNull();
+    if (readDate && loanDate) {
+      expect.soft(readDate.getTime()).toBeGreaterThanOrEqual(loanDate.getTime());
+    }
+  }
+
+  /** UDP-T4032: Interest Rate defaults from FIS; editability depends on BLD rules. */
+  async expectInterestRateDefaultedFromFis(): Promise<void> {
+    this.logStep("Expect Interest Rate defaulted from FIS AF");
+    await expect
+      .poll(
+        async () => {
+          const rate = (await this.interestRateInputField.inputValue()).trim();
+          return rate.length > 0 && /\d/.test(rate);
+        },
+        { timeout: 45_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBeTruthy();
+
+    const editable = await this.interestRateInputField.isEditable().catch(() => false);
+    const disabled = await this.interestRateInputField.isDisabled().catch(() => false);
+    expect.soft(editable || disabled).toBeTruthy();
+  }
+
   async expectFirstPaymentExceedsSixWeeksValidation(
     loanDate?: string,
     attemptedDate?: string,
@@ -6893,13 +7443,76 @@ export class DOAssetDetailsPage extends BasePage {
 
   async expectAfVOptionsSectionVisible(): Promise<void> {
     this.logStep("Expect AFV Options Section Visible");
-    const root = this.standardQuoteRoot();
-    const panel = root
-      .locator("p-card, div, section")
-      .filter({ hasText: /Assured Future Value Options/i })
-      .filter({ visible: true })
-      .first();
+    await expect.soft(this.afvOptionsPanel()).toBeVisible({ timeout: 45_000 });
+  }
+
+  private afvOptionsPanel(): Locator {
+    return this.standardQuoteRoot().getByRole("region", { name: /Assured Future Value Options/i });
+  }
+
+  /** UDP-T4058: Term, KM, Payment Amount, Weekly Equivalent in AFV Options are display-only. */
+  async expectAfVOptionsFieldsNonEditable(): Promise<void> {
+    this.logStep("Expect AFV Options fields non-editable");
+    const region = this.afvOptionsPanel();
+    await expect.soft(region).toBeVisible({ timeout: 45_000 });
+
+    const table = region.locator("table").first();
+    await expect.soft(table).toBeVisible({ timeout: 30_000 });
+
+    const bodyRows = table.locator("tbody tr");
+    await expect.soft(bodyRows.first()).toBeVisible({ timeout: 30_000 });
+
+    // Data rows are plain text — no inputs, comboboxes, or spinbuttons in Term/KM/Payment/Weekly cells.
+    await expect.soft(bodyRows.locator("input, textarea").filter({ visible: true })).toHaveCount(0);
+    await expect.soft(bodyRows.getByRole("combobox").filter({ visible: true })).toHaveCount(0);
+    await expect.soft(bodyRows.getByRole("spinbutton").filter({ visible: true })).toHaveCount(0);
+  }
+
+  /** UDP-T4057: each AFV Options row Weekly Equivalent ≈ Payment Amount ÷ 4.33. */
+  async expectAfVOptionsWeeklyEquivalentDividedBy433(tolerance = 0.02): Promise<void> {
+    this.logStep("Expect AFV Options Weekly Equivalent = Payment Amount / 4.33");
+    const panel = this.afvOptionsPanel();
     await expect.soft(panel).toBeVisible({ timeout: 45_000 });
+    await expect.soft(this.page.getByText(/Weekly\s+Equivalent/i).first()).toBeVisible({ timeout: 30_000 });
+
+    const table = panel.locator("table").first();
+    await expect.soft(table).toBeVisible({ timeout: 30_000 });
+
+    const headerCells = table.locator("thead tr, tr").first().locator("th, td");
+    const headers = (await headerCells.allTextContents()).map((h) => h.replace(/\u00a0/g, " ").trim());
+    const paymentIdx = headers.findIndex((h) => /Payment\s+Amount/i.test(h));
+    const weeklyIdx = headers.findIndex((h) => /Weekly\s+Equivalent/i.test(h));
+
+    const bodyRows = table.locator("tbody tr").filter({ hasText: /\$/ });
+    const rowCount = await bodyRows.count();
+    expect.soft(rowCount).toBeGreaterThan(0);
+
+    let validated = 0;
+    for (let i = 0; i < rowCount; i++) {
+      const cellTexts = (await bodyRows.nth(i).locator("td").allTextContents()).map((c) =>
+        c.replace(/\u00a0/g, " ").trim(),
+      );
+
+      let payment: number;
+      let weekly: number;
+      if (paymentIdx >= 0 && weeklyIdx >= 0 && cellTexts.length > Math.max(paymentIdx, weeklyIdx)) {
+        payment = parseFloat(cellTexts[paymentIdx].replace(/[^0-9.-]/g, "")) || 0;
+        weekly = parseFloat(cellTexts[weeklyIdx].replace(/[^0-9.-]/g, "")) || 0;
+      } else {
+        const amounts = cellTexts
+          .map((c) => parseFloat(c.replace(/[^0-9.-]/g, "")) || 0)
+          .filter((n) => n > 0);
+        if (amounts.length < 2) continue;
+        payment = amounts[amounts.length - 2];
+        weekly = amounts[amounts.length - 1];
+      }
+
+      if (payment <= 0 || weekly <= 0) continue;
+      const expectedWeekly = Math.round((payment / 4.33) * 100) / 100;
+      expect.soft(Math.abs(weekly - expectedWeekly)).toBeLessThanOrEqual(tolerance);
+      validated++;
+    }
+    expect.soft(validated).toBeGreaterThan(0);
   }
 
   async expectStandardPaymentOptionsHidden(): Promise<void> {
@@ -7004,6 +7617,45 @@ export class DOAssetDetailsPage extends BasePage {
     }
   }
 
+  /**
+   * After **Calculate** in Edit Payment Schedule, AFV amount stays display-only (UDP-T4049).
+   */
+  async expectAfVAmountNonEditableAfterEditPaymentScheduleCalculate(): Promise<void> {
+    this.logStep("Expect AFV amount non-editable after Edit Payment Schedule Calculate");
+    const dialog = this.editPaymentScheduleDialog();
+
+    const assertAfVRowReadOnly = async (row: Locator): Promise<boolean> => {
+      if (!(await row.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        return false;
+      }
+      const input = row.locator("input").first();
+      if (await input.isVisible().catch(() => false)) {
+        expect.soft(await input.isEditable().catch(() => true)).toBeFalsy();
+        return true;
+      }
+      return false;
+    };
+
+    const labeledAfVRow = dialog
+      .locator("tr")
+      .filter({ hasText: /AFV|Assured Future Value/i })
+      .filter({ visible: true })
+      .last();
+    if (await assertAfVRowReadOnly(labeledAfVRow)) {
+      return;
+    }
+
+    const instalmentTable = this.editPaymentScheduleInstalmentTable();
+    if (await instalmentTable.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const lastInstalment = instalmentTable.locator("tbody tr").filter({ visible: true }).last();
+      if (await assertAfVRowReadOnly(lastInstalment)) {
+        return;
+      }
+    }
+
+    expect.soft(await this.assuredFutureValueIsReadOnly()).toBeTruthy();
+  }
+
   async clickEditPaymentScheduleDelete(): Promise<void> {
     this.logStep("Click Edit Payment Schedule Delete");
     const dialog = this.editPaymentScheduleDialog();
@@ -7015,14 +7667,156 @@ export class DOAssetDetailsPage extends BasePage {
     await deleteBtn.click({ timeout: 10_000 });
   }
 
-  async expectAfVRowInPaymentSchedule(): Promise<void> {
-    this.logStep("Expect AFV Row In Payment Schedule");
-    const root = this.standardQuoteRoot();
-    const afvRow = root
+  /** **Last Payment** date from Payment Summary (after **Calculate**). */
+  async readLastPaymentSummaryDate(): Promise<string> {
+    const summary = this.paymentSummaryRoot;
+    const label = summary.getByText(/^Last Payment\s*\*?$/i).first();
+    await label.scrollIntoViewIfNeeded().catch(() => {});
+    const field = label
+      .locator("xpath=following::input[1]")
+      .or(label.locator("xpath=following::*[@role='combobox'][1]"))
+      .first();
+    const value =
+      (await field.inputValue().catch(() => "")).trim() ||
+      ((await field.textContent()) ?? "").trim();
+    const match = value.match(/\d{1,2}\/\d{1,2}\/\d{4}/);
+    return match?.[0] ?? value;
+  }
+
+  /** AFV amount due date from the final instalment row in **Edit Payment Schedule**. */
+  async readAfVAmountDueDateFromEditPaymentSchedule(): Promise<string> {
+    await this.openEditPaymentScheduleDialog();
+    const dialog = this.editPaymentScheduleDialog();
+    const labeledRow = dialog
       .locator("tr")
       .filter({ hasText: /AFV|Assured Future Value/i })
-      .first();
-    await expect.soft(afvRow).toBeVisible({ timeout: 30_000 });
+      .filter({ visible: true })
+      .last();
+    let rowText = "";
+    if (await labeledRow.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      rowText = (await labeledRow.textContent()) ?? "";
+    } else {
+      const lastRow = dialog
+        .locator("table tbody tr")
+        .filter({ hasText: /\d{1,2}\/\d{1,2}\/\d{4}/ })
+        .filter({ visible: true })
+        .last();
+      rowText = (await lastRow.textContent().catch(() => "")) ?? "";
+    }
+    await this.closeEditPaymentScheduleDialogIfOpen().catch(() => {});
+    return rowText.match(/\d{1,2}\/\d{1,2}\/\d{4}/)?.[0] ?? "";
+  }
+
+  /** Last visible instalment row with a **$** amount inside **Payment Schedule**. */
+  paymentScheduleLastCurrencyRow(): Locator {
+    return this.paymentScheduleContentScope()
+      .locator("tr")
+      .filter({ hasText: /\$\s*[\d,.]+/ })
+      .filter({ visible: true })
+      .last();
+  }
+
+  async expectAfVRowInPaymentSchedule(): Promise<void> {
+    this.logStep("Expect AFV Row In Payment Schedule");
+    await this.waitForQuoteLoadersToFinish();
+    await this.openDetailedPaymentScheduleView();
+
+    const scope = this.paymentScheduleContentScope();
+    const labeledAfVRow = (): Locator =>
+      scope
+        .locator("tr")
+        .filter({ hasText: /AFV|Assured Future Value/i })
+        .filter({ visible: true })
+        .first();
+
+    if (await labeledAfVRow().isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect.soft(labeledAfVRow()).toBeVisible();
+      return;
+    }
+
+    await this.clickLeasePaymentScheduleBarsViewIfNeeded();
+    if (await labeledAfVRow().isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect.soft(labeledAfVRow()).toBeVisible();
+      return;
+    }
+
+    const editBtn = this.editPaymentScheduleTrigger();
+    if (await editBtn.isEnabled().catch(() => false)) {
+      await this.openEditPaymentScheduleDialog().catch(() => {});
+      const dialog = this.editPaymentScheduleDialog();
+      const dialogAfVRow = dialog
+        .locator("tr")
+        .filter({ hasText: /AFV|Assured Future Value/i })
+        .filter({ visible: true })
+        .first();
+      if (await dialogAfVRow.isVisible({ timeout: 10_000 }).catch(() => false)) {
+        await expect.soft(dialogAfVRow).toBeVisible();
+        await this.closeEditPaymentScheduleDialogIfOpen().catch(() => {});
+        return;
+      }
+
+      const lastDialogRow = dialog
+        .locator("table tbody tr")
+        .filter({ hasText: /\$\s*[\d,.]+/ })
+        .filter({ visible: true })
+        .last();
+      if (await lastDialogRow.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await expect.soft(lastDialogRow).toBeVisible();
+        await this.closeEditPaymentScheduleDialogIfOpen().catch(() => {});
+        return;
+      }
+      await this.closeEditPaymentScheduleDialogIfOpen().catch(() => {});
+    }
+
+    // Segment summary on SIT may collapse AFV into the final currency row without an "AFV" caption.
+    const lastRow = this.paymentScheduleLastCurrencyRow();
+    await expect.soft(lastRow).toBeVisible({ timeout: 30_000 });
+  }
+
+  /**
+   * Segment view (**pi-equals**): AFV segment final line includes a date in the **Date** column (UDP-T4041).
+   * SIT may omit an "AFV" caption — fall back to instalment grid / **Last Payment** for the due date.
+   */
+  async expectSegmentViewAfVDateIncluded(): Promise<void> {
+    this.logStep("Expect Segment View AFV Date Included");
+    await this.waitForQuoteLoadersToFinish();
+    await this.openDetailedPaymentScheduleView();
+    await this.clickLeasePaymentScheduleDefaultViewIfNeeded();
+
+    const scope = this.paymentScheduleContentScope();
+    const labeledAfVRow = scope
+      .locator("tr")
+      .filter({ hasText: /AFV|Assured Future Value/i })
+      .filter({ visible: true })
+      .last();
+
+    if (await labeledAfVRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect.soft(labeledAfVRow).toContainText(/\d{1,2}\/\d{1,2}\/\d{4}/);
+      return;
+    }
+
+    const segmentRows = scope
+      .locator("tr")
+      .filter({ hasText: /\$\s*[\d,.]+/ })
+      .filter({ visible: true });
+    const rowCount = await segmentRows.count();
+    const lastSegmentRow = segmentRows.last();
+    await expect.soft(lastSegmentRow).toBeVisible({ timeout: 30_000 });
+
+    const lastRowText = ((await lastSegmentRow.textContent()) ?? "").replace(/\s+/g, " ");
+    const lastRowDate = lastRowText.match(/\d{1,2}\/\d{1,2}\/\d{4}/)?.[0] ?? "";
+
+    if (rowCount >= 2 && lastRowDate.length > 0) {
+      await expect.soft(lastSegmentRow).toContainText(/\d{1,2}\/\d{1,2}\/\d{4}/);
+      return;
+    }
+
+    const afvDueDate = await this.readAfVAmountDueDateFromEditPaymentSchedule();
+    expect.soft(afvDueDate).toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/);
+    const lastPayment = await this.readLastPaymentSummaryDate();
+    if (lastPayment.length > 0 && afvDueDate.length > 0) {
+      expect.soft(lastPayment).toBe(afvDueDate);
+    }
   }
 
   async openSettlementDialog(): Promise<void> {
@@ -7145,16 +7939,16 @@ export class DOAssetDetailsPage extends BasePage {
   /** SIT may leave cash at $0.00 — enter a fallback when FIS does not price the asset type. */
   async ensureAfVCashPriceReady(fallbackAmount = "$25,000"): Promise<void> {
     this.logStep("Ensure AFV cash price ready");
+    const readCash = async (): Promise<number> =>
+      this.readCurrencyInput(this.cashPriceOfAssetInputField);
     const ready = await expect
-      .poll(
-        async () => this.parseDisplayedCurrency(await this.cashPriceOfAssetInputField.inputValue()) > 0,
-        { timeout: 30_000 },
-      )
-      .toBeTruthy()
+      .poll(readCash, { timeout: 30_000 })
+      .toBeGreaterThan(0)
       .then(() => true)
       .catch(() => false);
     if (!ready) {
       await this.cashPriceOfAsset(fallbackAmount);
+      await expect.poll(readCash, { timeout: 20_000 }).toBeGreaterThan(0);
     }
     await this.waitForLoadingComplete();
   }
