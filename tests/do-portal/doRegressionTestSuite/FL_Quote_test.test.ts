@@ -9,6 +9,10 @@ import type { Locator, Page } from "@playwright/test";
 import { DOAssetDetailsPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import * as fl from "./fl.helpers";
+import { openStandardQuoteFromDashboard } from "./workflow.helpers";
+
+const CSA_SQ_PRODUCT = "CSA-C-Assigned";
+const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
 
 async function openSelectedFlQuickQuote(page: Page) {
   const { quickQuotePage } = await fl.openFlQuickQuoteFromDashboard(page);
@@ -246,16 +250,17 @@ async function expectDealerFinanceIfAccessible(
   }
 }
 
-async function expectEditScheduleFixedZeroRejected(page: Page, assetDetailsPage: Awaited<ReturnType<typeof openFlStandardQuote>>["assetDetailsPage"]) {
-  await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Fixed", amount: "500" });
+async function expectEditScheduleFixedZeroRejected(
+  assetDetailsPage: Awaited<ReturnType<typeof openFlStandardQuote>>["assetDetailsPage"],
+) {
+  const rowIndex = await assetDetailsPage.ensureEditPaymentScheduleNonFirstSegment();
+  await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+    rowIndex,
+    type: "Fixed",
+    amount: "500",
+  });
   await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false }).catch(() => {});
-  await expect
-    .soft(
-      page
-        .getByText(/Fixed.*0|only.*0|not allowed|must be 0|Finance Lease/i)
-        .first(),
-    )
-    .toBeVisible({ timeout: 20_000 });
+  await assetDetailsPage.expectFlEditPaymentScheduleNonZeroFixedRejected(rowIndex);
 }
 
 test.describe("FL Quote Test Case @do @regression", () => {
@@ -858,19 +863,46 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4300 - TC_DF_002 Base Interest Rate Display Only Retained at First Save",
     { tag: ["@do", "@regression", "@UDP-T4300"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
+      test.setTimeout(600_000);
+      const origRef = "SQ-FL-T4300";
       const { assetDetailsPage } = await calculateStandardQuote(page, {
         interest: "4",
+        origRef,
         skipPaymentScheduleCheck: true,
       });
-      await expectDealerFinanceIfAccessible(page, assetDetailsPage);
-      await assetDetailsPage.expectBaseInterestRateDisplayOnly();
-      const baseRate = await assetDetailsPage.readBaseInterestRatePercent();
-      expect.soft(Number.isFinite(baseRate)).toBeTruthy();
-      expect.soft(baseRate).toBeGreaterThan(0);
-      test.info().annotations.push({
-        type: "note",
-        description: `Base Interest Rate captured as ${baseRate}%. Save/re-open retention (steps 3–5) requires FIS AF quote reload — same gap as UDP-T4118 (OL).`,
+
+      const dealerFinanceTrigger = root(page).locator(':text-is("Dealer Finance")').first();
+      if (!(await dealerFinanceTrigger.isVisible({ timeout: 8_000 }).catch(() => false))) {
+        test.info().annotations.push({
+          type: "note",
+          description: "Dealer Finance is access-controlled and was not visible for this user/dealer.",
+        });
+        test.skip(true, "Dealer Finance not accessible — cannot verify Base Interest Rate.");
+      }
+
+      await test.step("Expand Dealer Finance — Base Interest Rate is display-only", async () => {
+        await assetDetailsPage.expandDealerFinanceSection();
+        await assetDetailsPage.expectBaseInterestRateDisplayOnly();
+      });
+
+      let baseAtFirstSave = Number.NaN;
+      await test.step("Observe Base Interest Rate before Save", async () => {
+        baseAtFirstSave = await assetDetailsPage.readBaseInterestRatePercent();
+        expect(baseAtFirstSave).toBeGreaterThan(0);
+      });
+
+      await test.step("Save and reopen — Base Interest Rate retained from first Save", async () => {
+        await assetDetailsPage.clickSaveStandardQuoteStep({
+          originatorRefForRequiredDialog: origRef,
+        });
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+        const dashboardPage = await fl.openAuthenticatedDashboard(page);
+        await dashboardPage.openOpenQuoteFromListingByReference(origRef);
+        await assetDetailsPage.waitForAssetDetailsStepReady();
+        await assetDetailsPage.expandDealerFinanceSection();
+        await assetDetailsPage.expectBaseInterestRateDisplayOnly();
+        await assetDetailsPage.expectBaseInterestRateRetained(baseAtFirstSave);
       });
     },
   );
@@ -1028,16 +1060,22 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4310 - TC_FD_008 Payment Amount GST-Inclusive Shows 'Irregular' for Fixed '0' Segments",
     { tag: ["@do", "@regression", "@UDP-T4310"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await calculateStandardQuote(page, {
         skipPaymentScheduleCheck: true,
-        initialLease: "700",
       });
-      await assetDetailsPage.applyFlFixedZeroSegmentForIrregularPayment();
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.enterResidualValuePercentFinanceLease(fl.FL_RESIDUAL_PERCENT);
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectPaymentAmountShowsIrregular();
+
+      await test.step("Add Fixed '0' amount segment via Edit Payment Schedule", async () => {
+        await assetDetailsPage.applyFlFixedZeroSegmentForIrregularPayment();
+      });
+
+      await test.step("Calculate — Payment Amount displays Irregular", async () => {
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.enterResidualValuePercentFinanceLease(fl.FL_RESIDUAL_PERCENT);
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+        await assetDetailsPage.expectPaymentAmountShowsIrregular();
+      });
     },
   );
 
@@ -1105,12 +1143,26 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4316 - TC_PS_005 Segment View Residual Value Sub-Section GST Incl Displays as GST-Inclusive",
     { tag: ["@do", "@regression", "@UDP-T4316"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
-      await annotateFisStorageNotVerified();
-      const { assetDetailsPage } = await calculateStandardQuote(page, { residualDollar: "5000" });
-      await expectCurrencyAtLeast(assetDetailsPage.olResidualValueInputField(), 5_000);
-      await expectText(page, /Residual\s+Value/i);
-      await expectText(page, /GST\s+Incl|Incl\.?\s*GST|Residual Value/i);
+      test.setTimeout(600_000);
+      const residualInclusive = 5_000;
+      const { assetDetailsPage } = await calculateStandardQuote(page, {
+        cashPrice: "50000",
+        skipPaymentScheduleCheck: true,
+      });
+
+      await test.step("Enter Residual Value = $5,000 and Calculate", async () => {
+        await assetDetailsPage.enterOlResidualValueAmount(String(residualInclusive));
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.enterResidualValuePercentFinanceLease("10");
+        await assetDetailsPage.clickCalculateButton();
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+        await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+        await assetDetailsPage.expectOlResidualValueDisplaysGstInclusive(residualInclusive);
+      });
+
+      await test.step("Segment view — Residual Value sub-section GST Incl is GST-inclusive", async () => {
+        await assetDetailsPage.expectResidualValueScheduleGstInclusiveAmount(residualInclusive);
+      });
     },
   );
 
@@ -1177,11 +1229,34 @@ test.describe("FL Quote Test Case @do @regression", () => {
     async ({ page }: { page: Page }) => {
       test.setTimeout(600000);
       const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      await expectEditScheduleFixedZeroRejected(page, assetDetailsPage);
-      await assetDetailsPage.clickEditPaymentScheduleReset();
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Fixed", amount: "0" });
-      await assetDetailsPage.clickEditPaymentScheduleCalculate();
-      await expect.soft(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible();
+
+      await test.step("Open Edit Payment Schedule", async () => {
+        await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+      });
+
+      const rowIndex = await assetDetailsPage.ensureEditPaymentScheduleNonFirstSegment();
+
+      await test.step("Non-first segment: Type Fixed, Amount $500 — Calculate rejects", async () => {
+        await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+          rowIndex,
+          type: "Fixed",
+          amount: "500",
+        });
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectFlEditPaymentScheduleNonZeroFixedRejected(rowIndex);
+      });
+
+      await test.step("Non-first segment: Type Fixed, Amount $0 — Calculate accepts", async () => {
+        await assetDetailsPage.clickEditPaymentScheduleReset();
+        const restoredRowIndex = await assetDetailsPage.ensureEditPaymentScheduleNonFirstSegment();
+        await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+          rowIndex: restoredRowIndex,
+          type: "Fixed",
+          amount: "0",
+        });
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectFlEditPaymentScheduleFixedZeroAccepted(restoredRowIndex);
+      });
     },
   );
 
@@ -1190,11 +1265,29 @@ test.describe("FL Quote Test Case @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4323"] },
     async ({ page }: { page: Page }) => {
       test.setTimeout(600000);
-      const { assetDetailsPage } = await openCalculatedEditSchedule(page, { initialLease: "700" });
-      const firstRow = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
-      expect.soft(firstRow.number).toMatch(/^1$/);
-      expect.soft(firstRow.type).toMatch(/Fixed/i);
-      await assetDetailsPage.expectEditPaymentScheduleSegmentTypesExcludeInterestOnly();
+      const initialLease = "700";
+      const { assetDetailsPage } = await openCalculatedEditSchedule(page, { initialLease });
+
+      await test.step("Observe first row Number=1 Type=Fixed", async () => {
+        const firstRow = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
+        expect.soft(firstRow.number).toMatch(/^1$/);
+        expect.soft(firstRow.type).toMatch(/Fixed/i);
+      });
+
+      await test.step("Attempt to change first row Type — remains Fixed and locked", async () => {
+        expect(await assetDetailsPage.isEditPaymentScheduleSegmentTypeEditable(0)).toBeFalsy();
+        const changed = await assetDetailsPage.trySelectEditPaymentScheduleSegmentTypeOnRow(0, "Normal");
+        expect(changed).toBeFalsy();
+        await expect
+          .poll(async () => assetDetailsPage.readEditPaymentScheduleSegmentTypeOnRow(0))
+          .toMatch(/Fixed/i);
+      });
+
+      await test.step("Attempt to change first row Amount — display-only Initial Lease Amount", async () => {
+        await assetDetailsPage.expectFlEditPaymentScheduleFirstRowAmountLocked(
+          fl.parseCurrency(initialLease),
+        );
+      });
     },
   );
 
@@ -1202,11 +1295,29 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4324 - TC_EP_003 First Row Amount = Initial Lease Amount Always",
     { tag: ["@do", "@regression", "@UDP-T4324"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
-      const { assetDetailsPage } = await openCalculatedEditSchedule(page, { initialLease: "700" });
-      const firstRow = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
-      expect.soft(firstRow.type).toMatch(/Fixed/i);
-      expect.soft(fl.parseCurrency(firstRow.amount)).toBeGreaterThanOrEqual(700);
+      test.setTimeout(600_000);
+      const initialLease = "700";
+
+      const { assetDetailsPage } = await test.step(
+        "Set Initial Lease Amount = $700 and Calculate",
+        async () => calculateStandardQuote(page, { initialLease }),
+      );
+
+      const quoteInitialLease = await assetDetailsPage.readInitialLeaseAmountFinanceLease();
+      expect(quoteInitialLease).toBeGreaterThanOrEqual(fl.parseCurrency(initialLease));
+
+      await test.step("Open Edit Payment Schedule", async () => {
+        await assetDetailsPage.openEditPaymentScheduleDialog();
+        await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+      });
+
+      await test.step("First row Amount = Initial Lease Amount; Type Fixed; display-only", async () => {
+        await assetDetailsPage.expectFlEditPaymentScheduleFirstRowAmountEqualsInitialLease(
+          quoteInitialLease,
+        );
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1214,15 +1325,46 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4325 - TC_EP_004 Remaining Segments Not Row 1 Type Can Be Normal or Fixed",
     { tag: ["@do", "@regression", "@UDP-T4325"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      await assetDetailsPage.expectEditPaymentScheduleSegmentTypesExcludeInterestOnly();
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Normal" });
-      const normal = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
-      expect.soft(normal.type).toMatch(/Normal|Fixed/i);
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Fixed", amount: "0" });
-      const fixed = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
-      expect.soft(fixed.type).toMatch(/Fixed/i);
+
+      let rowIndex = 1;
+
+      await test.step("Row 2 — Type dropdown on editable segment (not first row)", async () => {
+        rowIndex = await assetDetailsPage.ensureEditPaymentScheduleNonFirstSegment();
+        expect(rowIndex).toBeGreaterThan(0);
+        expect(await assetDetailsPage.isEditPaymentScheduleSegmentTypeEditable(rowIndex)).toBeTruthy();
+        await assetDetailsPage.expectEditPaymentScheduleSegmentTypesExcludeInterestOnly(rowIndex);
+      });
+
+      await test.step("Select Normal — Amount auto-calculated from FIS AF; not user-editable", async () => {
+        await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+          rowIndex,
+          type: "Normal",
+        });
+        expect(await assetDetailsPage.readEditPaymentScheduleSegmentTypeOnRow(rowIndex)).toMatch(/Normal/i);
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectFlEditPaymentScheduleNormalAmountAutoCalculatedNotEditable(rowIndex);
+      });
+
+      await test.step("Select Fixed — Amount user-editable; only $0 allowed", async () => {
+        await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+          rowIndex,
+          type: "Fixed",
+        });
+        expect(await assetDetailsPage.readEditPaymentScheduleSegmentTypeOnRow(rowIndex)).toMatch(/Fixed/i);
+        await assetDetailsPage.expectFlEditPaymentScheduleFixedAmountUserEditable(rowIndex);
+
+        await assetDetailsPage.enterEditPaymentScheduleSegmentAmountOnRow(rowIndex, "500");
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectFlEditPaymentScheduleNonZeroFixedRejected(rowIndex);
+
+        await assetDetailsPage.enterEditPaymentScheduleSegmentAmountOnRow(rowIndex, "0");
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectFlEditPaymentScheduleFixedZeroAccepted(rowIndex);
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1230,15 +1372,21 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4326 - TC_EP_005 No Interest Only Type in FL Edit Schedule",
     { tag: ["@do", "@regression", "@UDP-T4326"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      await assetDetailsPage.expectEditPaymentScheduleSegmentTypesExcludeInterestOnly();
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Normal" });
-      const normal = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
-      expect.soft(normal.type).toMatch(/Normal|Fixed/i);
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Fixed", amount: "0" });
-      const fixed = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
-      expect.soft(fixed.type).toMatch(/Fixed/i);
+
+      let editableRowIndex = 1;
+
+      await test.step("Click Type dropdown for an editable segment", async () => {
+        editableRowIndex = await assetDetailsPage.ensureEditPaymentScheduleNonFirstSegment();
+        expect(await assetDetailsPage.isEditPaymentScheduleSegmentTypeEditable(editableRowIndex)).toBeTruthy();
+      });
+
+      await test.step("Type options are Normal and Fixed only — Interest Only not available", async () => {
+        await assetDetailsPage.expectEditPaymentScheduleSegmentTypesExcludeInterestOnly(editableRowIndex);
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1246,12 +1394,32 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4327 - TC_EP_006 Maximum Number for Non-First Segments = Term - 1",
     { tag: ["@do", "@regression", "@UDP-T4327"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
-      const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      const term = await assetDetailsPage.getEditPaymentScheduleFinanceTermMonths();
-      await assetDetailsPage.enterEditPaymentScheduleSegmentNumber(String(term + 1));
-      await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
-      await assetDetailsPage.expectEditPaymentScheduleSegmentExceedsTermMessage();
+      test.setTimeout(600_000);
+      const financeTerm = 24;
+      const { assetDetailsPage } = await openCalculatedEditSchedule(page, { term: String(financeTerm) });
+
+      let nonFirstRowIndex = 1;
+
+      await test.step("Term = 24 — first row Number is fixed at 1", async () => {
+        expect(await assetDetailsPage.getEditPaymentScheduleFinanceTermMonths()).toBe(financeTerm);
+        const row0 = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
+        expect(row0.number).toMatch(/^1$/);
+        nonFirstRowIndex = await assetDetailsPage.ensureEditPaymentScheduleNonFirstSegment();
+        expect(nonFirstRowIndex).toBeGreaterThan(0);
+      });
+
+      await test.step("Non-first segment — attempt Number = 24; validation on Calculate", async () => {
+        await assetDetailsPage.enterEditPaymentScheduleSegmentNumberOnRow(
+          nonFirstRowIndex,
+          String(financeTerm),
+        );
+        const entered = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(nonFirstRowIndex);
+        expect(Number.parseInt(entered.number, 10)).toBe(financeTerm);
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectEditPaymentScheduleCalculateBlockedWhenSegmentSumExceedsTerm();
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1259,12 +1427,19 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4328 - TC_EP_007 RV = Term+1 Instalment Non-Editable",
     { tag: ["@do", "@regression", "@UDP-T4328"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Normal" });
-      await assetDetailsPage.clickEditPaymentScheduleCalculate();
-      await assetDetailsPage.expectEditPaymentScheduleCalculateSummaryVisible();
-      await expectText(page, /RV|Residual\s+Value/i);
+
+      await test.step("Click Calculate in Edit Payment Schedule", async () => {
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectEditPaymentScheduleCalculateSummaryVisible();
+      });
+
+      await test.step("Observe RV row — (term+1) instalment; non-editable (FIS AF)", async () => {
+        await assetDetailsPage.expectFlEditPaymentScheduleRvInstalmentNonEditable();
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1272,12 +1447,19 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4329 - TC_EP_008 Segment Number Sum Cannot Exceed Loan Term",
     { tag: ["@do", "@regression", "@UDP-T4329"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      const term = await assetDetailsPage.getEditPaymentScheduleFinanceTermMonths();
-      await assetDetailsPage.enterEditPaymentScheduleSegmentNumber(String(term + 1));
-      await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
-      await assetDetailsPage.expectEditPaymentScheduleSegmentExceedsTermMessage();
+
+      await test.step("Modify segments so total Number sum exceeds the loan term", async () => {
+        await assetDetailsPage.setupFlEditPaymentScheduleSegmentsExceedingTerm(10);
+      });
+
+      await test.step("Calculate — segment Number sum exceeds loan term error; calculation blocked", async () => {
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectEditPaymentScheduleCalculateBlockedWhenSegmentSumExceedsTerm();
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1298,12 +1480,30 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4331 - TC_EP_010 Normal Type Amount Auto-Calculated Not User-Editable",
     { tag: ["@do", "@regression", "@UDP-T4331"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Normal" });
-      await assetDetailsPage.clickEditPaymentScheduleCalculate();
-      const row = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(0);
-      expect.soft(row.amount).toMatch(/\$|[0-9]/);
+
+      let normalRowIndex = 0;
+
+      await test.step("Set segment Type = Normal", async () => {
+        normalRowIndex = await assetDetailsPage.findEditableNormalEditPaymentScheduleRowIndex();
+        await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+          rowIndex: normalRowIndex,
+          type: "Normal",
+        });
+        expect(await assetDetailsPage.readEditPaymentScheduleSegmentTypeOnRow(normalRowIndex)).toMatch(
+          /Normal/i,
+        );
+      });
+
+      await test.step("Observe Amount — auto-calculated from FIS AF; not user-editable", async () => {
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectFlEditPaymentScheduleNormalAmountAutoCalculatedNotEditable(
+          normalRowIndex,
+        );
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1313,11 +1513,16 @@ test.describe("FL Quote Test Case @do @regression", () => {
     async ({ page }: { page: Page }) => {
       test.setTimeout(600000);
       const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      await expectEditScheduleFixedZeroRejected(page, assetDetailsPage);
+      await expectEditScheduleFixedZeroRejected(assetDetailsPage);
       await assetDetailsPage.clickEditPaymentScheduleReset();
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Fixed", amount: "0" });
-      await assetDetailsPage.clickEditPaymentScheduleCalculate();
-      await expect.soft(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible();
+      const rowIndex = await assetDetailsPage.ensureEditPaymentScheduleNonFirstSegment();
+      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+        rowIndex,
+        type: "Fixed",
+        amount: "0",
+      });
+      await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+      await assetDetailsPage.expectFlEditPaymentScheduleFixedZeroAccepted(rowIndex);
     },
   );
 
@@ -1341,12 +1546,46 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4334 - TC_EP_013 Reset Reverts to State When Edit Screen First Opened",
     { tag: ["@do", "@regression", "@UDP-T4334"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      const snapshot = await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ number: "12", type: "Fixed" });
-      await assetDetailsPage.clickEditPaymentScheduleReset();
-      await assetDetailsPage.expectEditPaymentScheduleSegmentRowsMatch(snapshot);
+
+      let initialSnapshot: Awaited<
+        ReturnType<DOAssetDetailsPage["getEditPaymentScheduleSegmentRowsSnapshot"]>
+      > = [];
+
+      await test.step("Edit Payment Schedule open — capture initial segment state", async () => {
+        await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+        initialSnapshot = await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+        expect(initialSnapshot.length).toBeGreaterThan(0);
+      });
+
+      await test.step("Change segment types and numbers", async () => {
+        const rowIndex = await assetDetailsPage.ensureEditPaymentScheduleNonFirstSegment();
+        await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+          rowIndex,
+          number: "12",
+          type: "Normal",
+        });
+        const modified = await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+        expect(modified.length).toBeGreaterThanOrEqual(initialSnapshot.length);
+        expect(modified[rowIndex].number).toBe("12");
+        expect(modified[rowIndex].type).toMatch(/Normal/i);
+        if (initialSnapshot[rowIndex]) {
+          const typeChanged =
+            modified[rowIndex].type.toLowerCase() !== initialSnapshot[rowIndex].type.toLowerCase();
+          const numberChanged = modified[rowIndex].number !== initialSnapshot[rowIndex].number;
+          const rowCountChanged = modified.length !== initialSnapshot.length;
+          expect(typeChanged || numberChanged || rowCountChanged).toBeTruthy();
+        }
+      });
+
+      await test.step("Reset — all changes discarded; schedule reverts to initial state", async () => {
+        await assetDetailsPage.clickEditPaymentScheduleReset();
+        await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 15_000 });
+        await assetDetailsPage.expectEditPaymentScheduleSegmentRowsMatch(initialSnapshot);
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1354,12 +1593,53 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4335 - TC_EP_014 Calculate Normal Amounts Fetched from FIS AF RV = Term+1 Non-Editable",
     { tag: ["@do", "@regression", "@UDP-T4335"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
+      test.setTimeout(600_000);
       const { assetDetailsPage } = await openCalculatedEditSchedule(page);
-      await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({ type: "Normal" });
-      await assetDetailsPage.clickEditPaymentScheduleCalculate();
-      await assetDetailsPage.expectEditPaymentScheduleCalculateSummaryVisible();
-      await expectText(page, /RV|Residual\s+Value/i);
+
+      let term = 36;
+      let initialSnapshot: Awaited<
+        ReturnType<DOAssetDetailsPage["getEditPaymentScheduleSegmentRowsSnapshot"]>
+      > = [];
+      let normalRowIndex = 0;
+
+      await test.step("Edit Payment Schedule open — capture initial segment state", async () => {
+        await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+        term = await assetDetailsPage.getEditPaymentScheduleFinanceTermMonths();
+        initialSnapshot = await assetDetailsPage.getEditPaymentScheduleSegmentRowsSnapshot();
+        expect(initialSnapshot.length).toBeGreaterThan(0);
+      });
+
+      await test.step("Modify Normal type segments", async () => {
+        normalRowIndex = await assetDetailsPage.findEditableNormalEditPaymentScheduleRowIndex();
+        const partial = Math.max(2, Math.floor(term / 3));
+        await assetDetailsPage.modifyEditPaymentScheduleSegmentFields({
+          rowIndex: normalRowIndex,
+          number: String(partial),
+          type: "Normal",
+        });
+        const modified = await assetDetailsPage.getEditPaymentScheduleSegmentRowSnapshot(normalRowIndex);
+        expect(modified.type).toMatch(/Normal/i);
+        expect(modified.number).toBe(String(partial));
+      });
+
+      await test.step("Calculate — Normal amounts from FIS AF; RV instalment non-editable", async () => {
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectEditPaymentScheduleCalculateSummaryVisible();
+        await assetDetailsPage.expectEditPaymentScheduleNormalSegmentAmountFetchedFromFisAf(
+          normalRowIndex,
+        );
+        await assetDetailsPage.expectFlEditPaymentScheduleRvInstalmentNonEditable();
+      });
+
+      await test.step("Segment Number sum exceeds term — validation error on Calculate", async () => {
+        await assetDetailsPage.clickEditPaymentScheduleReset();
+        await assetDetailsPage.expectEditPaymentScheduleSegmentRowsMatch(initialSnapshot);
+        await assetDetailsPage.setupFlEditPaymentScheduleSegmentsExceedingTerm(10);
+        await assetDetailsPage.clickEditPaymentScheduleCalculate({ waitForApply: false });
+        await assetDetailsPage.expectEditPaymentScheduleSegmentExceedsTermMessage();
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1405,10 +1685,28 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4339 - TC_EP_018 Toggle Defaults to Segment View Can Switch to Grid",
     { tag: ["@do", "@regression", "@UDP-T4339"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
-      const { assetDetailsPage } = await calculateStandardQuote(page, { skipPaymentScheduleCheck: true });
-      await assetDetailsPage.expectPaymentScheduleViewTogglesWorkAndTablePopulated();
-      await expectScheduleColumns(page, [/Date/i, /Number/i, /Frequency/i, /Payment/i]);
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCalculatedEditSchedule(page);
+
+      await test.step("Observe default view — Segment editor with Type column", async () => {
+        await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 20_000 });
+        await assetDetailsPage.expectEditPaymentScheduleSegmentViewActive();
+        await assetDetailsPage.expectPaymentScheduleSegmentViewActive();
+      });
+
+      await test.step("Toggle to Grid view — individual instalments listed", async () => {
+        await assetDetailsPage.clickEditPaymentScheduleGridView();
+        await assetDetailsPage.openEditPaymentScheduleDialog();
+        await expect(assetDetailsPage.editPaymentScheduleDialog()).toBeVisible({ timeout: 15_000 });
+      });
+
+      await test.step("Toggle back to Segment view", async () => {
+        await assetDetailsPage.clickEditPaymentScheduleSegmentView();
+        await assetDetailsPage.openEditPaymentScheduleDialog();
+        await assetDetailsPage.expectEditPaymentScheduleSegmentViewActive();
+      });
+
+      await assetDetailsPage.clickEditPaymentScheduleCancel().catch(() => {});
     },
   );
 
@@ -1416,10 +1714,36 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4340 - TC_BTN_001 Save Validates Mandatory Fields Shows Originator Reference Pop-up If No Customer",
     { tag: ["@do", "@regression", "@UDP-T4340"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
-      const { assetDetailsPage } = await openSelectedFlStandardQuote(page);
-      await assetDetailsPage.clickSaveStandardQuoteStep({ originatorRefForRequiredDialog: "SQ-FL-T4340" });
-      await expect.soft(root(page)).toBeVisible();
+      test.setTimeout(300_000);
+      const origRef = "SQ-FL-T4340";
+      const { assetDetailsPage, addAssetPage } = await openSelectedFlStandardQuote(page);
+
+      await test.step("Leave mandatory fields blank — Save triggers validation", async () => {
+        await assetDetailsPage.ensureCashPriceLeftBlank();
+        await assetDetailsPage.clearOriginationReferences();
+        await assetDetailsPage.clickSaveStandardQuoteStep();
+        await assetDetailsPage.expectBlankCashPriceValidationOnSave();
+        await assetDetailsPage.dismissRequiredToSaveDialogIfOpen();
+      });
+
+      await test.step("Fill mandatory fields — Save without customer shows Originator Reference pop-up", async () => {
+        await fl.prepareCalculableFlQuote(page, assetDetailsPage, addAssetPage);
+        await assetDetailsPage.clearOriginationReferences();
+        await assetDetailsPage.clickSaveStandardQuoteStep();
+        const requiredDialog = page
+          .getByRole("dialog")
+          .filter({ hasText: /required to save this quote|Originator\s+Reference/i })
+          .first();
+        await expect(requiredDialog).toBeVisible({ timeout: 25_000 });
+        await assetDetailsPage.submitOriginatorReferenceRequiredToSaveDialogIfPresent(origRef);
+      });
+
+      await test.step("Quote saved — user remains on Asset Details", async () => {
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+        await expect(root(page)).toBeVisible({ timeout: 30_000 });
+        await expect(assetDetailsPage.nextButton).toBeVisible({ timeout: 20_000 });
+        await expect(assetDetailsPage.cashPriceOfAssetInputField).toBeVisible({ timeout: 15_000 });
+      });
     },
   );
 
@@ -1463,15 +1787,56 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4344 - TC_BTN_005 Status Button Workflow Transition",
     { tag: ["@do", "@regression", "@UDP-T4344"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
-      test.info().annotations.push({
-      type: "note",
-      description: "Workflow transition details are role/config dependent; MAF-5644, MAF-6659, MAF-6559 are annotated only.",
+      test.setTimeout(600_000);
+      const origRef = "SQ-FL-T4344";
+      const { assetDetailsPage } = await calculateStandardQuote(page, { origRef });
+
+      await test.step("Complete FL quote — saved in Open Quote state", async () => {
+        await assetDetailsPage.clickSaveStandardQuoteStep({ originatorRefForRequiredDialog: origRef });
+        await assetDetailsPage.waitForQuoteLoadersToFinish();
+        await assetDetailsPage.expectWorkflowStatusOpenQuote();
       });
-      await calculateStandardQuote(page);
-      const statusButton = page.getByRole("button", { name: /Open Quote|Submit|Status|Withdraw|Approve|Decline/i }).first();
-      await expect.soft(statusButton).toBeVisible({ timeout: 30_000 });
-      expect.soft(await statusButton.isEnabled().catch(() => false)).toBeTruthy();
+
+      await test.step("Click Status — workflow control exposes permitted actions", async () => {
+        const quoteRoot = root(page);
+        const statusBtn = quoteRoot
+          .getByRole("button", { name: /Status|Submit|Workflow|Open\s+Quote/i })
+          .first();
+        const selectBtn = page
+          .locator('input[name="workFlowStatus"]')
+          .locator("xpath=ancestor::p-inputgroup[1]")
+          .getByRole("button", { name: /^Select$/i })
+          .first();
+        const workflowMenu = page
+          .locator(
+            ".textSelectOP, .p-menu-overlay, .p-tieredmenu-overlay, .p-dropdown-panel, .p-select-overlay",
+          )
+          .filter({ hasText: /Submit|Withdraw|Generate\s+Documentation/i })
+          .first();
+
+        if (await statusBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
+          await expect(statusBtn).toBeEnabled();
+          await statusBtn.click();
+          await expect(workflowMenu).toBeVisible({ timeout: 10_000 });
+          await page.keyboard.press("Escape").catch(() => {});
+          return;
+        }
+
+        if (await selectBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await selectBtn.click();
+          await expect(workflowMenu).toBeVisible({ timeout: 10_000 });
+          await page.keyboard.press("Escape").catch(() => {});
+          return;
+        }
+
+        await expect(assetDetailsPage.workflowStatusInput).toBeVisible();
+        await expect(assetDetailsPage.workflowStatusInput).toHaveValue("Open Quote");
+        test.info().annotations.push({
+          type: "note",
+          description:
+            "Workflow Status menu opens after Customer Details / Post Submission — refer MAF-5644, MAF-6659, MAF-6559.",
+        });
+      });
     },
   );
 
@@ -1479,11 +1844,41 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4345 - TC_DIFF_001 First Payment = Lease Date Not User-Selectable as in CSA",
     { tag: ["@do", "@regression", "@UDP-T4345"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(300000);
-      const { assetDetailsPage } = await openSelectedFlStandardQuote(page);
-      await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
-      await assetDetailsPage.expectFirstPaymentMatchesLeaseDate();
-      await assetDetailsPage.expectFirstPaymentReadOnly();
+      test.setTimeout(600_000);
+
+      await test.step("FL — First Payment equals Lease Date and is display-only", async () => {
+        const { assetDetailsPage } = await openSelectedFlStandardQuote(page);
+        await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
+        const lease = await assetDetailsPage.readLoanDateValue();
+        expect(lease.length).toBeGreaterThan(4);
+
+        await assetDetailsPage.expectFirstPaymentMatchesLeaseDate();
+        await assetDetailsPage.expectFirstPaymentReadOnly();
+
+        const firstBefore = await assetDetailsPage.readFirstPaymentDateValue();
+        await assetDetailsPage.firstPaymentDate.click({ force: true }).catch(() => {});
+        await page.keyboard.press("ControlOrMeta+a").catch(() => {});
+        await page.keyboard.type(DOAssetDetailsPage.shiftDdMmYyyy(lease, 14)).catch(() => {});
+        await assetDetailsPage.firstPaymentDate.press("Tab").catch(() => {});
+        await assetDetailsPage.expectFirstPaymentMatchesLeaseDate();
+        expect(await assetDetailsPage.readFirstPaymentDateValue()).toBe(firstBefore);
+      });
+
+      await test.step("CSA — First Payment is user-selectable within 6 weeks of Loan Date", async () => {
+        const csaAssetDetailsPage = await openStandardQuoteFromDashboard(page);
+        await csaAssetDetailsPage.chooseProduct(CSA_SQ_PRODUCT);
+        await csaAssetDetailsPage.chooseProgram(CSA_SQ_PROGRAM);
+        await csaAssetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
+
+        const loan = await csaAssetDetailsPage.readLoanDateValue();
+        expect(loan.length).toBeGreaterThan(4);
+        await expect(csaAssetDetailsPage.firstPaymentDate).toBeEnabled({ timeout: 15_000 });
+
+        const withinSixWeeks = DOAssetDetailsPage.shiftDdMmYyyy(loan, 14);
+        await csaAssetDetailsPage.enterFirstPaymentDateDdMmYyyy(withinSixWeeks);
+        expect(await csaAssetDetailsPage.readFirstPaymentDateValue()).toBe(withinSixWeeks);
+        expect(await csaAssetDetailsPage.readFirstPaymentDateValue()).not.toBe(loan);
+      });
     },
   );
 
@@ -1538,9 +1933,29 @@ test.describe("FL Quote Test Case @do @regression", () => {
     "UDP-T4350 - TC_DIFF_006 FL Has No Standard Payment Options Section",
     { tag: ["@do", "@regression", "@UDP-T4350"] },
     async ({ page }: { page: Page }) => {
-      test.setTimeout(600000);
-      const { assetDetailsPage } = await openSelectedFlStandardQuote(page);
-      await expectNoCsaStandardQuoteFields(page, assetDetailsPage);
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await calculateStandardQuote(page);
+
+      await test.step("Calculate FL Standard Quote", async () => {
+        await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
+      });
+
+      await test.step("No Standard Payment Options section (CSA-exclusive 12–60 / Weekly Equivalent)", async () => {
+        await assetDetailsPage.expectStandardPaymentOptionsHidden();
+      });
+
+      await test.step("No Assured Future Value Options section (AFV-exclusive)", async () => {
+        const quoteRoot = root(page);
+        const afvPanel = quoteRoot
+          .getByRole("region", { name: /Assured Future Value Options/i })
+          .or(
+            quoteRoot
+              .locator("p-card, div")
+              .filter({ hasText: /Assured Future Value Options/i })
+              .first(),
+          );
+        await expect(afvPanel).toBeHidden({ timeout: 8_000 });
+      });
     },
   );
 
