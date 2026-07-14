@@ -9,6 +9,12 @@ import settlementData from "../../../testData/do-portal/settlementTestData.json"
 
 export const TLC_DEALER = settlementData.dealer || "Armstrong Prestige Wellington";
 
+/** Dealer with AFV product authorisation — required for AFV Loans dashboard grid (UDP-T4390+). */
+export const AFV_DASHBOARD_DEALER =
+  process.env.AFV_DASHBOARD_DEALER ??
+  process.env.AFV_SQ_DEALER ??
+  "Armstrong Prestige - Audi";
+
 export const QUOTE_GRID_COLUMNS: RegExp[] = [
   /^Date$/i,
   /Quote\s*ID/i,
@@ -58,14 +64,14 @@ export const AFV_LOAN_COLUMNS: RegExp[] = [
   /^Originator$/i,
 ];
 
+/** Portal buckets shown on the Workflow Status widget (Zephyr UDP-T4355). */
 export const WORKFLOW_BUCKETS: Array<string | RegExp> = [
-  /^Quote$/i,
-  /^Assessment$/i,
-  /^Approved$/i,
-  /With Customer for Signing/i,
-  /^Verification$/i,
-  /^Settlement$/i,
-  /Not Tracked/i,
+  "Quote",
+  "Assessment",
+  "Approved",
+  "With Customer for Signing",
+  "Verification",
+  "Settlement",
 ];
 
 export async function openDealerDashboard(page: Page): Promise<DODashboardPage> {
@@ -74,6 +80,22 @@ export async function openDealerDashboard(page: Page): Promise<DODashboardPage> 
   await dashboard.waitForAuthenticatedDashboard();
   await dashboard.selectDealer(TLC_DEALER);
   return dashboard;
+}
+
+export async function openAfvDealerDashboard(page: Page): Promise<DODashboardPage> {
+  const dashboard = new DODashboardPage(page);
+  await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
+  await dashboard.waitForAuthenticatedDashboard();
+  await dashboard.selectDealer(AFV_DASHBOARD_DEALER);
+  return dashboard;
+}
+
+/** Open AFV Loans grid or skip when the listing type is absent for the dealer. */
+export async function openAfvLoansGrid(dashboard: DODashboardPage): Promise<void> {
+  const available = await dashboard.tryNavigateToDealerListingAfvLoans();
+  if (!available) {
+    test.skip(true, `AFV Loans listing not available for dealer (${AFV_DASHBOARD_DEALER}).`);
+  }
 }
 
 export function requireLoanId(value: string, label: string): string {
@@ -89,11 +111,31 @@ export async function expectFirstQuoteRowVisible(dashboard: DODashboardPage): Pr
   });
 }
 
-export async function readFirstQuoteId(dashboard: DODashboardPage): Promise<string> {
-  const row = dashboard.quotesGridTable().locator("tbody tr").first();
+/** Quote ID or loan ID from a listing grid row (0-based index). */
+export async function readQuoteGridRowId(
+  dashboard: DODashboardPage,
+  rowIndex = 0,
+): Promise<string> {
+  const rows = dashboard.quotesGridTable().locator("tbody tr");
+  await expect(rows.first()).toBeVisible({ timeout: 60_000 });
+  if (rowIndex > 0) {
+    const count = await rows.count();
+    if (count <= rowIndex) {
+      test.skip(true, `Need at least ${rowIndex + 1} grid rows; found ${count}.`);
+    }
+  }
+  const row = rows.nth(rowIndex);
   await expect(row).toBeVisible({ timeout: 60_000 });
-  const quoteIdCell = row.locator("td.text-primary, div.cursor-pointer.text-primary").first();
-  return ((await quoteIdCell.innerText()) ?? "").trim();
+  const idCell = row.locator("td.text-primary, div.cursor-pointer.text-primary").first();
+  const ref = ((await idCell.innerText()) ?? "").trim();
+  if (!ref) {
+    throw new Error(`Grid row ${rowIndex + 1} has no quote/loan id cell text.`);
+  }
+  return ref;
+}
+
+export async function readFirstQuoteId(dashboard: DODashboardPage): Promise<string> {
+  return readQuoteGridRowId(dashboard, 0);
 }
 
 /** Seeded OL loan Rego/VIN/Loan ID, or first **Operating Lease** row in Active Loans. */

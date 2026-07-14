@@ -4,6 +4,7 @@
  */
 
 export { DODashboardPage } from "./dashboard/DashboardPage";
+export { DOCustomerStatementPage } from "./customerStatement/CustomerStatementPage";
 export { DOLoginPage } from "./login/LoginPage";
 export { DOQuickQuotePage } from "./QuickQuote/QuickQuotePage";
 export { DOAddOnsAccessoriesPage } from "./StandardQuote/AssetDetails/AddOnsAccessoriesPage";

@@ -81,7 +81,7 @@ export class DODashboardPage extends BasePage {
       .first();
     this.dashboardRoot = page.locator("app-dashboard").first();
     this.monthlyVolumesWidget = page.locator("app-monthly-volumes").first();
-    this.workflowStatusWidget = page.locator("app-workflow-status").first();
+    this.workflowStatusWidget = this.workflowStatusRoot();
     this.averageSalesWidget = page.locator("app-average-sales").first();
     this.applicationOutcomeWidget = page.locator("app-application-outcome").first();
     this.notificationsWidget = page.locator("app-notification").first();
@@ -93,9 +93,18 @@ export class DODashboardPage extends BasePage {
       .getByText(/Dashboard/i)
       .first();
     const listing = page.locator("app-quote-list").first();
-    this.assignLink = listing.locator("a").filter({ hasText: /^Assign$/i }).first();
-    this.exportLink = listing.locator("a").filter({ hasText: /Export/i }).first();
-    this.printLink = listing.locator("a").filter({ hasText: /Print/i }).first();
+    this.assignLink = listing
+      .getByRole("link", { name: /^\s*Assign\s*$/i })
+      .first()
+      .or(listing.locator("a").filter({ hasText: /^\s*Assign\s*$/i }).first());
+    this.exportLink = listing
+      .getByRole("link", { name: /Export/i })
+      .first()
+      .or(listing.locator("a").filter({ hasText: /Export/i }).first());
+    this.printLink = listing
+      .getByRole("link", { name: /Print/i })
+      .first()
+      .or(listing.locator("a").filter({ hasText: /Print/i }).first());
     this.quotesGridResetButton = listing
       .getByRole("button", { name: /^Reset$/i })
       .first();
@@ -562,22 +571,26 @@ export class DODashboardPage extends BasePage {
     row: Locator,
     columnHeader: RegExp,
   ): Promise<string> {
-    const table = this.quotesGridTable();
-    const headers = table.locator("thead th");
-    const count = await headers.count();
-    let colIndex = -1;
-    for (let i = 0; i < count; i++) {
-      const text = ((await headers.nth(i).innerText()) ?? "").replace(/\s+/g, " ").trim();
-      if (columnHeader.test(text)) {
-        colIndex = i;
-        break;
-      }
-    }
+    const colIndex = await this.findQuotesGridColumnIndex(columnHeader);
     if (colIndex < 0) {
       const rowText = ((await row.innerText()) ?? "").replace(/\s+/g, " ").trim();
       return rowText;
     }
     return ((await row.locator("td").nth(colIndex).innerText()) ?? "").replace(/\s+/g, " ").trim();
+  }
+
+  private async findQuotesGridColumnIndex(columnHeader: RegExp): Promise<number> {
+    const headers = this.quotesGridTable().locator("thead th");
+    const count = await headers.count();
+    for (let i = 0; i < count; i++) {
+      const text = DODashboardPage.normalizeQuotesGridHeaderLabel(
+        (await headers.nth(i).innerText()) ?? "",
+      );
+      if (DODashboardPage.quotesGridColumnHeaderNamePattern(columnHeader).test(text)) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   /** UDP-T3867 / T3891 — **Assigned To** column for a quote row. */
@@ -604,7 +617,7 @@ export class DODashboardPage extends BasePage {
     this.logStep(`Expect Quote Grid Workflow Status: ${String(expectedStatus)}`);
     const row = this.quoteGridRowByReference(referenceOrQuoteId);
     await expect(row).toBeVisible({ timeout: 45_000 });
-    const status = await this.readQuoteGridColumnForRow(row, /Workflow\s*Status|Status/i);
+    const status = await this.readQuoteGridColumnForRow(row, /Workflow\s*Status/i);
     if (expectedStatus instanceof RegExp) {
       expect(status).toMatch(expectedStatus);
       return;
@@ -634,6 +647,7 @@ export class DODashboardPage extends BasePage {
   /** Switch quote-type dropdown from **Quote** to **Expired** listing. */
   async openExpiredQuotesListing(): Promise<void> {
     this.logStep("Open Expired Quotes Listing");
+    await this.ensureNoBlockingQuoteDialog();
     await this.openQuotesAndApplications();
     const typeDropdown = this.quotesGridTypeDropdown();
     await expect(typeDropdown).toBeVisible({ timeout: 30_000 });
@@ -823,12 +837,46 @@ export class DODashboardPage extends BasePage {
     return this.page.locator("app-dashboard").first();
   }
 
+  /** Workflow Status card — `app-workflow-status` or `.card-body` with the widget header. */
+  workflowStatusRoot(): Locator {
+    return this.page
+      .locator("app-workflow-status, .card-body")
+      .filter({ has: this.page.getByText(/^Workflow\s+Status$/i) })
+      .first();
+  }
+
   /** Workflow Status bucket tile by portal label (Quote, Assessment, …). */
   workflowStatusBucket(label: string | RegExp): Locator {
-    return this.workflowStatusWidget
+    const labelPattern = DODashboardPage.workflowStatusBucketLabelPattern(label);
+    const root = this.workflowStatusRoot();
+    const bySummary = root
       .locator(".bordersummary")
-      .filter({ has: this.page.locator(".borderunit").filter({ hasText: label }) })
-      .first();
+      .filter({ has: this.page.locator(".borderunit").filter({ hasText: labelPattern }) });
+    const byGridTile = root.locator(".grid > div").filter({
+      has: this.page.getByText(labelPattern),
+    });
+    return bySummary.or(byGridTile).first();
+  }
+
+  /** Dollar / count line inside a workflow bucket tile. */
+  workflowStatusBucketMetric(bucket: Locator): Locator {
+    return bucket
+      .locator(".amount-section p")
+      .first()
+      .or(bucket.getByText(/\$[\d,]+(?:\.\d+)?K?|\$0\b/).first());
+  }
+
+  /**
+   * Portal bucket labels render with surrounding whitespace in `.borderunit`
+   * (e.g. `" Quote "`). Anchor on the label text, not exact `^Quote$`.
+   */
+  private static workflowStatusBucketLabelPattern(label: string | RegExp): RegExp {
+    if (label instanceof RegExp) {
+      const source = label.source.replace(/^\^/, "").replace(/\$$/, "");
+      return new RegExp(`^\\s*${source}\\s*$`, label.flags.includes("i") ? "i" : "");
+    }
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^\\s*${escaped}\\s*$`, "i");
   }
 
   /** Application Outcome legend row (Paid Out, Pending, …). */
@@ -854,7 +902,7 @@ export class DODashboardPage extends BasePage {
 
   /** Workflow Status **View All** / **View Less** toggle. */
   workflowStatusViewToggle(): Locator {
-    return this.workflowStatusWidget.locator("a.view-toggle").first();
+    return this.workflowStatusRoot().locator("a.view-toggle").first();
   }
 
   /** Year stepper label inside Monthly Volumes or Average Sales widgets. */
@@ -880,36 +928,61 @@ export class DODashboardPage extends BasePage {
     return year;
   }
 
+  /** Fees & Commission row (Fees + Commission labels + MTD/YTD dropdown). */
+  feesAndCommissionPanel(): Locator {
+    return this.averageSalesWidget
+      .locator(".grid")
+      .filter({ has: this.averageSalesWidget.getByText(/^Fees$/i) })
+      .filter({ has: this.averageSalesWidget.getByText(/^Commission$/i) })
+      .first();
+  }
+
+  /** Margins on Loans Paid Out card (sibling of Fees grid inside average-sales). */
+  marginsPanel(): Locator {
+    return this.averageSalesWidget
+      .locator("div")
+      .filter({ has: this.averageSalesWidget.getByText(/Margins on Loans Paid Out/i) })
+      .filter({ has: this.averageSalesWidget.getByRole("combobox", { name: /YTD|MTD/i }) })
+      .filter({ hasNot: this.averageSalesWidget.getByText(/^Fees$/i) })
+      .first();
+  }
+
   /** Fees amount label in Fees & Commission card. */
   feesAmountLabel(): Locator {
-    return this.averageSalesWidget
+    const panel = this.feesAndCommissionPanel();
+    return panel
       .locator("amount label.text-right")
       .first()
-      .or(this.averageSalesWidget.getByText(/\$[\d,]+\.\d{2}/).first());
+      .or(panel.getByText(/\$[\d,]+\.\d{2}/).first());
   }
 
   /** Commission amount label in Fees & Commission card. */
   commissionAmountLabel(): Locator {
-    return this.averageSalesWidget
+    const panel = this.feesAndCommissionPanel();
+    return panel
       .locator("amount label.text-right")
       .nth(1)
-      .or(this.averageSalesWidget.getByText(/\$[\d,]+\.\d{2}/).nth(1));
+      .or(panel.getByText(/\$[\d,]+\.\d{2}/).nth(1));
   }
 
-  /** MTD/YTD dropdown adjacent to Fees/Commission or Margins. */
-  feesOrMarginsPeriodDropdown(label: RegExp = /YTD|MTD/i): Locator {
-    return this.averageSalesWidget
-      .getByRole("combobox", { name: label })
-      .first()
-      .or(this.averageSalesWidget.locator("p-dropdown").getByRole("combobox").last());
+  /** MTD/YTD dropdown on the Fees & Commission widget only. */
+  feesCommissionPeriodDropdown(): Locator {
+    return this.feesAndCommissionPanel().locator("p-dropdown").getByRole("combobox").first();
   }
 
-  /** Margins percentage value (e.g. -64.9%). */
+  /** MTD/YTD dropdown on the Margins widget only. */
+  marginsPeriodDropdown(): Locator {
+    return this.marginsPanel().getByRole("combobox", { name: /YTD|MTD/i }).first();
+  }
+
+  /** Margins percentage value (e.g. 6.75% or -67.2%). */
   marginsPercentageLabel(): Locator {
-    return this.averageSalesWidget
-      .locator("span.font-bold")
-      .filter({ hasText: /%/ })
-      .first();
+    return this.marginsPanel().getByText(/-?\d+(?:\.\d+)?%/).first();
+  }
+
+  /** Margins paid-out date range line (e.g. Jan 23 - Nov 23). */
+  marginsDateRangeLabel(): Locator {
+    return this.marginsPanel().getByText(/\w{3}\s+\d{2}\s*-\s*\w{3}\s+\d{2}/).first();
   }
 
   /** Average Sales Price metric type dropdown. */
@@ -924,12 +997,9 @@ export class DODashboardPage extends BasePage {
     return widget.getByRole("combobox", { name: /^Year$/i }).first();
   }
 
-  /** Notifications panel empty-state or list body. */
+  /** Notifications panel body (list container or empty-state wrapper). */
   notificationsPanelBody(): Locator {
-    return this.notificationsWidget
-      .locator(".notification-card-body")
-      .first()
-      .or(this.notificationsWidget.getByRole("status"));
+    return this.notificationsWidget.locator(".notification-card-body").first();
   }
 
   async expectDashboardWidgetsVisible(): Promise<void> {
@@ -948,6 +1018,18 @@ export class DODashboardPage extends BasePage {
   async expectWorkflowStatusBucketsVisible(
     labels: Array<string | RegExp>,
   ): Promise<void> {
+    const root = this.workflowStatusRoot();
+    await expect(root).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () => {
+          const summary = await root.locator(".bordersummary").count();
+          const grid = await root.locator(".grid > div").count();
+          return Math.max(summary, grid);
+        },
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(0);
     for (const label of labels) {
       await expect(this.workflowStatusBucket(label)).toBeVisible({ timeout: 15_000 });
     }
@@ -1015,13 +1097,24 @@ export class DODashboardPage extends BasePage {
     await expect(dropdown).toHaveAttribute("aria-label", metric, { timeout: 15_000 });
   }
 
-  async selectFeesOrMarginsPeriod(period: "YTD" | "MTD"): Promise<void> {
-    const dropdown = this.feesOrMarginsPeriodDropdown(/YTD|MTD/i);
+  async selectFeesCommissionPeriod(period: "YTD" | "MTD"): Promise<void> {
+    await this.selectWidgetPeriodDropdown(this.feesCommissionPeriodDropdown(), period);
+  }
+
+  async selectMarginsPeriod(period: "YTD" | "MTD"): Promise<void> {
+    await this.selectWidgetPeriodDropdown(this.marginsPeriodDropdown(), period);
+  }
+
+  private async selectWidgetPeriodDropdown(
+    dropdown: Locator,
+    period: "YTD" | "MTD",
+  ): Promise<void> {
     await dropdown.click({ timeout: 10_000 });
     const option = this.page.getByRole("option", { name: period, exact: true }).first();
     await expect(option).toBeVisible({ timeout: 10_000 });
     await option.click({ timeout: 10_000 });
     await this.waitForAppLoaderOverlayGone(30_000);
+    await expect(dropdown).toHaveAttribute("aria-label", period, { timeout: 15_000 });
   }
 
   // ─── Applications grid (UDP-T4363–T4413) ─────────────────────────────────
@@ -1029,17 +1122,36 @@ export class DODashboardPage extends BasePage {
   /** Assign / Export / Print links above the quotes grid. */
   quotesGridToolbarLink(name: RegExp): Locator {
     return this.quotesListingRoot()
-      .locator("a")
-      .filter({ hasText: name })
-      .first();
+      .getByRole("link", { name })
+      .first()
+      .or(this.quotesListingRoot().locator("a").filter({ hasText: name }).first());
   }
 
   /** Column header cell in the dashboard listing grid. */
   quotesGridColumnHeader(name: RegExp): Locator {
-    return this.quotesGridTable()
-      .locator("thead th")
-      .filter({ hasText: name })
-      .first();
+    const pattern = DODashboardPage.quotesGridColumnHeaderNamePattern(name);
+    return this.quotesGridTable().getByRole("columnheader", { name: pattern }).first();
+  }
+
+  /**
+   * PrimeNG headers include sort/filter controls in the accessible name
+   * (e.g. `"Date Show Filter Menu"`). Match the column label prefix only.
+   */
+  private static quotesGridColumnHeaderNamePattern(name: RegExp): RegExp {
+    if (name instanceof RegExp) {
+      const source = name.source.replace(/^\^/, "").replace(/\$$/, "");
+      const flags = name.flags.includes("i") ? "i" : "";
+      return new RegExp(`^\\s*${source}(\\b|\\s)`, flags);
+    }
+    const escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^\\s*${escaped}(\\b|\\s)`, "i");
+  }
+
+  private static normalizeQuotesGridHeaderLabel(text: string): string {
+    return text
+      .replace(/\s+/g, " ")
+      .replace(/\s*Show Filter Menu.*$/i, "")
+      .trim();
   }
 
   /** Row ellipsis (Actions) control in the listing grid. */
@@ -1047,27 +1159,188 @@ export class DODashboardPage extends BasePage {
     return row.locator("i.fa-ellipsis, i.fa-solid.fa-ellipsis").first();
   }
 
-  /** Overlay / popover action menu after clicking row Actions. */
-  quoteGridActionsMenu(): Locator {
+  /** Quote row action overlay opened from the Actions ellipsis (View/Copy/Cancel/Reopen). */
+  quoteGridRowActionsOverlay(): Locator {
     return this.page
-      .locator("app-quote-list-action .action-item, .p-overlaypanel-content .action-item")
-      .first()
-      .locator("xpath=ancestor::*[contains(@class,'action-item') or contains(@class,'overlay')][1]")
-      .or(this.page.locator("app-quote-list-action"));
+      .locator(".p-overlaypanel")
+      .filter({ has: this.page.getByText(/View Quote|Copy Quote|Reopen Quote/i) })
+      .last();
   }
 
-  /** Visible action menu items (View Quote, Copy Quote, …). */
+  /** Quote row action items inside the ellipsis overlay. */
   quoteGridActionItems(): Locator {
     return this.page
       .locator("app-quote-list-action")
       .filter({ visible: true })
       .last()
       .locator(".action-item");
+    const overlay = this.quoteGridRowActionsOverlay();
+    return overlay
+      .locator(".action-item")
+      .or(overlay.getByText(/View Quote|Copy Quote|Cancel Quote|Reopen Quote/i));
+  }
+
+  /** Loan row action overlay from the Actions ellipsis (View Statement, …). */
+  quoteGridLoanRowActionsOverlay(): Locator {
+    return this.page
+      .locator(".p-overlaypanel")
+      .filter({
+        has: this.page.getByText(/View Statement|Create Settlement Quote|Email P&I Schedule/i),
+      })
+      .last();
+  }
+
+  /** Loan row action items inside the ellipsis overlay. */
+  loanGridRowActionItems(): Locator {
+    const overlay = this.quoteGridLoanRowActionsOverlay();
+    return overlay
+      .locator(".action-item")
+      .or(
+        overlay.getByText(
+          /View Statement|Create Settlement Quote|Email Statement|Email P&I Schedule/i,
+        ),
+      );
+  }
+
+  /** Loan listing statement actions host above the grid (Create Settlement Quote, View Statement, …). */
+  quotesListStatementActionHost(): Locator {
+    return this.quotesListingRoot().locator("app-quote-list-action").first();
+  }
+
+  /** Loan listing statement actions host (Create Settlement Quote, View Statement, …). */
+  quotesListStatementActionItems(): Locator {
+    return this.quotesListStatementActionHost().locator(".action-item");
+  }
+
+  private async loanRowActionsOverlayVisible(): Promise<boolean> {
+    return this.quoteGridLoanRowActionsOverlay().isVisible({ timeout: 1_000 }).catch(() => false);
+  }
+
+  private async usesQuoteRowActionsOverlay(): Promise<boolean> {
+    const label = ((await this.quotesGridTypeDropdown().getAttribute("aria-label")) ?? "").trim();
+    if (/Activated Loans|Active Loans|AFV\s*Loans?/i.test(label)) {
+      return false;
+    }
+    return /Quote|Expired/i.test(label);
+  }
+
+  private async activeQuoteGridActionItems(): Promise<Locator> {
+    if (await this.usesQuoteRowActionsOverlay()) {
+      return this.quoteGridActionItems();
+    }
+    if (await this.loanRowActionsOverlayVisible()) {
+      return this.loanGridRowActionItems();
+    }
+    return this.quotesListStatementActionItems();
+  }
+
+  private async scrollQuoteGridActionItemIntoView(item: Locator): Promise<void> {
+    if (await this.quotesListStatementActionHost().isVisible({ timeout: 500 }).catch(() => false)) {
+      await this.quotesListStatementActionHost().evaluate((el) => {
+        el.scrollIntoView({ block: "center", inline: "nearest" });
+      });
+    }
+    await item.evaluate((el) => {
+      el.scrollIntoView({ block: "center", inline: "nearest" });
+    });
+  }
+
+  private async waitForQuoteGridActionsMenu(): Promise<void> {
+    if (await this.usesQuoteRowActionsOverlay()) {
+      await expect(this.quoteGridRowActionsOverlay()).toBeVisible({ timeout: 15_000 });
+      return;
+    }
+    if (await this.loanRowActionsOverlayVisible()) {
+      await expect(this.quoteGridLoanRowActionsOverlay()).toBeVisible({ timeout: 15_000 });
+      return;
+    }
+    await this.quotesListStatementActionHost().scrollIntoViewIfNeeded();
+    await expect(this.quotesListStatementActionItems().first()).toBeVisible({ timeout: 15_000 });
   }
 
   /** Prime column filter menu button on a header. */
   quotesGridColumnFilterButton(columnHeader: Locator): Locator {
     return columnHeader.locator("button.p-column-filter-menu-button").first();
+  }
+
+  /** PrimeNG column filter dialog / overlay opened from a grid header. */
+  quotesGridColumnFilterOverlay(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ has: this.page.getByRole("button", { name: /^Apply$/i }) })
+      .filter({ visible: true })
+      .first()
+      .or(
+        this.page
+          .locator(".p-column-filter-overlay, .p-overlaypanel")
+          .filter({ visible: true })
+          .last(),
+      );
+  }
+
+  /** Match criterion dropdown (Starts with, Contains, …) inside the filter dialog. */
+  quotesGridColumnFilterMatchDropdown(): Locator {
+    const overlay = this.quotesGridColumnFilterOverlay();
+    return overlay
+      .locator(".p-column-filter-constraint")
+      .getByRole("combobox")
+      .first()
+      .or(overlay.getByRole("combobox").nth(1));
+  }
+
+  /** Visible PrimeNG panel for the column-filter match-type dropdown. */
+  private quotesGridColumnFilterMatchDropdownPanel(): Locator {
+    return this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
+  }
+
+  /** Option in the open match-type listbox inside the filter dialog. */
+  quotesGridColumnFilterMatchOption(label: RegExp): Locator {
+    const listbox = this.quotesGridColumnFilterOverlay()
+      .getByRole("listbox", { name: /Option List/i })
+      .first();
+    return listbox
+      .getByRole("option", { name: label })
+      .first()
+      .or(listbox.locator('[role="option"]').filter({ hasText: label }).first());
+  }
+
+  async openQuotesGridColumnFilterMatchDropdown(): Promise<void> {
+    const dropdown = this.quotesGridColumnFilterMatchDropdown();
+    await expect(dropdown).toBeVisible({ timeout: 10_000 });
+    const listbox = this.quotesGridColumnFilterOverlay()
+      .getByRole("listbox", { name: /Option List/i })
+      .first();
+    if (!(await listbox.isVisible({ timeout: 1_000 }).catch(() => false))) {
+      await dropdown.click({ timeout: 10_000 });
+    }
+    await expect(listbox).toBeVisible({ timeout: 10_000 });
+  }
+
+  async expectQuotesGridColumnFilterMatchOptions(labels: RegExp[]): Promise<void> {
+    this.logStep("Expect quotes grid column filter match options");
+    await this.openQuotesGridColumnFilterMatchDropdown();
+    for (const label of labels) {
+      await expect(this.quotesGridColumnFilterMatchOption(label)).toBeVisible({ timeout: 10_000 });
+    }
+  }
+
+  /** Portal clears column filters via **Clear** (no separate **No Filter** list item). */
+  async expectQuotesGridColumnFilterClearVisible(): Promise<void> {
+    await expect(
+      this.quotesGridColumnFilterOverlay().getByRole("button", { name: /^Clear$/i }),
+    ).toBeVisible({ timeout: 10_000 });
+  }
+
+  async openQuotesGridColumnFilter(column: RegExp): Promise<void> {
+    this.logStep(`Open Quotes Grid Column Filter: ${String(column)}`);
+    const header = this.quotesGridColumnHeader(column);
+    await this.quotesGridColumnFilterButton(header).click({ timeout: 10_000 });
+    await expect(this.quotesGridColumnFilterOverlay()).toBeVisible({ timeout: 15_000 });
+  }
+
+  async closeQuotesGridColumnFilterOverlay(): Promise<void> {
+    await this.page.keyboard.press("Escape");
+    await expect(this.quotesGridColumnFilterOverlay()).toBeHidden({ timeout: 10_000 }).catch(() => {});
   }
 
   /** Sort icon on a column header. */
@@ -1090,23 +1363,50 @@ export class DODashboardPage extends BasePage {
       .first();
   }
 
-  async selectQuotesGridListingType(type: RegExp): Promise<void> {
-    this.logStep(`Select Quotes Grid Listing Type ${type}`);
+  /** Visible PrimeNG panel for the quotes listing-type dropdown. */
+  private quotesGridListingTypeDropdownPanel(): Locator {
+    return this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
+  }
+
+  /** Option in the open listing-type dropdown (Quote, Active Loans, AFV Loans, …). */
+  private quotesGridListingTypeOption(type: RegExp): Locator {
+    const panel = this.quotesGridListingTypeDropdownPanel();
+    return panel
+      .getByRole("option", { name: type })
+      .first()
+      .or(panel.locator(".p-dropdown-item").filter({ hasText: type }).first())
+      .or(this.page.getByRole("option", { name: type }).first());
+  }
+
+  async trySelectQuotesGridListingType(type: RegExp): Promise<boolean> {
+    this.logStep(`Try Select Quotes Grid Listing Type ${type}`);
     await this.openQuotesAndApplications();
     const dropdown = this.quotesGridTypeDropdown();
     await expect(dropdown).toBeVisible({ timeout: 30_000 });
     const current = ((await dropdown.getAttribute("aria-label")) ?? (await dropdown.textContent()) ?? "").trim();
-    if (type.test(current)) return;
+    if (type.test(current)) return true;
 
     await dropdown.click({ timeout: 15_000 });
-    const option = this.page.getByRole("option", { name: type }).first();
-    await expect(option).toBeVisible({ timeout: 15_000 });
+    await expect(this.quotesGridListingTypeDropdownPanel()).toBeVisible({ timeout: 15_000 });
+    const option = this.quotesGridListingTypeOption(type);
+    if (!(await option.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      await this.page.keyboard.press("Escape").catch(() => {});
+      return false;
+    }
     await option.click({ timeout: 15_000 });
     const viewBtn = this.quotesGridViewButton();
     if (await viewBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
       await viewBtn.click({ timeout: 15_000 });
     }
     await this.waitForAppLoaderOverlayGone(60_000);
+    return true;
+  }
+
+  async selectQuotesGridListingType(type: RegExp): Promise<void> {
+    const selected = await this.trySelectQuotesGridListingType(type);
+    if (!selected) {
+      throw new Error(`Quotes grid listing type not found in dropdown: ${type}`);
+    }
   }
 
   async expectQuotesGridColumnsVisible(headers: RegExp[]): Promise<void> {
@@ -1125,11 +1425,12 @@ export class DODashboardPage extends BasePage {
     await row.scrollIntoViewIfNeeded();
     const actions = this.quoteGridRowActionsButton(row);
     await actions.click({ timeout: 15_000 });
-    await expect(this.quoteGridActionItems().first()).toBeVisible({ timeout: 15_000 });
+    await this.waitForQuoteGridActionsMenu();
   }
 
   async clickQuoteGridAction(actionName: RegExp): Promise<void> {
-    const item = this.quoteGridActionItems().filter({ hasText: actionName }).first();
+    const items = await this.activeQuoteGridActionItems();
+    const item = items.filter({ hasText: actionName }).first();
     await expect(item).toBeVisible({ timeout: 15_000 });
     const clicked = await item
       .click({ timeout: 5_000 })
@@ -1138,11 +1439,93 @@ export class DODashboardPage extends BasePage {
     if (!clicked) {
       await item.evaluate((el) => (el as HTMLElement).click());
     }
+    await this.scrollQuoteGridActionItemIntoView(item);
+    await item.click({ timeout: 15_000 });
+    const requiresConfirm = /Cancel\s+Quote/i.test(actionName.source);
+    await this.confirmQuoteGridActionDialogIfPresent({ required: requiresConfirm });
     await this.waitForAppLoaderOverlayGone(60_000);
   }
 
+  /** PrimeNG / dynamic-dialog confirmation after grid actions such as **Cancel Quote**. */
+  private quoteGridActionConfirmDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({
+        hasText: /withdraw this quote|Expired Listing|Do you want to continue/i,
+      })
+      .filter({ visible: true })
+      .first()
+      .or(
+        this.page
+          .locator(
+            "p-dynamicdialog, p-confirmdialog, .p-confirm-dialog, p-dialog.loan-date-dialog .p-dialog",
+          )
+          .filter({ visible: true })
+          .filter({
+            hasText: /withdraw|cancel|Expired Listing|Are you sure/i,
+          })
+          .first(),
+      );
+  }
+
+  async confirmQuoteGridActionDialogIfPresent(opts?: { required?: boolean }): Promise<void> {
+    const dialog = this.quoteGridActionConfirmDialog();
+    const timeout = opts?.required ? 20_000 : 5_000;
+    const visible = await dialog.isVisible({ timeout }).catch(() => false);
+    if (!visible) {
+      if (opts?.required) {
+        throw new Error("Expected quote grid confirm dialog after action, but none appeared.");
+      }
+      return;
+    }
+    const confirm = dialog
+      .getByRole("button", { name: /Yes,\s*Cancel/i })
+      .or(dialog.locator("button.yes-btn").first())
+      .or(dialog.getByRole("button", { name: /^Yes$|^Confirm$|^OK$/i }))
+      .first();
+    await expect(confirm).toBeVisible({ timeout: 15_000 });
+    await confirm.click({ timeout: 15_000 });
+    await expect(dialog).toBeHidden({ timeout: 30_000 });
+    await this.page
+      .locator(".p-dialog-mask.p-component-overlay")
+      .filter({ visible: true })
+      .waitFor({ state: "hidden", timeout: 30_000 })
+      .catch(() => {});
+  }
+
+  private async ensureNoBlockingQuoteDialog(): Promise<void> {
+    await this.confirmQuoteGridActionDialogIfPresent({ required: false });
+    await this.page
+      .locator(".p-dialog-mask.p-component-overlay")
+      .filter({ visible: true })
+      .waitFor({ state: "hidden", timeout: 5_000 })
+      .catch(() => {});
+  }
+
+  /** Open row actions → **Cancel Quote** → confirm → wait for listing refresh. */
+  async cancelQuoteFromGrid(referenceOrQuoteId?: string): Promise<void> {
+    this.logStep(`Cancel Quote From Grid: ${this.stepValueDisplay(referenceOrQuoteId ?? "(first row)")}`);
+    if (referenceOrQuoteId) {
+      await this.openQuoteGridRowActions(referenceOrQuoteId);
+    } else {
+      await this.openQuoteGridRowActions();
+    }
+    await this.clickQuoteGridAction(/Cancel Quote/i);
+  }
+
+  async expectQuoteGridActionVisible(actionName: RegExp, visible: boolean): Promise<void> {
+    const items = await this.activeQuoteGridActionItems();
+    const item = items.filter({ hasText: actionName });
+    if (visible) {
+      await expect(item.first()).toBeVisible({ timeout: 15_000 });
+      return;
+    }
+    await expect(item).toHaveCount(0);
+  }
+
   async expectQuoteGridActionEnabled(actionName: RegExp, enabled: boolean): Promise<void> {
-    const item = this.quoteGridActionItems().filter({ hasText: actionName }).first();
+    const items = await this.activeQuoteGridActionItems();
+    const item = items.filter({ hasText: actionName }).first();
     await expect(item).toBeVisible({ timeout: 15_000 });
     if (enabled) {
       await expect(item).not.toHaveClass(/disabled|p-disabled/i);
@@ -1154,8 +1537,15 @@ export class DODashboardPage extends BasePage {
     }
   }
 
+  async closeQuoteGridRowActionsOverlay(): Promise<void> {
+    if (await this.quoteGridRowActionsOverlay().isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await this.page.keyboard.press("Escape");
+      await expect(this.quoteGridRowActionsOverlay()).toBeHidden({ timeout: 5_000 });
+    }
+  }
+
   async readQuoteGridActionLabels(): Promise<string[]> {
-    const items = this.quoteGridActionItems();
+    const items = await this.activeQuoteGridActionItems();
     const count = await items.count();
     const labels: string[] = [];
     for (let i = 0; i < count; i++) {
@@ -1165,9 +1555,15 @@ export class DODashboardPage extends BasePage {
   }
 
   async setQuotesGridDateRange(from: string, to: string): Promise<void> {
-    await expect(this.quotesGridFromDate).toBeVisible({ timeout: 15_000 });
-    await this.quotesGridFromDate.fill(from);
-    await this.quotesGridToDate.fill(to);
+    const fromInput = this.quotesGridFromDate;
+    const toInput = this.quotesGridToDate;
+    await expect(fromInput).toBeVisible({ timeout: 15_000 });
+    await fromInput.click({ clickCount: 3 });
+    await fromInput.fill(from);
+    await fromInput.press("Enter");
+    await toInput.click({ clickCount: 3 });
+    await toInput.fill(to);
+    await toInput.press("Enter");
   }
 
   async clickQuotesGridView(): Promise<void> {
@@ -1180,27 +1576,128 @@ export class DODashboardPage extends BasePage {
     await this.waitForAppLoaderOverlayGone(30_000);
   }
 
+  /** Toolbar links (Assign / Export / Print) — scroll the link to viewport center; JS click if topbar overlaps. */
+  private async clickQuotesGridToolbarLink(name: RegExp): Promise<void> {
+    await this.openQuotesAndApplications();
+    const link = this.quotesGridToolbarLink(name);
+    await expect(link).toBeVisible({ timeout: 30_000 });
+    await link.evaluate((el) => {
+      el.scrollIntoView({ block: "center", inline: "nearest" });
+    });
+    try {
+      await link.click({ timeout: 10_000 });
+    } catch {
+      await link.evaluate((el: HTMLElement) => el.click());
+    }
+  }
+
   async clickAssignLink(): Promise<void> {
-    await this.assignLink.scrollIntoViewIfNeeded();
-    await this.assignLink.click({ timeout: 15_000 });
+    await this.clickQuotesGridToolbarLink(/^\s*Assign\s*$/i);
   }
 
   async clickExportLink(): Promise<void> {
-    await this.exportLink.scrollIntoViewIfNeeded();
     await this.clickExportLinkExpectingDatePromptOrDialog();
   }
 
   async clickExportLinkExpectingDatePromptOrDialog(): Promise<void> {
-    await this.exportLink.click({ timeout: 15_000 });
+    await this.clickQuotesGridToolbarLink(/Export/i);
+    await this.exportDateFilterPrompt()
+      .or(this.exportFormatDialog())
+      .waitFor({ state: "visible", timeout: 15_000 })
+      .catch(() => {});
+  }
+
+  /** Export format dialog (`Export As` / **Select Export Format**). */
+  exportFormatDialog(): Locator {
+    return this.page.getByRole("dialog", { name: /^Export$/i }).first();
+  }
+
+  /** Toast / inline prompt when export is clicked without a date filter. */
+  exportDateFilterPrompt(): Locator {
+    return this.page
+      .getByText(/date filter|add a date|select.*date|please.*date range/i)
+      .first()
+      .or(
+        this.page
+          .locator(".p-toast-message-text, .p-confirm-dialog-message, .p-dialog-content")
+          .filter({ hasText: /date filter|add a date|select.*date|please.*date range/i })
+          .first(),
+      );
+  }
+
+  async expectExportDateFilterPromptVisible(): Promise<void> {
+    this.logStep("Expect Export date-filter prompt");
+    await expect(this.exportDateFilterPrompt()).toBeVisible({ timeout: 15_000 });
+  }
+
+  async expectExportFormatDialogVisible(): Promise<void> {
+    this.logStep("Expect Export format dialog");
+    const dialog = this.exportFormatDialog();
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByText(/Export As/i).first()).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByText(/Select Export Format/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(dialog.getByRole("button", { name: /^Export$/i })).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByRole("button", { name: /^Cancel$/i })).toBeVisible({ timeout: 15_000 });
+  }
+
+  async clearQuotesGridDateRange(): Promise<void> {
+    await expect(this.quotesGridFromDate).toBeVisible({ timeout: 15_000 });
+    await this.quotesGridFromDate.fill("");
+    await this.quotesGridToDate.fill("");
   }
 
   async clickPrintLink(): Promise<void> {
-    await this.printLink.scrollIntoViewIfNeeded();
-    await this.printLink.click({ timeout: 15_000 });
+    await this.clickQuotesGridToolbarLink(/Print/i);
+  }
+
+  /** Assign salesperson dialog (`app-assign-salesperson`). */
+  assignDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ has: this.page.locator("app-assign-salesperson") })
+      .first();
   }
 
   async expectAssignDialogVisible(): Promise<void> {
-    await expect(this.page.getByRole("dialog").first()).toBeVisible({ timeout: 30_000 });
+    await expect(this.assignDialog()).toBeVisible({ timeout: 30_000 });
+  }
+
+  /** Single-quote assign pop-up fields (UDP-T4396). */
+  async expectAssignSingleQuoteDialogFields(): Promise<void> {
+    this.logStep("Expect Assign single-quote dialog fields");
+    const dialog = this.assignDialog();
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    for (const label of [
+      /Quote\s*ID/i,
+      /Customer\s*Name/i,
+      /Originator\s*Name/i,
+      /Originator\s*Number/i,
+      /Salesperson/i,
+    ]) {
+      await expect(dialog.locator("label").filter({ hasText: label }).first()).toBeVisible({
+        timeout: 15_000,
+      });
+    }
+    const originatorDropdown = dialog
+      .locator("label")
+      .filter({ hasText: /Originator\s*Name/i })
+      .locator("xpath=ancestor::span[1]")
+      .getByRole("combobox")
+      .first();
+    const salespersonDropdown = dialog
+      .locator("label")
+      .filter({ hasText: /Salesperson/i })
+      .locator("xpath=ancestor::span[1]")
+      .getByRole("combobox")
+      .first();
+    await expect(originatorDropdown).toBeVisible({ timeout: 15_000 });
+    await expect(originatorDropdown).toHaveAttribute("aria-disabled", "false");
+    await expect(salespersonDropdown).toBeVisible({ timeout: 15_000 });
+    await expect(salespersonDropdown).toHaveAttribute("aria-disabled", "false");
+    await expect(dialog.getByRole("button", { name: /^Assign$/i })).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByRole("button", { name: /^Cancel$/i })).toBeVisible({ timeout: 15_000 });
   }
 
   async expectAssignSameOriginatorError(): Promise<void> {
@@ -1209,13 +1706,23 @@ export class DODashboardPage extends BasePage {
     ).toBeVisible({ timeout: 30_000 });
   }
 
+  /** Row-selection checkbox in the first column (not Webform / other row checkboxes). */
+  quoteGridRowSelectionCheckbox(row: Locator): Locator {
+    return row.locator("td").first().locator(".p-checkbox .p-checkbox-box").first();
+  }
+
   async selectQuotesGridRows(...identifiers: string[]): Promise<void> {
     for (const id of identifiers) {
       const row = this.quoteGridRowByReference(id);
       await expect(row).toBeVisible({ timeout: 45_000 });
-      const checkbox = row.locator(".p-checkbox-box").first();
-      await checkbox.click({ timeout: 10_000 });
+      await this.quoteGridRowSelectionCheckbox(row).click({ timeout: 10_000 });
     }
+  }
+
+  async selectQuotesGridRowByIndex(rowIndex: number): Promise<void> {
+    const row = this.quotesGridTable().locator("tbody tr").nth(rowIndex);
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    await this.quoteGridRowSelectionCheckbox(row).click({ timeout: 10_000 });
   }
 
   async sortQuotesGridByColumn(column: RegExp): Promise<void> {
@@ -1225,14 +1732,12 @@ export class DODashboardPage extends BasePage {
   }
 
   async filterQuotesGridColumn(column: RegExp, matchType: RegExp, value: string): Promise<void> {
-    const header = this.quotesGridColumnHeader(column);
-    await this.quotesGridColumnFilterButton(header).click({ timeout: 10_000 });
-    const overlay = this.page.locator(".p-column-filter-overlay, .p-overlaypanel").last();
-    await expect(overlay).toBeVisible({ timeout: 10_000 });
-    const matchDropdown = overlay.getByRole("combobox").first();
+    await this.openQuotesGridColumnFilter(column);
+    const overlay = this.quotesGridColumnFilterOverlay();
+    const matchDropdown = this.quotesGridColumnFilterMatchDropdown();
     if (await matchDropdown.isVisible({ timeout: 3_000 }).catch(() => false)) {
       await matchDropdown.click();
-      await this.page.getByRole("option", { name: matchType }).first().click();
+      await this.quotesGridColumnFilterMatchOption(matchType).click();
     }
     const valueInput = overlay.locator("input").first();
     await valueInput.fill(value);
@@ -1242,22 +1747,174 @@ export class DODashboardPage extends BasePage {
     await this.waitForAppLoaderOverlayGone(60_000);
   }
 
+  /** `+` beside a listing grid column header — expands hidden columns (Customer Name or Loan Id on AFV). */
+  quotesGridColumnExpandToggle(columnHeader: RegExp): Locator {
+    return this.quotesGridTable()
+      .locator("thead th")
+      .filter({ hasText: columnHeader })
+      .getByRole("button", { name: "+", exact: true })
+      .first();
+  }
+
+  /** `+` beside **Customer Name** header — expands Email / Phone columns for all rows. */
+  activeLoanCustomerNameExpandToggle(): Locator {
+    return this.quotesGridColumnExpandToggle(/Customer\s*Name/i);
+  }
+
+  /** `+` beside **Loan Id** header — AFV Loans expand (Email / Phone / Max Permitted KM). */
+  afvLoanIdExpandToggle(): Locator {
+    return this.quotesGridColumnExpandToggle(/Loan\s*Id/i);
+  }
+
+  /** `-` beside **Customer Name** header — collapses Email / Phone columns. */
+  activeLoanCustomerNameCollapseToggle(): Locator {
+    return this.quotesGridTable()
+      .locator("thead th")
+      .filter({ hasText: /Customer\s*Name/i })
+      .getByRole("button", { name: /^-$/, exact: true })
+      .first();
+  }
+
+  private activeLoanExpandedColumnHeader(label: RegExp): Locator {
+    return this.quotesGridColumnHeader(label);
+  }
+
+  private async isActiveLoanCustomerDetailsExpanded(): Promise<boolean> {
+    const emailHeader = this.activeLoanExpandedColumnHeader(/^Email$/i);
+    if (await emailHeader.isVisible({ timeout: 500 }).catch(() => false)) {
+      return true;
+    }
+    const table = this.quotesGridTable().locator("tbody");
+    const emailLabel = await table.getByText(/^Email$/i).count();
+    const phoneLabel = await table.getByText(/^Phone$/i).count();
+    return emailLabel > 0 && phoneLabel > 0;
+  }
+
   async expandActiveLoanRow(reference: string): Promise<void> {
+    this.logStep(`Expand Active Loan Row: ${this.stepValueDisplay(reference)}`);
     const row = this.quoteGridRowByReference(reference);
     await expect(row).toBeVisible({ timeout: 45_000 });
-    const expand = row.locator("i.pi-plus, .pi-plus").first();
-    if (await expand.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await expand.click({ timeout: 10_000 });
+
+    if (await this.isActiveLoanCustomerDetailsExpanded()) {
+      return;
+    }
+
+    const headerToggles = [
+      this.activeLoanCustomerNameExpandToggle(),
+      this.afvLoanIdExpandToggle(),
+    ];
+    for (const headerToggle of headerToggles) {
+      if (await headerToggle.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await headerToggle.scrollIntoViewIfNeeded();
+        await headerToggle.click({ timeout: 10_000 });
+        await this.waitForAppLoaderOverlayGone(30_000);
+        await expect
+          .poll(async () => this.isActiveLoanCustomerDetailsExpanded(), { timeout: 15_000 })
+          .toBeTruthy();
+        return;
+      }
+    }
+
+    const rowToggle = row
+      .locator("button.column-toggle-btn, i.pi-plus, .pi-plus")
+      .filter({ hasText: /^\+$/ })
+      .first();
+    await expect(rowToggle).toBeVisible({ timeout: 15_000 });
+    await rowToggle.click({ timeout: 10_000 });
+    await expect
+      .poll(async () => this.isActiveLoanCustomerDetailsExpanded(), { timeout: 15_000 })
+      .toBeTruthy();
+  }
+
+  async expectActiveLoanExpandedEmailAndPhoneVisible(reference?: string): Promise<void> {
+    this.logStep("Expect Active Loan expanded Email and Phone columns");
+    const table = this.quotesGridTable();
+    const emailHeader = this.activeLoanExpandedColumnHeader(/^Email$/i);
+    const phoneHeader = this.activeLoanExpandedColumnHeader(/^Phone$/i);
+    const emailInBody = table.locator("tbody").getByText(/^Email$/i).first();
+    const phoneInBody = table.locator("tbody").getByText(/^Phone$/i).first();
+
+    await expect(emailHeader.or(emailInBody)).toBeVisible({ timeout: 15_000 });
+    await expect(phoneHeader.or(phoneInBody)).toBeVisible({ timeout: 15_000 });
+    if (reference) {
+      const row = this.quoteGridRowByReference(reference);
+      await expect(row).toBeVisible({ timeout: 15_000 });
     }
   }
 
-  async hoverActiveLoanInfoIcon(reference: string): Promise<void> {
+  /** AFV Loans expanded row — Email, Phone, and Maximum Permitted KM (UDP-T4391). */
+  async expectAfvLoanExpandedDetailsVisible(reference?: string): Promise<void> {
+    this.logStep("Expect AFV Loan expanded Email, Phone, and Max Permitted KM");
+    await this.expectActiveLoanExpandedEmailAndPhoneVisible(reference);
+    const table = this.quotesGridTable();
+    const maxKmHeader = this.activeLoanExpandedColumnHeader(/Max(?:imum)?\s*Permitted\s*KM/i);
+    const maxKmInBody = table.locator("tbody").getByText(/Max(?:imum)?\s*Permitted\s*KM/i).first();
+    await expect(maxKmHeader.or(maxKmInBody)).toBeVisible({ timeout: 15_000 });
+  }
+
+  /** PrimeNG / native tooltip for **Outstanding Balance** info icon (Active + AFV loan grids). */
+  outstandingBalanceTooltip(): Locator {
+    const pattern = /principal balance.*interest accrued.*settlement/i;
+    return this.page
+      .locator(".p-tooltip-text, .p-tooltip, [role='tooltip']")
+      .filter({ hasText: pattern })
+      .first()
+      .or(this.page.getByText(pattern).first());
+  }
+
+  private async outstandingBalanceInfoTriggers(reference?: string): Promise<Locator[]> {
+    const header = this.quotesGridColumnHeader(/Outstanding\s*Balance/i);
+    const triggers: Locator[] = [
+      header.locator("i.fa-circle-info, i.fa-info-circle, i[class*='circle-info']").first(),
+      header.locator("[class*='info'], i[class*='info'], [ptooltip], [pTooltip]").first(),
+    ];
+    if (!reference) {
+      return triggers;
+    }
     const row = this.quoteGridRowByReference(reference);
-    await expect(row).toBeVisible({ timeout: 45_000 });
-    const info = row.locator("i.pi-info, img[alt='Info'], .pi-info-circle").first();
-    await info.hover({ timeout: 10_000 }).catch(async () => {
-      await info.click({ timeout: 10_000 });
-    });
+    const colIndex = await this.findQuotesGridColumnIndex(/Outstanding\s*Balance/i);
+    if (colIndex >= 0) {
+      const cell = row.locator("td").nth(colIndex);
+      triggers.unshift(
+        cell.locator("i.fa-circle-info, i.fa-info-circle, i[class*='circle-info']").first(),
+      );
+      triggers.unshift(cell.locator("[class*='info'], i[class*='info']").first());
+    }
+    triggers.push(
+      row.locator("i[class*='info'], [class*='info-circle'], .pi-info, .fa-info").first(),
+    );
+    return triggers;
+  }
+
+  async expectOutstandingBalanceTooltipVisible(reference?: string): Promise<void> {
+    this.logStep("Expect Outstanding Balance tooltip");
+    const tooltip = this.outstandingBalanceTooltip();
+    const triggers = await this.outstandingBalanceInfoTriggers(reference);
+    await this.quotesGridColumnHeader(/Outstanding\s*Balance/i).scrollIntoViewIfNeeded();
+
+    await expect(async () => {
+      for (const trigger of triggers) {
+        if (!(await trigger.isVisible().catch(() => false))) {
+          continue;
+        }
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.hover({ force: true });
+        if (await tooltip.isVisible().catch(() => false)) {
+          return;
+        }
+        await trigger.click({ force: true });
+        if (await tooltip.isVisible().catch(() => false)) {
+          return;
+        }
+      }
+      throw new Error("Outstanding Balance tooltip did not appear.");
+    }).toPass({ timeout: 20_000 });
+
+    await expect(tooltip).toBeVisible({ timeout: 5_000 });
+  }
+
+  async hoverActiveLoanInfoIcon(reference?: string): Promise<void> {
+    await this.expectOutstandingBalanceTooltipVisible(reference);
   }
 
   /** Dealer listing → **Activated Loans** / **Active Loans** view. */
@@ -1269,7 +1926,13 @@ export class DODashboardPage extends BasePage {
   /** Dealer listing → **AFV Loans** view. */
   async navigateToDealerListingAfvLoans(): Promise<void> {
     this.logStep("Navigate To Dealer Listing AFV Loans");
-    await this.selectQuotesGridListingType(/AFV Loans/i);
+    await this.selectQuotesGridListingType(/AFV\s*Loans?/i);
+  }
+
+  /** Returns false when the dealer dashboard does not expose an AFV Loans listing. */
+  async tryNavigateToDealerListingAfvLoans(): Promise<boolean> {
+    this.logStep("Try Navigate To Dealer Listing AFV Loans");
+    return this.trySelectQuotesGridListingType(/AFV\s*Loans?/i);
   }
 
   /** Open row Actions → **Create Settlement Quote** for a loan (Rego/VIN/Loan ID). */
@@ -1286,6 +1949,10 @@ export class DODashboardPage extends BasePage {
     await this.searchQuotesGrid(loanReference);
     await this.openQuoteGridRowActions(loanReference);
     await this.clickQuoteGridAction(/View Statement/i);
+    await expect(this.page).toHaveURL(/customer-statement\//i, { timeout: 120_000 });
+    await expect(this.page.locator("app-customer-statement").first()).toBeVisible({
+      timeout: 60_000,
+    });
   }
 
   /** Open row Actions → **Email Statement** for a loan row. */

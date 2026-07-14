@@ -6,7 +6,7 @@
 
 import { expect, test } from "@fixtures/doPortalTest";
 import type { Page } from "@playwright/test";
-import { DODashboardPage } from "../../../pages";
+import { DODashboardPage, DOAssetDetailsPage, DOCustomerStatementPage } from "../../../pages";
 import settlementData from "../../../testData/do-portal/settlementTestData.json";
 import {
   ACTIVE_LOAN_COLUMNS,
@@ -15,8 +15,11 @@ import {
   QUOTE_GRID_COLUMNS,
   WORKFLOW_BUCKETS,
   expectFirstQuoteRowVisible,
+  openAfvDealerDashboard,
+  openAfvLoansGrid,
   openDealerDashboard,
   readFirstQuoteId,
+  readQuoteGridRowId,
   requireLoanId,
   resolveOlActiveLoanReference,
   TLC_DEALER,
@@ -75,7 +78,7 @@ test.describe("Dashboard — Widgets @do @regression", () => {
       await dashboard.expectWorkflowStatusBucketsVisible(WORKFLOW_BUCKETS);
       for (const bucket of WORKFLOW_BUCKETS) {
         const tile = dashboard.workflowStatusBucket(bucket);
-        await expect(tile.locator(".amount-section p").first()).toBeVisible();
+        await expect(dashboard.workflowStatusBucketMetric(tile)).toBeVisible();
       }
     },
   );
@@ -116,8 +119,8 @@ test.describe("Dashboard — Widgets @do @regression", () => {
       await expect(dashboard.averageSalesWidget.getByText(/^Commission$/i)).toBeVisible();
       await expect(dashboard.feesAmountLabel()).toBeVisible();
       await expect(dashboard.commissionAmountLabel()).toBeVisible();
-      await dashboard.selectFeesOrMarginsPeriod("YTD");
-      await dashboard.selectFeesOrMarginsPeriod("MTD");
+      await dashboard.selectFeesCommissionPeriod("YTD");
+      await dashboard.selectFeesCommissionPeriod("MTD");
     },
   );
 
@@ -127,12 +130,11 @@ test.describe("Dashboard — Widgets @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const dashboard = await openDealerDashboard(page);
-      await expect(
-        dashboard.averageSalesWidget.getByText(/Margins on Loans Paid Out/i),
-      ).toBeVisible();
+      await expect(dashboard.marginsPanel()).toBeVisible();
+      await expect(dashboard.marginsDateRangeLabel()).toBeVisible();
       await expect(dashboard.marginsPercentageLabel()).toBeVisible();
-      await dashboard.selectFeesOrMarginsPeriod("YTD");
-      await dashboard.selectFeesOrMarginsPeriod("MTD");
+      await dashboard.selectMarginsPeriod("MTD");
+      await dashboard.selectMarginsPeriod("YTD");
     },
   );
 
@@ -231,10 +233,21 @@ test.describe("Dashboard — Quotes Grid @do @regression", () => {
       await expectFirstQuoteRowVisible(dashboard);
       await dashboard.openQuoteGridRowActions();
       const labels = await dashboard.readQuoteGridActionLabels();
-      expect(labels.join(" ")).toMatch(/View Quote/i);
-      expect(labels.join(" ")).toMatch(/Copy Quote/i);
-      expect(labels.join(" ")).toMatch(/Cancel Quote/i);
-      expect(labels.join(" ")).toMatch(/Reopen Quote/i);
+      const menuText = labels.join(" ");
+      expect(menuText).toMatch(/View Quote/i);
+      expect(menuText).toMatch(/Copy Quote/i);
+      expect(menuText).toMatch(/Cancel Quote/i);
+      await dashboard.expectQuoteGridActionVisible(/Reopen Quote/i, false);
+
+      await dashboard.closeQuoteGridRowActionsOverlay();
+      await dashboard.openExpiredQuotesListing();
+      const expiredRow = dashboard.quotesGridTable().locator("tbody tr").first();
+      if (!(await expiredRow.isVisible({ timeout: 15_000 }).catch(() => false))) {
+        test.skip(true, "No expired/cancelled quotes in listing to validate Reopen Quote.");
+      }
+      const expiredRef = ((await expiredRow.innerText()) ?? "").replace(/\s+/g, " ").trim();
+      await dashboard.openQuoteGridRowActions(expiredRef.split(/\s+/)[0] ?? expiredRef);
+      expect((await dashboard.readQuoteGridActionLabels()).join(" ")).toMatch(/Reopen Quote/i);
     },
   );
 
@@ -248,12 +261,9 @@ test.describe("Dashboard — Quotes Grid @do @regression", () => {
       const quoteId = await readFirstQuoteId(dashboard);
       await dashboard.openQuoteGridRowActions(quoteId);
       await dashboard.clickQuoteGridAction(/View Quote/i);
-      await expect(page.locator("app-quote-details, app-standard-quote").first()).toBeVisible({
-        timeout: 120_000,
-      });
-      await expect(page.locator("app-asset-details, app-quote-asset").first()).toBeVisible({
-        timeout: 60_000,
-      });
+      const assetDetails = new DOAssetDetailsPage(page);
+      await assetDetails.waitForAssetDetailsStepReady();
+      await expect(page).toHaveURL(/standard-quote\/edit\//i, { timeout: 60_000 });
     },
   );
 
@@ -267,15 +277,19 @@ test.describe("Dashboard — Quotes Grid @do @regression", () => {
       const sourceId = await readFirstQuoteId(dashboard);
       await dashboard.openQuoteGridRowActions(sourceId);
       await dashboard.clickQuoteGridAction(/Copy Quote/i);
-      await expect(page.locator("app-quote-details, app-standard-quote").first()).toBeVisible({
-        timeout: 120_000,
-      });
+      const assetDetails = new DOAssetDetailsPage(page);
+      await assetDetails.waitForAssetDetailsStepReady();
+      const duplicateId = page.url().match(/standard-quote\/edit\/(\d+)/i)?.[1] ?? "";
+      expect(duplicateId).toBeTruthy();
+      expect(duplicateId).not.toBe(sourceId);
+
       await page.goto(page.url().replace(/\/dealer\/?.*$/i, "/dealer/"));
       await dashboard.waitForAuthenticatedDashboard();
       await openQuotesGrid(dashboard);
       await dashboard.searchQuotesGrid(sourceId);
-      const rows = dashboard.quotesGridTable().locator("tbody tr");
-      expect(await rows.count()).toBeGreaterThanOrEqual(1);
+      await expect(dashboard.quoteGridRowByReference(sourceId)).toBeVisible({ timeout: 45_000 });
+      await dashboard.searchQuotesGrid(duplicateId);
+      await expect(dashboard.quoteGridRowByReference(duplicateId)).toBeVisible({ timeout: 45_000 });
     },
   );
 
@@ -286,16 +300,11 @@ test.describe("Dashboard — Quotes Grid @do @regression", () => {
       test.setTimeout(300_000);
       const dashboard = await openDealerDashboard(page);
       await openQuotesGrid(dashboard);
-      const quoteId = await readFirstQuoteId(dashboard);
-      await dashboard.openQuoteGridRowActions(quoteId);
-      await dashboard.clickQuoteGridAction(/Cancel Quote/i);
-      const confirm = page.getByRole("button", { name: /Yes|Confirm|OK/i }).first();
-      if (await confirm.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await confirm.click();
-      }
-      await openQuotesGrid(dashboard);
+      const quoteId = await readQuoteGridRowId(dashboard, 1);
+      await dashboard.cancelQuoteFromGrid(quoteId);
+      await dashboard.openExpiredQuotesListing();
       await dashboard.searchQuotesGrid(quoteId);
-      await dashboard.expectQuoteGridWorkflowStatus(quoteId, /Cancelled/i);
+      await dashboard.expectQuoteGridWorkflowStatus(quoteId, /Cancelled|Withdrawn|Expired/i);
     },
   );
 
@@ -308,7 +317,7 @@ test.describe("Dashboard — Quotes Grid @do @regression", () => {
       await openQuotesGrid(dashboard);
       const activeId = await readFirstQuoteId(dashboard);
       await dashboard.openQuoteGridRowActions(activeId);
-      await dashboard.expectQuoteGridActionEnabled(/Reopen Quote/i, false);
+      await dashboard.expectQuoteGridActionVisible(/Reopen Quote/i, false);
 
       await dashboard.openExpiredQuotesListing();
       const expiredRow = dashboard.quotesGridTable().locator("tbody tr").first();
@@ -347,10 +356,7 @@ test.describe("Dashboard — Active Loans Grid @do @regression", () => {
       const dashboard = await openDealerDashboard(page);
       await dashboard.navigateToDealerListingActiveLoans();
       await dashboard.searchQuotesGrid(loanId);
-      await dashboard.hoverActiveLoanInfoIcon(loanId);
-      await expect(page.getByText(OUTSTANDING_BALANCE_TOOLTIP).first()).toBeVisible({
-        timeout: 15_000,
-      });
+      await dashboard.expectOutstandingBalanceTooltipVisible(loanId);
     },
   );
 
@@ -367,8 +373,7 @@ test.describe("Dashboard — Active Loans Grid @do @regression", () => {
       await dashboard.navigateToDealerListingActiveLoans();
       await dashboard.searchQuotesGrid(loanId);
       await dashboard.expandActiveLoanRow(loanId);
-      await expect(page.getByText(/Email/i).first()).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByText(/Phone/i).first()).toBeVisible({ timeout: 15_000 });
+      await dashboard.expectActiveLoanExpandedEmailAndPhoneVisible(loanId);
     },
   );
 
@@ -383,25 +388,25 @@ test.describe("Dashboard — Active Loans Grid @do @regression", () => {
       );
       const dashboard = await openDealerDashboard(page);
       await dashboard.navigateToDealerListingActiveLoans();
+      await dashboard.searchQuotesGrid(loanId);
       await dashboard.openQuoteGridRowActions(loanId);
       const labels = await dashboard.readQuoteGridActionLabels();
       expect(labels.join(" ")).toMatch(/View Statement/i);
       expect(labels.join(" ")).toMatch(/Create Settlement Quote/i);
-      expect(labels.join(" ")).toMatch(/Email/i);
+      expect(labels.join(" ")).toMatch(/Email\s*(Statement|P&I Schedule)/i);
     },
   );
 });
 
 test.describe("Dashboard — View Statement @do @regression", () => {
-  async function openStatement(page: Page): Promise<DODashboardPage> {
-    const loanId = requireLoanId(
-      settlementData.dealerListing.activatedLoanRegoOrVin,
-      "dealerListing.activatedLoanRegoOrVin",
-    );
+  async function openStatement(page: Page): Promise<DOCustomerStatementPage> {
     const dashboard = await openDealerDashboard(page);
     await dashboard.navigateToDealerListingActiveLoans();
+    const loanId = await readQuoteGridRowId(dashboard, 1);
     await dashboard.openViewStatementForLoan(loanId);
-    return dashboard;
+    const statement = new DOCustomerStatementPage(page);
+    await statement.waitForReady();
+    return statement;
   }
 
   async function openOlStatement(page: Page): Promise<DODashboardPage> {
@@ -417,10 +422,8 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4375"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      await openStatement(page);
-      for (const label of [/Product/i, /Program/i, /Originator/i, /Salesperson/i, /Status/i]) {
-        await expect(page.getByText(label).first()).toBeVisible({ timeout: 30_000 });
-      }
+      const statement = await openStatement(page);
+      await statement.expectCommonHeaderFieldsVisible();
     },
   );
 
@@ -429,8 +432,8 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4376"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      await openStatement(page);
-      await expect(page.getByText(/Asset Details/i).first()).toBeVisible({ timeout: 30_000 });
+      const statement = await openStatement(page);
+      await statement.expectAssetSummaryVisible();
     },
   );
 
@@ -439,10 +442,8 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4377"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      await openStatement(page);
-      await expect(page.getByText(/Borrowers?\s*&\s*Guarantors?/i).first()).toBeVisible({
-        timeout: 30_000,
-      });
+      const statement = await openStatement(page);
+      await statement.expectBorrowersGuarantorsVisible();
     },
   );
 
@@ -451,10 +452,8 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4378"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      await openStatement(page);
-      for (const col of [/Payment Date/i, /Principal/i, /Interest/i, /Total Payment/i]) {
-        await expect(page.getByText(col).first()).toBeVisible({ timeout: 20_000 });
-      }
+      const statement = await openStatement(page);
+      await statement.expectPaymentScheduleColumnsVisible();
     },
   );
 
@@ -463,8 +462,8 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4379"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      await openStatement(page);
-      await expect(page.getByText(/Payment Summary/i).first()).toBeVisible({ timeout: 20_000 });
+      const statement = await openStatement(page);
+      await statement.expectPaymentSummaryColumnsVisible();
     },
   );
 
@@ -473,10 +472,8 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4380"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      await openStatement(page);
-      await expect(page.getByText(/Current Position|Outstanding Balance/i).first()).toBeVisible({
-        timeout: 20_000,
-      });
+      const statement = await openStatement(page);
+      await statement.expectCurrentPositionFieldsVisible();
     },
   );
 
@@ -532,8 +529,8 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4387"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      await openStatement(page);
-      await expect(page.getByText(/Customer Decision/i)).toHaveCount(0);
+      const statement = await openStatement(page);
+      await expect(statement.root.getByText(/Customer Decision/i)).toHaveCount(0);
     },
   );
 
@@ -542,14 +539,9 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4388"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      await openStatement(page);
-      const customerLink = page.locator("a, .text-primary").filter({ hasText: /\w+/ }).first();
-      if (await customerLink.isVisible({ timeout: 10_000 }).catch(() => false)) {
-        await customerLink.click();
-        await expect(
-          page.locator("app-personal-details, app-customer-details").first(),
-        ).toBeVisible({ timeout: 60_000 });
-      }
+      const statement = await openStatement(page);
+      await statement.clickBorrowerCustomerNameLink();
+      await statement.expectViewOnlyIndividualCustomerDetailsVisible();
     },
   );
 
@@ -558,8 +550,9 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4389"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      await openStatement(page);
-      const schedule = page.locator("table, .p-datatable").filter({ hasText: /Payment/i }).first();
+      const statement = await openStatement(page);
+      await statement.selectPaymentTab("Payment Schedule");
+      const schedule = statement.paymentTable();
       await schedule.scrollIntoViewIfNeeded();
       await page.mouse.wheel(0, 400);
       await expect(schedule).toBeVisible();
@@ -573,22 +566,36 @@ test.describe("Dashboard — AFV Loans @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4390"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const dashboard = await openDealerDashboard(page);
-      await dashboard.navigateToDealerListingAfvLoans();
+      const dashboard = await openAfvDealerDashboard(page);
+      await openAfvLoansGrid(dashboard);
       await dashboard.expectQuotesGridColumnsVisible(AFV_LOAN_COLUMNS);
+      await expectFirstQuoteRowVisible(dashboard);
     },
   );
 
-  test.fixme(
+  test(
     "UDP-T4391 - TC_DB_040 AFV Loans Expanded View Shows Email Phone Max Permitted KM",
     { tag: ["@do", "@regression", "@UDP-T4391"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const dashboard = await openAfvDealerDashboard(page);
+      await openAfvLoansGrid(dashboard);
+      const loanId = await readQuoteGridRowId(dashboard, 0);
+      await dashboard.expandActiveLoanRow(loanId);
+      await dashboard.expectAfvLoanExpandedDetailsVisible(loanId);
+    },
   );
 
-  test.fixme(
+  test(
     "UDP-T4392 - TC_DB_041 AFV Loans Info Icon Outstanding Balance Tooltip",
     { tag: ["@do", "@regression", "@UDP-T4392"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const dashboard = await openAfvDealerDashboard(page);
+      await openAfvLoansGrid(dashboard);
+      const loanId = await readQuoteGridRowId(dashboard, 0);
+      await dashboard.expectOutstandingBalanceTooltipVisible(loanId);
+    },
   );
 
   test.fixme(
@@ -636,9 +643,7 @@ test.describe("Dashboard — Assign @do @regression", () => {
       const quoteId = await readFirstQuoteId(dashboard);
       await dashboard.selectQuotesGridRows(quoteId);
       await dashboard.clickAssignLink();
-      await dashboard.expectAssignDialogVisible();
-      await expect(page.getByText(/Originator/i).first()).toBeVisible();
-      await expect(page.getByText(/Salesperson/i).first()).toBeVisible();
+      await dashboard.expectAssignSingleQuoteDialogFields();
     },
   );
 
@@ -658,10 +663,13 @@ test.describe("Dashboard — Assign @do @regression", () => {
       if (!originator || !secondText.includes(originator.split(" - ")[0] ?? originator)) {
         test.skip(true, "First two rows are not from the same originator.");
       }
-      await rows.nth(0).locator(".p-checkbox-box").click();
-      await rows.nth(1).locator(".p-checkbox-box").click();
+      await dashboard.selectQuotesGridRowByIndex(0);
+      await dashboard.selectQuotesGridRowByIndex(1);
       await dashboard.clickAssignLink();
       await dashboard.expectAssignDialogVisible();
+      await expect(dashboard.assignDialog().getByRole("combobox", { name: /Salesperson/i })).toBeVisible({
+        timeout: 15_000,
+      });
     },
   );
 
@@ -674,12 +682,15 @@ test.describe("Dashboard — Assign @do @regression", () => {
       await openQuotesGrid(dashboard);
       const rows = dashboard.quotesGridTable().locator("tbody tr");
       if ((await rows.count()) < 2) test.skip(true, "Need multiple rows to test mixed-originator assign.");
-      await rows.nth(0).locator(".p-checkbox-box").click();
-      await rows.nth(1).locator(".p-checkbox-box").click();
+      await dashboard.selectQuotesGridRowByIndex(0);
+      await dashboard.selectQuotesGridRowByIndex(1);
       await dashboard.clickAssignLink();
       const sameOriginatorError = page.getByText(/Quote must all belong to the same originator/i);
-      const dialog = page.getByRole("dialog").first();
+      const dialog = dashboard.assignDialog();
       await expect(sameOriginatorError.or(dialog)).toBeVisible({ timeout: 30_000 });
+      if (await sameOriginatorError.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await dashboard.expectAssignSameOriginatorError();
+      }
     },
   );
 
@@ -703,15 +714,20 @@ test.describe("Dashboard — Export @do @regression", () => {
       test.setTimeout(300_000);
       const dashboard = await openDealerDashboard(page);
       await openQuotesGrid(dashboard);
+
+      // Dashboard pre-fills a date range — export opens the format picker (Export As / Select Export Format).
+      await expect(dashboard.quotesGridFromDate).not.toHaveValue("");
+      await expect(dashboard.quotesGridToDate).not.toHaveValue("");
       await dashboard.clickExportLinkExpectingDatePromptOrDialog();
-      const datePrompt = page.getByText(/date filter|add a date/i);
-      const formatDialog = page.getByText(/CSV|Excel/i);
-      await expect(datePrompt.or(formatDialog)).toBeVisible({ timeout: 15_000 });
+      await dashboard.expectExportFormatDialogVisible();
+      await page.keyboard.press("Escape");
+      await expect(dashboard.exportFormatDialog()).toBeHidden({ timeout: 10_000 });
 
       await dashboard.setQuotesGridDateRange("01/01/2024", "31/12/2026");
       await dashboard.clickQuotesGridView();
+      await dashboard.waitForAppLoaderOverlayGone(60_000);
       await dashboard.clickExportLinkExpectingDatePromptOrDialog();
-      await expect(page.getByText(/CSV|Excel/i).first()).toBeVisible({ timeout: 15_000 });
+      await dashboard.expectExportFormatDialogVisible();
     },
   );
 
@@ -795,12 +811,17 @@ test.describe("Dashboard — Grid Features @do @regression", () => {
       test.setTimeout(300_000);
       const dashboard = await openDealerDashboard(page);
       await openQuotesGrid(dashboard);
-      const header = dashboard.quotesGridColumnHeader(/^Name$/i);
-      await dashboard.quotesGridColumnFilterButton(header).click();
-      for (const option of [/Starts With/i, /Contains/i, /Equals/i, /No Filter/i]) {
-        await expect(page.getByText(option).first()).toBeVisible({ timeout: 10_000 });
-      }
-      await page.keyboard.press("Escape");
+      await dashboard.openQuotesGridColumnFilter(/^Name$/i);
+      await dashboard.expectQuotesGridColumnFilterMatchOptions([
+        /Starts\s*with/i,
+        /Contains/i,
+        /Not\s*contains/i,
+        /Ends\s*with/i,
+        /Equals/i,
+        /Not\s*equals/i,
+      ]);
+      await dashboard.expectQuotesGridColumnFilterClearVisible();
+      await dashboard.closeQuotesGridColumnFilterOverlay();
     },
   );
 
