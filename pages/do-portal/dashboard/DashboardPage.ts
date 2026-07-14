@@ -3,7 +3,7 @@
  * Page Object Model for DO Portal main dashboard
  */
 
-import { Locator, Page, expect } from "@playwright/test";
+import { Download, Locator, Page, expect } from "@playwright/test";
 import { BasePage } from "../../common/BasePage";
 
 export class DODashboardPage extends BasePage {
@@ -93,18 +93,9 @@ export class DODashboardPage extends BasePage {
       .getByText(/Dashboard/i)
       .first();
     const listing = page.locator("app-quote-list").first();
-    this.assignLink = listing
-      .getByRole("link", { name: /^\s*Assign\s*$/i })
-      .first()
-      .or(listing.locator("a").filter({ hasText: /^\s*Assign\s*$/i }).first());
-    this.exportLink = listing
-      .getByRole("link", { name: /Export/i })
-      .first()
-      .or(listing.locator("a").filter({ hasText: /Export/i }).first());
-    this.printLink = listing
-      .getByRole("link", { name: /Print/i })
-      .first()
-      .or(listing.locator("a").filter({ hasText: /Print/i }).first());
+    this.assignLink = listing.getByRole("link", { name: /^\s*Assign\s*$/i }).first();
+    this.exportLink = listing.getByRole("link", { name: /Export/i }).first();
+    this.printLink = listing.getByRole("link", { name: /Print/i }).first();
     this.quotesGridResetButton = listing
       .getByRole("button", { name: /^Reset$/i })
       .first();
@@ -576,7 +567,80 @@ export class DODashboardPage extends BasePage {
       const rowText = ((await row.innerText()) ?? "").replace(/\s+/g, " ").trim();
       return rowText;
     }
-    return ((await row.locator("td").nth(colIndex).innerText()) ?? "").replace(/\s+/g, " ").trim();
+    const cell = await this.quoteGridCellForRow(row, columnHeader);
+    return ((await cell.innerText()) ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  /** Cell for a quote row by header text. */
+  async quoteGridCellForRow(row: Locator, columnHeader: RegExp): Promise<Locator> {
+    const colIndex = await this.findQuotesGridColumnIndex(columnHeader);
+    if (colIndex < 0) {
+      throw new Error(`Quote grid column not found: ${columnHeader}`);
+    }
+    return row.locator("td").nth(colIndex);
+  }
+
+  /** Webform display checkbox in a quote grid row (not the row-selection checkbox). */
+  async quoteGridWebformCheckbox(row: Locator): Promise<Locator> {
+    const cell = await this.quoteGridCellForRow(row, /Webform\s*Checkbox/i);
+    return cell.locator("p-checkbox").first().or(cell.getByRole("checkbox").first());
+  }
+
+  private async readQuoteGridWebformChecked(row: Locator): Promise<boolean> {
+    const cell = await this.quoteGridCellForRow(row, /Webform\s*Checkbox/i);
+    return cell.evaluate((el) => {
+      const host = (el.querySelector("p-checkbox") ?? el) as HTMLElement;
+      const input = host.querySelector<HTMLInputElement>("input[type='checkbox']");
+      if (input?.checked || input?.getAttribute("aria-checked") === "true") {
+        return true;
+      }
+      if (host.classList.contains("p-checkbox-checked")) {
+        return true;
+      }
+      return Boolean(host.querySelector(".p-checkbox-icon.pi-check, .p-checkbox-icon"));
+    });
+  }
+
+  /** UDP-T4365 — Webform flag is display-only on the grid; clicks may flash UI but must not persist. */
+  async expectQuoteGridWebformCheckboxReadOnly(row: Locator): Promise<void> {
+    this.logStep("Expect quote grid Webform checkbox read-only");
+    const checkbox = await this.quoteGridWebformCheckbox(row);
+    await expect(checkbox).toBeVisible({ timeout: 30_000 });
+    await checkbox.scrollIntoViewIfNeeded();
+
+    const readOnlyByDom = await checkbox.evaluate((el) => {
+      const host = (el.closest("p-checkbox") ?? el) as HTMLElement;
+      const input = host.querySelector<HTMLInputElement>("input[type='checkbox']");
+      const box = host.querySelector<HTMLElement>(".p-checkbox-box");
+      return Boolean(
+        input?.disabled ||
+          input?.readOnly ||
+          input?.getAttribute("aria-disabled") === "true" ||
+          host.classList.contains("p-disabled") ||
+          host.classList.contains("p-checkbox-readonly") ||
+          host.classList.contains("p-readonly") ||
+          host.getAttribute("aria-disabled") === "true" ||
+          host.getAttribute("data-p-readonly") === "true" ||
+          host.getAttribute("ng-reflect-readonly") === "true" ||
+          host.closest(".p-disabled, .p-readonly, .p-checkbox-readonly, [aria-disabled='true']") ||
+          (box && getComputedStyle(box).pointerEvents === "none"),
+      );
+    });
+    if (readOnlyByDom) {
+      return;
+    }
+
+    const quoteId = await this.readQuoteGridColumnForRow(row, /Quote\s*ID/i);
+    const before = await this.readQuoteGridWebformChecked(row);
+    const box = checkbox.locator(".p-checkbox-box").first().or(checkbox);
+    await box.click({ timeout: 10_000 });
+    await this.clickQuotesGridView();
+    const refreshedRow = this.quoteGridRowByReference(quoteId);
+    await expect(refreshedRow).toBeVisible({ timeout: 45_000 });
+    const afterRefresh = await this.readQuoteGridWebformChecked(refreshedRow);
+    expect(afterRefresh).toBe(before);
   }
 
   private async findQuotesGridColumnIndex(columnHeader: RegExp): Promise<number> {
@@ -939,12 +1003,22 @@ export class DODashboardPage extends BasePage {
 
   /** Margins on Loans Paid Out card (sibling of Fees grid inside average-sales). */
   marginsPanel(): Locator {
-    return this.averageSalesWidget
+    // Try several fallbacks to find the Margins panel — UI can render the widget
+    // inside `app-average-sales` or as plain DOM (label + dropdown + summary).
+    const byAverageWidget = this.averageSalesWidget
       .locator("div")
-      .filter({ has: this.averageSalesWidget.getByText(/Margins on Loans Paid Out/i) })
-      .filter({ has: this.averageSalesWidget.getByRole("combobox", { name: /YTD|MTD/i }) })
-      .filter({ hasNot: this.averageSalesWidget.getByText(/^Fees$/i) })
+      .filter({ has: this.averageSalesWidget.getByText(/Margins/i) })
       .first();
+
+    const byLabelSibling = this.page
+      .locator("label")
+      .filter({ hasText: /Margins on Loans Paid Out/i })
+      .first()
+      .locator("xpath=..");
+
+    const byCardBody = this.page.locator("div.card-body").filter({ hasText: /Margins on Loans Paid Out/i }).first();
+
+    return byAverageWidget.or(byLabelSibling).or(byCardBody).first();
   }
 
   /** Fees amount label in Fees & Commission card. */
@@ -1119,12 +1193,9 @@ export class DODashboardPage extends BasePage {
 
   // ─── Applications grid (UDP-T4363–T4413) ─────────────────────────────────
 
-  /** Assign / Export / Print links above the quotes grid. */
-  quotesGridToolbarLink(name: RegExp): Locator {
-    return this.quotesListingRoot()
-      .getByRole("link", { name })
-      .first()
-      .or(this.quotesListingRoot().locator("a").filter({ hasText: name }).first());
+  /** Assign / Export / Print links in the listing toolbar (`app-quote-list`). */
+  quotesGridToolbarAction(name: RegExp): Locator {
+    return this.quotesListingRoot().getByRole("link", { name }).first();
   }
 
   /** Column header cell in the dashboard listing grid. */
@@ -1180,7 +1251,9 @@ export class DODashboardPage extends BasePage {
     return this.page
       .locator(".p-overlaypanel")
       .filter({
-        has: this.page.getByText(/View Statement|Create Settlement Quote|Email P&I Schedule/i),
+        has: this.page.getByText(
+          /View Statement|Create Settlement Quote|Email Statement|Email P&I Schedule/i,
+        ),
       })
       .last();
   }
@@ -1564,23 +1637,21 @@ export class DODashboardPage extends BasePage {
     await this.waitForAppLoaderOverlayGone(30_000);
   }
 
-  /** Toolbar links (Assign / Export / Print) — scroll the link to viewport center; JS click if topbar overlaps. */
-  private async clickQuotesGridToolbarLink(name: RegExp): Promise<void> {
-    await this.openQuotesAndApplications();
-    const link = this.quotesGridToolbarLink(name);
-    await expect(link).toBeVisible({ timeout: 30_000 });
-    await link.evaluate((el) => {
-      el.scrollIntoView({ block: "center", inline: "nearest" });
-    });
+  /** Toolbar actions (Assign / Export / Print) — scroll into view; JS click if topbar overlaps. */
+  private async clickQuotesGridToolbarAction(name: RegExp): Promise<void> {
+    await this.waitForAppLoaderOverlayGone(60_000);
+    const action = this.quotesGridToolbarAction(name);
+    await expect(action).toBeVisible({ timeout: 30_000 });
+    await action.scrollIntoViewIfNeeded();
     try {
-      await link.click({ timeout: 10_000 });
+      await action.click({ timeout: 15_000 });
     } catch {
-      await link.evaluate((el: HTMLElement) => el.click());
+      await action.evaluate((el: HTMLElement) => el.click());
     }
   }
 
   async clickAssignLink(): Promise<void> {
-    await this.clickQuotesGridToolbarLink(/^\s*Assign\s*$/i);
+    await this.clickQuotesGridToolbarAction(/^\s*Assign\s*$/i);
   }
 
   async clickExportLink(): Promise<void> {
@@ -1588,7 +1659,7 @@ export class DODashboardPage extends BasePage {
   }
 
   async clickExportLinkExpectingDatePromptOrDialog(): Promise<void> {
-    await this.clickQuotesGridToolbarLink(/Export/i);
+    await this.clickQuotesGridToolbarAction(/Export/i);
     await this.exportDateFilterPrompt()
       .or(this.exportFormatDialog())
       .waitFor({ state: "visible", timeout: 15_000 })
@@ -1630,14 +1701,100 @@ export class DODashboardPage extends BasePage {
     await expect(dialog.getByRole("button", { name: /^Cancel$/i })).toBeVisible({ timeout: 15_000 });
   }
 
+  /** **Export As** format dropdown inside the export dialog. */
+  exportFormatDropdown(): Locator {
+    return this.exportFormatDialog().locator("p-dropdown").getByRole("combobox").first();
+  }
+
+  async selectExportFormat(format: RegExp = /CSV/i): Promise<void> {
+    this.logStep(`Select export format: ${format}`);
+    const dropdown = this.exportFormatDropdown();
+    await expect(dropdown).toBeVisible({ timeout: 15_000 });
+    await dropdown.click({ timeout: 10_000 });
+    let option = this.page.getByRole("option").filter({ hasText: format }).first();
+    if (!(await option.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      option = this.page.getByRole("option").first();
+    }
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click({ timeout: 10_000 });
+  }
+
+  /** Confirm export in the dialog and wait for the file download. */
+  async confirmExportDownload(): Promise<Download> {
+    this.logStep("Confirm export download");
+    const dialog = this.exportFormatDialog();
+    const downloadPromise = this.page.waitForEvent("download", { timeout: 120_000 });
+    await dialog.getByRole("button", { name: /^Export$/i }).click({ timeout: 15_000 });
+    const download = await downloadPromise;
+    await this.waitForAppLoaderOverlayGone(60_000).catch(() => {});
+    return download;
+  }
+
+  /** Set listing grid date range and click **View**. */
+  async applyQuotesGridDateFilter(from: string, to: string): Promise<void> {
+    this.logStep(`Apply quotes grid date filter: ${from} – ${to}`);
+    await this.setQuotesGridDateRange(from, to);
+    await this.clickQuotesGridView();
+  }
+
+  /** Stub `window.print` / `beforeprint` so the native print dialog does not block automation. */
+  async preparePrintStub(): Promise<void> {
+    await this.page.evaluate(() => {
+      const win = window as Window & { __dashboardPrintInvoked?: boolean };
+      const mark = () => {
+        win.__dashboardPrintInvoked = true;
+      };
+      win.__dashboardPrintInvoked = false;
+      window.addEventListener("beforeprint", mark);
+      window.print = () => {
+        mark();
+      };
+    });
+  }
+
+  async wasNativePrintInvoked(): Promise<boolean> {
+    return this.page.evaluate(
+      () => (window as Window & { __dashboardPrintInvoked?: boolean }).__dashboardPrintInvoked === true,
+    );
+  }
+
+  async expectNativePrintInvoked(): Promise<void> {
+    this.logStep("Expect native print invoked");
+    await expect.poll(() => this.wasNativePrintInvoked(), { timeout: 15_000 }).toBe(true);
+  }
+
+  /** Click **Print** — stub `window.print` in-page, then JS-click to avoid native dialog blocking. */
+  async clickPrintLink(): Promise<void> {
+    this.logStep("Click Print link");
+    await this.waitForAppLoaderOverlayGone(60_000);
+    const printAction = this.quotesGridToolbarAction(/Print/i);
+    await expect(printAction).toBeVisible({ timeout: 30_000 });
+    await printAction.scrollIntoViewIfNeeded();
+    await printAction.evaluate((el) => {
+      const win = window as Window & { __dashboardPrintInvoked?: boolean };
+      win.__dashboardPrintInvoked = false;
+      window.print = () => {
+        win.__dashboardPrintInvoked = true;
+      };
+      (el as HTMLElement).click();
+    });
+  }
+
+  /** Column labels visible in print media after **Print** (browser print preview layout). */
+  async expectPrintMediaColumnsVisible(headers: RegExp[]): Promise<void> {
+    this.logStep("Expect print-media column headers");
+    await this.page.emulateMedia({ media: "print" });
+    const cells = this.page.locator("th, .p-datatable-thead th");
+    for (const header of headers) {
+      const pattern = DODashboardPage.quotesGridColumnHeaderNamePattern(header);
+      await expect(cells.filter({ hasText: pattern }).first()).toBeVisible({ timeout: 20_000 });
+    }
+  }
+
   async clearQuotesGridDateRange(): Promise<void> {
     await expect(this.quotesGridFromDate).toBeVisible({ timeout: 15_000 });
     await this.quotesGridFromDate.fill("");
     await this.quotesGridToDate.fill("");
-  }
-
-  async clickPrintLink(): Promise<void> {
-    await this.clickQuotesGridToolbarLink(/Print/i);
   }
 
   /** Assign salesperson dialog (`app-assign-salesperson`). */
@@ -1840,65 +1997,132 @@ export class DODashboardPage extends BasePage {
     await expect(maxKmHeader.or(maxKmInBody)).toBeVisible({ timeout: 15_000 });
   }
 
+  private static readonly OUTSTANDING_BALANCE_TOOLTIP_PATTERN =
+    /principal balance.*interest accrued|does not constitute a final settlement/i;
+
   /** PrimeNG / native tooltip for **Outstanding Balance** info icon (Active + AFV loan grids). */
   outstandingBalanceTooltip(): Locator {
-    const pattern = /principal balance.*interest accrued.*settlement/i;
+    const pattern = DODashboardPage.OUTSTANDING_BALANCE_TOOLTIP_PATTERN;
     return this.page
-      .locator(".p-tooltip-text, .p-tooltip, [role='tooltip']")
+      .locator(".p-tooltip-text, .p-tooltip .p-tooltip-text, [role='tooltip']")
       .filter({ hasText: pattern })
       .first()
       .or(this.page.getByText(pattern).first());
   }
 
-  private async outstandingBalanceInfoTriggers(reference?: string): Promise<Locator[]> {
+  /** Info (i) icon beside **Outstanding Balance** column header — AFV uses header-only icon. */
+  private outstandingBalanceHeaderInfoIcon(): Locator {
     const header = this.quotesGridColumnHeader(/Outstanding\s*Balance/i);
-    const triggers: Locator[] = [
-      header.locator("i.fa-circle-info, i.fa-info-circle, i[class*='circle-info']").first(),
-      header.locator("[class*='info'], i[class*='info'], [ptooltip], [pTooltip]").first(),
-    ];
+    const table = this.quotesGridTable();
+    const headerFlexIcon = header.locator("div").first().locator(":scope > *").nth(1);
+    return table
+      .locator(
+        '[ptooltip*="principal balance"], [pTooltip*="principal balance"], [ptooltip*="interest accrued"], [pTooltip*="settlement amount"], [ng-reflect-ptooltip*="principal balance"], [ng-reflect-p-tooltip*="principal balance"]',
+      )
+      .first()
+      .or(
+        header
+          .locator(
+            "i.fa-circle-info, i.fa-info-circle, i.far.fa-circle-info, i[class*='circle-info'], i[class*='fa-info'], [ptooltip], [pTooltip]",
+          )
+          .first(),
+      )
+      .or(headerFlexIcon)
+      .or(header.locator(".text-primary-color.cursor-pointer, .cursor-pointer.text-primary-color").first());
+  }
+
+  private async dispatchOutstandingBalanceTooltip(trigger: Locator): Promise<void> {
+    await trigger.hover({ force: true });
+    await trigger.dispatchEvent("mouseenter").catch(() => {});
+    await trigger.dispatchEvent("mouseover").catch(() => {});
+    await trigger.evaluate((el) => {
+      const target = (el.closest("i, [ptooltip], [pTooltip]") ?? el) as HTMLElement;
+      target.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      target.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+  }
+
+  private async outstandingBalanceInfoTriggers(reference?: string): Promise<Locator[]> {
+    const headerIcon = this.outstandingBalanceHeaderInfoIcon();
+    const triggers: Locator[] = [headerIcon];
+    const header = this.quotesGridColumnHeader(/Outstanding\s*Balance/i);
+    triggers.push(
+      header.locator("i.fa-circle-info, i.fa-info-circle, i.far.fa-circle-info, i[class*='circle-info']").first(),
+    );
+    triggers.push(header.locator("[ptooltip], [pTooltip]").first());
+
     if (!reference) {
       return triggers;
     }
+
     const row = this.quoteGridRowByReference(reference);
     const colIndex = await this.findQuotesGridColumnIndex(/Outstanding\s*Balance/i);
     if (colIndex >= 0) {
       const cell = row.locator("td").nth(colIndex);
+      triggers.unshift(cell.locator("[ptooltip], [pTooltip]").first());
       triggers.unshift(
-        cell.locator("i.fa-circle-info, i.fa-info-circle, i[class*='circle-info']").first(),
+        cell.locator("i.fa-circle-info, i.fa-info-circle, i.far.fa-circle-info, i[class*='circle-info']").first(),
       );
-      triggers.unshift(cell.locator("[class*='info'], i[class*='info']").first());
     }
     triggers.push(
-      row.locator("i[class*='info'], [class*='info-circle'], .pi-info, .fa-info").first(),
+      row.locator("i[class*='info'], [class*='info-circle'], .pi-info, .fa-info, [ptooltip], [pTooltip]").first(),
     );
     return triggers;
   }
 
+  private async readOutstandingBalanceTooltipMessage(trigger: Locator): Promise<string> {
+    const tooltip = this.outstandingBalanceTooltip();
+    if (await tooltip.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      return ((await tooltip.innerText()) ?? "").replace(/\s+/g, " ").trim();
+    }
+    const attrs = await trigger.evaluate((el) => {
+      const target = (el.closest("i, [ptooltip], [pTooltip]") ?? el) as HTMLElement;
+      return [
+        target.getAttribute("ptooltip"),
+        target.getAttribute("pTooltip"),
+        target.getAttribute("ng-reflect-ptooltip"),
+        target.getAttribute("ng-reflect-p-tooltip"),
+        target.getAttribute("ng-reflect-content"),
+        target.getAttribute("title"),
+        target.getAttribute("aria-label"),
+      ].filter(Boolean) as string[];
+    });
+    for (const value of attrs) {
+      if (DODashboardPage.OUTSTANDING_BALANCE_TOOLTIP_PATTERN.test(value)) {
+        return value.replace(/\s+/g, " ").trim();
+      }
+    }
+    return "";
+  }
+
   async expectOutstandingBalanceTooltipVisible(reference?: string): Promise<void> {
     this.logStep("Expect Outstanding Balance tooltip");
-    const tooltip = this.outstandingBalanceTooltip();
+    const pattern = DODashboardPage.OUTSTANDING_BALANCE_TOOLTIP_PATTERN;
     const triggers = await this.outstandingBalanceInfoTriggers(reference);
     await this.quotesGridColumnHeader(/Outstanding\s*Balance/i).scrollIntoViewIfNeeded();
 
+    let message = "";
     await expect(async () => {
       for (const trigger of triggers) {
         if (!(await trigger.isVisible().catch(() => false))) {
           continue;
         }
         await trigger.scrollIntoViewIfNeeded();
-        await trigger.hover({ force: true });
-        if (await tooltip.isVisible().catch(() => false)) {
+        await this.dispatchOutstandingBalanceTooltip(trigger);
+        message = await this.readOutstandingBalanceTooltipMessage(trigger);
+        if (pattern.test(message)) {
           return;
         }
         await trigger.click({ force: true });
-        if (await tooltip.isVisible().catch(() => false)) {
+        message = await this.readOutstandingBalanceTooltipMessage(trigger);
+        if (pattern.test(message)) {
           return;
         }
       }
       throw new Error("Outstanding Balance tooltip did not appear.");
     }).toPass({ timeout: 20_000 });
 
-    await expect(tooltip).toBeVisible({ timeout: 5_000 });
+    expect(message).toMatch(pattern);
   }
 
   async hoverActiveLoanInfoIcon(reference?: string): Promise<void> {

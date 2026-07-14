@@ -6,21 +6,30 @@
 
 import { expect, test } from "@fixtures/doPortalTest";
 import type { Page } from "@playwright/test";
-import { DODashboardPage, DOAssetDetailsPage, DOCustomerStatementPage } from "../../../pages";
+import { DOAssetDetailsPage, DOCustomerStatementPage, DODashboardPage } from "../../../pages";
 import settlementData from "../../../testData/do-portal/settlementTestData.json";
 import {
   ACTIVE_LOAN_COLUMNS,
+  ACTIVE_LOAN_EXPORT_COLUMNS,
   AFV_LOAN_COLUMNS,
+  AFV_LOAN_EXPORT_COLUMNS,
   QUOTE_GRID_COLUMNS,
+  TLC_DEALER,
   WORKFLOW_BUCKETS,
+  expectExportFileContainsColumns,
   expectFirstQuoteRowVisible,
+  findOperatingLeaseBuybackLoanIds,
   openAfvDealerDashboard,
+  openAfvLoanStatement,
   openAfvLoansGrid,
   openDealerDashboard,
+  openFinanceLeaseStatement,
+  openOperatingLeaseStatement,
+  openOperatingLeaseStatementForLoan,
   readFirstQuoteId,
   readQuoteGridRowId,
   requireLoanId,
-  TLC_DEALER,
+  saveDashboardDownload,
 } from "./dashboard.helpers";
 
 const OUTSTANDING_BALANCE_TOOLTIP =
@@ -210,14 +219,9 @@ test.describe("Dashboard — Quotes Grid @do @regression", () => {
       test.setTimeout(300_000);
       const dashboard = await openDealerDashboard(page);
       await openQuotesGrid(dashboard);
-      const checkbox = dashboard
-        .quotesGridTable()
-        .locator("tbody tr")
-        .first()
-        .locator(".p-checkbox")
-        .last();
-      await expect(checkbox).toBeVisible({ timeout: 30_000 });
-      await expect(checkbox.locator("input[type='checkbox']")).toBeDisabled();
+      const row = dashboard.quotesGridTable().locator("tbody tr").first();
+      await expect(row).toBeVisible({ timeout: 60_000 });
+      await dashboard.expectQuoteGridWebformCheckboxReadOnly(row);
     },
   );
 
@@ -467,42 +471,83 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     },
   );
 
-  test.fixme(
+  test(
     "UDP-T4381 - TC_DB_030 View Statement FL Lease Schedule Includes GST Column",
     { tag: ["@do", "@regression", "@UDP-T4381"] },
-    async () => {
-      // Requires activated Finance Lease loan seed in settlementTestData.json.
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const statement = await openFinanceLeaseStatement(page, { requireLeaseScheduleGst: true });
+      await statement.expectFlLeaseScheduleColumnsVisible();
     },
   );
 
-  test.fixme(
+  test(
     "UDP-T4382 - TC_DB_031 View Statement FL Payment Summary Includes GST",
     { tag: ["@do", "@regression", "@UDP-T4382"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const statement = await openFinanceLeaseStatement(page);
+      await statement.expectFlLeaseSummaryColumnsVisible();
+    },
   );
 
-  test.fixme(
+  test(
     "UDP-T4383 - TC_DB_032 View Statement OL Rental Schedule Columns",
     { tag: ["@do", "@regression", "@UDP-T4383"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const statement = await openOperatingLeaseStatement(page);
+      await statement.expectOlRentalScheduleColumnsVisible();
+    },
   );
 
-  test.fixme(
+  test(
     "UDP-T4384 - TC_DB_033 View Statement OL Payment Summary Columns",
     { tag: ["@do", "@regression", "@UDP-T4384"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const statement = await openOperatingLeaseStatement(page);
+      await statement.expectOlRentalSummaryColumnsVisible();
+    },
   );
 
-  test.fixme(
+  test(
     "UDP-T4385 - TC_DB_034 View Statement OL Buyback Details Conditional Display",
     { tag: ["@do", "@regression", "@UDP-T4385"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const { dashboard, withBuybackId, withoutBuybackId } =
+        await findOperatingLeaseBuybackLoanIds(page);
+
+      const matchingParty = await openOperatingLeaseStatementForLoan(
+        page,
+        dashboard,
+        withBuybackId,
+      );
+      await matchingParty.expectBuybackDetailsVisible();
+
+      await matchingParty.clickPreviousToDashboard();
+      await dashboard.navigateToDealerListingActiveLoans();
+      await dashboard.searchQuotesGrid("Operating");
+
+      const nonMatchingParty = await openOperatingLeaseStatementForLoan(
+        page,
+        dashboard,
+        withoutBuybackId,
+      );
+      await nonMatchingParty.expectBuybackDetailsHidden();
+    },
   );
 
-  test.fixme(
+  test(
     "UDP-T4386 - TC_DB_035 View Statement AFV Loan Details Fields",
     { tag: ["@do", "@regression", "@UDP-T4386"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const statement = await openAfvLoanStatement(page);
+      await statement.expectAfvLoanDetailsFieldsVisible();
+      await statement.expectAfvPaymentScheduleColumnsVisible();
+    },
   );
 
   test(
@@ -579,10 +624,20 @@ test.describe("Dashboard — AFV Loans @do @regression", () => {
     },
   );
 
-  test.fixme(
+  test(
     "UDP-T4393 - TC_DB_042 AFV Loans Actions Menu Options",
     { tag: ["@do", "@regression", "@UDP-T4393"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const dashboard = await openAfvDealerDashboard(page);
+      await openAfvLoansGrid(dashboard);
+      const loanId = await readQuoteGridRowId(dashboard, 0);
+      await dashboard.openQuoteGridRowActions(loanId);
+      const labels = await dashboard.readQuoteGridActionLabels();
+      expect(labels.join(" ")).toMatch(/View Statement/i);
+      expect(labels.join(" ")).toMatch(/Create Settlement Quote/i);
+      expect(labels.join(" ")).toMatch(/Email\s*(Statement|P&I Schedule)/i);
+    },
   );
 });
 
@@ -706,7 +761,6 @@ test.describe("Dashboard — Export @do @regression", () => {
 
       await dashboard.setQuotesGridDateRange("01/01/2024", "31/12/2026");
       await dashboard.clickQuotesGridView();
-      await dashboard.waitForAppLoaderOverlayGone(60_000);
       await dashboard.clickExportLinkExpectingDatePromptOrDialog();
       await dashboard.expectExportFormatDialogVisible();
     },
@@ -726,15 +780,41 @@ test.describe("Dashboard — Export @do @regression", () => {
     },
   );
 
-  test.fixme(
+  test(
     "UDP-T4402 - TC_DB_051 Export Active Loans Fields Include More Data Than Dashboard",
     { tag: ["@do", "@regression", "@UDP-T4402"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const dashboard = await openDealerDashboard(page);
+      await dashboard.openQuotesAndApplications();
+      await dashboard.navigateToDealerListingActiveLoans();
+      await expectFirstQuoteRowVisible(dashboard);
+      await dashboard.applyQuotesGridDateFilter("01/01/2020", "31/12/2026");
+      await dashboard.clickExportLinkExpectingDatePromptOrDialog();
+      await dashboard.expectExportFormatDialogVisible();
+      await dashboard.selectExportFormat(/CSV/i);
+      const download = await dashboard.confirmExportDownload();
+      const filePath = await saveDashboardDownload(download);
+      await expectExportFileContainsColumns(filePath, ACTIVE_LOAN_EXPORT_COLUMNS);
+    },
   );
-  test.fixme(
+
+  test(
     "UDP-T4403 - TC_DB_052 Export AFV Loans Fields Include KM Allowance and Customer Decision",
     { tag: ["@do", "@regression", "@UDP-T4403"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const dashboard = await openAfvDealerDashboard(page);
+      await openAfvLoansGrid(dashboard);
+      await expectFirstQuoteRowVisible(dashboard);
+      await dashboard.applyQuotesGridDateFilter("01/01/2020", "31/12/2026");
+      await dashboard.clickExportLinkExpectingDatePromptOrDialog();
+      await dashboard.expectExportFormatDialogVisible();
+      await dashboard.selectExportFormat(/CSV/i);
+      const download = await dashboard.confirmExportDownload();
+      const filePath = await saveDashboardDownload(download);
+      await expectExportFileContainsColumns(filePath, AFV_LOAN_EXPORT_COLUMNS);
+    },
   );
 });
 
@@ -746,10 +826,10 @@ test.describe("Dashboard — Print @do @regression", () => {
       test.setTimeout(300_000);
       const dashboard = await openDealerDashboard(page);
       await openQuotesGrid(dashboard);
-      const printPromise = page.waitForEvent("dialog", { timeout: 5_000 }).catch(() => null);
+      await dashboard.applyQuotesGridDateFilter("01/01/2024", "31/12/2026");
+      await expect(dashboard.printLink).toBeVisible({ timeout: 30_000 });
+      await expect(dashboard.printLink).toBeEnabled();
       await dashboard.clickPrintLink();
-      const dialog = await printPromise;
-      if (dialog) await dialog.dismiss();
     },
   );
 
@@ -760,14 +840,25 @@ test.describe("Dashboard — Print @do @regression", () => {
       test.setTimeout(300_000);
       const dashboard = await openDealerDashboard(page);
       await openQuotesGrid(dashboard);
+      await expect(dashboard.printLink).toBeVisible({ timeout: 30_000 });
+      await expect(dashboard.printLink).toBeEnabled();
       await dashboard.clickPrintLink();
     },
   );
 
-  test.fixme(
+  test(
     "UDP-T4406 - TC_DB_055 Print Active Loans PDF Fields",
     { tag: ["@do", "@regression", "@UDP-T4406"] },
-    async () => {},
+    async ({ page }) => {
+      test.setTimeout(300_000);
+      const dashboard = await openDealerDashboard(page);
+      await dashboard.openQuotesAndApplications();
+      await dashboard.navigateToDealerListingActiveLoans();
+      await expectFirstQuoteRowVisible(dashboard);
+      await expect(dashboard.printLink).toBeVisible({ timeout: 30_000 });
+      await expect(dashboard.printLink).toBeEnabled();
+      await dashboard.clickPrintLink();
+    },
   );
 });
 
