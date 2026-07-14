@@ -10,10 +10,10 @@
   "loanLookup": {
     "validRegoSameDealer": "BAGGED",
     "validVinSameDealer": "",
-    "validRegoDifferentDealer": "",
+    "validRegoDifferentDealer": "BC7474",
     "validVinDifferentDealer": "",
     "invalidRegoOrVin": "ZZZZ99",
-    "arrearsRegoOrVin": "",
+    "arrearsRegoOrVin": "214",
     "afvActivatedLoanRegoOrVin": "",
     "consumerLoanRegoOrVin": "",
     "businessLoanRegoOrVin": "BAGGED",
@@ -32,7 +32,7 @@
     "validRego": "BAGGED",
     "validRegoMax6Alphanumeric": "ABC123",
     "invalidRegoSpecialChars": "AB@#12",
-    "validVin": "1HGBH41JXMN109186",
+    "validVin": "7A433LN8508501772",
     "invalidVinSpecialChars": "VIN-123@ABC"
   }
 }

@@ -167,6 +167,60 @@ async function completeLoanSearchToDisplay(
   await settlementPage.expectSettlementDisplayScreen();
 }
 
+/** UDP-T3952 — minimal calculable TL Asset Details (no trade/settlement prerequisites). */
+async function prepareTlMandatoryAssetDetailsForUdpT3952(
+  page: Page,
+  assetDetailsPage: DOAssetDetailsPage,
+): Promise<void> {
+  const addAssetPage = new DOAddAssetPage(page);
+  await assetDetailsPage.enterAsset("Car and Light Commercial /");
+  await assetDetailsPage.selectCondition("Used");
+  await assetDetailsPage.openAssetInsuranceTradeInSummary();
+  await assetDetailsPage.clickAssetSummaryEditButton();
+  await addAssetPage.enterAssetValue("$20,000");
+  await addAssetPage.selectCondition("Used");
+  await addAssetPage.selectYear("2025");
+  await addAssetPage.enterMake("Toyota");
+  await addAssetPage.enterModel("Hilux");
+  await addAssetPage.enterVariant("Top");
+  await addAssetPage.clickSummitButton();
+  await addAssetPage.clickCrossButton();
+  await assetDetailsPage.termsOfFinance("36");
+  await assetDetailsPage.interestRate("9");
+  await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
+  await assetDetailsPage.enterOriginationReference("SQ-Settlement-Ref-01");
+  await assetDetailsPage.clickCalculateButton();
+  await assetDetailsPage.expectTotalAmountBorrowedGreaterThanZero({ timeoutMs: 90_000 });
+  await assetDetailsPage.enterOriginationReference("SQ-Settlement-Ref-01");
+}
+
+/**
+ * UDP-T3952 — **Calculate Settlement** enables only after mandatory Asset Details are saved
+ * by advancing to Customer Details once, then returning to Asset Details.
+ */
+async function accessSettlementScreenAfterAssetDetailsSaved(
+  page: Page,
+  productKey: ProductKey = "tl",
+): Promise<{
+  assetDetailsPage: DOAssetDetailsPage;
+  settlementPage: DOSettlementPage;
+}> {
+  const { assetDetailsPage, settlementPage } = await openStandardQuoteForProduct(page, productKey);
+  if (productKey !== "tl") {
+    test.skip(true, `UDP-T3952 TL-only prep; ${productKey} not configured.`);
+  }
+  await prepareTlMandatoryAssetDetailsForUdpT3952(page, assetDetailsPage);
+
+  await assetDetailsPage.clickNextAndExpectCustomerDetails("SQ-Settlement-Ref-01");
+  await assetDetailsPage.clickStandardQuoteStepTab(/Asset\s*Details/i);
+  await assetDetailsPage.waitForAssetDetailsStepReady();
+
+  await settlementPage.expectSettlementTriggerVisible();
+  await settlementPage.waitForSettlementTriggerEnabled();
+  await settlementPage.openSettlementFromQuote();
+  return { assetDetailsPage, settlementPage };
+}
+
 /** Existing Standard Quote (e.g. 2361) → Asset Details → Settlement loan-search pop-up. */
 async function openSettlementFromExistingQuote(page: Page): Promise<{
   assetDetailsPage: DOAssetDetailsPage;
@@ -193,7 +247,7 @@ test.describe("Settlement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3952"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page, "tl");
       await settlementPage.expectSettlementSearchScreenVisible();
     },
   );
@@ -214,9 +268,7 @@ test.describe("Settlement @do @regression", () => {
       await dashboardPage.selectDealer(TLC_DEALER);
       await dashboardPage.navigateToDealerListingActiveLoans();
       await dashboardPage.clickCreateSettlementQuoteForLoan(loanId);
-      await expect.soft(settlementPage.regoInput.or(settlementPage.vinInput).first()).toBeVisible({
-        timeout: 45_000,
-      });
+      await settlementPage.expectSettlementSearchScreenVisible();
     },
   );
 
@@ -237,9 +289,10 @@ test.describe("Settlement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3955"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const rego = settlementData.fieldSamples.validRegoMax6Alphanumeric;
-      const { settlementPage } = await openSettlementFromExistingQuote(page);
+      const rego = settlementData.fieldSamples.validRego; // SIT activated loan — max 6 alphanumeric
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
 
+      await settlementPage.expectSettlementSearchScreenVisible();
       await settlementPage.expectSettlementDateIsPopulated();
       await settlementPage.enterRego(rego);
       await settlementPage.clearVin();
@@ -256,7 +309,9 @@ test.describe("Settlement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3956"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const { settlementPage } = await openSettlementFromExistingQuote(page);
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
       await settlementPage.enterRego(settlementData.fieldSamples.invalidRegoSpecialChars);
       await settlementPage.clickNext();
       await settlementPage.expectRegoValidationError();
@@ -268,22 +323,18 @@ test.describe("Settlement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3957"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
+      const vin = settlementData.fieldSamples.validVin; // SIT — max 17 alphanumeric
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
+      await settlementPage.expectSettlementDateIsPopulated();
       await settlementPage.clearRego();
-      await settlementPage.enterVin(settlementData.fieldSamples.validVin);
+      await settlementPage.enterVin(vin);
+      await settlementPage.expectRegoIsBlank();
+      await settlementPage.expectVinValue(vin);
+      await settlementPage.expectNoVinValidationError();
       await settlementPage.clickNext();
-      const vinVal = settlementData.loanLookup.validVinSameDealer;
-      if (vinVal) {
-        await settlementPage.expectSettlementDisplayScreen();
-      } else {
-        await expect
-          .poll(
-            async () =>
-              (await settlementPage.vinInput.inputValue().catch(() => "")).includes("1HGBH") ||
-              (await page.getByText(/not found|privacy|settlement/i).first().isVisible().catch(() => false)),
-          )
-          .toBeTruthy();
-      }
+      await settlementPage.expectLoanSearchStepCompleted();
     },
   );
 
@@ -292,7 +343,10 @@ test.describe("Settlement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3958"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
+      await settlementPage.clearRego();
       await settlementPage.enterVin(settlementData.fieldSamples.invalidVinSpecialChars);
       await settlementPage.clickNext();
       await settlementPage.expectVinValidationError();
@@ -304,7 +358,9 @@ test.describe("Settlement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3959"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "csa");
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
       await settlementPage.expectSettlementDateIsToday();
     },
   );
@@ -314,7 +370,10 @@ test.describe("Settlement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3960"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
+      await settlementPage.expectSettlementDateIsPopulated();
       await settlementPage.expectPastSettlementDateRejected();
     },
   );
@@ -335,9 +394,10 @@ test.describe("Settlement @do @regression", () => {
       await dashboardPage.selectDealer(TLC_DEALER);
       await dashboardPage.navigateToDealerListingActiveLoans();
       await dashboardPage.clickCreateSettlementQuoteForLoan(loanId);
-      const rego = (await settlementPage.regoInput.inputValue()).trim();
-      const vin = (await settlementPage.vinInput.inputValue()).trim();
-      expect(rego.length > 0 || vin.length > 0).toBeTruthy();
+
+      await settlementPage.expectSettlementSearchScreenVisible();
+      await settlementPage.expectSettlementDateIsPopulated();
+      await settlementPage.expectRegoValue(loanId);
     },
   );
 
@@ -345,13 +405,21 @@ test.describe("Settlement @do @regression", () => {
     "UDP-T3962 - Loan Found Same Dealer Proceed to Settlement Display",
     { tag: ["@do", "@regression", "@UDP-T3962"] },
     async ({ page }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(300_000);
       const rego = requireLoanId(
         settlementData.loanLookup.validRegoSameDealer,
         "loanLookup.validRegoSameDealer",
       );
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
-      await completeLoanSearchToDisplay(settlementPage, rego, false);
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
+      await settlementPage.expectSettlementDateIsPopulated();
+      await settlementPage.enterRego(rego);
+      await settlementPage.clearVin();
+      await settlementPage.expectRegoValue(rego);
+      await settlementPage.expectNoRegoValidationError();
+      await settlementPage.clickNext();
+      await settlementPage.expectSettlementDisplayScreen();
       await settlementPage.expectCustomerDetailsPopulated();
     },
   );
@@ -360,13 +428,19 @@ test.describe("Settlement @do @regression", () => {
     "UDP-T3963 - Loan Found Different Dealer Privacy Waiver Required",
     { tag: ["@do", "@regression", "@UDP-T3963"] },
     async ({ page }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(300_000);
       const rego = requireLoanId(
         settlementData.loanLookup.validRegoDifferentDealer,
         "loanLookup.validRegoDifferentDealer",
       );
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
+      await settlementPage.expectSettlementDateIsPopulated();
       await settlementPage.enterRego(rego);
+      await settlementPage.clearVin();
+      await settlementPage.expectRegoValue(rego);
+      await settlementPage.expectNoRegoValidationError();
       await settlementPage.clickNext();
       await settlementPage.expectPrivacyWaiverScreen();
     },
@@ -414,8 +488,13 @@ test.describe("Settlement @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T3966"] },
     async ({ page }) => {
       test.setTimeout(300_000);
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
+      await settlementPage.expectSettlementDateIsPopulated();
       await settlementPage.enterRego(settlementData.loanLookup.invalidRegoOrVin);
+      await settlementPage.clearVin();
+      await settlementPage.expectNoRegoValidationError();
       await settlementPage.clickNext();
       await settlementPage.expectVehicleNotFoundError();
     },
@@ -425,13 +504,19 @@ test.describe("Settlement @do @regression", () => {
     "UDP-T3967 - Business Rules Not Met Return Error",
     { tag: ["@do", "@regression", "@UDP-T3967"] },
     async ({ page }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(300_000);
       const rego = requireLoanId(
         settlementData.loanLookup.arrearsRegoOrVin,
         "loanLookup.arrearsRegoOrVin",
       );
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
+      await settlementPage.expectSettlementDateIsPopulated();
       await settlementPage.enterRego(rego);
+      await settlementPage.clearVin();
+      await settlementPage.expectRegoValue(rego);
+      await settlementPage.expectNoRegoValidationError();
       await settlementPage.clickNext();
       await settlementPage.expectBusinessRuleError();
     },
@@ -724,13 +809,16 @@ test.describe("Settlement @do @regression", () => {
     "UDP-T3984 - Loan in Arrears/Overdue Settlement Cannot Proceed",
     { tag: ["@do", "@regression", "@UDP-T3984"] },
     async ({ page }) => {
-      test.setTimeout(600_000);
+      test.setTimeout(300_000);
       const rego = requireLoanId(
         settlementData.loanLookup.arrearsRegoOrVin,
         "loanLookup.arrearsRegoOrVin",
       );
-      const { settlementPage } = await openSettlementPopupFromQuote(page, "tl");
+      const { settlementPage } = await accessSettlementScreenAfterAssetDetailsSaved(page);
+
+      await settlementPage.expectSettlementSearchScreenVisible();
       await settlementPage.enterRego(rego);
+      await settlementPage.clearVin();
       await settlementPage.clickNext();
       await settlementPage.expectBusinessRuleError();
     },

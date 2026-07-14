@@ -47,6 +47,14 @@ export const ACTIVE_LOAN_COLUMNS: RegExp[] = [
   /^Originator$/i,
 ];
 
+/** UDP-T4383 — OL View Statement **Rental Schedule** column headers. */
+export const OL_RENTAL_SCHEDULE_COLUMNS: RegExp[] = [
+  /Payment Date/i,
+  /Total\s*Payment/i,
+  /^Payment$/i,
+  /^GST$/i,
+];
+
 export const AFV_LOAN_COLUMNS: RegExp[] = [
   /Loan\s*ID/i,
   /Customer\s*Name/i,
@@ -384,6 +392,32 @@ export async function openFinanceLeaseStatement(
       await statement.clickPreviousToDashboard();
       await dashboard.navigateToDealerListingActiveLoans();
       await dashboard.searchQuotesGrid("Finance");
+/** Seeded OL loan Rego/VIN/Loan ID, or first **Operating Lease** row in Active Loans. */
+export async function resolveOlActiveLoanReference(dashboard: DODashboardPage): Promise<string> {
+  const seeded = settlementData.dealerListing.olActivatedLoanRegoOrVin?.trim();
+  if (seeded) {
+    return seeded;
+  }
+
+  await dashboard.navigateToDealerListingActiveLoans();
+  const rows = dashboard.quotesGridTable().locator("tbody tr");
+  const count = await rows.count();
+  for (let i = 0; i < count; i++) {
+    const row = rows.nth(i);
+    if (!(await row.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      continue;
+    }
+    const product = await dashboard.readQuoteGridColumnForRow(row, /^Product$/i);
+    if (!/Operating\s*Lease/i.test(product)) {
+      continue;
+    }
+    const rego = await dashboard.readQuoteGridColumnForRow(row, /Rego|ID\s*No/i);
+    if (rego.trim().length > 0) {
+      return rego.trim();
+    }
+    const loanId = await dashboard.readQuoteGridColumnForRow(row, /Loan\s*ID/i);
+    if (loanId.trim().length > 0) {
+      return loanId.trim();
     }
   }
 
@@ -474,4 +508,7 @@ export async function openAfvLoanStatement(page: Page): Promise<DOCustomerStatem
     statement.paymentDetailsRoot().getByRole("radio", { name: /Payment Summary/i }),
   ).toBeVisible({ timeout: 30_000 });
   return statement;
+    "No Operating Lease active loan in dealer listing; set dealerListing.olActivatedLoanRegoOrVin in settlementTestData.json.",
+  );
+  return "";
 }
