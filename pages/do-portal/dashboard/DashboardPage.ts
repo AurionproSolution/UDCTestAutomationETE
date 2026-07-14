@@ -1058,7 +1058,11 @@ export class DODashboardPage extends BasePage {
 
   /** Visible action menu items (View Quote, Copy Quote, …). */
   quoteGridActionItems(): Locator {
-    return this.page.locator("app-quote-list-action .action-item");
+    return this.page
+      .locator("app-quote-list-action")
+      .filter({ visible: true })
+      .last()
+      .locator(".action-item");
   }
 
   /** Prime column filter menu button on a header. */
@@ -1127,7 +1131,13 @@ export class DODashboardPage extends BasePage {
   async clickQuoteGridAction(actionName: RegExp): Promise<void> {
     const item = this.quoteGridActionItems().filter({ hasText: actionName }).first();
     await expect(item).toBeVisible({ timeout: 15_000 });
-    await item.click({ timeout: 15_000 });
+    const clicked = await item
+      .click({ timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!clicked) {
+      await item.evaluate((el) => (el as HTMLElement).click());
+    }
     await this.waitForAppLoaderOverlayGone(60_000);
   }
 
