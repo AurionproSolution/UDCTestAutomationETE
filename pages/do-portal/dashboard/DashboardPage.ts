@@ -1169,6 +1169,11 @@ export class DODashboardPage extends BasePage {
 
   /** Quote row action items inside the ellipsis overlay. */
   quoteGridActionItems(): Locator {
+    return this.page
+      .locator("app-quote-list-action")
+      .filter({ visible: true })
+      .last()
+      .locator(".action-item");
     const overlay = this.quoteGridRowActionsOverlay();
     return overlay
       .locator(".action-item")
@@ -1427,6 +1432,13 @@ export class DODashboardPage extends BasePage {
     const items = await this.activeQuoteGridActionItems();
     const item = items.filter({ hasText: actionName }).first();
     await expect(item).toBeVisible({ timeout: 15_000 });
+    const clicked = await item
+      .click({ timeout: 5_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!clicked) {
+      await item.evaluate((el) => (el as HTMLElement).click());
+    }
     await this.scrollQuoteGridActionItemIntoView(item);
     await item.click({ timeout: 15_000 });
     const requiresConfirm = /Cancel\s+Quote/i.test(actionName.source);
@@ -1949,5 +1961,69 @@ export class DODashboardPage extends BasePage {
     await this.searchQuotesGrid(loanReference);
     await this.openQuoteGridRowActions(loanReference);
     await this.clickQuoteGridAction(/Email Statement|Email P&I Schedule/i);
+  }
+
+  /** View Statement — **Payment / Rental Schedule** table (OL label is **Rental Schedule**). */
+  statementPaymentScheduleTable(): Locator {
+    const scheduleHost = this.page
+      .locator("p-card, section, div")
+      .filter({ hasText: /Rental\s+Schedule|Payment\s+Schedule/i })
+      .filter({ has: this.page.locator("table, .p-datatable") })
+      .first();
+    return scheduleHost.locator("table, .p-datatable-table").first();
+  }
+
+  /** UDP-T4383 — schedule column headers on View Statement. */
+  async expectStatementPaymentScheduleColumnsVisible(headers: RegExp[]): Promise<void> {
+    this.logStep("Expect statement payment schedule columns visible");
+    const table = this.statementPaymentScheduleTable();
+    await expect(table).toBeVisible({ timeout: 30_000 });
+    const headerRow = table.locator("thead tr").first().or(table.locator("tr").first());
+    const headerTexts = ((await headerRow.locator("th, td").allTextContents()) ?? [])
+      .map((text) => text.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    for (const header of headers) {
+      const matched = headerTexts.some((text) => header.test(text));
+      expect(matched, `Expected schedule column matching ${header}`).toBeTruthy();
+    }
+  }
+
+  /** UDP-T4383 — schedule rows are display-only (values fetched from FIS AF). */
+  async expectStatementPaymentScheduleRowsDisplayOnly(): Promise<void> {
+    this.logStep("Expect statement payment schedule rows display only");
+    const table = this.statementPaymentScheduleTable();
+    const dataRows = table.locator("tbody tr").filter({ visible: true });
+    await expect(dataRows.first()).toBeVisible({ timeout: 15_000 });
+    const rowCount = await dataRows.count();
+    expect(rowCount).toBeGreaterThan(0);
+    for (let i = 0; i < Math.min(rowCount, 5); i++) {
+      const row = dataRows.nth(i);
+      const editable = row.locator(
+        "input:not([type='hidden']):not([disabled]), textarea:not([disabled]), [role='spinbutton']:not([disabled]), select:not([disabled])",
+      );
+      expect(await editable.count()).toBe(0);
+    }
+  }
+
+  /** UDP-T4383 — **Payment Date** cells use DD/MM/YYYY format. */
+  async expectStatementPaymentScheduleDatesFormatted(): Promise<void> {
+    this.logStep("Expect statement payment schedule dates formatted");
+    const table = this.statementPaymentScheduleTable();
+    const firstDateCell = table
+      .locator("tbody tr td")
+      .filter({ hasText: /^\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/ })
+      .first();
+    await expect(firstDateCell).toBeVisible({ timeout: 15_000 });
+  }
+
+  /** UDP-T4383 — schedule shows currency amounts from FIS AF. */
+  async expectStatementPaymentScheduleHasFetchedAmounts(): Promise<void> {
+    this.logStep("Expect statement payment schedule has fetched amounts");
+    const table = this.statementPaymentScheduleTable();
+    const moneyCell = table
+      .locator("tbody tr td")
+      .filter({ hasText: /\$\s*[\d,]+\.\d{2}/ })
+      .first();
+    await expect(moneyCell).toBeVisible({ timeout: 15_000 });
   }
 }
