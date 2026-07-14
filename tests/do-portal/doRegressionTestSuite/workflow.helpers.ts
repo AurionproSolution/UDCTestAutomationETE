@@ -206,7 +206,7 @@ export async function fillMinimalFinancialContinue(fin: DOFinancialPositionPage)
 }
 
 /** CSA Calculate can clear Originator Reference — re-fill and retry **Next** until Customer Details loads. */
-async function advanceAssetDetailsToCustomerDetails(
+export async function advanceAssetDetailsToCustomerDetails(
   assetDetailsPage: DOAssetDetailsPage,
   origRef: string,
 ): Promise<void> {
