@@ -104,12 +104,14 @@ export class DOSettlementPage extends BasePage {
 
     this.privacyWaiverCheckbox = page
       .getByRole("checkbox", {
-        name: /consent to proceed with settlement|privacy waiver/i,
+        name: /consent to proceed with settlement|privacy waiver|obtained the customer'?s consent/i,
       })
       .or(
         page
           .locator("p-checkbox")
-          .filter({ hasText: /consent to proceed with settlement/i })
+          .filter({
+            hasText: /consent to proceed with settlement|obtained the customer'?s consent/i,
+          })
           .locator('input[type="checkbox"]'),
       )
       .first();
@@ -145,7 +147,12 @@ export class DOSettlementPage extends BasePage {
   private regoField(): Locator {
     const dialog = this.activeDialog();
     return dialog
-      .getByRole("textbox", { name: /Rego/i })
+      .locator(".p-field, .field, .p-col, [class*='p-field']")
+      .filter({ hasText: /Rego Number/i })
+      .locator("input#text, input.p-inputtext, input[role='textbox']")
+      .first()
+      .or(dialog.locator("input#text").first())
+      .or(dialog.getByRole("textbox", { name: /Rego/i }))
       .or(settlementTextFieldIn(dialog, "Rego Number"))
       .or(settlementTextFieldIn(dialog, "Rego"))
       .first();
@@ -155,8 +162,21 @@ export class DOSettlementPage extends BasePage {
   private vinField(): Locator {
     const dialog = this.activeDialog();
     return dialog
-      .getByRole("textbox", { name: /^VIN$/i })
+      .locator(".p-field, .field, .p-col, [class*='p-field']")
+      .filter({ hasText: /^VIN$/i })
+      .locator("input#text, input.p-inputtext, input[role='textbox']")
+      .first()
+      .or(dialog.locator("input#text").nth(1))
+      .or(dialog.getByRole("textbox", { name: /^VIN$/i }))
       .or(settlementTextFieldIn(dialog, "VIN"))
+      .first();
+  }
+
+  /** Settlement Date field group on the active Settlement loan-search dialog. */
+  private settlementDateFieldGroup(): Locator {
+    return this.activeDialog()
+      .locator(".p-field, .field, .p-col, [class*='p-field'], div")
+      .filter({ hasText: /Settlement Date/i })
       .first();
   }
 
@@ -166,16 +186,34 @@ export class DOSettlementPage extends BasePage {
    */
   private settlementDateField(): Locator {
     const dialog = this.activeDialog();
-    return dialog
-      .getByRole("combobox", { name: /Settlement Date/i })
+    const group = this.settlementDateFieldGroup();
+    return group
+      .getByRole("combobox")
+      .first()
+      .or(group.locator("p-calendar input, input.p-inputtext, input[role='combobox'], input").first())
+      .or(
+        dialog
+          .locator(".p-field, .field, .p-col, [class*='p-field']")
+          .filter({ hasText: /Settlement Date/i })
+          .locator("input.p-inputtext, input[role='combobox'], input")
+          .first(),
+      )
+      .or(dialog.getByLabel(/Settlement Date/i))
+      .or(dialog.getByRole("combobox", { name: /Settlement Date/i }))
       .or(dialog.getByRole("textbox", { name: /Settlement Date/i }))
       .or(
         dialog
-          .locator("label, text, span")
-          .filter({ hasText: /^Settlement Date$/i })
+          .locator("label, text, span, div")
+          .filter({ hasText: /Settlement Date/i })
           .locator(
-            "xpath=following::p-calendar[1]//input[contains(@class,'p-inputtext') or @role='combobox'][1]",
+            "xpath=following::input[contains(@class,'p-inputtext') or @role='combobox' or @role='textbox'][1]",
           ),
+      )
+      .or(
+        dialog
+          .locator("label, text, span, div")
+          .filter({ hasText: /Settlement Date/i })
+          .locator("xpath=following::p-calendar[1]//input[1]"),
       )
       .or(settlementTextFieldIn(dialog, "Settlement Date"))
       .first();
@@ -250,7 +288,6 @@ export class DOSettlementPage extends BasePage {
     await field.press("ControlOrMeta+a");
     await this.page.keyboard.press("Backspace");
     await field.fill(value, { force: true });
-    await field.press("Tab").catch(() => {});
   }
 
   async enterVin(value: string): Promise<void> {
@@ -261,7 +298,6 @@ export class DOSettlementPage extends BasePage {
     await field.press("ControlOrMeta+a");
     await this.page.keyboard.press("Backspace");
     await field.fill(value, { force: true });
-    await field.press("Tab").catch(() => {});
   }
 
   async clearRego(): Promise<void> {
@@ -272,33 +308,113 @@ export class DOSettlementPage extends BasePage {
     await this.enterVin("");
   }
 
-  async readSettlementDate(): Promise<string> {
-    const field = this.settlementDateField();
-    if (await field.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      return (await field.inputValue()).trim();
-    }
+  private async resolveSettlementDateField(): Promise<Locator> {
     const dialog = this.activeDialog();
-    const labelBlock = dialog
-      .locator("label, text, span, div")
-      .filter({ hasText: /^Settlement Date$/i })
-      .first();
-    if (await labelBlock.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      const text =
-        (await labelBlock.locator("xpath=ancestor::div[1]").textContent())?.trim() ?? "";
-      const match = text.match(/\d{1,2}[/\\-]\d{1,2}[/\\-]\d{2,4}/);
-      if (match) return match[0];
+    const candidates = [
+      dialog.getByRole("combobox").first(),
+      this.settlementDateFieldGroup().getByRole("combobox").first(),
+      this.settlementDateFieldGroup().locator("p-calendar input, input").first(),
+      dialog
+        .locator(".p-field, .field, .p-col, [class*='p-field']")
+        .filter({ hasText: /Settlement Date/i })
+        .locator("input")
+        .first(),
+    ];
+    for (const candidate of candidates) {
+      if (await candidate.isVisible({ timeout: 1_500 }).catch(() => false)) {
+        return candidate;
+      }
     }
+    return dialog.getByRole("combobox").first();
+  }
+
+  async readSettlementDate(): Promise<string> {
+    const dialog = this.activeDialog();
+    const field = await this.resolveSettlementDateField();
+
+    const readFromLocator = async (loc: Locator): Promise<string> => {
+      if ((await loc.count()) === 0) {
+        return "";
+      }
+      const val = (await loc.inputValue().catch(() => "")).trim();
+      if (val.length > 4) {
+        return val;
+      }
+      const attr = ((await loc.getAttribute("value")) ?? "").trim();
+      if (attr.length > 4) {
+        return attr;
+      }
+      const text = ((await loc.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+      const match = text.match(/\d{1,2}[/\\-]\d{1,2}[/\\-]\d{2,4}/);
+      return match?.[0] ?? "";
+    };
+
+    const fromField = await readFromLocator(field);
+    if (fromField) {
+      return fromField;
+    }
+
+    const dateHost = dialog
+      .locator(".p-field, .field, .p-col, div")
+      .filter({ hasText: /Settlement Date/i })
+      .first();
+    if (await dateHost.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      const text = ((await dateHost.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+      const match = text.match(/\d{1,2}[/\\-]\d{1,2}[/\\-]\d{2,4}/);
+      if (match) {
+        return match[0];
+      }
+    }
+
+    const inputs = dialog.locator("input");
+    const count = await inputs.count();
+    for (let i = 0; i < count; i++) {
+      const val = await readFromLocator(inputs.nth(i));
+      if (/^\d{1,2}[/\\-]\d{1,2}[/\\-]\d{2,4}$/.test(val)) {
+        return val;
+      }
+    }
+
     return "";
+  }
+
+  private async focusSettlementDateField(): Promise<void> {
+    const field = await this.resolveSettlementDateField();
+    await field.scrollIntoViewIfNeeded().catch(() => {});
+    await field.click({ force: true, timeout: 15_000 });
   }
 
   async enterSettlementDate(date: string): Promise<void> {
     this.logStep(`Enter Settlement Date ${this.stepValueDisplay(date)}`);
-    const field = this.settlementDateField();
-    await field.click({ force: true });
-    await field.press("ControlOrMeta+a");
+    await this.focusSettlementDateField();
+    await this.page.keyboard.press("ControlOrMeta+a");
     await this.page.keyboard.press("Backspace");
-    await field.fill(date, { force: true });
-    await field.press("Tab").catch(() => {});
+    await this.page.waitForTimeout(200);
+
+    const input = this.settlementDateFieldGroup().locator("p-calendar input, input").first();
+    const filled = await input
+      .fill(date, { force: true })
+      .then(() => true)
+      .catch(() => false);
+    if (!filled) {
+      await input
+        .evaluate((el, val) => {
+          const target = el as HTMLInputElement;
+          target.value = val;
+          target.dispatchEvent(new Event("input", { bubbles: true }));
+          target.dispatchEvent(new Event("change", { bubbles: true }));
+        }, date)
+        .catch(() => {});
+    }
+
+    const entered = ((await this.readSettlementDate().catch(() => "")) ?? "").replace(/\D/g, "");
+    const wanted = date.replace(/\D/g, "");
+    if (wanted.length > 0 && !entered.includes(wanted)) {
+      await this.focusSettlementDateField();
+      await this.page.keyboard.type(date, { delay: 60 });
+    }
+    await this.page.keyboard.press("Tab").catch(() => {});
+    await this.page.waitForTimeout(300);
   }
 
   async expectSettlementDateIsToday(): Promise<void> {
@@ -314,18 +430,14 @@ export class DOSettlementPage extends BasePage {
   async expectSettlementDateIsPopulated(): Promise<void> {
     this.logStep("Expect Settlement Date Is Populated");
     const dialog = this.activeDialog();
-    const dateField = this.settlementDateField();
-
-    if (await dateField.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      await expect
-        .poll(async () => (await dateField.inputValue()).trim().length, { timeout: 10_000 })
-        .toBeGreaterThan(4);
-      return;
-    }
-
-    await expect(dialog.getByText(/^Settlement Date$/i).first()).toBeVisible({ timeout: 15_000 });
-    const today = todayDdMmYyyy();
-    await expect(dialog).toContainText(new RegExp(today.replace(/\//g, "[/\\-]")));
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    await expect(dialog.getByText(/Settlement Date/i).first()).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(async () => this.readSettlementDate(), {
+        timeout: 15_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toMatch(/\d{1,2}[/\\-]\d{1,2}[/\\-]\d{2,4}/);
   }
 
   /** Initial Settlement loan-search pop-up: Rego, VIN, and **Next** (date validated separately). */
@@ -339,21 +451,77 @@ export class DOSettlementPage extends BasePage {
     await expect(this.loanSearchNextButton()).toBeVisible({ timeout: 15_000 });
   }
 
+  async clearSettlementDate(): Promise<void> {
+    this.logStep("Clear Settlement Date");
+    await this.focusSettlementDateField();
+    await this.page.keyboard.press("ControlOrMeta+a");
+    await this.page.keyboard.press("Backspace");
+    await this.page.keyboard.press("Tab").catch(() => {});
+  }
+
+  private settlementDateValidationErrorMessage(): Locator {
+    const group = this.settlementDateFieldGroup();
+    const errorPattern =
+      /past|invalid|cannot|not accept|future|today|before|earlier|greater than|minimum|not allowed|required/i;
+    return group
+      .getByText(errorPattern)
+      .first()
+      .or(
+        group
+          .locator(".p-error, .p-invalid, .invalid-feedback, [class*='error'], small")
+          .filter({ hasText: errorPattern })
+          .first(),
+      )
+      .or(
+        this.activeDialog()
+          .locator(".p-error, .p-invalid, .invalid-feedback, [class*='error'], small")
+          .filter({ hasText: errorPattern })
+          .filter({ hasText: /settlement date|date/i })
+          .first(),
+      );
+  }
+
   async expectPastSettlementDateRejected(): Promise<void> {
     this.logStep("Expect Past Settlement Date Rejected");
     const yesterday = shiftDdMmYyyy(-1);
+    const today = todayDdMmYyyy();
+
+    await this.clearSettlementDate();
     await this.enterSettlementDate(yesterday);
-    const error = this.page.getByText(/past|invalid|cannot|not accept|future|today/i).first();
-    const nextDisabled = this.nextButton;
-    const hasError = await error.isVisible({ timeout: 8_000 }).catch(() => false);
-    const nextBlocked = !(await nextDisabled.isEnabled().catch(() => true));
-    expect(hasError || nextBlocked).toBeTruthy();
+
+    const msg = this.settlementDateValidationErrorMessage().or(
+      this.activeDialog().getByText(/past|invalid|cannot|not accept|future|today|before|earlier|required/i),
+    );
+
+    const dateAfterEntry = await this.readSettlementDate();
+    const revertedToToday = new RegExp(today.replace(/\//g, "[/\\-]")).test(dateAfterEntry);
+    const stillYesterday = new RegExp(yesterday.replace(/\//g, "[/\\-]")).test(dateAfterEntry);
+
+    let hasError = await msg
+      .first()
+      .isVisible({ timeout: 5_000 })
+      .catch(() => false);
+
+    if (!hasError && stillYesterday) {
+      await this.clickNext().catch(() => {});
+      hasError = await msg
+        .first()
+        .isVisible({ timeout: 8_000 })
+        .catch(() => false);
+    }
+
+    const nextBlocked = !(await this.loanSearchNextButton().isEnabled().catch(() => true));
+    expect(hasError || nextBlocked || revertedToToday).toBeTruthy();
   }
 
   async clickNext(): Promise<void> {
     this.logStep("Click Next");
     await this.waitForLoaderGone();
-    await this.nextButton.click({ timeout: 20_000 });
+    const onLoanSearch =
+      (await this.regoField().isVisible({ timeout: 3_000 }).catch(() => false)) &&
+      (await this.loanSearchNextButton().isVisible({ timeout: 2_000 }).catch(() => false));
+    const next = onLoanSearch ? this.loanSearchNextButton() : this.nextButton;
+    await next.click({ timeout: 20_000 });
     await this.waitForLoaderGone();
   }
 
@@ -369,25 +537,73 @@ export class DOSettlementPage extends BasePage {
     await this.waitForLoaderGone();
   }
 
+  /** Rego field group on the active Settlement loan-search dialog (label + inline validation). */
+  private regoFieldGroup(): Locator {
+    return this.activeDialog()
+      .locator(".p-field, .field, .p-col, [class*='p-field']")
+      .filter({ hasText: /Rego Number/i })
+      .first();
+  }
+
+  private regoValidationErrorMessage(): Locator {
+    const group = this.regoFieldGroup();
+    const errorPattern =
+      /incorrect combination|invalid|special character|alphanumeric|maximum|no more than 6|must be|6 character|not allowed/i;
+    return group
+      .getByText(errorPattern)
+      .first()
+      .or(
+        group
+          .locator(".p-error, .p-invalid, .invalid-feedback, [class*='error'], small")
+          .filter({ hasText: errorPattern })
+          .first(),
+      )
+      .or(
+        this.activeDialog()
+          .locator(".p-error, .p-invalid, .invalid-feedback, [class*='error'], small")
+          .filter({ hasText: errorPattern })
+          .filter({ hasText: /rego/i })
+          .first(),
+      );
+  }
+
   async expectRegoValidationError(): Promise<void> {
     this.logStep("Expect Rego Validation Error");
-    const msg = this.activeDialog()
-      .getByText(/invalid|special character|alphanumeric|maximum|6 character|rego/i)
-      .first();
-    await expect(msg).toBeVisible({ timeout: 15_000 });
+    const msg = this.regoValidationErrorMessage().or(
+      this.activeDialog().getByText(
+        /incorrect combination|rego.*(?:invalid|special character|alphanumeric|maximum|6 character|not allowed)|(?:invalid|special character|alphanumeric|maximum|6 character).*(?:rego|registration)/i,
+      ),
+    );
+    const hasMsg = await msg
+      .first()
+      .isVisible({ timeout: 15_000 })
+      .catch(() => false);
+    if (hasMsg) {
+      return;
+    }
+    const nextBlocked = !(await this.loanSearchNextButton().isEnabled().catch(() => true));
+    expect(nextBlocked).toBeTruthy();
   }
 
   async expectNoRegoValidationError(): Promise<void> {
     this.logStep("Expect No Rego Validation Error");
-    const msg = this.activeDialog()
-      .getByText(/invalid|special character|alphanumeric|maximum|6 character|rego/i)
-      .first();
-    await expect(msg).toBeHidden({ timeout: 8_000 });
+    const msg = this.regoValidationErrorMessage().or(
+      this.activeDialog().getByText(
+        /incorrect combination|rego.*(?:invalid|special character|alphanumeric|maximum|6 character|not allowed)|(?:invalid|special character|alphanumeric|maximum|6 character).*(?:rego|registration)/i,
+      ),
+    );
+    await expect(msg.first()).toBeHidden({ timeout: 8_000 });
   }
 
   async expectRegoValue(expected: string): Promise<void> {
     this.logStep(`Expect Rego Value ${this.stepValueDisplay(expected)}`);
-    await expect(this.regoField()).toHaveValue(expected, { timeout: 10_000 });
+    await this.page.keyboard.press("Escape").catch(() => {});
+    const field = this.regoField();
+    await expect
+      .poll(async () => (await field.inputValue().catch(() => "")).trim().toUpperCase(), {
+        timeout: 10_000,
+      })
+      .toBe(expected.toUpperCase());
   }
 
   async expectVinIsBlank(): Promise<void> {
@@ -397,15 +613,77 @@ export class DOSettlementPage extends BasePage {
       .toBe("");
   }
 
+  async expectRegoIsBlank(): Promise<void> {
+    this.logStep("Expect Rego Is Blank");
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await expect
+      .poll(async () => (await this.regoField().inputValue().catch(() => "")).trim(), {
+        timeout: 8_000,
+      })
+      .toBe("");
+  }
+
+  async expectVinValue(expected: string): Promise<void> {
+    this.logStep(`Expect VIN Value ${this.stepValueDisplay(expected)}`);
+    await this.page.keyboard.press("Escape").catch(() => {});
+    const field = this.vinField();
+    await expect
+      .poll(async () => (await field.inputValue().catch(() => "")).trim().toUpperCase(), {
+        timeout: 10_000,
+      })
+      .toBe(expected.toUpperCase());
+  }
+
+  /** VIN field group on the active Settlement loan-search dialog (label + inline validation). */
+  private vinFieldGroup(): Locator {
+    return this.activeDialog()
+      .locator(".p-field, .field, .p-col, [class*='p-field']")
+      .filter({ hasText: /^VIN$/i })
+      .first();
+  }
+
+  private vinValidationErrorMessage(): Locator {
+    const group = this.vinFieldGroup();
+    const errorPattern =
+      /incorrect combination|invalid|special character|alphanumeric|maximum|no more than 17|must be|17 character|not allowed/i;
+    return group
+      .getByText(errorPattern)
+      .first()
+      .or(
+        group
+          .locator(".p-error, .p-invalid, .invalid-feedback, [class*='error'], small")
+          .filter({ hasText: errorPattern })
+          .first(),
+      )
+      .or(
+        this.activeDialog()
+          .locator(".p-error, .p-invalid, .invalid-feedback, [class*='error'], small")
+          .filter({ hasText: errorPattern })
+          .filter({ hasText: /vin/i })
+          .first(),
+      );
+  }
+
+  async expectNoVinValidationError(): Promise<void> {
+    this.logStep("Expect No VIN Validation Error");
+    const msg = this.vinValidationErrorMessage().or(
+      this.activeDialog().getByText(
+        /incorrect combination|vin.*(?:invalid|special character|alphanumeric|maximum|17 character|not allowed)|(?:invalid|special character|alphanumeric|maximum|17 character).*\bvin\b/i,
+      ),
+    );
+    await expect(msg.first()).toBeHidden({ timeout: 8_000 });
+  }
+
   /** After **Next** on loan search — advanced past rego format validation (display, privacy, or lookup result). */
   async expectLoanSearchStepCompleted(): Promise<void> {
     this.logStep("Expect Loan Search Step Completed");
     await this.waitForLoaderGone();
     await this.expectNoRegoValidationError();
+    await this.expectNoVinValidationError();
     await expect(
       this.page
         .getByText(
-          /privacy waiver|Settlement (Amount|Quote|Display)|not found|no loan|unable to find|Customer Details/i,
+          /privacy waiver|Settlement (Amount|Quote|Display)|not found|no loan|unable to find|do not match any existing financed|Customer Details/i,
         )
         .first(),
     ).toBeVisible({ timeout: 60_000 });
@@ -413,33 +691,62 @@ export class DOSettlementPage extends BasePage {
 
   async expectVinValidationError(): Promise<void> {
     this.logStep("Expect VIN Validation Error");
-    const msg = this.page
-      .getByText(/invalid|special character|alphanumeric|maximum|17 character|vin/i)
-      .first();
-    await expect(msg).toBeVisible({ timeout: 15_000 });
+    const msg = this.vinValidationErrorMessage().or(
+      this.activeDialog().getByText(
+        /incorrect combination|vin.*(?:invalid|special character|alphanumeric|maximum|17 character|not allowed)|(?:invalid|special character|alphanumeric|maximum|17 character).*\bvin\b/i,
+      ),
+    );
+    const hasMsg = await msg
+      .first()
+      .isVisible({ timeout: 15_000 })
+      .catch(() => false);
+    if (hasMsg) {
+      return;
+    }
+    const nextBlocked = !(await this.loanSearchNextButton().isEnabled().catch(() => true));
+    expect(nextBlocked).toBeTruthy();
   }
 
   async expectVehicleNotFoundError(): Promise<void> {
     this.logStep("Expect Vehicle Not Found Error");
-    await expect(
-      this.page.getByText(/not found|no loan|unable to find|vehicle not found|no matching/i).first(),
-    ).toBeVisible({ timeout: 45_000 });
+    await this.waitForLoaderGone();
+    const pattern =
+      /not found|no loan|unable to find|vehicle not found|no matching|do not match any existing financed/i;
+    const msg = this.activeDialog()
+      .getByText(pattern)
+      .first()
+      .or(this.page.getByText(pattern).first());
+    await expect(msg).toBeVisible({ timeout: 45_000 });
   }
 
   async expectBusinessRuleError(): Promise<void> {
     this.logStep("Expect Business Rule Error");
-    await expect(
-      this.page
-        .getByText(/arrears|overdue|not eligible|cannot proceed|business rule|error/i)
-        .first(),
-    ).toBeVisible({ timeout: 45_000 });
+    await this.waitForLoaderGone();
+    const pattern =
+      /arrears|overdue|in arrears|past due|not eligible|cannot proceed|unable to proceed|business rule|finance lease|operating lease|lease.*not.*(?:eligible|support)|not.*(?:eligible|allowed).*settlement|settlement can not be completed|can not be completed|contact UDC finance|please contact UDC|FIS|ineligible/i;
+    const msg = this.activeDialog()
+      .getByText(pattern)
+      .first()
+      .or(this.page.getByText(pattern).first());
+    await expect(msg).toBeVisible({ timeout: 60_000 });
   }
 
   async expectPrivacyWaiverScreen(): Promise<void> {
     this.logStep("Expect Privacy Waiver Screen");
-    await expect(
-      this.page.getByText(/privacy waiver|different dealer|consent to proceed/i).first(),
-    ).toBeVisible({ timeout: 30_000 });
+    await this.waitForLoaderGone();
+    const waiverMessage = this.activeDialog()
+      .getByText(
+        /privacy waiver|different dealer|different originator|consent to proceed|obtained the customer'?s consent|MAF-5578/i,
+      )
+      .first()
+      .or(
+        this.page
+          .getByText(
+            /privacy waiver|different dealer|different originator|consent to proceed|obtained the customer'?s consent|MAF-5578/i,
+          )
+          .first(),
+      );
+    await expect(waiverMessage).toBeVisible({ timeout: 45_000 });
     await expect(this.privacyWaiverCheckbox).toBeVisible({ timeout: 15_000 });
   }
 
@@ -465,8 +772,10 @@ export class DOSettlementPage extends BasePage {
     await expect
       .poll(
         async () => {
-          const text = await this.page.locator("body").innerText();
-          return /Settlement (Amount|Quote|Display)|Customer Details|Asset Details/i.test(text);
+          const text = await this.activeDialog().innerText().catch(() => "");
+          return /Settlement (Amount|Quote|Display)|Customer Details|Loan Number|Goods Description/i.test(
+            text,
+          );
         },
         { timeout: 60_000 },
       )

@@ -13,6 +13,7 @@ import {
   ACTIVE_LOAN_EXPORT_COLUMNS,
   AFV_LOAN_COLUMNS,
   AFV_LOAN_EXPORT_COLUMNS,
+  OL_RENTAL_SCHEDULE_COLUMNS,
   QUOTE_GRID_COLUMNS,
   TLC_DEALER,
   WORKFLOW_BUCKETS,
@@ -30,6 +31,8 @@ import {
   readQuoteGridRowId,
   requireLoanId,
   saveDashboardDownload,
+  resolveOlActiveLoanReference,
+  TLC_DEALER,
 } from "./dashboard.helpers";
 
 const OUTSTANDING_BALANCE_TOOLTIP =
@@ -411,6 +414,14 @@ test.describe("Dashboard — View Statement @do @regression", () => {
     return statement;
   }
 
+  async function openOlStatement(page: Page): Promise<DODashboardPage> {
+    const dashboard = await openDealerDashboard(page);
+    const loanRef = await resolveOlActiveLoanReference(dashboard);
+    await dashboard.navigateToDealerListingActiveLoans();
+    await dashboard.openViewStatementForLoan(loanRef);
+    return dashboard;
+  }
+
   test(
     "UDP-T4375 - TC_DB_024 View Statement Common Header Fields",
     { tag: ["@do", "@regression", "@UDP-T4375"] },
@@ -498,6 +509,13 @@ test.describe("Dashboard — View Statement @do @regression", () => {
       test.setTimeout(300_000);
       const statement = await openOperatingLeaseStatement(page);
       await statement.expectOlRentalScheduleColumnsVisible();
+      const dashboard = await openOlStatement(page);
+      await expect(page.getByText(/Operating\s*Lease/i).first()).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText(/Rental\s+Schedule/i).first()).toBeVisible({ timeout: 30_000 });
+      await dashboard.expectStatementPaymentScheduleColumnsVisible(OL_RENTAL_SCHEDULE_COLUMNS);
+      await dashboard.expectStatementPaymentScheduleDatesFormatted();
+      await dashboard.expectStatementPaymentScheduleHasFetchedAmounts();
+      await dashboard.expectStatementPaymentScheduleRowsDisplayOnly();
     },
   );
 
