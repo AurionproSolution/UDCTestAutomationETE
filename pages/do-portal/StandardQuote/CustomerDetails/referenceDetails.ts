@@ -113,6 +113,86 @@ export class DOReferenceDetailsPage extends BasePage {
     await input.fill(value);
   }
 
+  private contactSignatoryHost(): Locator {
+    const dialog = this.contactAddModal();
+    const signatoryBlock = dialog
+      .locator("div, toggle-checkbox")
+      .filter({ has: dialog.getByText(/^Signatory$/i) })
+      .first();
+    return signatoryBlock.locator("p-inputswitch").first();
+  }
+
+  private async isContactSignatoryYesInModal(): Promise<boolean> {
+    const host = this.contactSignatoryHost();
+    if (!(await host.count())) {
+      return false;
+    }
+    const cls = (await host.getAttribute("class").catch(() => "")) ?? "";
+    if (/p-inputswitch-checked/.test(cls)) {
+      return true;
+    }
+    const hidden = host.locator('input[type="checkbox"]').first();
+    if (await hidden.isChecked().catch(() => false)) {
+      return true;
+    }
+    const dialog = this.contactAddModal();
+    return dialog
+      .locator("div, toggle-checkbox")
+      .filter({ has: dialog.getByText(/^Signatory$/i) })
+      .getByText(/^Yes$/i)
+      .isVisible({ timeout: 300 })
+      .catch(() => false);
+  }
+
+  /** Turn **Signatory** on in the Add Contact modal (requires **Email** before **Add Contact**). */
+  async setContactSignatoryYes(): Promise<void> {
+    const dialog = this.contactAddModal();
+    await dialog.getByText(/^Signatory$/i).first().waitFor({ state: "visible", timeout: 15_000 });
+    if (await this.isContactSignatoryYesInModal()) {
+      return;
+    }
+
+    const host = this.contactSignatoryHost();
+    await host.waitFor({ state: "attached", timeout: 10_000 });
+    await host.evaluate((el) => {
+      const shell = el as HTMLElement;
+      if (shell.classList.contains("p-inputswitch-checked")) {
+        return;
+      }
+      const slider = shell.querySelector(".p-inputswitch-slider") as HTMLElement | null;
+      if (slider) {
+        slider.click();
+        return;
+      }
+      const input = shell.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+      input?.click();
+    });
+
+    if (!(await this.isContactSignatoryYesInModal())) {
+      const signatoryBlock = dialog
+        .locator("div, toggle-checkbox")
+        .filter({ has: dialog.getByText(/^Signatory$/i) })
+        .first();
+      await signatoryBlock.getByText(/^No$/i).click({ force: true }).catch(() => {});
+      await host.evaluate((el) => {
+        (el.querySelector(".p-inputswitch-slider") as HTMLElement | null)?.click();
+      });
+    }
+
+    await expect.poll(async () => this.isContactSignatoryYesInModal(), { timeout: 10_000 }).toBe(true);
+  }
+
+  async enterContactEmail(email: string): Promise<void> {
+    const dialog = this.contactAddModal();
+    const input = dialog
+      .getByRole("textbox", { name: /^Email$/i })
+      .first()
+      .or(dialog.locator("input#email, input[type='email']").first());
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.click();
+    await input.fill(email);
+  }
+
   async enterContactLastName(value: string): Promise<void> {
     const dialog = this.contactAddModal();
     const byLabelRow = this.contactNameInput(dialog, "last");
@@ -141,8 +221,13 @@ export class DOReferenceDetailsPage extends BasePage {
     const dialog = this.contactAddModal();
     await dialog.waitFor({ state: "visible", timeout: 20000 });
 
-    // Blur name fields so PrimeNG / Angular validation enables the footer button.
-    await this.contactNameInput(dialog, "last").press("Tab");
+    // Blur last filled field so PrimeNG / Angular validation enables the footer button.
+    const emailInput = dialog.locator("input#email, input[type='email']").first();
+    if (await emailInput.isVisible({ timeout: 500 }).catch(() => false)) {
+      await emailInput.press("Tab").catch(() => {});
+    } else {
+      await this.contactNameInput(dialog, "last").press("Tab");
+    }
     await this.page.waitForTimeout(300);
 
     const byRole = dialog
@@ -164,6 +249,29 @@ export class DOReferenceDetailsPage extends BasePage {
     await btn.scrollIntoViewIfNeeded();
     await btn.click({ timeout: 20000 });
     await dialog.waitFor({ state: "hidden", timeout: 25000 }).catch(() => {});
+  }
+
+  /** Contact row on Reference Details after **Add Contact** (name + **Signatory** = Yes). */
+  async expectContactListedAsSignatory(contactFirstName: string): Promise<void> {
+    const row = this.page
+      .locator("tr, .p-datatable-row, app-contact-details, [class*='contact']")
+      .filter({ hasText: new RegExp(contactFirstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") })
+      .first();
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row).toContainText(/\bYes\b/i);
+  }
+
+  /** **Signing Order** column visible and editable for the named contact. */
+  async expectSigningOrderEditableForContact(contactFirstName: string): Promise<void> {
+    await expect(this.page.getByText(/Signing\s*Order/i).first()).toBeVisible({ timeout: 15_000 });
+    const row = this.page
+      .locator("tr")
+      .filter({ hasText: new RegExp(contactFirstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") })
+      .first();
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    const orderInput = row.locator("input, [role='spinbutton']").filter({ visible: true }).first();
+    await expect(orderInput).toBeVisible({ timeout: 15_000 });
+    await expect(orderInput).toBeEnabled();
   }
 
   private confirmDetailsCheckboxHost(): Locator {

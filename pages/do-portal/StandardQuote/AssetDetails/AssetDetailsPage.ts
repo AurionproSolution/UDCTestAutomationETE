@@ -2766,6 +2766,32 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
+   * Originator / Origination Reference input — label-anchored so Quote ID and other
+   * header fields are not mistaken (Webform concatenates labels in a11y names).
+   */
+  private originationReferenceInputLocator(root: Locator): Locator {
+    const refLabelText = /^Originator\s+Reference|^Origination\s+Reference/i;
+    const fromExactLabel = root
+      .locator("label, span, .p-float-label")
+      .filter({ hasText: refLabelText })
+      .first()
+      .locator(
+        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
+      );
+    const fromOriginatorHost = this.page
+      .locator("app-quote-originator")
+      .first()
+      .locator(
+        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/ancestor::div[contains(@class,'p-field') or contains(@class,'p-col')][1]//input[not(@type='hidden')][1]",
+      );
+    return fromExactLabel
+      .or(fromOriginatorHost)
+      .or(root.locator('input[formControlName="originationReference"]'))
+      .or(root.locator('input[formControlName="originatorReference"]'))
+      .or(root.locator('input[name="originationReference"]'));
+  }
+
+  /**
    * Fills Origination / Originator Reference on a quote shell (`root`).
    * Webform / Prime uses a real `input`; legacy CSA may use SVG `text#text` — try inputs first.
    */
@@ -2796,20 +2822,14 @@ export class DOAssetDetailsPage extends BasePage {
       return (await t.inputValue().catch(() => "")).trim().length > 0;
     };
 
-    const originatorRoot = this.page.locator("app-quote-originator").first();
-    if (await originatorRoot.isVisible({ timeout: 4_000 }).catch(() => false)) {
-      const originInput = originatorRoot.locator(
-        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/following::input[1]",
-      );
-      if (await tryFill(originInput.first())) {
-        return true;
-      }
+    if (await tryFill(this.originationReferenceInputLocator(root))) {
+      return true;
     }
 
     if (
       await tryFill(
         root.getByLabel(
-          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator\s*Ref/i,
         ),
       )
     ) {
@@ -2818,7 +2838,7 @@ export class DOAssetDetailsPage extends BasePage {
     if (
       await tryFill(
         this.page.getByLabel(
-          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator\s*Ref/i,
         ),
       )
     ) {
@@ -2827,7 +2847,7 @@ export class DOAssetDetailsPage extends BasePage {
     if (
       await tryFill(
         root.getByRole("textbox", {
-          name: /Origination|Originator|Orig(ination)?\s*Ref/,
+          name: /^(Origination|Originator)\s*(Reference|Ref)/i,
         }),
       )
     ) {
@@ -2836,41 +2856,10 @@ export class DOAssetDetailsPage extends BasePage {
     if (
       await tryFill(
         this.page.getByRole("textbox", {
-          name: /Origination|Originator|Orig(ination)?\s*Ref/,
+          name: /^(Origination|Originator)\s*(Reference|Ref)/i,
         }),
       )
     ) {
-      return true;
-    }
-    for (const sel of [
-      'input[formControlName="originationReference"]',
-      'input[formControlName="originatorReference"]',
-      'input[name="originationReference"]',
-      'input[ng-reflect-name*="origination"]',
-      "p-float-label input",
-      ".p-field input.p-inputtext",
-    ]) {
-      if (await tryFill(root.locator(sel).first())) {
-        return true;
-      }
-    }
-    const row = root
-      .locator(".p-field, .p-col, .p-float-label, [class*='p-field']")
-      .filter({
-        hasText: /Origination|Originator\s*Ref|Origination\s*Ref/,
-      })
-      .first();
-    if (await tryFill(row.locator("input, textarea").first())) {
-      return true;
-    }
-    const fromLabel = root
-      .locator("span, label, .p-float-label")
-      .filter({ hasText: /Origination|Originator/i })
-      .first()
-      .locator(
-        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
-      );
-    if (await tryFill(fromLabel)) {
       return true;
     }
     if (await tryFill(this.originationRefInput)) {
@@ -2894,6 +2883,17 @@ export class DOAssetDetailsPage extends BasePage {
       );
     }
     await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
+  }
+
+  /** Read Originator / Origination Reference using the same discovery order as {@link enterOriginationReference}. */
+  async readOriginationReference(): Promise<string> {
+    const root = this.standardQuoteRoot();
+    await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    const inp = await this.findVisibleFinanceLeaseOriginationInput(root);
+    if (inp) {
+      return this.readOriginationLocatorValue(inp);
+    }
+    return this.readOriginationLocatorValue(this.originationRefInput.first());
   }
 
   /**
@@ -3008,7 +3008,7 @@ export class DOAssetDetailsPage extends BasePage {
     }
   }
 
-  /** Same discovery order as {@link enterOriginationReferenceFinanceLease} so verify reads the field we filled. */
+  /** Same discovery order as {@link enterOriginationReference} so verify reads the field we filled. */
   private async findVisibleFinanceLeaseOriginationInput(
     root: Locator,
   ): Promise<Locator | null> {
@@ -3020,61 +3020,19 @@ export class DOAssetDetailsPage extends BasePage {
       return null;
     };
 
-    let x: Locator | null;
-    x = await firstVisible(
-      root.getByLabel(
-        /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
-      ),
-    );
-    if (x) return x;
-    x = await firstVisible(
-      this.page.getByLabel(
-        /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
-      ),
-    );
-    if (x) return x;
-    x = await firstVisible(
-      root.getByRole("textbox", {
-        name: /Origination|Originator|Orig(ination)?\s*Ref/,
-      }),
-    );
-    if (x) return x;
-    x = await firstVisible(
-      this.page.getByRole("textbox", {
-        name: /Origination|Originator|Orig(ination)?\s*Ref/,
-      }),
-    );
+    let x = await firstVisible(this.originationReferenceInputLocator(root));
     if (x) return x;
 
-    for (const sel of [
-      'input[formControlName="originationReference"]',
-      'input[formControlName="originatorReference"]',
-      'input[name="originationReference"]',
-      'input[ng-reflect-name*="origination"]',
-      "p-float-label input",
-      ".p-field input.p-inputtext",
-    ]) {
-      x = await firstVisible(root.locator(sel).first());
-      if (x) return x;
-    }
+    const refLabel = /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator\s*Ref/i;
+    const refTextboxName = /^(Origination|Originator)\s*(Reference|Ref)/i;
 
-    const row = root
-      .locator(".p-field, .p-col, .p-float-label, [class*='p-field']")
-      .filter({
-        hasText: /Origination|Originator\s*Ref|Origination\s*Ref/,
-      })
-      .first();
-    x = await firstVisible(row.locator("input, textarea").first());
+    x = await firstVisible(root.getByLabel(refLabel));
     if (x) return x;
-
-    const fromLabel = root
-      .locator("span, label, .p-float-label")
-      .filter({ hasText: /Origination|Originator/i })
-      .first()
-      .locator(
-        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
-      );
-    x = await firstVisible(fromLabel);
+    x = await firstVisible(this.page.getByLabel(refLabel));
+    if (x) return x;
+    x = await firstVisible(root.getByRole("textbox", { name: refTextboxName }));
+    if (x) return x;
+    x = await firstVisible(this.page.getByRole("textbox", { name: refTextboxName }));
     if (x) return x;
 
     x = await firstVisible(this.originationRefInput);
