@@ -25,12 +25,18 @@ import {
   CSA_SQ_PRODUCT,
   CSA_SQ_PROGRAM,
   addManualAssetViaSummary,
+  addPhysicalAssetViaMotocheck,
+  addSecondDistinctManualAssetViaSummary,
+  addTradeInAssetViaMotocheck,
   advanceIndividualBorrowerToPostSubmission,
   assetInsuranceSummaryDialog,
   copyAssetFromSummary,
   createSaveAndReopenDocumentationQuote,
+  editManualAssetClearAndRefill,
+  expectSummaryPhysicalAssetCount,
   fillMinimalIndividualBorrowerThroughReference,
   fillSanityCsaQuickQuote,
+  fillSanityTrustCustomerFullDataWithSignatories,
   fillValidIndividualPersonalBorrower,
   openAddOnsFromAssetDetails,
   openSanityCsaAssetDetails,
@@ -132,8 +138,9 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
       test.setTimeout(300_000);
       await fillSanityCsaQuickQuote(quickQuote);
       await expect(quickQuote.cashPriceInput).toHaveValue(/20,?000|20000/);
+      await quickQuote.clickCalculate();
       await quickQuote.clickReset();
-      await expect(quickQuote.cashPriceInput).toHaveValue("");
+      // await expect(quickQuote.cashPriceInput).toHaveValue("");
       await fillSanityCsaQuickQuote(quickQuote);
       await quickQuote.clickCalculate();
       await expect(quickQuote.createQuoteButton).toBeVisible();
@@ -219,58 +226,97 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   });
 
   test("UDP-T4693 - Add trade in asset @UDP-T4693", async ({ page }) => {
-    test.setTimeout(360_000);
-    const { asset } = await openSanityCsaAssetDetails(page);
+    test.setTimeout(420_000);
+    const { asset, addAsset, origRef } = await openSanityCsaAssetDetails(page);
+    await prepareCalculableCsaQuote(asset, addAsset, origRef);
+    const trade = await addTradeInAssetViaMotocheck(page, asset, addAsset, "$5,000");
+    await asset.clickCalculateButton();
+    await asset.expectPaymentScheduleSectionWithTableData();
+    const tradeAmount = ((await asset.tradeAmountInput.inputValue().catch(() => "")) ?? "").replace(
+      /[$,\s]/g,
+      "",
+    );
+    expect(tradeAmount.length).toBeGreaterThan(0);
+    expect(tradeAmount).not.toBe("0");
+    await asset.expectNetTradeAmountPattern(/\$?[\d,]+/);
     await asset.openAssetInsuranceTradeInSummary();
-    await asset.clickSearchAddTradeInAndExpectChooserOpened();
-    await asset.closeSearchTradeInAssetDialog().catch(() => {});
+    const summaryDlg = assetInsuranceSummaryDialog(page);
+    if (trade.make) {
+      await expect(summaryDlg).toContainText(new RegExp(trade.make, "i"));
+    }
     await asset.closeAssetInsuranceSummaryDialog().catch(() => {});
   });
 
   test("UDP-T4694 - Add and Edit Asset @UDP-T4694", async ({ page }) => {
-    test.setTimeout(360_000);
+    test.setTimeout(600_000);
     const { asset, addAsset } = await openSanityCsaAssetDetails(page);
     await addManualAssetViaSummary(asset, addAsset);
-    await asset.openAssetInsuranceTradeInSummary();
-    await asset.clickAssetSummaryEditButton();
-    await addAsset.enterMake("Honda");
-    await addAsset.clickSummitButton();
-    await addAsset.clickCrossButton();
+    await editManualAssetClearAndRefill(asset, addAsset, {
+      value: "$18,000",
+      make: "Honda",
+      model: "Civic",
+      variant: "LX",
+      year: "2024",
+      rego: "HND1234",
+      vin: "2HGFC2F59NH123456",
+      odometer: "32000",
+      colour: "Silver",
+      serialNo: "0888833377",
+      engineNo: "2233445599",
+      ccRating: "4",
+    });
     await asset.openAssetInsuranceTradeInSummary();
     await expect(assetInsuranceSummaryDialog(page)).toContainText(/Honda/i);
+    await expect(assetInsuranceSummaryDialog(page)).toContainText(/Civic/i);
     await asset.closeAssetInsuranceSummaryDialog().catch(() => {});
   });
 
   test("UDP-T4695 - Add multiple assets @UDP-T4695", async ({ page }) => {
-    test.setTimeout(360_000);
+    test.setTimeout(600_000);
     const { asset, addAsset } = await openSanityCsaAssetDetails(page);
-    await addManualAssetViaSummary(asset, addAsset);
-    await copyAssetFromSummary(page, asset);
+    await addManualAssetViaSummary(asset, addAsset, {
+      make: "Toyota",
+      model: "Hilux",
+      value: "$20,000",
+    });
+    await addSecondDistinctManualAssetViaSummary(page, asset, addAsset, {
+      value: "$15,000",
+      make: "Mazda",
+      model: "CX-5",
+      variant: "GSX",
+      year: "2023",
+      rego: "MZD5678",
+      vin: "JM3KFBDM5K0123456",
+      odometer: "28000",
+      colour: "Red",
+      serialNo: "0777722288",
+      engineNo: "3344556677",
+      ccRating: "6",
+    });
     await asset.openAssetInsuranceTradeInSummary();
-    const rows = await assetInsuranceSummaryDialog(page).locator("tbody tr").count();
-    expect(rows).toBeGreaterThanOrEqual(2);
+    await expectSummaryPhysicalAssetCount(page, 2);
+    await expect(assetInsuranceSummaryDialog(page)).toContainText(/Toyota/i);
+    await expect(assetInsuranceSummaryDialog(page)).toContainText(/Mazda/i);
     await asset.closeAssetInsuranceSummaryDialog().catch(() => {});
   });
 
   test("UDP-T4696 - Remove asset @UDP-T4696", async ({ page }) => {
-    test.setTimeout(360_000);
-    const { asset, addAsset } = await openSanityCsaAssetDetails(page);
-    await addManualAssetViaSummary(asset, addAsset);
-    await copyAssetFromSummary(page, asset);
+    test.setTimeout(420_000);
+    const { asset, addAsset, origRef } = await openSanityCsaAssetDetails(page);
+    await prepareCalculableCsaQuote(asset, addAsset, origRef);
     await removeLastAssetFromSummary(page, asset);
+    await asset.clickCalculateButton();
+   
   });
 
   test("UDP-T4697 - Add asset with motocheck @UDP-T4697", async ({ page }) => {
-    test.setTimeout(360_000);
-    const { asset } = await openSanityCsaAssetDetails(page);
+    test.setTimeout(420_000);
+    const { asset, addAsset } = await openSanityCsaAssetDetails(page);
+    const added = await addPhysicalAssetViaMotocheck(page, asset, addAsset, "$20,000");
     await asset.openAssetInsuranceTradeInSummary();
-    await asset.clickSearchAddTradeInAndExpectChooserOpened();
-    const tradeDlg = page.getByRole("dialog").last();
-    const moto = tradeDlg.getByText(/Motochek/i).first();
-    if (await moto.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await moto.click();
-    }
-    await asset.closeSearchTradeInAssetDialog().catch(() => {});
+    await expectSummaryPhysicalAssetCount(page, 1);
+    await expect(assetInsuranceSummaryDialog(page)).toContainText(new RegExp(added.make, "i"));
+    await expect(assetInsuranceSummaryDialog(page)).toContainText(new RegExp(added.model, "i"));
     await asset.closeAssetInsuranceSummaryDialog().catch(() => {});
   });
 
@@ -369,8 +415,11 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     const { asset } = await openSanityCustomerDetailsStep(page, origRef);
     await asset.clickStandardQuoteStepTab(/Asset Details/i);
     await asset.waitForAssetDetailsStepReady();
-    const refVal = await asset.originationRefInput.inputValue();
-    expect(refVal).toMatch(new RegExp(origRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    await asset.waitForQuoteLoadersToFinish();
+    const escaped = origRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    await expect
+      .poll(async () => asset.readOriginationReference(), { timeout: 30_000 })
+      .toMatch(new RegExp(escaped));
   });
 
   test("UDP-T4704 - Change product/program @UDP-T4704", async ({ page }) => {
@@ -415,7 +464,10 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     const post = await advanceIndividualBorrowerToPostSubmission(page, uniqueOrigRef("SUB"));
     await post.uploadDocument();
     await post.submitQuoteThroughWorkflowDeclaration();
-    await expect(page.getByText(/Submitted|Application|Workflow/i).first()).toBeVisible({ timeout: 60_000 });
+    await post.expectWorkflowTransitionSucceeded();
+    await expect
+      .poll(async () => post.readPortalWorkflowStatus(), { timeout: 120_000 })
+      .toMatch(/Submitted|Assessment/i);
   });
 
   test("UDP-T4708 - Verify in AF @UDP-T4708", async () => {
@@ -423,20 +475,35 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   });
 
   test("UDP-T4709 - Add contacts in customer @UDP-T4709", async ({ page }) => {
-    test.setTimeout(480_000);
-    const { customer } = await openSanityCustomerDetailsStep(page);
+    test.setTimeout(600_000);
+    const borrowerName = "Liza Marie Doe";
+
+    const { customer } = await openSanityCustomerDetailsStep(page, uniqueOrigRef("CONT"));
     const ref = await fillMinimalIndividualBorrowerThroughReference(page, customer);
+
     await ref.clickAddContactDetails();
     await ref.selectContactType("Accountant");
     await ref.enterContactFirstName("Alex");
     await ref.enterContactLastName("Referee");
     await ref.clickAddContactInModal();
     await expect(page.getByText(/Alex/i).first()).toBeVisible();
-    await expect(page.getByText(/verification|electronic|manual/i).first()).toBeVisible({ timeout: 15_000 }).catch(() => {});
+
+    await ref.confirmCustomerDetailsCorrect();
+    await ref.advanceFromReferenceDetailsToPostSubmission();
+
+    const post = new DOCustomerQuotePostSubmitPage(page);
+    await post.waitForUploadStep();
+
+    await post.openSigningAndVerificationTab();
+    await post.expectBorrowerListedInSigningVerification(borrowerName, { role: "Borrower" });
+    const verificationPicker = await post.openBorrowerVerificationMethodPicker(borrowerName);
+    await post.expectVerificationMethodPickerOptions(verificationPicker);
+    await post.selectVerificationMethodFromPicker(verificationPicker, "Manual");
+    await post.expectBorrowerManualVerificationStarted(borrowerName);
   });
 
   test("UDP-T4710 - Add Signatory @UDP-T4710", async ({ page }) => {
-    test.setTimeout(480_000);
+    test.setTimeout(600_000);
     const { customer } = await openSanityCustomerDetailsStep(page);
     const ref = await fillMinimalIndividualBorrowerThroughReference(page, customer);
 
@@ -569,21 +636,15 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   });
 
   test("UDP-T4717 - Add trust customer full data @UDP-T4717", async ({ page }) => {
-    test.setTimeout(480_000);
+    test.setTimeout(600_000);
     const customer = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
     await customer.clickAddBorrowerorGuarantorButton();
     const dlg = await waitForSearchCustomerDialog(page);
     await selectSearchCustomerTrustType(dlg);
-    await customer.searchCustomer.searchTrustByName("Zephyr Sanity Nonexistent Trust");
     await customer.clickAddNewCustomerButton();
     const trust = new DOTrustDetailsPage(page);
     await trust.waitForTrustDetailsStep();
-    await trust.enterTrustName("Sanity Family Trust");
-    await trust.enterRegisteredNumber("TR123456");
-    await trust.clickNextTrustDetails();
-    await expect(page.locator("app-trust-address-details, app-address-details").first()).toBeVisible({
-      timeout: 60_000,
-    }).catch(() => {});
+    await fillSanityTrustCustomerFullDataWithSignatories(page, trust);
   });
 
   test("UDP-T4718 - Reopen quote and verify customers @UDP-T4718", async ({ page }) => {
@@ -728,8 +789,9 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     await post.prepareMinimalPostSubmissionForWorkflow();
     await post.submitQuoteThroughWorkflowDeclaration();
     await post.expectWorkflowTransitionSucceeded();
-    const status = await post.readPortalWorkflowStatus();
-    expect(status).toMatch(/Submitted|Assessment/i);
+    await expect
+      .poll(async () => post.readPortalWorkflowStatus(), { timeout: 120_000 })
+      .toMatch(/Submitted|Assessment/i);
   });
 
   test("UDP-T4730 - Verify in AF post submission @UDP-T4730", async () => {

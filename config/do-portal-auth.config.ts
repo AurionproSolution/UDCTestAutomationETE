@@ -49,6 +49,14 @@ export const DO_PORTAL_MFA_LOCK_WAIT_MS = Number(
   process.env.DO_PORTAL_MFA_LOCK_WAIT_MS ?? 5 * 60 * 1000,
 );
 
+/**
+ * Abandon an MFA lock file when older than this (default: lock wait + 60s).
+ * Prevents interrupted runs from blocking subsequent workers on a dead lock.
+ */
+export const DO_PORTAL_MFA_LOCK_MAX_AGE_MS = Number(
+  process.env.DO_PORTAL_MFA_LOCK_MAX_AGE_MS ?? DO_PORTAL_MFA_LOCK_WAIT_MS + 60_000,
+);
+
 /** Auto-start keepalive when test timeout exceeds this (15 min). */
 export const DO_PORTAL_LONG_TEST_TIMEOUT_MS = Number(
   process.env.DO_PORTAL_LONG_TEST_TIMEOUT_MS ?? 900_000,

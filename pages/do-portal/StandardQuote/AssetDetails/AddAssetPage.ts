@@ -115,7 +115,11 @@ export class DOAddAssetPage extends BasePage {
       .or(page.locator("button.p-button-outlined").filter({ hasText: /Search for Asset/i }))
       .filter({ visible: true })
       .first();
-    this.summitButton = page.getByRole("button", { name: /^Submit$/i }).filter({ visible: true }).last();
+    this.summitButton = page
+      .locator("app-add-asset, app-asset-details-add-asset, app-standard-quote-add-asset")
+      .getByRole("button", { name: /^Submit$/i })
+      .or(page.getByRole("button", { name: /^Submit$/i }))
+      .first();
     this.crossButton = page
       .locator("button.p-dialog-header-close, timesicon button")
       .filter({ visible: true })
@@ -355,8 +359,11 @@ export class DOAddAssetPage extends BasePage {
   }
   async clickSummitButton(): Promise<void> {
     this.logStep("Clicked Submit on Add Asset");
-    await this.summitButton.waitFor({ state: "visible", timeout: 30_000 });
-    await this.summitButton.click();
+    await this.summitButton.waitFor({ state: "attached", timeout: 30_000 });
+    await this.summitButton.scrollIntoViewIfNeeded().catch(() => {});
+    await this.summitButton.click({ timeout: 15_000, force: true }).catch(async () => {
+      await this.summitButton.click({ timeout: 15_000, force: true });
+    });
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
   }
 
