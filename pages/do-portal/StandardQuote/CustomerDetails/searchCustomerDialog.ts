@@ -215,6 +215,75 @@ export class DOSearchCustomerDialog extends BasePage {
     await this.selectIndividualType();
   }
 
+  /** Set search type to **Trust** (Individual | Business | Trust). */
+  async selectTrustSearchType(): Promise<void> {
+    this.logStep("Select Trust search type");
+    await this.waitForVisible();
+
+    const byRole = this.dialog.getByRole("radio", { name: /^Trust$/i });
+    if (await byRole.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await byRole.click({ timeout: 15_000, force: true });
+      await this.page.waitForTimeout(300);
+      return;
+    }
+
+    const box = this.dialog
+      .locator('p-radiobutton:has(input[value="trust"]) .p-radiobutton-box')
+      .first();
+    if (await box.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await box.click({ timeout: 15_000, force: true });
+      await this.page.waitForTimeout(300);
+      return;
+    }
+
+    throw new Error("Trust search type radio not found in Search Customer dialog.");
+  }
+
+  async enterTrustName(trustName: string): Promise<void> {
+    this.logStep(`Entered trust search name as ${this.stepValueDisplay(trustName)}`);
+    await this.waitForVisible();
+    const trustTab = this.dialog.locator("app-trust-tab").first();
+    await trustTab.waitFor({ state: "visible", timeout: 20_000 });
+
+    const candidates: Locator[] = [
+      trustTab.getByRole("textbox", { name: /Trust Name/i }),
+      trustTab.locator("text").filter({ hasText: /^Trust Name/ }).locator("#text"),
+      trustTab.locator(
+        "xpath=.//label[contains(normalize-space(.),'Trust Name')]/following::input[contains(@class,'p-inputtext') or contains(@class,'form-control')][1]",
+      ),
+      this.dialog.getByRole("textbox", { name: /Trust Name/i }),
+    ];
+
+    const deadline = Date.now() + 35_000;
+    while (Date.now() < deadline) {
+      for (const loc of candidates) {
+        const el = loc.first();
+        if (
+          (await el.isVisible().catch(() => false)) &&
+          (await el.isEnabled().catch(() => false))
+        ) {
+          await el.fill(trustName);
+          return;
+        }
+      }
+      await this.page.waitForTimeout(200);
+    }
+
+    throw new Error(
+      "No visible, enabled Trust Name field found in borrower search dialog after 35s.",
+    );
+  }
+
+  /**
+   * Search by **Trust Name** (select Trust type, fill name, click Search).
+   * Caller must open the dialog first via {@link DOCustomerDetailsPage.clickAddBorrowersOrGuarantors}.
+   */
+  async searchByTrustName(trustName: string): Promise<void> {
+    await this.selectTrustSearchType();
+    await this.enterTrustName(trustName);
+    await this.clickSearch();
+  }
+
   private addNewCustomerButtonCandidates(): Locator[] {
     return [
       this.dialog.getByRole("button", { name: /Add New Customer/i }),
@@ -267,6 +336,9 @@ export class DOSearchCustomerDialog extends BasePage {
       ),
       this.page.locator("app-personal-detail-email-contact"),
       this.page.getByRole("textbox", { name: /Phone number/i }),
+      this.page.locator("app-business-details").first(),
+      this.page.locator("app-trust-detail").first(),
+      this.page.getByText(/^Trust Details$/i).first(),
       this.page.locator(
         "//span//label[contains(text(),'Title')]/following-sibling::div//span",
       ),
@@ -281,7 +353,7 @@ export class DOSearchCustomerDialog extends BasePage {
     }
 
     throw new Error(
-      "Personal details did not open after Add New Customer (expected DOB, Choose Date, First Name, Title, or email block).",
+      "Customer details form did not open after Add New Customer (expected Personal, Business, or Trust details).",
     );
   }
 

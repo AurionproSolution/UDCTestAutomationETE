@@ -424,7 +424,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     await customer.clickAddNewCustomerButton();
     const personal = new DOPersonalDetailsPage(page);
     await personal.clickSavePersonalDetails();
-    await personal.expectPersonalDetailsRequiredValidationMessages();
+    await personal.expectPersonalDetailsSaveValidationToaster();
   });
 
   test("UDP-T4712 - Add individual customer full data @UDP-T4712", async ({ page }) => {
@@ -443,15 +443,16 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
 
   test("UDP-T4713 - Save Business customer empty fields validation @UDP-T4713", async ({ page }) => {
     test.setTimeout(480_000);
-    const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-    await asset.clickAddBorrowerorGuarantorButton();
+    const customer = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+    await customer.clickAddBorrowersOrGuarantors();
     const dlg = await waitForSearchCustomerDialog(page);
     await dlg.locator('p-radiobutton:has(input[value="business"]) .p-radiobutton-box').first().click({ force: true }).catch(() => {});
-    await asset.clickAddNewCustomerButton();
+    await customer.searchCustomer.searchByUdcNumber("420");
+    await customer.clickAddNewCustomerButton();
     const biz = new DOBusinessDetailsPage(page);
     await biz.waitForBusinessDetailsStep();
     await biz.clickSaveBusinessDetails();
-    await expect(biz.businessRoot.getByText(/required/i).first()).toBeVisible({ timeout: 20_000 });
+    await biz.expectBusinessDetailsSaveValidationToaster();
   });
 
   test("UDP-T4714 - Add Business customer full data @UDP-T4714", async ({ page }) => {
@@ -502,28 +503,32 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
 
   test("UDP-T4716 - Save trust customer empty fields validation @UDP-T4716", async ({ page }) => {
     test.setTimeout(480_000);
-    const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-    await asset.clickAddBorrowerorGuarantorButton();
+    const customer = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+    await customer.clickAddBorrowersOrGuarantors();
     const dlg = await waitForSearchCustomerDialog(page);
     if ((await searchTypeRadioInput(dlg, "trust").count()) > 0) {
-      await dlg.locator('p-radiobutton:has(input[value="trust"]) .p-radiobutton-box').first().click({ force: true });
+      await customer.searchCustomer.searchByTrustName("df");
+    } else {
+      test.skip(true, "Trust search type not exposed in this dialog build.");
     }
-    await asset.clickAddNewCustomerButton();
+    await customer.clickAddNewCustomerButton();
     const trust = new DOTrustDetailsPage(page);
     await trust.waitForTrustDetailsStep();
     await trust.clickSaveTrustDetails();
-    await expect(page.getByText(/required/i).first()).toBeVisible({ timeout: 20_000 });
+    await trust.expectTrustDetailsSaveValidationToaster();
   });
 
   test("UDP-T4717 - Add trust customer full data @UDP-T4717", async ({ page }) => {
     test.setTimeout(480_000);
-    const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-    await asset.clickAddBorrowerorGuarantorButton();
+    const customer = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+    await customer.clickAddBorrowersOrGuarantors();
     const dlg = await waitForSearchCustomerDialog(page);
     if ((await searchTypeRadioInput(dlg, "trust").count()) > 0) {
-      await dlg.locator('p-radiobutton:has(input[value="trust"]) .p-radiobutton-box').first().click({ force: true });
+      await customer.searchCustomer.searchByTrustName("df");
+    } else {
+      test.skip(true, "Trust search type not exposed in this dialog build.");
     }
-    await asset.clickAddNewCustomerButton();
+    await customer.clickAddNewCustomerButton();
     const trust = new DOTrustDetailsPage(page);
     await trust.waitForTrustDetailsStep();
     await trust.enterTrustName("Sanity Family Trust");

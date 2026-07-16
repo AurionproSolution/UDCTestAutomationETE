@@ -720,4 +720,22 @@ export class DOBusinessDetailsPage extends BasePage {
     await assertFormatIfShown("New Zealand Business Number is in an incorrect format");
     await assertFormatIfShown("GST Number is in an incorrect format");
   }
+
+  /**
+   * After **Save** with required Business Details left unset, expect PrimeNG error toaster
+   * (post-enhancement: validation surfaces as a toast instead of inline under-field copy on Save).
+   */
+  async expectBusinessDetailsSaveValidationToaster(
+    messagePattern: RegExp = /Legal\s*Name is required to save the party/i,
+  ): Promise<void> {
+    this.logStep("Expect Business Details save validation toaster");
+    await expect(
+      this.page
+        .locator(
+          ".p-toast-message-error, .p-toast-message-warn, .p-toast-message, .p-toast-detail, [role='alert']",
+        )
+        .filter({ hasText: messagePattern })
+        .first(),
+    ).toBeVisible({ timeout: 25_000 });
+  }
 }
