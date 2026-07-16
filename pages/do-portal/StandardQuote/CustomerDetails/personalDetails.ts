@@ -1255,6 +1255,24 @@ export class DOPersonalDetailsPage extends BasePage {
     }
   }
 
+  /**
+   * After **Save** with required Personal Details left unset, expect PrimeNG error toaster
+   * (post-enhancement: validation surfaces as a toast instead of inline under-field copy on Save).
+   */
+  async expectPersonalDetailsSaveValidationToaster(
+    messagePattern: RegExp = /Last\s*Name is required to save the party/i,
+  ): Promise<void> {
+    this.logStep("Expect Personal Details save validation toaster");
+    await expect(
+      this.page
+        .locator(
+          ".p-toast-message-error, .p-toast-message-warn, .p-toast-message, .p-toast-detail, [role='alert']",
+        )
+        .filter({ hasText: messagePattern })
+        .first(),
+    ).toBeVisible({ timeout: 25_000 });
+  }
+
   async clickNextButton(): Promise<void> {
     this.logStep("Click Next (Personal Details)");
     await this.waitForPersonalDetailsStepReady();
