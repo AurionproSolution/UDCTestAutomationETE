@@ -515,31 +515,134 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
    * QAT overlay: `p-overlaypanel` with Manual | Electronic.
    */
   async startBorrowerElectronicVerification(customerName: string): Promise<void> {
-    this.logStep(`Start Borrower Electronic Verification (${customerName})`);
-    const row = this.signatoryRowByCustomerName(customerName);
-    await expect(row).toBeVisible({ timeout: 30_000 });
+    await this.startBorrowerVerification(customerName, "Electronic");
+  }
 
-    const startVerification = row
+  /**
+   * Borrower **Start Verification → Manual** (UDP-T4709).
+   * Opens the verification method picker and selects Manual.
+   */
+  async startBorrowerManualVerification(customerName: string): Promise<void> {
+    await this.startBorrowerVerification(customerName, "Manual");
+  }
+
+  /** Start Verification picker — `dialog` overlay or PrimeNG menu panel. */
+  private verificationMethodPicker(): Locator {
+    return this.page
+      .locator("dialog, .textSelectOP, .p-overlaypanel, .p-menu-overlay, .p-tieredmenu-overlay")
+      .filter({ visible: true })
+      .filter({ hasText: /Manual/i })
+      .filter({ hasText: /Electronic/i })
+      .last();
+  }
+
+  private borrowerIdentityVerificationCell(row: Locator): Locator {
+    return row
+      .locator(".id-verification-cell-data, .id-verification-cell")
+      .or(row.locator("td").filter({ hasText: /Verification|Manual|Verified|Pending|Upload/i }))
+      .first();
+  }
+
+  private startVerificationTriggerInRow(row: Locator): Locator {
+    return row
       .locator(".id-verification-cell-data, .id-verification-cell")
       .filter({ hasText: /Start Verification/i })
       .or(row.locator("td").filter({ hasText: /Start Verification/i }))
+      .or(row.getByRole("button", { name: /Start Verification/i }))
       .first();
+  }
+
+  /** Opens Start Verification dropdown and returns the visible Manual/Electronic picker. */
+  async openBorrowerVerificationMethodPicker(customerName: string): Promise<Locator> {
+    this.logStep(`Open Borrower Verification Method Picker (${customerName})`);
+    const row = this.signatoryRowByCustomerName(customerName);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+
+    const startVerification = this.startVerificationTriggerInRow(row);
     await expect(startVerification).toBeVisible({ timeout: 20_000 });
     await startVerification.scrollIntoViewIfNeeded();
     await startVerification.click({ timeout: 12_000 });
 
-    const picker = this.page.locator("dialog, [role='dialog']").last();
-    await expect(picker).toContainText(/Manual/i, { timeout: 15_000 });
-    await expect(picker).toContainText(/Electronic/i, { timeout: 5_000 });
+    const picker = this.verificationMethodPicker();
+    await expect(picker).toBeVisible({ timeout: 15_000 });
+    await expect(picker).toContainText(/Manual/i);
+    await expect(picker).toContainText(/Electronic/i);
+    return picker;
+  }
 
-    const electronicLabel = picker.getByText("Electronic", { exact: true });
-    await expect(electronicLabel).toBeVisible({ timeout: 10_000 });
-    await electronicLabel
-      .locator("xpath=ancestor::*[contains(@class,'cursor-pointer')][1]")
+  async expectVerificationMethodPickerOptions(picker: Locator): Promise<void> {
+    await expect(picker.getByText("Manual", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(picker.getByText("Electronic", { exact: true })).toBeVisible({ timeout: 10_000 });
+  }
+
+  async selectVerificationMethodFromPicker(
+    picker: Locator,
+    method: "Manual" | "Electronic",
+  ): Promise<void> {
+    await this.clickVerificationMethodOption(picker, method);
+  }
+
+  private async clickVerificationMethodOption(
+    picker: Locator,
+    method: "Manual" | "Electronic",
+  ): Promise<void> {
+    const option = picker.getByText(method, { exact: true }).last();
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.scrollIntoViewIfNeeded();
+    await option
       .click({ timeout: 10_000 })
       .catch(async () => {
-        await electronicLabel.click({ timeout: 10_000, force: true });
+        const clickable = option.locator(
+          "xpath=ancestor::*[contains(@class,'cursor-pointer')][1]",
+        );
+        if (await clickable.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          await clickable.click({ timeout: 10_000 });
+        } else {
+          await option.click({ timeout: 10_000, force: true });
+        }
       });
+    await picker.waitFor({ state: "hidden", timeout: 15_000 }).catch(() => {});
+  }
+
+  /**
+   * Borrower **Start Verification** with Manual or Electronic (Signing & Verification tab).
+   */
+  async startBorrowerVerification(
+    customerName: string,
+    method: "Manual" | "Electronic",
+  ): Promise<void> {
+    const picker = await this.openBorrowerVerificationMethodPicker(customerName);
+    await this.clickVerificationMethodOption(picker, method);
+  }
+
+  /** UDP-T4709 — Manual verification option selected; picker dismissed and borrower still listed. */
+  async expectBorrowerManualVerificationStarted(customerName: string): Promise<void> {
+    this.logStep(`Expect Borrower Manual Verification Started (${customerName})`);
+    const row = this.signatoryRowByCustomerName(customerName);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(this.verificationMethodPicker()).toBeHidden({ timeout: 15_000 });
+    await expect(row).toContainText(
+      new RegExp(customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+    );
+    await expect(row).toContainText(/Borrower/i);
+  }
+
+  /** Signing tab lists the borrower with expected role (UDP-T4709). */
+  async expectBorrowerListedInSigningVerification(
+    customerName: string,
+    options?: { role?: string },
+  ): Promise<void> {
+    this.logStep(`Expect Borrower Listed In Signing Verification (${customerName})`);
+    const row = this.signatoryRowByCustomerName(customerName);
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await expect(row).toContainText(new RegExp(customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    await expect(row).toContainText(new RegExp(options?.role ?? "Borrower", "i"));
+  }
+
+  /** Signing tab shows Start Verification for the named borrower. */
+  async expectBorrowerStartVerificationVisible(customerName: string): Promise<void> {
+    const row = this.signatoryRowByCustomerName(customerName);
+    await expect(this.startVerificationTriggerInRow(row)).toBeVisible({ timeout: 20_000 });
   }
 
   /** Click through on-screen signing / verification prompts until idle or e-signed row appears. */

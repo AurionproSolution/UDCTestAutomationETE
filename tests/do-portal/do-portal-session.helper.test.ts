@@ -1,14 +1,20 @@
 /**
  * Unit checks for DO portal JWT/session helpers (no browser / MFA required).
  */
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { test, expect } from "@playwright/test";
 import type { DoPortalAuthMeta } from "../../config/do-portal-auth.config";
 import {
   discoverTokensFromStorageState,
   evaluateDoPortalSessionFromState,
   isAccessTokenExpiringSoon,
+  isMfaLockStale,
   looksLikeJwt,
   parseJwtExpiryMs,
+  readMfaLock,
+  releaseStaleMfaLockIfNeeded,
 } from "../../playwright/do-portal-session.helper";
 
 /** Sample JWT: exp = 4102444800 (year 2099). */
@@ -213,5 +219,131 @@ test.describe("do-portal-session.helper", () => {
     const tokens = discoverTokensFromStorageState(state);
     expect(tokens?.accessTokenKey).toBe("access_token");
     expect(tokens?.refreshToken).toBe("rt-flat");
+  });
+});
+
+test.describe("MFA lock helpers", () => {
+  const nowMs = Date.UTC(2026, 6, 16, 12, 0, 0);
+  const maxAgeMs = 6 * 60_000;
+
+  function tempLockPath(): string {
+    return path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), "do-mfa-lock-")),
+      "do-portal.sit.json.mfa.lock",
+    );
+  }
+
+  test("readMfaLock parses legacy PID-only format", () => {
+    const lockPath = tempLockPath();
+    fs.writeFileSync(lockPath, "57048", "utf8");
+    const lock = readMfaLock(lockPath);
+    expect(lock?.pid).toBe(57048);
+    expect(lock?.startedAt).toBeTruthy();
+    fs.rmSync(path.dirname(lockPath), { recursive: true, force: true });
+  });
+
+  test("readMfaLock parses JSON lock metadata", () => {
+    const lockPath = tempLockPath();
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: 12345,
+        hostname: "test-host",
+        startedAt: "2026-07-16T06:00:00.000Z",
+      }),
+      "utf8",
+    );
+    const lock = readMfaLock(lockPath);
+    expect(lock).toEqual({
+      pid: 12345,
+      hostname: "test-host",
+      startedAt: "2026-07-16T06:00:00.000Z",
+    });
+    fs.rmSync(path.dirname(lockPath), { recursive: true, force: true });
+  });
+
+  test("isMfaLockStale is true when PID is dead", () => {
+    const stale = isMfaLockStale(
+      { pid: 999999, startedAt: new Date(nowMs).toISOString() },
+      { nowMs, maxAgeMs, isAlive: () => false },
+    );
+    expect(stale).toBe(true);
+  });
+
+  test("isMfaLockStale is true when lock age exceeds max age", () => {
+    const stale = isMfaLockStale(
+      {
+        pid: 12345,
+        startedAt: new Date(nowMs - maxAgeMs - 1_000).toISOString(),
+      },
+      { nowMs, maxAgeMs, isAlive: () => true },
+    );
+    expect(stale).toBe(true);
+  });
+
+  test("isMfaLockStale is false for fresh lock with alive PID", () => {
+    const fresh = isMfaLockStale(
+      {
+        pid: 12345,
+        startedAt: new Date(nowMs - 60_000).toISOString(),
+      },
+      { nowMs, maxAgeMs, isAlive: () => true },
+    );
+    expect(fresh).toBe(false);
+  });
+
+  test("releaseStaleMfaLockIfNeeded removes legacy lock with dead PID", () => {
+    const lockPath = tempLockPath();
+    fs.writeFileSync(lockPath, "57048", "utf8");
+    const removed = releaseStaleMfaLockIfNeeded(lockPath, {
+      nowMs,
+      maxAgeMs,
+      isAlive: () => false,
+    });
+    expect(removed).toBe(true);
+    expect(fs.existsSync(lockPath)).toBe(false);
+    fs.rmSync(path.dirname(lockPath), { recursive: true, force: true });
+  });
+
+  test("releaseStaleMfaLockIfNeeded removes aged JSON lock", () => {
+    const lockPath = tempLockPath();
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: 12345,
+        hostname: "vm-runner",
+        startedAt: new Date(nowMs - maxAgeMs - 5_000).toISOString(),
+      }),
+      "utf8",
+    );
+    const removed = releaseStaleMfaLockIfNeeded(lockPath, {
+      nowMs,
+      maxAgeMs,
+      isAlive: () => true,
+    });
+    expect(removed).toBe(true);
+    expect(fs.existsSync(lockPath)).toBe(false);
+    fs.rmSync(path.dirname(lockPath), { recursive: true, force: true });
+  });
+
+  test("releaseStaleMfaLockIfNeeded keeps fresh lock with alive PID", () => {
+    const lockPath = tempLockPath();
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: 12345,
+        hostname: "vm-runner",
+        startedAt: new Date(nowMs - 30_000).toISOString(),
+      }),
+      "utf8",
+    );
+    const removed = releaseStaleMfaLockIfNeeded(lockPath, {
+      nowMs,
+      maxAgeMs,
+      isAlive: () => true,
+    });
+    expect(removed).toBe(false);
+    expect(fs.existsSync(lockPath)).toBe(true);
+    fs.rmSync(path.dirname(lockPath), { recursive: true, force: true });
   });
 });

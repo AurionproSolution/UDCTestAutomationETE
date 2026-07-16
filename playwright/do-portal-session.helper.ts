@@ -10,6 +10,7 @@ import {
   type Page,
 } from "@playwright/test";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import {
   DO_PORTAL_ACCESS_TOKEN_COOKIE_NAMES,
@@ -17,6 +18,7 @@ import {
   DO_PORTAL_COOKIE_TOKEN_KEY_PREFIX,
   DO_PORTAL_KEEPALIVE_INTERVAL_MS,
   DO_PORTAL_MAX_SESSION_REUSE_AGE_MS,
+  DO_PORTAL_MFA_LOCK_MAX_AGE_MS,
   DO_PORTAL_REFRESH_TOKEN_COOKIE_NAMES,
   DO_PORTAL_REFRESH_TOKEN_KEYS,
   DO_PORTAL_TOKEN_EXPIRY_BUFFER_MS,
@@ -184,19 +186,159 @@ export function writeAuthMeta(meta: DoPortalAuthMeta): void {
   fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), "utf8");
 }
 
+// ---------------------------------------------------------------------------
+// MFA / storage file locks
+// ---------------------------------------------------------------------------
+
+export interface MfaLockInfo {
+  pid: number;
+  hostname?: string;
+  startedAt: string;
+}
+
+export interface MfaLockStaleOptions {
+  nowMs?: number;
+  maxAgeMs?: number;
+  isAlive?: (pid: number) => boolean;
+}
+
+export function getDoPortalMfaLockPath(filePath = getDoPortalAuthFile()): string {
+  return `${filePath}.mfa.lock`;
+}
+
+export function readMfaLock(lockPath: string): MfaLockInfo | undefined {
+  if (!fs.existsSync(lockPath)) return undefined;
+  try {
+    const raw = fs.readFileSync(lockPath, "utf8").trim();
+    const mtimeIso = new Date(fs.statSync(lockPath).mtimeMs).toISOString();
+    if (/^\d+$/.test(raw)) {
+      return { pid: Number(raw), startedAt: mtimeIso };
+    }
+    const parsed = JSON.parse(raw) as {
+      pid?: number;
+      hostname?: string;
+      startedAt?: string;
+    };
+    if (typeof parsed.pid !== "number" || !Number.isFinite(parsed.pid)) {
+      return undefined;
+    }
+    return {
+      pid: parsed.pid,
+      hostname: parsed.hostname,
+      startedAt: parsed.startedAt ?? mtimeIso,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function isProcessAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isMfaLockStale(lock: MfaLockInfo, options: MfaLockStaleOptions = {}): boolean {
+  const nowMs = options.nowMs ?? Date.now();
+  const maxAgeMs = options.maxAgeMs ?? DO_PORTAL_MFA_LOCK_MAX_AGE_MS;
+  const isAlive = options.isAlive ?? isProcessAlive;
+
+  if (!isAlive(lock.pid)) {
+    return true;
+  }
+
+  const startedMs = Date.parse(lock.startedAt);
+  if (Number.isNaN(startedMs)) {
+    return true;
+  }
+
+  return nowMs - startedMs > maxAgeMs;
+}
+
+export function releaseMfaLock(lockPath: string): void {
+  try {
+    if (fs.existsSync(lockPath)) {
+      fs.unlinkSync(lockPath);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function releaseStaleMfaLockIfNeeded(
+  lockPath: string,
+  options: MfaLockStaleOptions = {},
+): boolean {
+  const lock = readMfaLock(lockPath);
+  if (!lock) return false;
+
+  if (!isMfaLockStale(lock, options)) {
+    return false;
+  }
+
+  const isAlive = options.isAlive ?? isProcessAlive;
+  const maxAgeMs = options.maxAgeMs ?? DO_PORTAL_MFA_LOCK_MAX_AGE_MS;
+  const reason = !isAlive(lock.pid)
+    ? `PID ${lock.pid} no longer running`
+    : `lock age exceeds ${Math.round(maxAgeMs / 1000)}s`;
+
+  logTestStep(`DO auth: removing stale MFA lock at ${lockPath} (${reason}).`);
+  releaseMfaLock(lockPath);
+  return true;
+}
+
+export function writeMfaLock(lockPath: string): void {
+  const lock: MfaLockInfo = {
+    pid: process.pid,
+    hostname: os.hostname(),
+    startedAt: new Date().toISOString(),
+  };
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  const fd = fs.openSync(lockPath, "wx");
+  fs.writeFileSync(fd, JSON.stringify(lock), "utf8");
+  fs.closeSync(fd);
+}
+
+export function tryAcquireMfaLock(lockPath: string): boolean {
+  try {
+    writeMfaLock(lockPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function releaseStaleStorageLockIfNeeded(lockPath: string, maxAgeMs = 35_000): boolean {
+  if (!fs.existsSync(lockPath)) return false;
+  const ageMs = Date.now() - fs.statSync(lockPath).mtimeMs;
+  if (ageMs <= maxAgeMs) return false;
+  logTestStep(
+    `DO auth: removing stale storage lock at ${lockPath} (age ${Math.round(ageMs / 1000)}s).`,
+  );
+  releaseMfaLock(lockPath);
+  return true;
+}
+
 async function withStorageFileLock<T>(fn: () => Promise<T> | T): Promise<T> {
   const lockPath = `${getDoPortalAuthFile()}.lock`;
   const deadline = Date.now() + 30_000;
+  releaseStaleStorageLockIfNeeded(lockPath);
   while (Date.now() < deadline) {
+    releaseStaleStorageLockIfNeeded(lockPath);
     try {
       const fd = fs.openSync(lockPath, "wx");
       fs.closeSync(fd);
       try {
         return await fn();
       } finally {
-        fs.unlinkSync(lockPath);
+        releaseMfaLock(lockPath);
       }
     } catch {
+      releaseStaleStorageLockIfNeeded(lockPath);
       await new Promise((r) => setTimeout(r, 100));
     }
   }
