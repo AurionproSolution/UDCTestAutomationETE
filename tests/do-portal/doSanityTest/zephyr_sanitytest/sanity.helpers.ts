@@ -16,6 +16,7 @@ import {
   DOQuickQuotePage,
 } from "../../../../pages";
 import { DOAddAssetPage } from "../../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../../config/env";
 import {
   CSA_SQ_PRODUCT,
   CSA_SQ_PROGRAM,
@@ -39,6 +40,10 @@ import {
 import { DOPersonalDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import { DOReferenceDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
 import { DOBusinessDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/businessDetails";
+import {
+  DOC_T3824_BORROWER,
+  openPostSubmissionUploadStepWithAsset,
+} from "../../doRegressionTestSuite/documentation.helpers";
 import { DOTrustDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/trustDetails";
 
 export const CSA_QQ_PRODUCT = CSA_SQ_PRODUCT;
@@ -834,6 +839,106 @@ export async function fillMinimalIndividualBorrowerThroughReference(
   return ref;
 }
 
+/** FIS existing individual — search UDC, **Add** on borrower result, advance to Reference Details. */
+export async function fillExistingIndividualBorrowerThroughReference(
+  page: Page,
+  customer: DOCustomerDetailsPage,
+  udcCustomerNumber: string,
+): Promise<DOReferenceDetailsPage> {
+  await customer.clickAddBorrowersOrGuarantors();
+  await customer.searchCustomer.addExistingCustomerFromUdcSearch(udcCustomerNumber);
+  const personal = new DOPersonalDetailsPage(page);
+  await expect(personal.personalDetailsRoot).toBeVisible({ timeout: 120_000 });
+  await personal.clickNextButton();
+  const address = new DOAddressDetailsPage(page);
+  await fillMinimalAddressContinue(page, address);
+  const emp = new DOEmploymentDetailsPage(page);
+  await fillMinimalEmploymentContinue(emp);
+  const fin = new DOFinancialPositionPage(page);
+  await fillMinimalFinancialContinue(fin);
+  await navigateToBorrowerSummaryIfAvailable(page);
+  const ref = new DOReferenceDetailsPage(page);
+  await ref.waitForReferenceDetailsStep();
+  return ref;
+}
+
+/** Leave individual/borrower wizard and reopen Standard Quote **Customer Details**. */
+export async function returnToStandardQuoteCustomerDetailsStep(
+  page: Page,
+  customer: DOCustomerDetailsPage,
+  origRef?: string,
+): Promise<void> {
+  const quoteId =
+    page.url().match(/individual\/edit\/(\d+)/i)?.[1] ??
+    page.url().match(/standard-quote\/create\/(\d+)/i)?.[1];
+  if (!quoteId) {
+    throw new Error(`Cannot resolve quote id from URL: ${page.url()}`);
+  }
+  const dealerBase = DO_DEALER_STANDARD_QUOTE_URL().replace(/\/$/, "");
+  await page.goto(`${dealerBase}/standard-quote/create/${quoteId}`);
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+
+  const asset = new DOAssetDetailsPage(page);
+  await asset.waitForAssetDetailsStepReady().catch(() => {});
+  if (origRef) {
+    await asset.enterOriginationReference(origRef).catch(() => {});
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await asset.clickNextButton();
+    try {
+      await customer.waitForAddBorrowerButton();
+      return;
+    } catch (err) {
+      if (attempt === 2) {
+        throw err;
+      }
+      if (origRef) {
+        await asset.enterOriginationReference(origRef).catch(() => {});
+      }
+      await asset.waitForLoadingComplete().catch(() => {});
+    }
+  }
+}
+
+/**
+ * FIS existing individual added to the quote (borrower search **Add**), then return to Customer Details grid.
+ */
+export async function saveExistingIndividualBorrowerOnCustomerDetailsQuote(
+  page: Page,
+  udcCustomerNumber: string,
+  origRef?: string,
+): Promise<DOCustomerDetailsPage> {
+  const { customer } = await openSanityCustomerDetailsStep(page, origRef);
+  await customer.clickAddBorrowersOrGuarantors();
+  await customer.searchCustomer.addExistingCustomerFromUdcSearch(udcCustomerNumber);
+  const personal = new DOPersonalDetailsPage(page);
+  await expect(personal.personalDetailsRoot).toBeVisible({ timeout: 120_000 });
+  await personal.clickSavePersonalDetails();
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await returnToStandardQuoteCustomerDetailsStep(page, customer, origRef);
+  return customer;
+}
+
+/** Save an existing FIS individual on the quote through Reference submit → Upload. */
+export async function advanceExistingIndividualBorrowerFromUdcToPostSubmission(
+  page: Page,
+  udcCustomerNumber: string,
+  origRef?: string,
+): Promise<DOCustomerQuotePostSubmitPage> {
+  const { customer } = await openSanityCustomerDetailsStep(page, origRef);
+  const ref = await fillExistingIndividualBorrowerThroughReference(page, customer, udcCustomerNumber);
+  await ref.clickAddContactDetails();
+  await ref.selectContactType("Accountant");
+  await ref.enterContactFirstName("Alex");
+  await ref.enterContactLastName("Referee");
+  await ref.clickAddContactInModal();
+  await ref.confirmCustomerDetailsCorrect();
+  await ref.advanceFromReferenceDetailsToPostSubmission();
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  await post.waitForUploadStep();
+  return post;
+}
+
 export async function addSignatoryContactToReference(
   ref: DOReferenceDetailsPage,
   opts: {
@@ -1299,4 +1404,62 @@ export async function addSecondIndividualCoBorrowerFromPostSubmit(
   await returnToPostSubmitPartiesView(page);
   await expect(partyRowByName(page, namePattern)).toBeVisible({ timeout: 60_000 });
   return namePattern;
+}
+
+export async function selectSearchCustomerTrustType(dlg: Locator): Promise<void> {
+  const trustInput = searchTypeRadioInput(dlg, "trust");
+  if ((await trustInput.count()) === 0) {
+    return;
+  }
+  const trustBox = dlg
+    .locator('p-radiobutton:has(input[value="trust"]) .p-radiobutton-box')
+    .first()
+    .or(dlg.getByRole("radio", { name: /^Trust$/i }));
+  await trustBox.click({ force: true });
+  await expect(trustInput).toBeChecked({ timeout: 15_000 });
+}
+
+/**
+ * UDP-T4718 — reopen from dashboard, open Customer Details, open each saved borrower, verify sections.
+ */
+export async function verifyT3824BorrowerDataOnReopenedQuote(page: Page): Promise<void> {
+  const asset = new DOAssetDetailsPage(page);
+  const customer = new DOCustomerDetailsPage(page);
+  await asset.waitForQuoteLoadersToFinish(120_000);
+  await asset.clickStandardQuoteStepTab(/Customer\s*Details/i);
+  await customer.waitForAddBorrowerButton();
+
+  await customer.expectSavedCustomerListed(DOC_T3824_BORROWER.displayName, DOC_T3824_BORROWER.role);
+  await customer.openSavedCustomerByName(DOC_T3824_BORROWER.displayName);
+
+  const personal = new DOPersonalDetailsPage(page);
+  await personal.expectIndividualPersonalDetailsMatch(DOC_T3824_BORROWER.personal);
+
+  const address = new DOAddressDetailsPage(page);
+  await address.clickCustomerDetailsStepTab(/Address\s+Details/i);
+  await address.expectSavedPhysicalAddressDetailsMatch(DOC_T3824_BORROWER.address);
+
+  await address.clickCustomerDetailsStepTab(/Employment\s+Details/i);
+  const employment = new DOEmploymentDetailsPage(page);
+  await employment.expectSavedCurrentEmploymentMatch(DOC_T3824_BORROWER.employment);
+
+  await address.clickCustomerDetailsStepTab(/Financial\s+Position/i);
+  const financial = new DOFinancialPositionPage(page);
+  await financial.waitForFinancialPositionStep();
+  await expect(financial.financialRoot).toContainText(/\$500,?000/, { timeout: 15_000 });
+  await expect(financial.financialRoot).toContainText(/\$5,?000/, { timeout: 15_000 });
+}
+
+/** UDP-T4718 — create/submit via UDP-T3824 flow, save quote, reopen from dashboard by quote ID. */
+export async function createSaveAndReopenDocumentationQuote(
+  page: Page,
+  origRef: string,
+): Promise<void> {
+  const { asset } = await openPostSubmissionUploadStepWithAsset(page, origRef);
+  await asset.waitForQuoteLoadersToFinish(120_000);
+  const quoteId = await asset.readStandardQuoteIdFromHeader();
+  await asset.clickSaveStandardQuoteStep({ originatorRefForRequiredDialog: origRef });
+  const dashboard = await openDashboard(page);
+  await dashboard.openOpenQuoteFromListing(quoteId);
+  await verifyT3824BorrowerDataOnReopenedQuote(page);
 }

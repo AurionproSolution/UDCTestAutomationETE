@@ -278,4 +278,21 @@ export class DOTrustDetailsPage extends BasePage {
     await expect(this.page.getByText(/Email is required/i).first()).toBeVisible();
   }
 
+  /**
+   * After **Save** with required Trust Details left unset, expect PrimeNG error toaster
+   * (post-enhancement: validation surfaces as a toast instead of inline under-field copy on Save).
+   */
+  async expectTrustDetailsSaveValidationToaster(
+    messagePattern: RegExp = /Trust Type is mandatory for trust customer/i,
+  ): Promise<void> {
+    this.logStep("Expect Trust Details save validation toaster");
+    await expect(
+      this.page
+        .locator(
+          ".p-toast-message-error, .p-toast-message-warn, .p-toast-message, .p-toast-detail, [role='alert']",
+        )
+        .filter({ hasText: messagePattern })
+        .first(),
+    ).toBeVisible({ timeout: 25_000 });
+  }
 }

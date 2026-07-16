@@ -1,6 +1,14 @@
 import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
+export type SavedEmploymentSnapshot = {
+  employer: string;
+  occupation: string;
+  employmentType: string;
+  years?: string;
+  months?: string;
+};
+
 /**
  * Step: Employment Details (`app-employment-details`).
  * - Sole trade: `app-sole-trade` → `app-previous-employment` / `app-sole-trade-previous-employee`.
@@ -1280,5 +1288,48 @@ export class DOEmploymentDetailsPage extends BasePage {
     await expect(discardBtn).toBeVisible({ timeout: 10_000 });
     await discardBtn.click({ timeout: 10_000 });
     await expect(confirmDlg).toBeHidden({ timeout: 20_000 }).catch(() => {});
+  }
+
+  private async expectEmploymentDropdownShows(
+    root: Locator,
+    label: string,
+    expected: string,
+  ): Promise<void> {
+    const rx = new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const combo = root.getByRole("combobox", { name: expected }).first();
+    if (await combo.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect(combo).toBeVisible({ timeout: 10_000 });
+      return;
+    }
+    const block = root
+      .locator("label, span")
+      .filter({ hasText: rx })
+      .first()
+      .locator("xpath=ancestor::div[contains(@class,'p-dropdown') or .//p-dropdown][1]");
+    await expect(block).toContainText(expected, { timeout: 10_000 });
+  }
+
+  /** UDP-T4718 — current employment fields match saved values after quote reopen. */
+  async expectSavedCurrentEmploymentMatch(snapshot: SavedEmploymentSnapshot): Promise<void> {
+    this.logStep("Expect saved current employment match");
+    await this.waitForEmploymentDetailsStep();
+    const root = await this.resolveEmploymentFormRoot();
+    await expect(this.employerNameInputFor(root)).toHaveValue(snapshot.employer, {
+      timeout: 15_000,
+    });
+    await this.expectEmploymentDropdownShows(root, "Occupation", snapshot.occupation);
+    await this.expectEmploymentDropdownShows(root, "Employment Type", snapshot.employmentType);
+    if (snapshot.years !== undefined) {
+      const timeRoot = root.locator("gen-card, p-card").filter({ hasText: /Current Employment/i }).first();
+      const yearsSpin = timeRoot.getByRole("spinbutton").first();
+      if (await yearsSpin.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await expect(yearsSpin).toHaveValue(snapshot.years, { timeout: 10_000 });
+        if (snapshot.months !== undefined) {
+          await expect(timeRoot.getByRole("spinbutton").nth(1)).toHaveValue(snapshot.months, {
+            timeout: 10_000,
+          });
+        }
+      }
+    }
   }
 }

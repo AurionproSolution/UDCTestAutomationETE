@@ -29,6 +29,12 @@ export type DOPreviousPhysicalRequiredData = {
   country: string;
 };
 
+/** Physical address fields verified after quote reopen (UDP-T4718). */
+export type SavedPhysicalAddressSnapshot = Pick<
+  DOPhysicalAddressManualData,
+  "streetNumber" | "streetName" | "city" | "country" | "residenceType"
+>;
+
 /**
  * **Reuse for Postal Address** row label. Some QAT builds typo **…Addresss** (extra `s`); allow trailing `s`.
  */
@@ -3196,6 +3202,54 @@ export class DOAddressDetailsPage extends BasePage {
       timeout: 30_000,
     });
     await this.waitForPhysicalAddressStep();
+  }
+
+  /**
+   * UDP-T4719 — Address Details **Residence Type** / **Country** dropdowns and **Reuse for Postal Address** slider.
+   */
+  async expectAddressDropdownsAndSlidersWork(): Promise<void> {
+    this.logStep("Expect Address Details dropdowns and sliders work");
+    await this.waitForPhysicalAddressStep();
+    const root = await this.activePhysicalHost();
+    const residenceTrig = this.residenceTypeTrigger(root);
+    if (await residenceTrig.isVisible({ timeout: 15_000 }).catch(() => false)) {
+      await residenceTrig.click({ timeout: 15_000 });
+      const panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
+      await expect(panel.getByRole("option", { name: /Boarding/i }).first()).toBeVisible({
+        timeout: 10_000,
+      });
+      await this.page.keyboard.press("Escape").catch(() => {});
+      await this.selectResidenceType("Boarding");
+    }
+    await expect(this.countryDropdown).toBeVisible({ timeout: 15_000 });
+    await this.chooseCountry("New Zealand");
+    await this.clickReuseForPostalAddressToggle();
+    await expect(this.page.getByText(/Postal Address|Reuse for Postal/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  private async expectPrimeDropdownLabelShows(expected: string): Promise<void> {
+    const combo = this.page.getByRole("combobox", { name: expected }).first();
+    if (await combo.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect(combo).toBeVisible({ timeout: 10_000 });
+      return;
+    }
+    const panel = this.page.locator(".p-dropdown").filter({ hasText: expected }).first();
+    await expect(panel).toContainText(expected, { timeout: 10_000 });
+  }
+
+  /** UDP-T4718 — physical address fields match saved values after quote reopen. */
+  async expectSavedPhysicalAddressDetailsMatch(
+    snapshot: SavedPhysicalAddressSnapshot,
+  ): Promise<void> {
+    this.logStep("Expect saved physical address details match");
+    await this.waitForPhysicalAddressStep();
+    await expect(this.streetNumberInput).toHaveValue(snapshot.streetNumber, { timeout: 15_000 });
+    await expect(this.streetNameInput).toHaveValue(snapshot.streetName, { timeout: 15_000 });
+    await expect(this.cityInput).toHaveValue(snapshot.city, { timeout: 15_000 });
+    await this.expectPrimeDropdownLabelShows(snapshot.country);
+    await this.expectPrimeDropdownLabelShows(snapshot.residenceType);
   }
 
   /** UDP-T3791 — **Previous** from Employment lands on Address Details (not Employment / Financial). */

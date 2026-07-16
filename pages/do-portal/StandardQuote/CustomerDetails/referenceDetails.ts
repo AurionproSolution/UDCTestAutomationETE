@@ -86,6 +86,132 @@ export class DOReferenceDetailsPage extends BasePage {
     );
   }
 
+  /** UDP-T4710 — **Signatory** on Add Contact modal (`Yes` / `No` dropdown, toggle, or checkbox). */
+  async selectContactSignatory(option: "Yes" | "No"): Promise<void> {
+    this.logStep(`Select contact signatory: ${option}`);
+    const dialog = this.contactAddModal();
+    await dialog.waitFor({ state: "visible", timeout: 20_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+
+    try {
+      await this.selectDropdownInRoot(dialog, "Signatory", option);
+      return;
+    } catch {
+      /* fall through to toggle / checkbox */
+    }
+
+    const host = dialog
+      .locator("p-checkbox, .p-checkbox, p-inputswitch, .p-inputswitch")
+      .filter({ hasText: /Signatory/i })
+      .first();
+    if (await host.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      const box = host.locator(".p-checkbox-box, .p-inputswitch-slider").first();
+      const input = host.locator('input[type="checkbox"]').first();
+      const isOn = async (): Promise<boolean> => {
+        if (await host.locator(".p-checkbox-checked, .p-highlight, .p-inputswitch-checked").first().isVisible({ timeout: 500 }).catch(() => false)) {
+          return true;
+        }
+        return input.isChecked().catch(() => false);
+      };
+      const wantOn = option === "Yes";
+      if ((await isOn()) !== wantOn) {
+        await box.click({ timeout: 15_000 }).catch(() => host.click({ timeout: 15_000 }));
+      }
+      return;
+    }
+
+    const yesNo = dialog
+      .getByRole("button", { name: new RegExp(`^${option}$`, "i") })
+      .or(dialog.getByText(new RegExp(`^${option}$`, "i")))
+      .first();
+    if (await yesNo.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await yesNo.click({ timeout: 15_000 });
+    }
+  }
+
+  private referenceContactCard(namePattern: RegExp): Locator {
+    return this.page
+      .locator("gen-card, p-card, .p-card, section, div")
+      .filter({ hasText: namePattern })
+      .filter({ hasText: /Signatory/i })
+      .first();
+  }
+
+  /** UDP-T4710 — added reference contact card shows **Signatory** value. */
+  async expectReferenceContactSignatoryShows(
+    namePattern: RegExp,
+    expected: "Yes" | "No",
+  ): Promise<void> {
+    this.logStep(
+      `Expect reference contact signatory ${expected} (${namePattern.source})`,
+    );
+  
+    const card = this.referenceContactCard(namePattern);
+  
+    await expect(card).toBeVisible({ timeout: 30_000 });
+  
+    await expect
+      .poll(
+        async () => (await card.textContent())?.replace(/\s+/g, " ") ?? "",
+        { timeout: 15_000 },
+      )
+      .toMatch(new RegExp(`\\b${expected}\\b`, "i"));
+  }
+  /** UDP-T4710 — open an existing reference contact card for edit (pencil / **Edit**). */
+  async openReferenceContactForEdit(namePattern: RegExp): Promise<void> {
+    this.logStep(`Open reference contact for edit (${namePattern.source})`);
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    const card = this.page
+      .locator("gen-card, p-card, .p-card, section, div")
+      .filter({ hasText: namePattern })
+      .first();
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    const editBtn = card
+      .getByRole("button", { name: /^Edit$/i })
+      .or(card.locator("i.pi-pencil, .pi-pencil, .fa-pencil, .fa-edit").locator("xpath=ancestor::button[1]"))
+      .first();
+    await editBtn.scrollIntoViewIfNeeded();
+    await editBtn.click({ timeout: 15_000 });
+    await this.contactAddModal().waitFor({ state: "visible", timeout: 20_000 });
+  }
+
+  /** UDP-T4710 — save an existing contact from the add/edit modal (**Save** / **Update**). */
+  async clickSaveContactInModal(): Promise<void> {
+    this.logStep("Save contact in modal");
+    const dialog = this.contactAddModal();
+    await dialog.waitFor({ state: "visible", timeout: 20_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+
+    const saveBtn = dialog
+      .getByRole("button", { name: /^(Save|Update)(\s+Contact)?$/i })
+      .or(dialog.locator(".p-dialog-footer button, footer button").filter({ hasText: /^Save$/i }))
+      .first();
+    if (await saveBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect(saveBtn).toBeEnabled({ timeout: 30_000 });
+      await saveBtn.scrollIntoViewIfNeeded();
+      await saveBtn.click({ timeout: 20_000 });
+      await dialog.waitFor({ state: "hidden", timeout: 25_000 }).catch(() => {});
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+      return;
+    }
+    await this.clickAddContactInModal();
+  }
+
+  /** UDP-T4710 — jump to **Reference Details** from the individual customer stepper. */
+  async navigateToReferenceDetailsStep(): Promise<void> {
+    this.logStep("Navigate to Reference Details step");
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    const step = this.page
+      .locator("button, a, span, li")
+      .filter({ hasText: /Reference\s+Details|Contact\s+Details/i })
+      .first();
+    if (await step.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await step.click({ timeout: 15_000 });
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    }
+    await this.waitForReferenceDetailsStep();
+  }
+
   /**
    * Resolves the real `<input>` for a float label. `getByLabel` / generic `text` + `#text` can resolve
    * the wrong row so Last Name overwrites First Name.
@@ -572,7 +698,24 @@ export class DOReferenceDetailsPage extends BasePage {
       }
     }
 
-    await this.clickSubmitButton();
+    await expect
+      .poll(
+        async () => {
+          if (await reachedPostSubmissionEntry()) {
+            return true;
+          }
+          await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
+          if (await this.submitButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            await this.submitButton.scrollIntoViewIfNeeded();
+            await this.submitButton.click({ timeout: 30_000 }).catch(() => {});
+            await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+            await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
+          }
+          return reachedPostSubmissionEntry();
+        },
+        { timeout: 120_000, intervals: [500, 1_500, 3_000] },
+      )
+      .toBeTruthy();
   }
 
   /** **.app-loader-overlay** intercepts footer **Next** / **Submit** on QAT. */
