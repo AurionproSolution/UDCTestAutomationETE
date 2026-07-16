@@ -5,8 +5,11 @@
  */
 
 import type { FullConfig } from "@playwright/test";
+import { getDoPortalAuthFile } from "./do-portal-auth.helper";
 import { logTestStep } from "../utils/testStepLog";
 import {
+  getDoPortalMfaLockPath,
+  releaseStaleMfaLockIfNeeded,
   trySilentRefreshSession,
 } from "./do-portal-session.helper";
 
@@ -14,6 +17,9 @@ async function globalSetup(_config: FullConfig): Promise<void> {
   const useGlobalDoAuth =
     !process.env.CI || process.env.PLAYWRIGHT_USE_DO_GLOBAL_AUTH === "1";
   if (!useGlobalDoAuth) return;
+
+  const lockPath = getDoPortalMfaLockPath(getDoPortalAuthFile());
+  releaseStaleMfaLockIfNeeded(lockPath);
 
   let evaluation = await trySilentRefreshSession();
 

@@ -38,6 +38,22 @@ After pulling this change:
 
 Terminal / CI still use the **multi-project** config (smoke, regression, `do-portal-chromium`, etc.) because they do **not** set `PLAYWRIGHT_IDE=1`.
 
+## Troubleshooting: browser stuck on `about:blank` (no URL)
+
+**Symptom:** Chrome opens but stays on `about:blank`; the test never navigates to the portal.
+
+**Cause:** DO auth runs in the `@fixtures/doPortalTest` fixture *before* `page.goto()`. If a prior run was stopped during MFA (IDE stop, VM timeout, CI cancel), a coordination lock file may remain at `playwright/.auth/do-portal.<env>.json.mfa.lock`.
+
+**Auto-fix (built in):** Before each run, `globalSetup` and `ensureDoPortalAuthSession` remove **stale** locks when the owning PID is dead or the lock is older than ~6 minutes. You should see a log line: `DO auth: removing stale MFA lock at ...`.
+
+**Manual fallback:** Delete stale lock files and re-run:
+
+```powershell
+Remove-Item playwright\.auth\*.mfa.lock -ErrorAction SilentlyContinue
+```
+
+Then run `npx playwright test --project=do-portal-auth-setup` (or your DO test). Complete MFA/OTP when prompted; the browser will then navigate to the dealer URL.
+
 ## What you want
 
 All Playwright tests—including everything under `tests/do-portal/`—visible in the **Testing** sidebar so you can **Run / Debug** with one click.

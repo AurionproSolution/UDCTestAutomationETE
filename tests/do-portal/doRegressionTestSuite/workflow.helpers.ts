@@ -216,6 +216,10 @@ export async function advanceAssetDetailsToCustomerDetails(
   await assetDetailsPage.clickCalculateButton();
   await assetDetailsPage.waitForLoadingComplete(120_000);
   await assetDetailsPage.enterOriginationReference(origRef);
+  await assetDetailsPage.clickSaveStandardQuoteStep({
+    originatorRefForRequiredDialog: origRef,
+  });
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
 
   for (let attempt = 0; attempt < 3; attempt++) {
     await assetDetailsPage.clickNextButton();
