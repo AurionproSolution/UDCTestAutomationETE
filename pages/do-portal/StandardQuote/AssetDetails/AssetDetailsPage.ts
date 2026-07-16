@@ -4338,6 +4338,27 @@ export class DOAssetDetailsPage extends BasePage {
     return inDialog.or(this.leasePaymentScheduleViewToggleScope());
   }
 
+  /** Segment view toggle inside the dialog only (`pi-equals` or **Segment** label). */
+  private editPaymentScheduleInDialogSegmentViewToggle(): Locator {
+    const dialog = this.editPaymentScheduleDialog();
+    const inDialog = dialog
+      .getByRole("group")
+      .filter({ has: dialog.getByRole("radio") })
+      .first();
+    return inDialog
+      .getByRole("radio")
+      .first()
+      .or(inDialog.getByRole("radio").filter({ has: inDialog.locator("i.pi.pi-equals") }).first())
+      .or(
+        dialog
+          .locator(
+            "p-selectbutton button, p-selectButton button, .p-selectbutton .p-button, .p-button",
+          )
+          .filter({ hasText: /^Segment$/i })
+          .first(),
+      );
+  }
+
   /** Segment view toggle (`pi-equals` or **Segment** label). */
   private editPaymentScheduleSegmentViewToggle(): Locator {
     const dialog = this.editPaymentScheduleDialog();
@@ -4426,6 +4447,47 @@ export class DOAssetDetailsPage extends BasePage {
     return rowCount >= 3;
   }
 
+  private async isEditPaymentScheduleAggregatedSegmentEditorActive(): Promise<boolean> {
+    const table = this.editPaymentScheduleSegmentTable();
+    if (!(await table.isVisible({ timeout: 500 }).catch(() => false))) {
+      return false;
+    }
+    const rows = table.locator("tbody tr");
+    const rowCount = await rows.count();
+    if (rowCount === 0) {
+      return false;
+    }
+    if (rowCount > 10) {
+      return false;
+    }
+
+    const firstRow = rows.first();
+    if (await firstRow.getByRole("spinbutton").first().isVisible({ timeout: 500 }).catch(() => false)) {
+      return true;
+    }
+
+    const hasDateColumn = await table
+      .locator("th")
+      .filter({ hasText: /^Date$/i })
+      .isVisible({ timeout: 500 })
+      .catch(() => false);
+    if (!hasDateColumn) {
+      return rowCount <= 5;
+    }
+
+    if (rowCount >= 5) {
+      const sample: string[] = [];
+      const limit = Math.min(rowCount, 4);
+      for (let i = 0; i < limit; i++) {
+        sample.push(await this.readEditPaymentScheduleSegmentNumberFromRow(rows.nth(i)));
+      }
+      if (sample.every((value) => value === "1")) {
+        return false;
+      }
+    }
+    return rowCount <= 5;
+  }
+
   /** UDP-T4339 — **Edit Payment Schedule** segment editor (Type column) is visible. */
   async expectEditPaymentScheduleSegmentViewActive(): Promise<void> {
     this.logStep("Expect Edit Payment Schedule segment view active");
@@ -4442,6 +4504,42 @@ export class DOAssetDetailsPage extends BasePage {
         intervals: [300, 500, 1_000],
       })
       .toBeGreaterThan(0);
+  }
+
+  /**
+   * **Edit Payment Schedule** dialog opens on instalment grid on some builds — switch to segment editor
+   * (Type / Number columns) before modifying segments. Does not close the dialog.
+   */
+  async ensureEditPaymentScheduleDialogSegmentView(): Promise<void> {
+    this.logStep("Ensure Edit Payment Schedule dialog segment view");
+    const dialog = this.editPaymentScheduleDialog();
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    if (await this.isEditPaymentScheduleAggregatedSegmentEditorActive()) {
+      await this.expectEditPaymentScheduleSegmentViewActive();
+      return;
+    }
+
+    const inDialogToggle = this.editPaymentScheduleInDialogSegmentViewToggle();
+    if (await inDialogToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await inDialogToggle.click({ timeout: 10_000 });
+      await this.waitForQuoteLoadersToFinish().catch(() => {});
+      if (await this.isEditPaymentScheduleAggregatedSegmentEditorActive()) {
+        await this.expectEditPaymentScheduleSegmentViewActive();
+        return;
+      }
+    }
+
+    await this.closeEditPaymentScheduleDialogIfOpen();
+    await this.clickLeasePaymentScheduleDefaultViewIfNeeded();
+    await this.openEditPaymentScheduleDialog();
+
+    await expect
+      .poll(async () => this.isEditPaymentScheduleAggregatedSegmentEditorActive(), {
+        timeout: 20_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBe(true);
+    await this.expectEditPaymentScheduleSegmentViewActive();
   }
 
   /** UDP-T4339 — grid view lists individual instalments on quote or in-dialog instalment grid. */

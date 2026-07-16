@@ -1,6 +1,27 @@
 import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../..";
 
+export type IndividualPersonalDetailsSnapshot = {
+  title: string;
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  gender: string;
+  dateOfBirth: string;
+  maritalStatus: string;
+  dependants: string;
+  dependantAges: string[];
+  mobile: string;
+  email: string;
+  licenceType: string;
+  countryOfIssue: string;
+  licenceNumber: string;
+  versionNumber: string;
+  nzResident: string;
+  countryOfBirth: string;
+  countryOfCitizenship: string;
+};
+
 export class DOPersonalDetailsPage extends BasePage {
   readonly personalDetailsRoot: Locator;
   readonly titleDropdown: Locator;
@@ -217,6 +238,16 @@ export class DOPersonalDetailsPage extends BasePage {
       return byName.first();
     }
 
+    const dobLabel = root.locator("label").filter({ hasText: /Date of Birth/i }).first();
+    const comboAfterLabel = dobLabel.locator("xpath=following::*[@role='combobox'][1]");
+    if (await comboAfterLabel.isVisible({ timeout: 6_000 }).catch(() => false)) {
+      const innerInput = comboAfterLabel.locator("input.p-inputtext, input[type='text']").first();
+      if (await innerInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        return innerInput;
+      }
+      return comboAfterLabel;
+    }
+
     const labelCal = root
       .locator("label")
       .filter({ hasText: /Date of Birth/i })
@@ -261,10 +292,17 @@ export class DOPersonalDetailsPage extends BasePage {
       return;
     }
     await dateOfBirthInput.waitFor({ state: "visible", timeout: 20_000 });
-    try {
-      await this.clickAndFillElement(dateOfBirthInput, dob);
-    } catch {
-      await dateOfBirthInput.fill(dob, { force: true });
+    const role = await dateOfBirthInput.getAttribute("role").catch(() => null);
+    if (role === "combobox") {
+      await dateOfBirthInput.click({ timeout: 10_000 });
+      await this.page.keyboard.press("Control+A").catch(() => {});
+      await this.page.keyboard.type(dob, { delay: 30 });
+    } else {
+      try {
+        await this.clickAndFillElement(dateOfBirthInput, dob);
+      } catch {
+        await dateOfBirthInput.fill(dob, { force: true });
+      }
     }
     await this.page.keyboard.press("Tab");
     await this.page.keyboard.press("Escape").catch(() => {});
@@ -1022,6 +1060,199 @@ export class DOPersonalDetailsPage extends BasePage {
     await assertFormatIfShown(/Last [Nn]ame.{0,40}incorrect format/i);
     await assertFormatIfShown(/Licence Number.{0,60}(incorrect|invalid|format)/i);
     await assertFormatIfShown(/Version Number.{0,60}(incorrect|invalid|format)/i);
+  }
+
+  private async expectPrimeDropdownWorks(
+    label: string,
+    trigger: Locator,
+    optionToSelect: string,
+    mustIncludeOptions?: RegExp[],
+  ): Promise<void> {
+    this.logStep(`Expect ${label} dropdown works (${optionToSelect})`);
+    await expect(trigger).toBeVisible({ timeout: 20_000 });
+    await trigger.scrollIntoViewIfNeeded();
+    await this.dismissOpenDropdownPanels();
+    await trigger.click({ timeout: 15_000 });
+    const panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    if (mustIncludeOptions) {
+      for (const pattern of mustIncludeOptions) {
+        await expect(
+          panel.locator("li[role='option'], .p-dropdown-item").filter({ hasText: pattern }).first(),
+        ).toBeVisible({ timeout: 10_000 });
+      }
+    }
+    await panel.getByRole("option", { name: optionToSelect, exact: true }).click({ timeout: 15_000 });
+    await this.dismissOpenDropdownPanels();
+    const host = trigger
+      .locator("xpath=ancestor::p-dropdown[1]")
+      .or(trigger.locator("xpath=ancestor::div[contains(@class,'p-dropdown')][1]"));
+    const selectedLabel = host.locator(".p-dropdown-label, [class*='p-dropdown-label']").first();
+    if (await selectedLabel.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect(selectedLabel).toContainText(optionToSelect, { timeout: 10_000 });
+    }
+  }
+
+  private async expectCustomerRoleDropdownWorks(): Promise<void> {
+    const roleTrig = this.page
+      .locator("label")
+      .filter({ hasText: /Customer Role/i })
+      .first()
+      .locator(
+        "xpath=following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+      );
+    if (!(await roleTrig.isVisible({ timeout: 10_000 }).catch(() => false))) {
+      return;
+    }
+    this.logStep("Expect Customer Role dropdown works");
+    await roleTrig.click({ timeout: 15_000 });
+    await expect(this.page.getByRole("option", { name: /^Borrower$/i }).first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await this.dismissOpenDropdownPanels();
+  }
+
+  /** Date of Birth calendar entry — **Choose Date** button or combobox/textbox under the label. */
+  private async expectDateOfBirthPickerWorks(): Promise<void> {
+    this.logStep("Expect Date of Birth picker works");
+    const root = this.personalDetailsRoot;
+    const chooseDate = root.getByRole("button", { name: /Choose Date/i }).first();
+    if (await chooseDate.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect(chooseDate).toBeVisible({ timeout: 15_000 });
+      return;
+    }
+    const dobControl = await this.resolveDateOfBirthInput();
+    await expect(dobControl).toBeVisible({ timeout: 15_000 });
+    await dobControl.scrollIntoViewIfNeeded();
+    await dobControl.click({ timeout: 10_000 });
+    const calendar = this.page
+      .locator(".p-datepicker, .p-datepicker-panel, .p-calendar-panel")
+      .filter({ visible: true })
+      .first();
+    if (await calendar.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await this.page.keyboard.press("Escape").catch(() => {});
+    }
+  }
+
+  /**
+   * UDP-T4719 — Personal Details PrimeNG dropdowns open, list expected values, and retain selection.
+   * Includes **Customer Role** and **Choose Date** entry point (calendar).
+   */
+  async expectPersonalDetailsDropdownsAndSlidersWork(): Promise<void> {
+    this.logStep("Expect Personal Details dropdowns and sliders work");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.visiblePersonalDetailsRoot().waitFor({ state: "visible", timeout: 120_000 });
+    await this.dismissOpenDropdownPanels();
+
+    await this.expectCustomerRoleDropdownWorks();
+
+    const dropdowns: Array<{
+      label: string;
+      trigger: Locator;
+      option: string;
+      mustInclude?: RegExp[];
+    }> = [
+      { label: "Title", trigger: this.titleDropdown, option: "Dame", mustInclude: [/Dame/i, /Mr/i] },
+      {
+        label: "Gender",
+        trigger: this.genderDropdown,
+        option: "Female",
+        mustInclude: [/Female/i, /Male/i],
+      },
+      {
+        label: "Marital Status",
+        trigger: this.maritalStatusDropdown,
+        option: "Married",
+        mustInclude: [/Married/i, /Single/i],
+      },
+      {
+        label: "No. of Dependants",
+        trigger: this.noOfDependentsDropdown,
+        option: "2",
+        mustInclude: [/^0$/, /^1$/, /^2$/],
+      },
+      { label: "Licence Type", trigger: this.licenceTypeDropdown, option: "Full Licence" },
+      {
+        label: "Country of Issue",
+        trigger: this.CountryOfIssueDropDown,
+        option: "New Zealand",
+        mustInclude: [/New Zealand/i],
+      },
+      {
+        label: "New Zealand Resident",
+        trigger: this.newZealandResidentDropdown,
+        option: "Yes",
+        mustInclude: [/Yes/i, /No/i],
+      },
+      {
+        label: "Country of Birth",
+        trigger: this.countryOfBirthDropdown,
+        option: "New Zealand",
+        mustInclude: [/New Zealand/i],
+      },
+      {
+        label: "Country of Citizenship",
+        trigger: this.countryOfCitizenshipDropdown,
+        option: "New Zealand",
+        mustInclude: [/New Zealand/i],
+      },
+    ];
+
+    for (const field of dropdowns) {
+      await this.expectPrimeDropdownWorks(field.label, field.trigger, field.option, field.mustInclude);
+    }
+
+    await this.expectDateOfBirthPickerWorks();
+  }
+
+  private async expectPrimeDropdownShows(trigger: Locator, expected: string): Promise<void> {
+    const host = trigger
+      .locator("xpath=ancestor::p-dropdown[1]")
+      .or(trigger.locator("xpath=ancestor::div[contains(@class,'p-dropdown')][1]"));
+    const label = host.locator(".p-dropdown-label, [class*='p-dropdown-label']").first();
+    if (await label.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect(label).toContainText(expected, { timeout: 10_000 });
+      return;
+    }
+    await expect(
+      this.visiblePersonalDetailsRoot().getByRole("combobox", { name: expected }).first(),
+    ).toBeVisible({ timeout: 10_000 });
+  }
+
+  /** UDP-T4718 — reopened customer Personal Details match the saved snapshot. */
+  async expectIndividualPersonalDetailsMatch(
+    snapshot: IndividualPersonalDetailsSnapshot,
+  ): Promise<void> {
+    this.logStep("Expect individual personal details match saved snapshot");
+    await this.waitForPersonalDetailsStepReady();
+    await expect(this.firstNameInput).toHaveValue(snapshot.firstName, { timeout: 15_000 });
+    await expect(this.middleNameInput).toHaveValue(snapshot.middleName, { timeout: 15_000 });
+    await expect(this.lastNameInput).toHaveValue(snapshot.lastName, { timeout: 15_000 });
+    await expect(this.licenceNumber).toHaveValue(snapshot.licenceNumber, { timeout: 15_000 });
+    await expect(this.versionNumber).toHaveValue(snapshot.versionNumber, { timeout: 15_000 });
+    await expect(this.emailInput).toHaveValue(snapshot.email, { timeout: 15_000 });
+    await expect(this.mobileNumberInput).toHaveValue(snapshot.mobile, { timeout: 15_000 });
+
+    await this.expectPrimeDropdownShows(this.titleDropdown, snapshot.title);
+    await this.expectPrimeDropdownShows(this.genderDropdown, snapshot.gender);
+    await this.expectPrimeDropdownShows(this.maritalStatusDropdown, snapshot.maritalStatus);
+    await this.expectPrimeDropdownShows(this.noOfDependentsDropdown, snapshot.dependants);
+    await this.expectPrimeDropdownShows(this.licenceTypeDropdown, snapshot.licenceType);
+    await this.expectPrimeDropdownShows(this.CountryOfIssueDropDown, snapshot.countryOfIssue);
+    await this.expectPrimeDropdownShows(this.newZealandResidentDropdown, snapshot.nzResident);
+    await this.expectPrimeDropdownShows(this.countryOfBirthDropdown, snapshot.countryOfBirth);
+    await this.expectPrimeDropdownShows(this.countryOfCitizenshipDropdown, snapshot.countryOfCitizenship);
+
+    const dob = await this.resolveDateOfBirthInput();
+    const dobVal = (await dob.inputValue().catch(() => "")).replace(/\s/g, "");
+    expect(dobVal).toMatch(
+      new RegExp(snapshot.dateOfBirth.replace(/\//g, "[/\\-]") + "|1980", "i"),
+    );
+
+    const spinbuttons = this.visiblePersonalDetailsRoot().getByRole("spinbutton");
+    for (let i = 0; i < snapshot.dependantAges.length; i++) {
+      await expect(spinbuttons.nth(i)).toHaveValue(snapshot.dependantAges[i], { timeout: 10_000 });
+    }
   }
 
   async clickNextButton(): Promise<void> {

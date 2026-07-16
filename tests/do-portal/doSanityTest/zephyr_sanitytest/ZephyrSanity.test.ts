@@ -5,17 +5,18 @@
 
 import { expect, test } from "@fixtures/doPortalTest";
 import type { Page } from "@playwright/test";
+import path from "path";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../../config/env";
 import {
   DOAssetDetailsPage,
   DOBusinessDetailsPage,
-  DOCustomerQuotePostSubmitPage,
   DODashboardPage,
   DOQuickQuotePage,
-  DOTrustDetailsPage,
+  DOTrustDetailsPage
 } from "../../../../pages";
-import { DOAddAssetPage } from "../../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { DOAddressDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
 import { openFinanceLeaseBusinessAsgToAddBorrowerStep } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/customerDetailsFLBusiness.helpers.test";
+import { DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/customerQuotePostSubmit";
 import { DOPersonalDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import { DOReferenceDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
 import { fillAddOnAccessoriesAndSave } from "../../doRegressionTestSuite/fl.helpers";
@@ -27,25 +28,25 @@ import {
   advanceIndividualBorrowerToPostSubmission,
   assetInsuranceSummaryDialog,
   copyAssetFromSummary,
+  createSaveAndReopenDocumentationQuote,
   fillMinimalIndividualBorrowerThroughReference,
-  CSA_QQ_PRODUCT,
-  CSA_QQ_PROGRAM,
   fillSanityCsaQuickQuote,
-  selectCsaQuickQuoteProductAndProgram,
   fillValidIndividualPersonalBorrower,
   openAddOnsFromAssetDetails,
-  openDashboard,
   openSanityCsaAssetDetails,
   openSanityCustomerDetailsStep,
   openSanityQuickQuote,
   prepareCalculableCsaQuote,
   promotionQuoteCheckbox,
   removeLastAssetFromSummary,
+  saveExistingIndividualBorrowerOnCustomerDetailsQuote,
   searchTypeRadioInput,
   selectCsaProductAndProgram,
+  selectCsaQuickQuoteProductAndProgram,
+  selectSearchCustomerTrustType,
   standardQuoteRoot,
   uniqueOrigRef,
-  waitForSearchCustomerDialog,
+  waitForSearchCustomerDialog
 } from "./sanity.helpers";
 
 const EXISTING_UDC = process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "1183304";
@@ -318,14 +319,48 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   });
 
   test("UDP-T4702 - Edit payment schedule @UDP-T4702", async ({ page }) => {
-    test.setTimeout(420_000);
+    test.setTimeout(600_000);
     const { asset, addAsset, origRef } = await openSanityCsaAssetDetails(page);
     await prepareCalculableCsaQuote(asset, addAsset, origRef);
     await asset.clickCalculateButton();
+    await asset.expectPaymentScheduleSectionWithTableData();
+
     await asset.openEditPaymentScheduleDialog();
-    await asset.expectEditPaymentScheduleDialogOpenWithoutErrors();
-    await asset.clickEditPaymentScheduleDeleteLastSegment().catch(() => {});
+    await asset.ensureEditPaymentScheduleDialogSegmentView();
+    const originalSchedule = await asset.getEditPaymentScheduleSegmentRowsSnapshot();
+    expect(originalSchedule.length).toBeGreaterThan(0);
+
+    const interestOnlyPayments = "12";
+    await asset.modifyEditPaymentScheduleSegmentFields({
+      number: interestOnlyPayments,
+      type: "Interest Only",
+    });
+    await asset.waitForEditPaymentScheduleAddSegmentEnabled();
+    await asset.clickEditPaymentScheduleAddSegment();
+
+    const paymentsTotal = await asset.getEditPaymentScheduleNumberOfPayments();
+    const remainingPayments = String(Math.max(1, paymentsTotal - Number(interestOnlyPayments)));
+    await asset.enterEditPaymentScheduleSegmentNumberOnRow(1, remainingPayments);
+    await asset.selectEditPaymentScheduleSegmentTypeOnRow(1, "Normal");
+
+    await asset.clickEditPaymentScheduleCalculate();
+    await asset.expectEditPaymentScheduleCalculateSummaryVisible();
+
+    const modifiedSchedule = await asset.getEditPaymentScheduleSegmentRowsSnapshot();
+    expect(modifiedSchedule).toHaveLength(2);
+    expect(modifiedSchedule[0].number).toBe(interestOnlyPayments);
+    expect(modifiedSchedule[0].type).toMatch(/Interest Only/i);
+    expect(modifiedSchedule[1].number).toBe(remainingPayments);
+    expect(modifiedSchedule[1].type).toMatch(/Normal/i);
+
     await asset.clickEditPaymentScheduleApply();
+    await asset.expectEditPaymentScheduleDialogClosedOnStandardQuote();
+
+    await asset.openEditPaymentScheduleDialog();
+    await asset.ensureEditPaymentScheduleDialogSegmentView();
+    await asset.expectEditPaymentScheduleSegmentRowsMatch(modifiedSchedule);
+    await asset.closeEditPaymentScheduleDialogIfOpen();
+    await asset.expectPaymentScheduleSectionWithTableData();
   });
 
   test("UDP-T4703 - Cross page data retention @UDP-T4703", async ({ page }) => {
@@ -404,16 +439,33 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     test.setTimeout(480_000);
     const { customer } = await openSanityCustomerDetailsStep(page);
     const ref = await fillMinimalIndividualBorrowerThroughReference(page, customer);
+
+    // Precondition — reuse UDP-T4709 contact creation (Signatory defaults to No).
     await ref.clickAddContactDetails();
     await ref.selectContactType("Accountant");
-    await ref.enterContactFirstName("Sam");
-    await ref.enterContactLastName("Signatory");
-    const signatory = page.getByText(/Signatory/i).first();
-    if (await signatory.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await page.getByRole("checkbox", { name: /Signatory/i }).first().check().catch(() => {});
-    }
+    await ref.enterContactFirstName("Alex");
+    await ref.enterContactLastName("Referee");
     await ref.clickAddContactInModal();
-    await expect(page.getByText(/Sam|Signatory/i).first()).toBeVisible();
+
+    // Step 1 — open existing customer from Customer Details.
+    await customer.navigateToBorrowerSummary();
+    await customer.openSavedCustomerByName(/Liza|Marie|Doe/i);
+
+    // Step 2 — Reference Details.
+    await ref.navigateToReferenceDetailsStep();
+
+    // Steps 3–5 — open contact, set Signatory = Yes, save.
+    await ref.openReferenceContactForEdit(/Alex|Referee/i);
+    await ref.selectContactSignatory("Yes");
+    await ref.clickSaveContactInModal();
+    await ref.expectReferenceContactSignatoryShows(/Alex|Referee/i, "Yes");
+
+    // Step 6 — return to Customer Details.
+    await customer.navigateToBorrowerSummary();
+
+    // Steps 7–10 — Signatory = Yes, Signing Order visible, editable, and persisted.
+    await customer.expectPartySignatoryYes(/Alex|Referee/i);
+    await customer.expectPartySigningOrderEditable(/Alex|Referee/i, "2");
   });
 
   test("UDP-T4711 - Save individual customer empty fields validation @UDP-T4711", async ({ page }) => {
@@ -440,7 +492,6 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
       timeout: 60_000,
     });
   });
-
   test("UDP-T4713 - Save Business customer empty fields validation @UDP-T4713", async ({ page }) => {
     test.setTimeout(480_000);
     const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
@@ -453,6 +504,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     await biz.clickSaveBusinessDetails();
     await expect(biz.businessRoot.getByText(/required/i).first()).toBeVisible({ timeout: 20_000 });
   });
+
 
   test("UDP-T4714 - Add Business customer full data @UDP-T4714", async ({ page }) => {
     test.setTimeout(600_000);
@@ -502,28 +554,28 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
 
   test("UDP-T4716 - Save trust customer empty fields validation @UDP-T4716", async ({ page }) => {
     test.setTimeout(480_000);
-    const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-    await asset.clickAddBorrowerorGuarantorButton();
+    const { customer } = await openSanityCustomerDetailsStep(page);
+    await customer.clickAddBorrowersOrGuarantors();
     const dlg = await waitForSearchCustomerDialog(page);
-    if ((await searchTypeRadioInput(dlg, "trust").count()) > 0) {
-      await dlg.locator('p-radiobutton:has(input[value="trust"]) .p-radiobutton-box').first().click({ force: true });
-    }
-    await asset.clickAddNewCustomerButton();
+    await selectSearchCustomerTrustType(dlg);
+    await customer.searchCustomer.searchByUdcNumber("420");
+    await customer.clickAddNewCustomerButton();
     const trust = new DOTrustDetailsPage(page);
     await trust.waitForTrustDetailsStep();
+    await trust.touchTrustTypeDropdownWithoutSelection();
+    await trust.touchPrimaryNatureOfTrustDropdownWithoutSelection();
     await trust.clickSaveTrustDetails();
-    await expect(page.getByText(/required/i).first()).toBeVisible({ timeout: 20_000 });
+    await trust.expectTrustDetailsRequiredValidationMessages();
   });
 
   test("UDP-T4717 - Add trust customer full data @UDP-T4717", async ({ page }) => {
     test.setTimeout(480_000);
-    const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-    await asset.clickAddBorrowerorGuarantorButton();
+    const customer = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+    await customer.clickAddBorrowerorGuarantorButton();
     const dlg = await waitForSearchCustomerDialog(page);
-    if ((await searchTypeRadioInput(dlg, "trust").count()) > 0) {
-      await dlg.locator('p-radiobutton:has(input[value="trust"]) .p-radiobutton-box').first().click({ force: true });
-    }
-    await asset.clickAddNewCustomerButton();
+    await selectSearchCustomerTrustType(dlg);
+    await customer.searchCustomer.searchTrustByName("Zephyr Sanity Nonexistent Trust");
+    await customer.clickAddNewCustomerButton();
     const trust = new DOTrustDetailsPage(page);
     await trust.waitForTrustDetailsStep();
     await trust.enterTrustName("Sanity Family Trust");
@@ -536,24 +588,30 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
 
   test("UDP-T4718 - Reopen quote and verify customers @UDP-T4718", async ({ page }) => {
     test.setTimeout(600_000);
-    const origRef = uniqueOrigRef("REOP");
-    await advanceIndividualBorrowerToPostSubmission(page, origRef);
-    const dashboard = await openDashboard(page);
-    await dashboard.openQuotesAndApplications();
-    await dashboard.openQuoteFromGridByReference(origRef);
-    await expect(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
-    await expect(page.getByText(/Liza|Doe/i).first()).toBeVisible({ timeout: 60_000 });
+    const origRef = uniqueOrigRef("DOC");
+    await createSaveAndReopenDocumentationQuote(page, origRef);
   });
 
   test("UDP-T4719 - Verify dropdowns and sliders @UDP-T4719", async ({ page }) => {
-    test.setTimeout(420_000);
+    test.setTimeout(600_000);
     const { customer } = await openSanityCustomerDetailsStep(page);
     await customer.clickAddBorrowersOrGuarantors();
     await customer.searchCustomer.searchByUdcNumber("420");
     await customer.clickAddNewCustomerButton();
     const personal = new DOPersonalDetailsPage(page);
-    await expect(personal.titleDropdown.or(page.getByRole("combobox").first())).toBeVisible();
-    await expect(page.getByRole("combobox").first()).toBeEnabled();
+    await personal.expectPersonalDetailsDropdownsAndSlidersWork();
+    await personal.enterFirstName("Liza");
+    await personal.enterMiddleName("Marie");
+    await personal.enterLastName("Doe");
+    await personal.enterDateOfBirth("01/01/1980");
+    await personal.fillDependantsAgesInYears(["8", "12"]);
+    await personal.enterMobileNumber("0211234567");
+    await personal.enterEmail("liza.doe@example.com");
+    await personal.enterLicenceNumber("AB123456");
+    await personal.enterVersionNumber("244");
+    await personal.clickNextButton();
+    const address = new DOAddressDetailsPage(page);
+    await address.expectAddressDropdownsAndSlidersWork();
   });
 
   test("UDP-T4720 - Change role @UDP-T4720", async ({ page }) => {
@@ -592,19 +650,14 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   });
 
   test("UDP-T4722 - Add same customers again @UDP-T4722", async ({ page }) => {
-    test.setTimeout(480_000);
-    const { customer } = await openSanityCustomerDetailsStep(page);
-    await customer.clickAddBorrowersOrGuarantors();
-    await customer.searchCustomer.searchByUdcNumber(EXISTING_UDC);
-    const addBtn = page.getByRole("button", { name: /Add/i }).first();
-    if (await addBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
-      await addBtn.click();
-      await customer.clickAddBorrowersOrGuarantors();
-      await customer.searchCustomer.searchByUdcNumber(EXISTING_UDC);
-      await expect(page.getByText(/already exists|duplicate|already added/i).first()).toBeVisible({
-        timeout: 20_000,
-      }).catch(() => {});
-    }
+    test.setTimeout(600_000);
+    test.skip(!EXISTING_UDC, "Set UDC_EXISTING_CUSTOMER_NUMBER for FIS duplicate-customer check.");
+    const customer = await saveExistingIndividualBorrowerOnCustomerDetailsQuote(
+      page,
+      EXISTING_UDC,
+      uniqueOrigRef("DUP"),
+    );
+    await customer.expectDuplicateExistingCustomerBlockedByUdc(EXISTING_UDC);
   });
 
   test("UDP-T4723 - Signing and verification @UDP-T4723", async ({ page }) => {
@@ -621,36 +674,38 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     await expect(page.getByText(/Signing|Verification/i).first()).toBeVisible();
   });
 
-  test("UDP-T4725 - Document Upload via Browse Files and Drag-and-Drop @UDP-T4725", async ({ page }) => {
+  test("UDP-T4725 - Document Upload via Browse Files and Drag-and-Drop @UDP-T4725", async ({
+    page,
+  }) => {
     test.setTimeout(600_000);
+    const pdfName = path.basename(DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF);
+    const jpgName = "zephyr-drop-upload.jpg";
     const post = await advanceIndividualBorrowerToPostSubmission(page, uniqueOrigRef("DOC"));
-    await post.uploadDocument();
+    await post.expectBrowseFilesAndDropZoneVisible();
+    await post.uploadDocumentViaBrowseFiles();
     await post.expectDocumentUploaded();
-    const browse = page.getByRole("button", { name: /^Browse Files$/i });
-    await expect(browse).toBeVisible();
-    const dropZone = page.locator("[class*='drop'], [class*='upload']").filter({ hasText: /drag|drop/i }).first();
-    if (await dropZone.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await expect(dropZone).toBeVisible();
-    }
+    await post.uploadDocumentViaDragAndDrop();
+    await post.expectUploadedFilesVisibleInUploadGrid([pdfName, jpgName]);
   });
 
-  test("UDP-T4726 - Auto Generated unticked manual generation @UDP-T4726", async ({ page }) => {
+  test("UDP-T4726 - Auto Generated Unticked Manual Preview Generates Document @UDP-T4726", async ({
+    page,
+  }) => {
     test.setTimeout(600_000);
+    const doc = /Customer Quote\s*-\s*Basic/i;
     const post = await advanceIndividualBorrowerToPostSubmission(page, uniqueOrigRef("GEN"));
     await post.openDocumentsTab();
-    const preview = page.getByRole("button", { name: /^Preview$/i }).first();
-    if (await preview.isVisible({ timeout: 15_000 }).catch(() => false)) {
-      await preview.click({ timeout: 15_000 });
-      await expect(page.getByText(/\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}/).first()).toBeVisible({
-        timeout: 60_000,
-      }).catch(() => {});
-    }
+    const timestamp = await post.expectManualGenerationDocumentPreviewCreatesTimestamp(doc);
+    expect(timestamp).toMatch(/\d{1,2}\/\d{1,2}\/\d{4}/);
   });
 
   test("UDP-T4727 - Notes @UDP-T4727", async ({ page }) => {
     test.setTimeout(600_000);
+    const noteText = "Zephyr sanity note cannot edit or delete.";
     const post = await advanceIndividualBorrowerToPostSubmission(page, uniqueOrigRef("NOTE"));
-    await post.addNoteAndSubmit("Zephyr sanity note — cannot edit after submit.");
+    await post.ensureUploadTab();
+    await post.addNoteAndSubmit(noteText);
+    await post.expectNoteVisibleAndReadOnly(noteText);
     await post.expectExistingNoteCardsShowAuthorAndTimestamp();
   });
 
@@ -666,14 +721,15 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   });
 
   test("UDP-T4729 - Submit Quote @UDP-T4729", async ({ page }) => {
-    test.setTimeout(600_000);
-    const post: DOCustomerQuotePostSubmitPage = await advanceIndividualBorrowerToPostSubmission(
-      page,
-      uniqueOrigRef("FINAL"),
-    );
-    await post.uploadDocument();
+    test.setTimeout(900_000);
+    const post = await advanceIndividualBorrowerToPostSubmission(page, uniqueOrigRef("FINAL"));
+    await post.expectWorkflowStatusControlVisible();
+    await post.expectWorkflowStatusOpenQuote();
+    await post.prepareMinimalPostSubmissionForWorkflow();
     await post.submitQuoteThroughWorkflowDeclaration();
-    await expect(page.getByText(/Submitted|Application|Workflow/i).first()).toBeVisible({ timeout: 90_000 });
+    await post.expectWorkflowTransitionSucceeded();
+    const status = await post.readPortalWorkflowStatus();
+    expect(status).toMatch(/Submitted|Assessment/i);
   });
 
   test("UDP-T4730 - Verify in AF post submission @UDP-T4730", async () => {

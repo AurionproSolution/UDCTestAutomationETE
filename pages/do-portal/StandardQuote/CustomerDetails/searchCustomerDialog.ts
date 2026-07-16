@@ -54,10 +54,33 @@ export class DOSearchCustomerDialog extends BasePage {
 
   async selectSearchByOption(name: RegExp | string): Promise<void> {
     this.logStep(`Select Search By option: ${String(name)}`);
-    const panel = this.page.locator(".p-dropdown-panel").last();
-    const opt = panel.getByRole("option", { name }).first();
+    const panel = this.dialog
+      .locator(".p-dropdown-panel")
+      .last()
+      .or(this.page.locator(".p-dropdown-panel").filter({ visible: true }).last());
+    const opt = panel
+      .locator("li[role='option'], .p-dropdown-item")
+      .filter({ hasText: name })
+      .first()
+      .or(panel.getByRole("option", { name }).first());
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await this.openSearchByDropdown();
+      }
+      if (!(await opt.isVisible({ timeout: 8_000 }).catch(() => false))) {
+        continue;
+      }
+      await opt.click({ force: true, timeout: 15_000 });
+      await this.page
+        .locator(".p-dropdown-panel")
+        .waitFor({ state: "hidden", timeout: 10_000 })
+        .catch(() => {});
+      return;
+    }
+
     await opt.waitFor({ state: "visible", timeout: 30_000 });
-    await opt.click();
+    await opt.click({ force: true, timeout: 15_000 });
     await this.page
       .locator(".p-dropdown-panel")
       .waitFor({ state: "hidden", timeout: 15_000 })
@@ -180,6 +203,23 @@ export class DOSearchCustomerDialog extends BasePage {
   }
 
   /**
+   * **Trust** search type — search by **Trust Name** with no expected match so **Add New Customer** enables.
+   */
+  async searchTrustByName(trustName: string): Promise<void> {
+    this.logStep(`Search Trust By Name (${trustName})`);
+    await this.waitForVisible();
+    const trustNameField = this.dialog
+      .locator("label")
+      .filter({ hasText: /^Trust Name/i })
+      .locator("xpath=following::input[contains(@class,'p-inputtext') or @type='text'][1]")
+      .first()
+      .or(this.dialog.getByRole("textbox").filter({ visible: true }).first());
+    await trustNameField.waitFor({ state: "visible", timeout: 30_000 });
+    await trustNameField.fill(trustName);
+    await this.clickSearch();
+  }
+
+  /**
    * Set search type to **Individual** (first radio: Individual | Business | Trust).
    */
   async selectIndividualType(): Promise<void> {
@@ -255,6 +295,8 @@ export class DOSearchCustomerDialog extends BasePage {
     await this.page.waitForTimeout(600);
 
     const markers: Locator[] = [
+      this.page.locator("app-trust-detail"),
+      this.page.getByText(/^Trust Details$/i),
       this.page.locator('input[name="dateOfBirth"]'),
       this.page.getByRole("button", { name: /Choose Date/i }),
       this.page.getByRole("textbox", { name: /First Name/i }),
@@ -281,7 +323,7 @@ export class DOSearchCustomerDialog extends BasePage {
     }
 
     throw new Error(
-      "Personal details did not open after Add New Customer (expected DOB, Choose Date, First Name, Title, or email block).",
+      "Customer details form did not open after Add New Customer (expected Trust, Personal, or Business details).",
     );
   }
 
@@ -294,5 +336,92 @@ export class DOSearchCustomerDialog extends BasePage {
     const ind = this.searchTypeRadio(/Individual/i).first();
     await expect.soft(ind).toBeVisible({ timeout: 20_000 });
     await expect.soft(ind).toBeChecked();
+  }
+
+  /** UDC search navigates to **Borrower Result** cards (not the search dialog datatable). */
+  async waitForBorrowerSearchResult(udcCustomerNumber: string): Promise<void> {
+    this.logStep(`Wait for borrower search result (${udcCustomerNumber})`);
+    await this.page
+      .waitForURL(/borrower-search-result/i, { timeout: 90_000 })
+      .catch(() => {});
+    await expect(this.page.getByText(udcCustomerNumber, { exact: false }).first()).toBeVisible({
+      timeout: 90_000,
+    });
+    await expect(this.page.getByText(/UDC Customer Number/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  private borrowerSearchResultCard(udcCustomerNumber: string): Locator {
+    return this.page
+      .locator("div, section, article")
+      .filter({ hasText: udcCustomerNumber })
+      .filter({ hasText: /UDC Customer Number/i })
+      .last();
+  }
+
+  private borrowerSearchResultAddButton(udcCustomerNumber: string): Locator {
+    const resultCard = this.borrowerSearchResultCard(udcCustomerNumber);
+    return resultCard
+      .getByRole("button", { name: /^Add$/i })
+      .or(this.page.getByRole("button", { name: /^Add$/i }).first());
+  }
+
+  /** **Add** on the borrower search result card for `udcCustomerNumber`. */
+  async clickAddOnBorrowerSearchResult(udcCustomerNumber: string): Promise<void> {
+    this.logStep(`Click Add on borrower search result (${udcCustomerNumber})`);
+    await this.waitForBorrowerSearchResult(udcCustomerNumber);
+    await this.borrowerSearchResultAddButton(udcCustomerNumber).first().click({ timeout: 30_000 });
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+  }
+
+  /** Search by UDC and **Add** the FIS party from borrower search results. */
+  async addExistingCustomerFromUdcSearch(udcCustomerNumber: string): Promise<void> {
+    await this.searchByUdcNumber(udcCustomerNumber);
+    await this.clickAddOnBorrowerSearchResult(udcCustomerNumber);
+  }
+
+  private duplicateCustomerValidationPatterns(): RegExp[] {
+    return [
+      /customer already exists/i,
+      /already exists on (the )?quote/i,
+      /customer.{0,60}already added/i,
+      /duplicate customer/i,
+      /already added to (the )?quote/i,
+      /already exists|duplicate|already added/i,
+    ];
+  }
+
+  private duplicateCustomerValidationRoots(): Locator[] {
+    return [
+      this.page.locator(".p-toast, .p-toast-message, [role='alert'], .p-message, .p-inline-message"),
+      this.dialog,
+      this.page.locator("app-standard-quote, app-quote-details").first(),
+      this.page.locator("body"),
+    ];
+  }
+
+  /** Whether FP/ID duplicate-customer copy is visible (toast, dialog, or inline). */
+  async isCustomerAlreadyExistsValidationVisible(timeoutMs = 3_000): Promise<boolean> {
+    for (const root of this.duplicateCustomerValidationRoots()) {
+      for (const pattern of this.duplicateCustomerValidationPatterns()) {
+        const msg = root.getByText(pattern).first();
+        if (await msg.isVisible({ timeout: timeoutMs }).catch(() => false)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** UDP-T4722 — duplicate party add is blocked with **customer already exists** (or equivalent). */
+  async expectCustomerAlreadyExistsValidation(timeoutMs = 30_000): Promise<void> {
+    this.logStep("Expect customer already exists validation");
+    await expect
+      .poll(async () => this.isCustomerAlreadyExistsValidationVisible(800), {
+        timeout: timeoutMs,
+        intervals: [300, 500, 1_000],
+      })
+      .toBe(true);
   }
 }

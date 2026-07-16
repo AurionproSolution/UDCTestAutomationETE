@@ -165,4 +165,173 @@ export class DOCustomerDetailsPage extends BasePage {
   async clickAddNewCustomerButton(): Promise<void> {
     await this.searchCustomer.clickAddNewCustomer();
   }
+
+  /**
+   * UDP-T4722 — after a customer is saved on the quote, re-search the same UDC and expect
+   * FP/ID duplicate validation (**customer already exists**).
+   */
+  async expectDuplicateExistingCustomerBlockedByUdc(udcCustomerNumber: string): Promise<void> {
+    this.logStep(`Expect duplicate existing customer blocked (${udcCustomerNumber})`);
+    await this.clickAddBorrowersOrGuarantors();
+    await this.searchCustomer.searchByUdcNumber(udcCustomerNumber);
+    await this.searchCustomer.waitForBorrowerSearchResult(udcCustomerNumber);
+    if (!(await this.searchCustomer.isCustomerAlreadyExistsValidationVisible(2_000))) {
+      await this.searchCustomer.clickAddOnBorrowerSearchResult(udcCustomerNumber);
+    }
+    await this.searchCustomer.expectCustomerAlreadyExistsValidation();
+  }
+
+  /** UDP-T4718 — saved party is listed on Customer Details / Post Submission parties grid. */
+  async expectSavedCustomerListed(
+    namePattern: RegExp,
+    rolePattern: RegExp = /Borrower/i,
+  ): Promise<void> {
+    this.logStep(`Expect saved customer listed (${namePattern.source})`);
+    const row = this.customerPartyRow(namePattern);
+    await expect(row).toBeVisible({ timeout: 90_000 });
+    await expect(row).toContainText(rolePattern);
+  }
+
+  private customerPartyRow(namePattern: RegExp): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .locator("tr, [role='row'], .p-datatable-row, .p-datatable-tbody > tr, div, li, section")
+      .filter({ hasText: namePattern })
+      .first();
+  }
+
+  private customerPartiesScope(): Locator {
+    const root = this.standardQuoteRoot();
+    return root
+      .locator('[role="grid"], .p-datatable-wrapper, .p-datatable, table')
+      .filter({ visible: true })
+      .first();
+  }
+
+  private signatoryPartyRow(namePattern: RegExp): Locator {
+    const grid = this.customerPartiesScope();
+    return grid
+      .locator("tr, [role='row'], .p-datatable-row, .p-datatable-tbody > tr")
+      .filter({ hasText: namePattern })
+      .first()
+      .or(this.customerPartyRow(namePattern));
+  }
+
+  /** Borrower Summary / parties grid on Standard Quote **Customer Details**. */
+  async navigateToBorrowerSummary(): Promise<void> {
+    this.logStep("Navigate to Borrower Summary");
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    const root = this.standardQuoteRoot();
+    const byRole = root
+      .getByRole("button", { name: /^Borrower\s+Summary$/i })
+      .or(root.getByRole("link", { name: /^Borrower\s+Summary$/i }))
+      .or(root.getByRole("tab", { name: /^Borrower\s+Summary$/i }))
+      .first();
+    if (await byRole.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await byRole.click({ timeout: 15_000 });
+      await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+      await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+      return;
+    }
+    const numbered = root
+      .locator("button, a, span, li")
+      .filter({ hasText: /\d+\.\s*Borrower\s+Summary/i })
+      .first();
+    if (await numbered.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await numbered.click({ timeout: 15_000 });
+      await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+      return;
+    }
+    const customerStep = root
+      .locator("button, a, span, li")
+      .filter({ hasText: /Customer\s+Details/i })
+      .first();
+    if (await customerStep.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      await customerStep.click({ timeout: 15_000 });
+    }
+    await this.waitForAddBorrowerButton();
+  }
+
+  /** UDP-T4710 — party row on Customer Details shows **Signatory** = Yes. */
+  async expectPartySignatoryYes(namePattern: RegExp): Promise<void> {
+    this.logStep(`Expect party signatory Yes (${namePattern.source})`);
+    await this.navigateToBorrowerSummary();
+    const row = this.signatoryPartyRow(namePattern);
+    await expect(row).toBeVisible({ timeout: 60_000 });
+    await expect(row).toContainText(/Signatory/i, { timeout: 15_000 });
+    await expect(row).toContainText(/\bYes\b/i, { timeout: 15_000 });
+  }
+
+  /**
+   * UDP-T4710 — **Signing Order** is visible on the party row and can be edited (spinbutton / input).
+   * Persists the change when a **Save** control is shown on Customer Details.
+   */
+  async expectPartySigningOrderEditable(namePattern: RegExp, newOrder = "2"): Promise<string> {
+    this.logStep(`Expect party signing order editable (${namePattern.source})`);
+    await this.navigateToBorrowerSummary();
+    const row = this.signatoryPartyRow(namePattern);
+    await expect(row).toBeVisible({ timeout: 60_000 });
+    await expect(row).toContainText(/Signing\s*Order/i, { timeout: 15_000 });
+
+    const orderInput = row
+      .getByRole("spinbutton")
+      .first()
+      .or(row.locator("input[type='number'], input.p-inputnumber-input").first());
+    await expect(orderInput).toBeVisible({ timeout: 15_000 });
+    await expect(orderInput).toBeEnabled({ timeout: 10_000 });
+    await orderInput.scrollIntoViewIfNeeded();
+    await orderInput.click({ timeout: 10_000 });
+    await orderInput.fill(newOrder);
+    await orderInput.press("Tab").catch(() => {});
+
+    const saveBtn = this.standardQuoteRoot().getByRole("button", { name: /^Save$/i }).last();
+    if (await saveBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await saveBtn.click({ timeout: 15_000 });
+      await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    }
+
+    await expect(orderInput).toHaveValue(newOrder, { timeout: 15_000 });
+    return newOrder;
+  }
+
+  /**
+   * UDP-T4718 — open a saved customer from the parties list (row **Edit**, pencil, or primary-name link).
+   */
+  async openSavedCustomerByName(namePattern: RegExp): Promise<void> {
+    this.logStep(`Open saved customer (${namePattern.source})`);
+    const root = this.standardQuoteRoot();
+    const scopedRow = root
+      .locator("tr, [role='row'], .p-datatable-row, .p-datatable-tbody > tr")
+      .filter({ hasText: namePattern })
+      .first();
+    const editInRow = scopedRow
+      .getByRole("button", { name: /^Edit$/i })
+      .or(scopedRow.getByRole("link", { name: /^Edit$/i }))
+      .or(scopedRow.locator("button, a").filter({ hasText: /^Edit$/i }))
+      .first();
+    if (await editInRow.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await editInRow.click({ timeout: 20_000 });
+    } else {
+      const pencil = scopedRow.locator("i.pi-pencil, .pi-pencil, [class*='pi-pencil']").first();
+      if (await pencil.isVisible({ timeout: 4_000 }).catch(() => false)) {
+        await pencil.click({ timeout: 15_000 });
+      } else {
+        const nameLink = root
+          .locator(
+            "div.align-items-center.capitalize.cursor-pointer.ng-star-inserted a.cursor-pointer.text-primary, a.cursor-pointer.text-primary",
+          )
+          .filter({ hasText: namePattern })
+          .first()
+          .or(root.getByRole("link", { name: namePattern }).first());
+        await expect(nameLink).toBeVisible({ timeout: 60_000 });
+        await nameLink.click({ timeout: 60_000 });
+      }
+    }
+    await expect(
+      this.page
+        .locator("app-personal-details, app-business-details, app-trust-detail")
+        .or(this.page.getByText(/^1\.\s*Personal Details$/i))
+        .first(),
+    ).toBeVisible({ timeout: 90_000 });
+  }
 }

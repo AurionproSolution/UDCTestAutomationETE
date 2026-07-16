@@ -3,8 +3,8 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { BasePage } from "../../../common";
-import { DOFinancialPositionPage } from "./financialPosition";
 import { DOCustomerDetailsPage } from "./customerDetailsPage";
+import { DOFinancialPositionPage } from "./financialPosition";
 import { DOSearchCustomerDialog } from "./searchCustomerDialog";
 
 /** Default PDF used on Customer Details after Reference submit (Upload tab). */
@@ -325,6 +325,16 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   /** Uploaded-documents grid on the **Upload** tab (Name / Loaded On / Loaded By / Source). */
   private uploadTabDocumentsTable(): Locator {
     return this.uploadTabContentPanel().locator("table").first();
+  }
+
+  /** Drag-and-drop target on the **Upload** tab (right-hand **Files** upload area). */
+  private uploadTabDropZone(): Locator {
+    const panel = this.uploadTabContentPanel();
+    return panel
+      .locator("p-fileupload .p-fileupload-content, .p-fileupload-content")
+      .filter({ hasText: /drag|drop/i })
+      .first()
+      .or(panel.locator("[class*='drop'], [class*='upload']").filter({ hasText: /drag|drop/i }).first());
   }
 
   /**
@@ -967,6 +977,116 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     });
   }
 
+  /** UDP-T4725 — **Browse Files** and drag-and-drop entry points are visible on Upload. */
+  async expectBrowseFilesAndDropZoneVisible(): Promise<void> {
+    this.logStep("Expect Browse Files And Drop Zone Visible");
+    await this.ensureUploadTab();
+    await expect(this.browseFilesButton).toBeVisible({ timeout: 60_000 });
+    await expect(this.uploadTabDropZone()).toBeVisible({ timeout: 15_000 });
+  }
+
+  /**
+   * UDP-T4725 — upload via **Browse Files** (file chooser), not the hidden `input[type=file]` shortcut.
+   */
+  async uploadDocumentViaBrowseFiles(
+    filePath: string = DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF,
+  ): Promise<void> {
+    this.logStep(`Upload Document Via Browse Files (${path.basename(filePath)})`);
+    await this.ensureUploadTab();
+    await expect(this.browseFilesButton).toBeVisible({ timeout: 60_000 });
+
+    const responsePromise = this.page
+      .waitForResponse(
+        (res: Response) => DOCustomerQuotePostSubmitPage.looksLikeUploadRequest(res.request()),
+        { timeout: 25_000 },
+      )
+      .catch(() => null);
+
+    const fileChooserPromise = this.page.waitForEvent("filechooser", { timeout: 30_000 });
+    await this.browseFilesButton.click();
+    const chooser = await fileChooserPromise;
+    await chooser.setFiles(filePath);
+
+    const response = await responsePromise;
+    if (response && !response.ok()) {
+      throw new Error(
+        `Upload HTTP failed: ${response.status()} ${response.statusText()} ${response.url()}`,
+      );
+    }
+
+    const spinner = this.page.locator(".p-progress-spinner, .p-blockui").first();
+    if (await spinner.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await spinner.waitFor({ state: "hidden", timeout: 60_000 });
+    }
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.postSubmitMicroDelay(800);
+  }
+
+  /**
+   * UDP-T4725 — drag-and-drop a file into the designated drop area on the Upload tab.
+   */
+  async uploadDocumentViaDragAndDrop(
+    file: { name: string; mimeType: string; buffer: Buffer } = {
+      name: "zephyr-drop-upload.jpg",
+      mimeType: "image/jpeg",
+      buffer: MINIMAL_JPEG_BYTES,
+    },
+  ): Promise<void> {
+    this.logStep(`Upload Document Via Drag And Drop (${file.name})`);
+    await this.ensureUploadTab();
+    const dropZone = this.uploadTabDropZone();
+    await expect(dropZone).toBeVisible({ timeout: 30_000 });
+
+    const responsePromise = this.page
+      .waitForResponse(
+        (res: Response) => DOCustomerQuotePostSubmitPage.looksLikeUploadRequest(res.request()),
+        { timeout: 25_000 },
+      )
+      .catch(() => null);
+
+    const byteArray = Array.from(file.buffer);
+    const dataTransfer = await this.page.evaluateHandle(
+      ({ bytes, name, mimeType }) => {
+        const dt = new DataTransfer();
+        dt.items.add(new File([new Uint8Array(bytes)], name, { type: mimeType }));
+        return dt;
+      },
+      { bytes: byteArray, name: file.name, mimeType: file.mimeType },
+    );
+
+    await dropZone.dispatchEvent("dragenter", { dataTransfer });
+    await dropZone.dispatchEvent("dragover", { dataTransfer });
+    await dropZone.dispatchEvent("drop", { dataTransfer });
+
+    const response = await responsePromise;
+    if (response && !response.ok()) {
+      throw new Error(
+        `Upload HTTP failed: ${response.status()} ${response.statusText()} ${response.url()}`,
+      );
+    }
+
+    const spinner = this.page.locator(".p-progress-spinner, .p-blockui").first();
+    if (await spinner.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await spinner.waitFor({ state: "hidden", timeout: 60_000 });
+    }
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.postSubmitMicroDelay(800);
+  }
+
+  /** UDP-T4725 — uploaded file names appear in the **Files** grid on the Upload tab. */
+  async expectUploadedFilesVisibleInUploadGrid(fileNames: string[]): Promise<void> {
+    this.logStep(`Expect Uploaded Files Visible In Upload Grid (${fileNames.join(", ")})`);
+    await this.ensureUploadTab();
+    const table = this.uploadTabDocumentsTable();
+    await expect(table).toBeVisible({ timeout: 30_000 });
+    for (const name of fileNames) {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      await expect(
+        table.locator("tbody tr").filter({ hasText: new RegExp(escaped, "i") }).first(),
+      ).toBeVisible({ timeout: 90_000 });
+    }
+  }
+
   async openDocumentsTab(): Promise<void> {
     await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
     let root = this.documentManagementTabView();
@@ -1117,6 +1237,8 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   }
 
   async addNoteAndSubmit(noteText: string): Promise<void> {
+    this.logStep(`Add Note And Submit (${noteText.slice(0, 48)})`);
+    await this.ensureUploadTab();
     await this.addNewNotesButton.waitFor({ state: "visible", timeout: 60000 });
     await this.addNewNotesButton.scrollIntoViewIfNeeded();
     await this.addNewNotesButton.click();
@@ -1128,6 +1250,14 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
     await ta.fill(noteText);
     await dialog.locator(':text-is("Submit")').click();
     await dialog.waitFor({ state: "hidden", timeout: 30000 }).catch(() => {});
+
+    const token = noteText.slice(0, 24).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    await expect
+      .poll(
+        async () => this.page.getByText(new RegExp(token, "i")).first().isVisible().catch(() => false),
+        { timeout: 45_000, intervals: [400, 1_000, 2_000] },
+      )
+      .toBeTruthy();
   }
 
   /** Switch to **Upload** tab inside the post-submission document strip (safe if already active). */
@@ -1152,6 +1282,18 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
       await uploadTab.click({ timeout: 15000 }).catch(() => {});
     }
     await this.browseFilesButton.waitFor({ state: "visible", timeout: 60000 });
+  }
+
+  private notesListScope(): Locator {
+    const tabPanel = this.page
+      .locator(".p-tabview-panel")
+      .filter({ has: this.addNewNotesButton })
+      .first();
+    const stripPanel = this.documentManagementTabView()
+      .locator(".p-tabview-panel")
+      .filter({ has: this.addNewNotesButton })
+      .first();
+    return tabPanel.or(stripPanel);
   }
 
   private notesRegion(): Locator {
@@ -1225,6 +1367,36 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         intervals: [500, 1_500, 3_000],
       })
       .toBeTruthy();
+  }
+
+  /**
+   * Saved note body is listed on Post Submission and cannot be edited or deleted
+   * (no row actions / inline editors on note cards).
+   */
+  async expectNoteVisibleAndReadOnly(noteText: string): Promise<void> {
+    this.logStep(`Expect Note Visible And Read Only (${noteText.slice(0, 48)})`);
+    await this.ensureUploadTab();
+    const token = noteText.slice(0, 24).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const noteBody = this.page.getByText(new RegExp(token, "i")).first();
+    await expect(noteBody).toBeVisible({ timeout: 45_000 });
+
+    const notesList = this.notesListScope();
+    const editDelete = notesList
+      .getByRole("button", { name: /^(Edit|Delete|Remove)(\s+Note)?$/i })
+      .or(notesList.getByRole("link", { name: /^(Edit|Delete|Remove)(\s+Note)?$/i }))
+      .or(
+        notesList.locator(
+          ".fa-pencil, .fa-pen, .fa-edit, .fa-trash, .fa-trash-alt, .pi-pencil, .pi-trash, .pi-trash-alt",
+        ),
+      );
+    await expect(editDelete).toHaveCount(0, { timeout: 8_000 });
+
+    const editableInCards = notesList
+      .locator(
+        "gen-card textarea, p-card textarea, .p-card-body textarea, [class*='note'] textarea, gen-card input[type='text'], p-card input[type='text']",
+      )
+      .filter({ visible: true });
+    await expect(editableInCards).toHaveCount(0, { timeout: 5_000 });
   }
 
   async expectOversizedNoteRejectedOnSubmit(): Promise<void> {
@@ -1980,9 +2152,14 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
   /** Poll for success toast/copy/status after Originator Declaration **Proceed** (or lone **Proceed**). */
   private async waitForPostSubmitLoaderGone(timeoutMs = 120_000): Promise<void> {
     const p = this.page;
-    const loaders = p.locator(
-      ".p-progress-spinner, .p-blockui, progressbar, .p-progressbar, .p-progressbar-indeterminate",
-    );
+    /** Exclude completed `p-fileupload` row bars — they stay in the Upload grid and never hide. */
+    const loaders = p
+      .locator(".p-progress-spinner, .p-blockui, .p-progressbar-indeterminate")
+      .or(
+        p
+          .locator("progressbar, .p-progressbar")
+          .filter({ hasNot: p.locator("p-fileupload, .p-fileupload, .p-fileupload-file") }),
+      );
     const n = await loaders.count();
     for (let i = 0; i < n; i++) {
       await loaders
@@ -2748,14 +2925,78 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
   /** Read **Date & Time** from a Generated Documents row's dedicated column cell. */
   private async readGeneratedDocumentDateTimeFromRow(row: Locator): Promise<string> {
+    const raw = await this.readGeneratedDocumentDateTimeCellRaw(row);
+    if (!raw) {
+      throw new Error("Generated Documents Date & Time cell is empty.");
+    }
+    return raw;
+  }
+
+  /** Raw **Date & Time** cell text; empty when the document has not been generated yet. */
+  private async readGeneratedDocumentDateTimeCellRaw(row: Locator): Promise<string> {
     const colIdx = await this.generatedDocumentsDateTimeColumnIndex();
     const cell = row.locator("td").nth(colIdx);
-    await expect(cell).toBeVisible({ timeout: 15_000 });
-    const cellText = (await cell.innerText()).replace(/\s+/g, " ").trim();
-    if (!cellText || cellText === "-") {
-      throw new Error(`Generated Documents Date & Time cell is empty: "${cellText}"`);
+    if (!(await cell.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return "";
     }
-    return DOCustomerQuotePostSubmitPage.extractGeneratedDocumentDateTime(cellText);
+    const cellText = (await cell.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+    if (!cellText || cellText === "-" || /^n\/a$/i.test(cellText)) {
+      return "";
+    }
+    try {
+      return DOCustomerQuotePostSubmitPage.extractGeneratedDocumentDateTime(cellText);
+    } catch {
+      return "";
+    }
+  }
+
+  /** UDP-T3833 / UDP-T4726 — manually generated row has no **Date & Time** until Preview/Download. */
+  async expectGeneratedDocumentNotYetGenerated(namePattern: RegExp): Promise<void> {
+    this.logStep(`Expect Generated Document Not Yet Generated (${namePattern.source})`);
+    await this.openDocumentsTab();
+    const row = await this.generatedDocumentsRowByName(namePattern);
+    await expect(row).toBeVisible({ timeout: 60_000 });
+    const raw = await this.readGeneratedDocumentDateTimeCellRaw(row);
+    expect(raw, "Expected empty Date & Time before manual Preview/Download").toBe("");
+  }
+
+  /**
+   * UDP-T3833 / UDP-T4726 — **Auto Generated** unticked: select row, **Preview** triggers AF generation,
+   * then **Date & Time** appears on the Generated Documents grid.
+   */
+  async expectManualGenerationDocumentPreviewCreatesTimestamp(
+    namePattern: RegExp = /Customer Quote\s*-\s*Basic/i,
+  ): Promise<string> {
+    this.logStep(
+      `Expect Manual Generation Document Preview Creates Timestamp (${namePattern.source})`,
+    );
+    await this.expectGeneratedDocumentNotYetGenerated(namePattern);
+    await this.triggerGeneratedDocumentManualPreview(namePattern);
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.refreshGeneratedDocumentsTab();
+    return this.readGeneratedDocumentDateTimeWhenReady(namePattern);
+  }
+
+  /** **Preview** on a manually generated document — may show **Document Parameters** before AF generation. */
+  private async triggerGeneratedDocumentManualPreview(namePattern: RegExp): Promise<void> {
+    this.logStep(`Trigger Generated Document Manual Preview (${namePattern.source})`);
+    await this.selectGeneratedDocumentsRowByDocumentName(namePattern);
+    const preview = await this.generatedDocumentsSharedActionButton("Preview");
+    await expect(preview).toBeVisible({ timeout: 20_000 });
+    await preview.scrollIntoViewIfNeeded();
+
+    const paramsDialog = this.page.getByRole("dialog", { name: /Document Parameters/i });
+
+    await preview.click({ timeout: 12_000 });
+
+    if (await paramsDialog.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await this.confirmDocumentParameters();
+    }
+
+    await this.page
+      .waitForEvent("popup", { timeout: 20_000 })
+      .then((popup) => popup.close().catch(() => {}))
+      .catch(() => {});
   }
 
   /** Visible Generated Documents rows matching `namePattern` (newest **Date & Time** first). */
