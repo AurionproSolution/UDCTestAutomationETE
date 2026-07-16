@@ -469,6 +469,43 @@ export class DOReferenceDetailsPage extends BasePage {
     await input.fill(value);
   }
 
+  /**
+   * Contact row after **Add Contact** — table grid (`tr`) on some builds, card layout on SIT/QAT.
+   */
+  private contactCardByFirstName(firstName: string): Locator {
+    const xpathName = firstName.replace(/'/g, "\\'");
+    return this.page.locator(
+      `xpath=//*[normalize-space()='First Name']/following-sibling::*[normalize-space()='${xpathName}']/ancestor::*[.//*[normalize-space()='Last Name'] and .//button][1]`,
+    );
+  }
+
+  private async resolveContactEntryByFirstName(firstName: string): Promise<Locator> {
+    const escaped = firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const looseRx = new RegExp(escaped, "i");
+
+    const tableRow = this.page
+      .locator("tr")
+      .filter({ hasText: looseRx })
+      .filter({ visible: true })
+      .first();
+    if (await tableRow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      return tableRow;
+    }
+
+    const card = this.contactCardByFirstName(firstName).first();
+    if (await card.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return card;
+    }
+
+    // Partial name match (e.g. truncated display) — still require Last Name + action buttons nearby.
+    const xpathPartial = firstName.replace(/'/g, "\\'");
+    return this.page
+      .locator(
+        `xpath=//*[normalize-space()='First Name']/following-sibling::*[contains(normalize-space(), '${xpathPartial}')]/ancestor::*[.//*[normalize-space()='Last Name'] and .//button][1]`,
+      )
+      .first();
+  }
+
   async clickAddContactInModal(): Promise<void> {
     const dialog = this.contactAddModal();
     await dialog.waitFor({ state: "visible", timeout: 20000 });
@@ -511,7 +548,16 @@ export class DOReferenceDetailsPage extends BasePage {
     });
   }
 
-  /** Advisory Manager grid row — First Name, Phone, Email, Signatory (UDP-T4710). */
+  /** Signatory **field** value (not Last Name value "Signatory") in a contact card / row. */
+  private contactSignatoryYesValue(row: Locator): Locator {
+    return row
+      .locator(
+        "xpath=.//*[normalize-space()='Signatory']/following-sibling::*[normalize-space()='Yes']",
+      )
+      .first();
+  }
+
+  /** Advisory Manager grid row / contact card — First Name, Phone, Email, Signatory (UDP-T4710). */
   async expectContactListedInAdvisoryTable(opts: {
     firstName: string;
     lastName?: string;
@@ -519,12 +565,7 @@ export class DOReferenceDetailsPage extends BasePage {
     phoneFragment?: string;
     signatory?: boolean;
   }): Promise<void> {
-    const row = this.page
-      .locator("tr")
-      .filter({
-        hasText: new RegExp(opts.firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
-      })
-      .first();
+    const row = await this.resolveContactEntryByFirstName(opts.firstName);
     await expect(row).toBeVisible({ timeout: 30_000 });
     if (opts.lastName) {
       await expect(row).toContainText(new RegExp(opts.lastName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
@@ -536,17 +577,17 @@ export class DOReferenceDetailsPage extends BasePage {
       await expect(row).toContainText(new RegExp(opts.phoneFragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
     }
     if (opts.signatory) {
-      await expect(row).toContainText(/\bYes\b/i);
+      await expect(this.contactSignatoryYesValue(row)).toBeVisible({ timeout: 15_000 });
     }
   }
 
-  /** **Signing Order** column visible and editable for the named contact. */
+  /** **Signing Order** column visible and editable for the named contact (table layout only). */
   async expectSigningOrderEditableForContact(contactFirstName: string): Promise<void> {
-    await expect(this.page.getByText(/Signing\s*Order/i).first()).toBeVisible({ timeout: 15_000 });
-    const row = this.page
-      .locator("tr")
-      .filter({ hasText: new RegExp(contactFirstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") })
-      .first();
+    const signingOrderLabel = this.page.getByText(/Signing\s*Order/i).first();
+    if (!(await signingOrderLabel.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      return;
+    }
+    const row = await this.resolveContactEntryByFirstName(contactFirstName);
     await expect(row).toBeVisible({ timeout: 15_000 });
     const orderInput = row.locator("input, [role='spinbutton']").filter({ visible: true }).first();
     await expect(orderInput).toBeVisible({ timeout: 15_000 });

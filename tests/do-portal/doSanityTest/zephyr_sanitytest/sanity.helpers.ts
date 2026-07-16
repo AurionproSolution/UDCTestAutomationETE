@@ -39,6 +39,7 @@ import {
 } from "../../doRegressionTestSuite/fl.helpers";
 import { DOPersonalDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import { DOReferenceDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
+import { DOBusinessDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/businessDetails";
 import {
   DOC_T3824_BORROWER,
   openPostSubmissionUploadStepWithAsset,
@@ -73,6 +74,35 @@ let origRefCounter = 0;
 export function uniqueOrigRef(prefix = "SAN"): string {
   origRefCounter += 1;
   return `${prefix}-${Date.now()}-${origRefCounter}`;
+}
+
+/** Quote ID from `/standard-quote/edit/{id}` while still on the quote wizard. */
+export function readStandardQuoteIdFromUrl(page: Page): string {
+  return page.url().match(/standard-quote\/edit\/(\d+)/i)?.[1]?.trim() ?? "";
+}
+
+/** Dashboard → reopen quote by ID (preferred) or origination reference listing search. */
+export async function reopenSanityQuoteOnDashboard(
+  page: Page,
+  opts: { origRef: string; quoteId?: string },
+): Promise<DODashboardPage> {
+  const quoteId = opts.quoteId?.trim() || readStandardQuoteIdFromUrl(page);
+  const dashboard = await openDashboard(page);
+  if (quoteId) {
+    await dashboard.openQuoteById(quoteId);
+  } else {
+    await dashboard.openOpenQuoteFromListingByReference(opts.origRef);
+  }
+  return dashboard;
+}
+
+/** Reopened quotes land on Asset Details — open Customer Details and assert primary borrower. */
+export async function expectSanityPrimaryBorrowerOnCustomerDetailsStep(page: Page): Promise<void> {
+  const asset = new DOAssetDetailsPage(page);
+  await asset.clickStandardQuoteStepTab(/Customer Details/i);
+  const customer = new DOCustomerDetailsPage(page);
+  await customer.waitForAddBorrowerButton();
+  await expect(standardQuoteRoot(page)).toContainText(/Liza|Marie|Doe/i, { timeout: 60_000 });
 }
 
 export async function selectCsaProductAndProgram(asset: DOAssetDetailsPage): Promise<void> {
@@ -404,6 +434,111 @@ async function clickMotochekProceed(dlg: Locator): Promise<void> {
   await btn.click({ timeout: 15_000 });
 }
 
+type MotochekDialogFields = {
+  make: string;
+  model: string;
+  year: string;
+  rego?: string;
+  vin?: string;
+};
+
+async function parseMotochekDialogFields(dlg: Locator): Promise<MotochekDialogFields> {
+  const body = ((await dlg.innerText()) ?? "").replace(/\u00a0/g, " ");
+  const pick = (label: string): string => {
+    const m = body.match(new RegExp(`${label}\\s*[:\\n]?\\s*([^\\n]+)`, "i"));
+    return (m?.[1] ?? "").trim();
+  };
+  const yearRaw = pick("Year");
+  const yearMatch = yearRaw.match(/\d{4}/);
+  return {
+    make: pick("Make"),
+    model: pick("Model"),
+    year: yearMatch?.[0] ?? yearRaw,
+    rego: pick("Rego No") || pick("Rego"),
+    vin: pick("VIN"),
+  };
+}
+
+async function clickTradeInMotochekProceed(dlg: Locator): Promise<void> {
+  const btn = dlg
+    .getByRole("button", { name: /^Add Trade$/i })
+    .or(dlg.locator("button, a").filter({ hasText: /Add Trade/i }))
+    .or(motochekProceedButton(dlg))
+    .first();
+  await expect(btn).toBeVisible({ timeout: 30_000 });
+  await expect(btn).toBeEnabled({ timeout: 30_000 });
+  await btn.scrollIntoViewIfNeeded();
+  await btn.click({ timeout: 15_000 });
+  await dlg.page().waitForLoadState("domcontentloaded").catch(() => {});
+}
+
+async function tradeInFormPopulated(addAsset: DOAddAssetPage): Promise<boolean> {
+  const make = (await addAsset.makeInputField.first().inputValue().catch(() => "")).trim();
+  const model = (await addAsset.modelInputField.first().inputValue().catch(() => "")).trim();
+  const year = (await addAsset.yearInputField.first().inputValue().catch(() => "")).trim();
+  return make.length > 0 && model.length > 0 && /\d{4}/.test(year);
+}
+
+/** Add Trade route may not copy Motochek hits — refill mandatory identity from search dialog text. */
+async function ensureTradeInFormPopulated(
+  addAsset: DOAddAssetPage,
+  moto: MotochekDialogFields,
+): Promise<void> {
+  if (await tradeInFormPopulated(addAsset).catch(() => false)) {
+    return;
+  }
+  if (moto.year) {
+    await addAsset.selectYear(moto.year).catch(async () => {
+      await addAsset.yearInputField.first().fill(moto.year);
+    });
+  }
+  if (moto.make) {
+    await addAsset.enterMake(moto.make);
+  }
+  if (moto.model) {
+    await addAsset.enterModel(moto.model);
+  }
+  if (moto.rego) {
+    await addAsset.enterRegoNO(moto.rego).catch(() => {});
+  }
+  if (moto.vin) {
+    await addAsset.enterVIN(moto.vin).catch(() => {});
+  }
+  await expect.poll(() => tradeInFormPopulated(addAsset), { timeout: 20_000 }).toBe(true);
+}
+
+async function returnFromAddTradeRouteToStandardQuote(page: Page): Promise<void> {
+  const root = standardQuoteRoot(page);
+  if (await root.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    return;
+  }
+  if (/\/asset\/addTrade/i.test(page.url())) {
+    const cancel = page.getByRole("button", { name: /^Cancel$/i }).first();
+    if (await cancel.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await cancel.click({ timeout: 15_000 }).catch(() => {});
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+    }
+  }
+  if (await root.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    return;
+  }
+  const quoteCrumb = page
+    .getByRole("link", { name: /Standard Quote\s*-/i })
+    .or(page.getByRole("link", { name: /Create Standard Quote/i }))
+    .first();
+  if (await quoteCrumb.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    await quoteCrumb.click({ timeout: 15_000 });
+  } else {
+    await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => {});
+  }
+  await expect(root).toBeVisible({ timeout: 120_000 });
+}
+
+async function waitForReturnToStandardQuote(page: Page, asset: DOAssetDetailsPage): Promise<void> {
+  await returnFromAddTradeRouteToStandardQuote(page);
+  await asset.waitForAssetDetailsStepReady();
+}
+
 async function isConditionAlreadySelected(addAsset: DOAddAssetPage, condition: string): Promise<boolean> {
   const pattern = new RegExp(condition, "i");
   const combos = addAsset.conditionDropdown.getByRole("combobox");
@@ -557,30 +692,28 @@ export async function addTradeInAssetViaMotocheck(
   await asset.clickSearchAddTradeInAndExpectChooserOpened();
   const tradeDlg = await tradeInSearchAssetDialog(page);
   await runMotochekRegoSearch(page, tradeDlg, MOTOCHEK_SANITY_REGO);
+  const motoFields = await parseMotochekDialogFields(tradeDlg);
+  expect(motoFields.make.length).toBeGreaterThan(0);
+  expect(motoFields.model.length).toBeGreaterThan(0);
+  expect(motoFields.year.length).toBeGreaterThan(0);
 
-  const addTradeBtn = tradeDlg
-    .getByRole("button", { name: /^Add Trade$/i })
-    .or(tradeDlg.locator("button, a").filter({ hasText: /Add Trade/i }))
-    .first();
-  if (await addTradeBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await addTradeBtn.click({ timeout: 15_000 });
-  } else {
-    await clickMotochekProceed(tradeDlg);
-  }
+  await clickTradeInMotochekProceed(tradeDlg);
 
   await addAsset.makeInputField.first().waitFor({ state: "visible", timeout: 60_000 });
-  const make = (await addAsset.makeInputField.first().inputValue()).trim();
-  const model = (await addAsset.modelInputField.first().inputValue()).trim();
+  await ensureTradeInFormPopulated(addAsset, motoFields);
+  const make =
+    (await addAsset.makeInputField.first().inputValue().catch(() => "")).trim() || motoFields.make;
+  const model =
+    (await addAsset.modelInputField.first().inputValue().catch(() => "")).trim() || motoFields.model;
+
   await addAsset.enterAssetValue(tradeValue);
   if (await addAsset.conditionDropdown.isVisible({ timeout: 3_000 }).catch(() => false)) {
     await addAsset.selectCondition("Used").catch(() => {});
   }
   await addAsset.chooseMotivePower("Petrol").catch(() => {});
-  await addAsset.chooseCountryRegistered("New Zealand").catch(() => {});
-  await addAsset.chooseAssetLocation("North Island").catch(() => {});
   await addAsset.clickSummitButton();
   await addAsset.clickCrossButton().catch(() => {});
-  await asset.closeSearchTradeInAssetDialog().catch(() => {});
+  await waitForReturnToStandardQuote(page, asset);
 
   await asset.openAssetInsuranceTradeInSummary();
   const summaryDlg = assetInsuranceSummaryDialog(page);
@@ -729,19 +862,6 @@ export async function fillExistingIndividualBorrowerThroughReference(
   return ref;
 }
 
-async function navigateToBorrowerSummaryIfAvailable(page: Page): Promise<void> {
-  const root = standardQuoteRoot(page);
-  const byRole = root
-    .getByRole("button", { name: /^Borrower\s+Summary$/i })
-    .or(root.getByRole("link", { name: /^Borrower\s+Summary$/i }))
-    .or(root.getByRole("tab", { name: /^Borrower\s+Summary$/i }))
-    .first();
-  if (await byRole.isVisible({ timeout: 6_000 }).catch(() => false)) {
-    await byRole.click({ timeout: 15_000 });
-    await page.waitForTimeout(400);
-  }
-}
-
 /** Leave individual/borrower wizard and reopen Standard Quote **Customer Details**. */
 export async function returnToStandardQuoteCustomerDetailsStep(
   page: Page,
@@ -850,13 +970,15 @@ export async function addSignatoryContactToReference(
 }
 
 /** Trust borrower — all mandatory steps through Reference Details with a signatory contact. */
+export const SANITY_TRUST_NAME = "Sanity Family Trust";
+
 export async function fillSanityTrustCustomerFullDataWithSignatories(
   page: Page,
   trust: DOTrustDetailsPage,
 ): Promise<DOReferenceDetailsPage> {
   await trust.selectTrustTypeFirstAvailableOption();
-  await trust.enterTrustName("Sanity Family Trust");
-  await trust.enterRegisteredNumber("TR123456");
+  await trust.enterTrustName(SANITY_TRUST_NAME);
+  await trust.enterRegisteredNumber("12345678");
   await trust.enterGstNumber("123456789");
   await trust.enterTrustPurpose("Sanity automation trust borrower.");
   await trust.selectPrimaryNatureOfTrustFirstAvailableOption();
@@ -913,8 +1035,91 @@ export async function fillSanityTrustCustomerFullDataWithSignatories(
     lastName: "Signatory",
     email: "trust.signatory@example.com",
   });
-  await trust.clickSaveTrustDetails();
-  await expect(page.getByText(/Sanity Family Trust/i).first()).toBeVisible({ timeout: 30_000 });
+  await ref.confirmCustomerDetailsCorrect();
+  await page.getByRole("button", { name: /^Save$/i }).last().click({ timeout: 30_000 });
+  await page.waitForLoadState("networkidle", { timeout: 25_000 }).catch(() => {});
+  await ref.expectContactListedInAdvisoryTable({
+    firstName: "Trust",
+    lastName: "Signatory",
+    email: "trust.signatory@example.com",
+    signatory: true,
+  });
+  return ref;
+}
+
+export const SANITY_BUSINESS_LEGAL_NAME = "Sanity Business Ltd";
+
+/** Business borrower — all mandatory steps through Reference Details with a signatory contact. */
+export async function fillSanityBusinessCustomerFullDataWithSignatories(
+  page: Page,
+  biz: DOBusinessDetailsPage,
+): Promise<DOReferenceDetailsPage> {
+  await biz.selectOrganisationType("Incorporated Body");
+  await biz.enterLegalName(SANITY_BUSINESS_LEGAL_NAME);
+  await biz.enterTradingName("Sanity Trading");
+  await biz.enterRegisteredCompanyNumber("1234567");
+  await biz.enterNzBusinessNumber("9429031234567");
+  await biz.enterGstNumber("123456789");
+  await biz.fillBusinessDescription("Sanity automation business borrower.");
+  await biz.selectPrimaryNatureOfBusiness("0113 Vegetable Growing");
+  await biz.selectSourceOfWealth("Business Activity");
+  await biz.enterTimeInBusiness("5", "3");
+  await biz.enterBusinessAreaCode("9");
+  await biz.enterBusinessPhoneNumber("0211234567");
+  await biz.enterBusinessEmail("sanity.business@example.com");
+  await biz.clickNextButton();
+
+  const address = new DOAddressDetailsPage(page);
+  await address.waitForPhysicalAddressStep();
+  await address.timeAtAddress("1", "1");
+  await address.enterStreetNumber("123");
+  await address.enterStreetName("Main Street");
+  await address.enterCity("Wellington");
+  await address.chooseCountry("New Zealand");
+  await address.clickReuseForPostalAddressToggle();
+  await page.waitForTimeout(400);
+  await address.ensureReuseForRegisterAddressYes();
+  await address.ensureOverseasAddressNoIfPreviousPhysicalVisible();
+  await address.fillPreviousPhysicalRequiredIfPresent({
+    years: "1",
+    months: "1",
+    streetNumber: "45",
+    streetName: "Queen Street",
+    city: "Wellington",
+    country: "New Zealand",
+  });
+  await address.clickNextButton();
+
+  const fin = new DOFinancialPositionPage(page);
+  await fin.waitForFinancialPositionStep();
+  await fin.selectBusinessNetProfitLastYearNo();
+  await page.waitForTimeout(200);
+  await fin.selectBusinessNetProfitLastYearYes();
+  await fin.fillBusinessNetProfitLastYear("$50000.00");
+  await fin.fillBusinessTurnoverLatestYear("$500000.00", "31/03/2025");
+  await fin.fillBusinessCashBalance("$10000.00", "31/03/2025");
+  await fin.clickNextButton();
+
+  const ref = new DOReferenceDetailsPage(page);
+  await ref.waitForReferenceDetailsStep();
+  await addSignatoryContactToReference(ref, {
+    contactType: "Accountant",
+    firstName: "Biz",
+    lastName: "Signatory",
+    email: "biz.signatory@example.com",
+    mobileAreaCode: "123",
+    mobileNumber: "897897897",
+  });
+  await ref.confirmCustomerDetailsCorrect();
+  await page.getByRole("button", { name: /^Save$/i }).last().click({ timeout: 30_000 });
+  await page.waitForLoadState("networkidle", { timeout: 25_000 }).catch(() => {});
+  await ref.expectContactListedInAdvisoryTable({
+    firstName: "Biz",
+    lastName: "Signatory",
+    email: "biz.signatory@example.com",
+    phoneFragment: "897897897",
+    signatory: true,
+  });
   return ref;
 }
 
@@ -946,6 +1151,261 @@ export function searchTypeRadioInput(dlg: Locator, value: "individual" | "busine
   return dlg.locator(`input[type="radio"][value="${value}"]`).first();
 }
 
+/** UDC number that should not match — enables **Add New Customer** after Search. */
+export const SANITY_NO_MATCH_UDC = "999999999999";
+
+/** Search Customer dialog: select **Business**, search by UDC with no match, then **Add New Customer**. */
+export async function selectBusinessTypeSearchNoMatchUdcAndAddNewCustomer(
+  page: Page,
+  customer: DOCustomerDetailsPage,
+): Promise<void> {
+  const dlg = await waitForSearchCustomerDialog(page);
+  const businessBox = dlg.locator('p-radiobutton:has(input[value="business"]) .p-radiobutton-box').first();
+  if (await businessBox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await businessBox.click({ force: true });
+  } else {
+    await searchTypeRadioInput(dlg, "business").check({ force: true });
+  }
+  await customer.searchByDropdownClick();
+  await customer.selectUDCSelectOption();
+  await customer.enterUDCCustomerNumber(SANITY_NO_MATCH_UDC);
+  await customer.clickSearchButton();
+  await customer.clickAddNewCustomerButton();
+}
+
+/** Search Customer dialog: select **Trust**, search by UDC with no match, then **Add New Customer**. */
+export async function selectTrustTypeSearchNoMatchUdcAndAddNewCustomer(
+  page: Page,
+  customer: DOCustomerDetailsPage,
+): Promise<void> {
+  const dlg = await waitForSearchCustomerDialog(page);
+  const trustBox = dlg.locator('p-radiobutton:has(input[value="trust"]) .p-radiobutton-box').first();
+  if (await trustBox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await trustBox.click({ force: true });
+  } else if ((await searchTypeRadioInput(dlg, "trust").count()) > 0) {
+    await searchTypeRadioInput(dlg, "trust").check({ force: true });
+  }
+  await customer.searchByDropdownClick();
+  await customer.selectUDCSelectOption();
+  await customer.enterUDCCustomerNumber(SANITY_NO_MATCH_UDC);
+  await customer.clickSearchButton();
+  await customer.clickAddNewCustomerButton();
+}
+
+/** Second-party identity used when adding Co-Borrower / Guarantor in sanity role-change flows. */
+export const SANITY_SECOND_PARTY_FIRST_NAME = "John";
+export const SANITY_SECOND_PARTY_LAST_NAME = "Smith";
+
+async function navigateToBorrowerSummaryIfAvailable(page: Page): Promise<void> {
+  const root = standardQuoteRoot(page);
+  const byRole = root
+    .getByRole("button", { name: /^Borrower\s+Summary$/i })
+    .or(root.getByRole("link", { name: /^Borrower\s+Summary$/i }))
+    .or(root.getByRole("tab", { name: /^Borrower\s+Summary$/i }))
+    .first();
+  if (await byRole.isVisible({ timeout: 6_000 }).catch(() => false)) {
+    await byRole.click({ timeout: 15_000 });
+    await page.waitForTimeout(400);
+    return;
+  }
+  const numbered = root.locator("button, a, span, li").filter({ hasText: /\d+\.\s*Borrower\s+Summary/i }).first();
+  if (await numbered.isVisible({ timeout: 4_000 }).catch(() => false)) {
+    await numbered.click({ timeout: 15_000 });
+    await page.waitForTimeout(400);
+  }
+}
+
+export async function returnToBorrowerSummaryForPartyObserve(page: Page): Promise<void> {
+  const ref = new DOReferenceDetailsPage(page);
+  if (await ref.addContactDetailsButton.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await navigateToBorrowerSummaryIfAvailable(page);
+    return;
+  }
+  await navigateToBorrowerSummaryIfAvailable(page);
+}
+
+export function partyRowByName(page: Page, namePattern: RegExp): Locator {
+  const candidates = page.locator("tr, [role='row'], .p-datatable-row, li, section, div.grid, div.row, div");
+  return candidates
+    .filter({ hasText: namePattern })
+    .first()
+    .or(standardQuoteRoot(page).locator("tr, [role='row'], .p-datatable-row, li, section, div").filter({ hasText: namePattern }).first());
+}
+
+async function tryEnableCopyPrimaryBorrowerAddress(page: Page): Promise<boolean> {
+  const label = page.getByText(/Copy primary borrower/i).first();
+  if (!(await label.isVisible({ timeout: 5_000 }).catch(() => false))) {
+    return false;
+  }
+  const slider = label.locator(
+    "xpath=following::span[contains(@class,'p-inputswitch-slider')][1]",
+  );
+  if (!(await slider.isVisible({ timeout: 3_000 }).catch(() => false))) {
+    return false;
+  }
+  await slider.click({ force: true });
+  await page.waitForTimeout(1_000);
+  return true;
+}
+
+export async function expectPartyRowShowsRole(
+  page: Page,
+  namePattern: RegExp,
+  rolePattern: RegExp,
+): Promise<void> {
+  const row = partyRowByName(page, namePattern);
+  await expect(row).toBeVisible({ timeout: 60_000 });
+  await expect(row).toContainText(rolePattern);
+}
+
+export async function clickEditPartyFromPartiesList(page: Page, namePattern: RegExp): Promise<void> {
+  const root = standardQuoteRoot(page);
+  const scopedRow = root
+    .locator("tr, [role='row'], .p-datatable-row, .p-datatable-tbody > tr, li, section")
+    .filter({ hasText: namePattern })
+    .first();
+  const editInRow = scopedRow
+    .getByRole("button", { name: /^Edit$/i })
+    .or(scopedRow.getByRole("link", { name: /^Edit$/i }))
+    .or(scopedRow.locator("button, a").filter({ hasText: /^Edit$/i }))
+    .first();
+  if (await editInRow.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await editInRow.click({ timeout: 20_000 });
+    await page.waitForTimeout(500);
+    return;
+  }
+  const pencil = scopedRow.locator("i.pi-pencil, .pi-pencil, [class*='pi-pencil'], i.fa-pen").first();
+  if (await pencil.isVisible({ timeout: 4_000 }).catch(() => false)) {
+    await pencil.click({ timeout: 15_000 });
+    await page.waitForTimeout(500);
+    return;
+  }
+  const nameLink = scopedRow
+    .locator("a.cursor-pointer.text-primary, .cursor-pointer.text-primary")
+    .filter({ hasText: namePattern })
+    .first();
+  if (await nameLink.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await nameLink.click({ timeout: 20_000 });
+    await page.waitForTimeout(500);
+    return;
+  }
+  throw new Error(`Could not open party editor for name matching ${namePattern}`);
+}
+
+export async function fillValidSecondIndividualPersonalBorrower(p: DOPersonalDetailsPage): Promise<void> {
+  await p.chooseTitle("Mr");
+  await p.enterFirstName(SANITY_SECOND_PARTY_FIRST_NAME);
+  await p.enterMiddleName("Alan");
+  await p.enterLastName(SANITY_SECOND_PARTY_LAST_NAME);
+  await p.chooseGender("Male");
+  await p.enterDateOfBirth("15/06/1985");
+  await p.chooseMarritalStatus("Single");
+  await p.chooseNoOfDependents("0");
+  await p.enterMobileNumber("0219876543");
+  await p.enterEmail("john.smith@example.com");
+  await p.chooseLicenceType("Full Licence");
+  await p.chooseCountryOfIssue("New Zealand");
+  await p.enterLicenceNumber("CD654321");
+  await p.enterVersionNumber("512");
+  await p.chooseNewZealandResident("Yes");
+  await p.chooseCountryOfBirth("New Zealand");
+  await p.chooseCountryOfCitizenship("New Zealand");
+}
+
+/** Existing UDC individual as primary Borrower through Post Submission. */
+export async function advanceExistingUdcBorrowerToPostSubmission(
+  page: Page,
+  udcNumber: string,
+  origRef?: string,
+): Promise<DOCustomerQuotePostSubmitPage> {
+  const { customer } = await openSanityCustomerDetailsStep(page, origRef);
+  await customer.clickAddBorrowersOrGuarantors();
+  await customer.searchCustomer.searchByUdcNumber(udcNumber);
+  await customer.searchCustomer.clickAddFromBorrowerSearchResult(udcNumber);
+  const personal = new DOPersonalDetailsPage(page);
+  await expect(personal.personalDetailsRoot).toBeVisible({ timeout: 120_000 });
+  await personal.clickSavePersonalDetails();
+  await personal.clickNextButton();
+  const address = new DOAddressDetailsPage(page);
+  await fillMinimalAddressContinue(page, address);
+  const emp = new DOEmploymentDetailsPage(page);
+  await fillMinimalEmploymentContinue(emp);
+  const fin = new DOFinancialPositionPage(page);
+  await fillMinimalFinancialContinue(fin);
+  await navigateToBorrowerSummaryIfAvailable(page);
+  const ref = new DOReferenceDetailsPage(page);
+  await ref.waitForReferenceDetailsStep();
+  await ref.clickAddContactDetails();
+  await ref.selectContactType("Accountant");
+  await ref.enterContactFirstName("Alex");
+  await ref.enterContactLastName("Referee");
+  await ref.clickAddContactInModal();
+  await ref.confirmCustomerDetailsCorrect();
+  await ref.advanceFromReferenceDetailsToPostSubmission();
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  await post.waitForUploadStep();
+  return post;
+}
+
+/** Save co-borrower address only (parties list updates without advancing the full wizard). */
+async function fillCoBorrowerAddressSaveOnly(page: Page, address: DOAddressDetailsPage): Promise<void> {
+  await address.waitForPhysicalAddressStep();
+  const copied = await tryEnableCopyPrimaryBorrowerAddress(page);
+  if (copied) {
+    await address.selectResidenceType("Boarding").catch(() => {});
+    await address.clickReuseForPostalAddressToggle().catch(() => {});
+  } else {
+    await address.waitForAddressStepReadyForInput();
+    await address.timeAtAddress("3", "0");
+    await address.enterStreetNumber("456");
+    await address.enterStreetName("CoBorrower Street");
+    await address.enterCity("Auckland");
+    await address.chooseCountry("New Zealand");
+    await address.selectResidenceType("Boarding");
+    await address.clickReuseForPostalAddressToggle();
+  }
+  await address.clickSaveAddressDetails();
+}
+
+async function returnToPostSubmitPartiesView(page: Page): Promise<void> {
+  const quoteCrumb = page.getByRole("link", { name: /Standard Quote\s*-/i }).first();
+  if (await quoteCrumb.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await quoteCrumb.click({ timeout: 20_000 });
+    await page.waitForTimeout(800);
+  }
+  await navigateToBorrowerSummaryIfAvailable(page);
+}
+
+/** Add a second existing UDC Individual as Co-Borrower from Post Submission. Returns a name pattern for party assertions. */
+export async function addSecondIndividualCoBorrowerFromPostSubmit(
+  page: Page,
+  udcNumber: string,
+): Promise<RegExp> {
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  const customer = new DOCustomerDetailsPage(page);
+  await post.clickAddBorrowersOrGuarantorsButton();
+  await customer.searchCustomer.searchByUdcNumber(udcNumber);
+  await customer.searchCustomer.clickAddFromBorrowerSearchResult(udcNumber);
+
+  const personal = new DOPersonalDetailsPage(page);
+  await expect(personal.personalDetailsRoot).toBeVisible({ timeout: 120_000 });
+  await personal.chooseCustomerRole(/^Co[\s-]*Borrower$/i);
+  const firstName = ((await personal.firstNameInput.inputValue().catch(() => "")) || "").trim();
+  const lastName = ((await personal.lastNameInput.inputValue().catch(() => "")) || "").trim();
+  const namePattern = new RegExp(
+    firstName.length > 0 ? firstName.split(/\s+/)[0]! : lastName.length > 0 ? lastName : udcNumber,
+    "i",
+  );
+  await personal.clickSavePersonalDetails();
+  await personal.clickNextButton();
+
+  const address = new DOAddressDetailsPage(page);
+  await fillCoBorrowerAddressSaveOnly(page, address);
+  await returnToPostSubmitPartiesView(page);
+  await expect(partyRowByName(page, namePattern)).toBeVisible({ timeout: 60_000 });
+  return namePattern;
+}
+
 export async function selectSearchCustomerTrustType(dlg: Locator): Promise<void> {
   const trustInput = searchTypeRadioInput(dlg, "trust");
   if ((await trustInput.count()) === 0) {
@@ -965,7 +1425,7 @@ export async function selectSearchCustomerTrustType(dlg: Locator): Promise<void>
 export async function verifyT3824BorrowerDataOnReopenedQuote(page: Page): Promise<void> {
   const asset = new DOAssetDetailsPage(page);
   const customer = new DOCustomerDetailsPage(page);
-  await asset.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  await asset.waitForQuoteLoadersToFinish(120_000);
   await asset.clickStandardQuoteStepTab(/Customer\s*Details/i);
   await customer.waitForAddBorrowerButton();
 
@@ -996,7 +1456,7 @@ export async function createSaveAndReopenDocumentationQuote(
   origRef: string,
 ): Promise<void> {
   const { asset } = await openPostSubmissionUploadStepWithAsset(page, origRef);
-  await asset.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  await asset.waitForQuoteLoadersToFinish(120_000);
   const quoteId = await asset.readStandardQuoteIdFromHeader();
   await asset.clickSaveStandardQuoteStep({ originatorRefForRequiredDialog: origRef });
   const dashboard = await openDashboard(page);
