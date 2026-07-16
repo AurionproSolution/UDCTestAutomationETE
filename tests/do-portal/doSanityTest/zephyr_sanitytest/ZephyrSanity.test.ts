@@ -26,13 +26,19 @@ import {
   addPhysicalAssetViaMotocheck,
   addSecondDistinctManualAssetViaSummary,
   addSignatoryContactToReference,
+  addSecondIndividualCoBorrowerFromPostSubmit,
   addTradeInAssetViaMotocheck,
+  advanceExistingUdcBorrowerToPostSubmission,
   advanceIndividualBorrowerToPostSubmission,
   assetInsuranceSummaryDialog,
+  clickEditPartyFromPartiesList,
   editManualAssetClearAndRefill,
+  expectPartyRowShowsRole,
+  expectSanityPrimaryBorrowerOnCustomerDetailsStep,
   expectSummaryPhysicalAssetCount,
   fillMinimalIndividualBorrowerThroughReference,
   fillSanityCsaQuickQuote,
+  fillSanityBusinessCustomerFullDataWithSignatories,
   fillSanityTrustCustomerFullDataWithSignatories,
   fillValidIndividualPersonalBorrower,
   openAddOnsFromAssetDetails,
@@ -42,8 +48,13 @@ import {
   openSanityQuickQuote,
   prepareCalculableCsaQuote,
   promotionQuoteCheckbox,
+  readStandardQuoteIdFromUrl,
   removeLastAssetFromSummary,
+  reopenSanityQuoteOnDashboard,
+  returnToBorrowerSummaryForPartyObserve,
   searchTypeRadioInput,
+  selectBusinessTypeSearchNoMatchUdcAndAddNewCustomer,
+  selectTrustTypeSearchNoMatchUdcAndAddNewCustomer,
   selectCsaProductAndProgram,
   selectCsaQuickQuoteProductAndProgram,
   standardQuoteRoot,
@@ -52,6 +63,7 @@ import {
 } from "./sanity.helpers";
 
 const EXISTING_UDC = process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "1183304";
+const EXISTING_UDC_SECOND = process.env.UDC_EXISTING_SECOND_CUSTOMER_NUMBER?.trim() || "1183681";
 
 async function waitForProductProgramChange(page: Page, asset: DOAssetDetailsPage): Promise<void> {
   const loaders = page.locator(".app-loader-overlay, .p-progress-spinner, .p-blockui");
@@ -513,11 +525,9 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
 
   test("UDP-T4713 - Save Business customer empty fields validation @UDP-T4713", async ({ page }) => {
     test.setTimeout(480_000);
-    const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-    await asset.clickAddBorrowerorGuarantorButton();
-    const dlg = await waitForSearchCustomerDialog(page);
-    await dlg.locator('p-radiobutton:has(input[value="business"]) .p-radiobutton-box').first().click({ force: true }).catch(() => {});
-    await asset.clickAddNewCustomerButton();
+    const customer = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+    await customer.clickAddBorrowersOrGuarantors();
+    await selectBusinessTypeSearchNoMatchUdcAndAddNewCustomer(page, customer);
     const biz = new DOBusinessDetailsPage(page);
     await biz.waitForBusinessDetailsStep();
     await biz.clickSaveBusinessDetails();
@@ -526,29 +536,12 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
 
   test("UDP-T4714 - Add Business customer full data @UDP-T4714", async ({ page }) => {
     test.setTimeout(600_000);
-    const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-    await asset.clickAddBorrowerorGuarantorButton();
-    const dlg = await waitForSearchCustomerDialog(page);
-    await dlg.locator('p-radiobutton:has(input[value="business"]) .p-radiobutton-box').first().click({ force: true }).catch(() => {});
-    await asset.searchByDropdownClick();
-    await asset.selectUDCSelectOption();
-    await asset.enterUDCCustomerNumber("420");
-    await asset.clickSearchButton();
-    await asset.clickAddNewCustomerButton();
+    const customer = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+    await customer.clickAddBorrowersOrGuarantors();
+    await selectBusinessTypeSearchNoMatchUdcAndAddNewCustomer(page, customer);
     const biz = new DOBusinessDetailsPage(page);
     await biz.waitForBusinessDetailsStep();
-    await biz.selectOrganisationType("Incorporated Body");
-    await biz.enterLegalName("Sanity Business Ltd");
-    await biz.enterTradingName("Sanity Trading");
-    await biz.enterRegisteredCompanyNumber("1234567");
-    await biz.enterNzBusinessNumber("9429031234567");
-    await biz.enterGstNumber("123456789");
-    await biz.fillBusinessDescription("Sanity automation business borrower.");
-    await biz.selectPrimaryNatureOfBusiness("0113 Vegetable Growing");
-    await biz.clickNextButton();
-    await expect(page.locator("app-business-address-details, app-address-details").first()).toBeVisible({
-      timeout: 60_000,
-    });
+    await fillSanityBusinessCustomerFullDataWithSignatories(page, biz);
   });
 
   test("UDP-T4715 - Partnership requires co-borrowers @UDP-T4715", async ({ page }) => {
@@ -572,13 +565,9 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
 
   test("UDP-T4716 - Save trust customer empty fields validation @UDP-T4716", async ({ page }) => {
     test.setTimeout(480_000);
-    const asset = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-    await asset.clickAddBorrowerorGuarantorButton();
-    const dlg = await waitForSearchCustomerDialog(page);
-    if ((await searchTypeRadioInput(dlg, "trust").count()) > 0) {
-      await dlg.locator('p-radiobutton:has(input[value="trust"]) .p-radiobutton-box').first().click({ force: true });
-    }
-    await asset.clickAddNewCustomerButton();
+    const customer = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
+    await customer.clickAddBorrowersOrGuarantors();
+    await selectTrustTypeSearchNoMatchUdcAndAddNewCustomer(page, customer);
     const trust = new DOTrustDetailsPage(page);
     await trust.waitForTrustDetailsStep();
     await trust.clickSaveTrustDetails();
@@ -588,12 +577,8 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   test("UDP-T4717 - Add trust customer full data @UDP-T4717", async ({ page }) => {
     test.setTimeout(600_000);
     const customer = await openFinanceLeaseBusinessAsgToAddBorrowerStep(page);
-    await customer.clickAddBorrowerorGuarantorButton();
-    const dlg = await waitForSearchCustomerDialog(page);
-    if ((await searchTypeRadioInput(dlg, "trust").count()) > 0) {
-      await dlg.locator('p-radiobutton:has(input[value="trust"]) .p-radiobutton-box').first().click({ force: true });
-    }
-    await customer.clickAddNewCustomerButton();
+    await customer.clickAddBorrowersOrGuarantors();
+    await selectTrustTypeSearchNoMatchUdcAndAddNewCustomer(page, customer);
     const trust = new DOTrustDetailsPage(page);
     await trust.waitForTrustDetailsStep();
     await fillSanityTrustCustomerFullDataWithSignatories(page, trust);
@@ -603,11 +588,10 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     test.setTimeout(600_000);
     const origRef = uniqueOrigRef("REOP");
     await advanceIndividualBorrowerToPostSubmission(page, origRef);
-    const dashboard = await openDashboard(page);
-    await dashboard.openQuotesAndApplications();
-    await dashboard.openQuoteFromGridByReference(origRef);
+    const quoteId = readStandardQuoteIdFromUrl(page);
+    await reopenSanityQuoteOnDashboard(page, { origRef, quoteId });
     await expect(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
-    await expect(page.getByText(/Liza|Doe/i).first()).toBeVisible({ timeout: 60_000 });
+    await expectSanityPrimaryBorrowerOnCustomerDetailsStep(page);
   });
 
   test("UDP-T4719 - Verify dropdowns and sliders @UDP-T4719", async ({ page }) => {
@@ -622,22 +606,20 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   });
 
   test("UDP-T4720 - Change role @UDP-T4720", async ({ page }) => {
-    test.setTimeout(480_000);
-    const { customer } = await openSanityCustomerDetailsStep(page);
-    await customer.clickAddBorrowersOrGuarantors();
-    await customer.searchCustomer.searchByUdcNumber(EXISTING_UDC);
-    const addExisting = page.getByRole("button", { name: /Add|Select/i }).first();
-    if (await addExisting.isVisible({ timeout: 10_000 }).catch(() => false)) {
-      await addExisting.click();
-    }
-    const role = page.getByRole("combobox", { name: /Borrower|Guarantor|Role/i }).first();
-    if (await role.isVisible({ timeout: 10_000 }).catch(() => false)) {
-      await role.click();
-      const guarantor = page.getByRole("option", { name: /Guarantor/i }).first();
-      if (await guarantor.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await guarantor.click();
-      }
-    }
+    test.setTimeout(600_000);
+
+    await advanceExistingUdcBorrowerToPostSubmission(page, EXISTING_UDC, uniqueOrigRef("ROLE"));
+    const secondParty = await addSecondIndividualCoBorrowerFromPostSubmit(page, EXISTING_UDC_SECOND);
+    await expectPartyRowShowsRole(page, secondParty, /Co[\s-]*Borrower/i);
+
+    await clickEditPartyFromPartiesList(page, secondParty);
+    const personal = new DOPersonalDetailsPage(page);
+    await expect(personal.personalDetailsRoot).toBeVisible({ timeout: 30_000 });
+    await personal.chooseCustomerRole(/^Guarantor$/i);
+    await personal.clickSavePersonalDetails();
+
+    await returnToBorrowerSummaryForPartyObserve(page);
+    await expectPartyRowShowsRole(page, secondParty, /^Guarantor$/i);
   });
 
   test("UDP-T4721 - Delete all customers @UDP-T4721", async ({ page }) => {

@@ -111,22 +111,85 @@ export class DOFinancialPositionPage extends BasePage {
   }
 
   /**
-   * Trust profit radios: **No** then **Yes** so the Net Profit amount control is shown and bound reliably
-   * (`isNetProfitLastYear` — hidden native `input` on `p-radiobutton`).
+   * Trust profit radios: **No** then **Yes** so the Net Profit amount control is shown and bound reliably.
+   * PrimeNG keeps native `input` off-screen — click visible labels / `.p-radiobutton-box` (same as business flow).
    */
+  private async clickTrustProfitRadioOption(host: Locator, label: "No" | "Yes"): Promise<void> {
+    const already = host.locator("p-radiobutton.p-radiobutton-checked").filter({
+      hasText: label,
+    });
+    if (await already.isVisible({ timeout: 800 }).catch(() => false)) {
+      return;
+    }
+
+    const profitLead = host
+      .getByText(/Did you make a Net Profit|Net Profit last year|Profit Declaration/i)
+      .first();
+    if (await profitLead.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      const fieldset = profitLead.locator(
+        "xpath=ancestor::*[self::fieldset or self::p-card or self::gen-card][1]",
+      );
+      const scoped = fieldset.getByText(label, { exact: true }).first();
+      if (await scoped.isVisible({ timeout: 2_500 }).catch(() => false)) {
+        await scoped.scrollIntoViewIfNeeded();
+        await scoped.click({ timeout: 15_000, force: true });
+        await this.page.waitForTimeout(450);
+        if (await already.isVisible({ timeout: 1_500 }).catch(() => false)) {
+          return;
+        }
+      }
+    }
+
+    const textLabel = host.getByText(label, { exact: true }).first();
+    if (await textLabel.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await textLabel.scrollIntoViewIfNeeded();
+      await textLabel.click({ timeout: 15_000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const byRole = host.getByRole("radio", { name: new RegExp(`^${label}$`, "i") });
+    if (await byRole.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await byRole.click({ timeout: 15_000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const box = host
+      .locator("p-radiobutton")
+      .filter({ hasText: label })
+      .locator(".p-radiobutton-box")
+      .first();
+    if (await box.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await box.scrollIntoViewIfNeeded();
+      await box.click({ timeout: 15_000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    const radios = host.locator("p-radiobutton");
+    const count = await radios.count();
+    if (count >= 2) {
+      const idx = label === "No" ? 0 : 1;
+      await radios.nth(idx).locator(".p-radiobutton-box").click({ timeout: 15_000, force: true });
+      await this.page.waitForTimeout(400);
+      return;
+    }
+
+    throw new Error(`Trust profit declaration: could not select ${label}`);
+  }
+
   async primeTrustNetProfitLastYearNoThenYes(): Promise<void> {
     this.logStep("Prime Trust Net Profit Last Year No Then Yes");
     const host = this.trustProfitDeclarationHost();
     await host.waitFor({ state: "visible", timeout: 60_000 });
-    await host.scrollIntoViewIfNeeded().catch(() => {});
+    await host.evaluate((el: Element) => {
+      (el as HTMLElement).scrollIntoView({ block: "center", behavior: "instant" });
+    });
+    await this.page.waitForTimeout(200);
 
-    const noInput = host.locator('input[type="radio"][name="isNetProfitLastYear"][value="false"]');
-    const yesInput = host.locator('input[type="radio"][name="isNetProfitLastYear"][value="true"]');
-    await noInput.waitFor({ state: "attached", timeout: 15_000 });
-    await noInput.click({ force: true });
-    await this.page.waitForTimeout(350);
-    await yesInput.click({ force: true });
-    await this.page.waitForTimeout(450);
+    await this.clickTrustProfitRadioOption(host, "No");
+    await this.clickTrustProfitRadioOption(host, "Yes");
 
     const netRow = host.locator("amount").locator("#amount").first();
     await netRow.waitFor({ state: "visible", timeout: 20_000 });

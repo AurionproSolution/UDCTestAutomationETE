@@ -179,6 +179,34 @@ export class DOSearchCustomerDialog extends BasePage {
     await this.clickSearch();
   }
 
+  /** UDC search navigates to **Borrower Result** cards (not the in-dialog datatable). */
+  async waitForBorrowerSearchResult(udcCustomerNumber: string): Promise<void> {
+    await this.page
+      .waitForURL(/borrower-search-result/i, { timeout: 90_000 })
+      .catch(() => {});
+    await expect(this.page.getByText(udcCustomerNumber, { exact: false }).first()).toBeVisible({
+      timeout: 90_000,
+    });
+    await expect(this.page.getByText(/UDC Customer Number/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  /** Click **Add** on the borrower search result card for an existing UDC customer. */
+  async clickAddFromBorrowerSearchResult(udcCustomerNumber: string): Promise<void> {
+    await this.waitForBorrowerSearchResult(udcCustomerNumber);
+    const resultCard = this.page
+      .locator("div, section, article")
+      .filter({ hasText: udcCustomerNumber })
+      .filter({ hasText: /UDC Customer Number/i })
+      .last();
+    const addBtn = resultCard
+      .getByRole("button", { name: /^Add$/i })
+      .or(this.page.getByRole("button", { name: /^Add$/i }).first());
+    await addBtn.first().click({ timeout: 30_000 });
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+  }
+
   /**
    * Set search type to **Individual** (first radio: Individual | Business | Trust).
    */
@@ -270,6 +298,10 @@ export class DOSearchCustomerDialog extends BasePage {
       this.page.locator(
         "//span//label[contains(text(),'Title')]/following-sibling::div//span",
       ),
+      this.page.locator("app-business-details").first(),
+      this.page.getByText(/Organisation Type/i).first(),
+      this.page.locator("app-trust-details").first(),
+      this.page.getByText(/Trust Name/i).first(),
     ];
 
     const deadline = Date.now() + 120_000;
@@ -281,7 +313,7 @@ export class DOSearchCustomerDialog extends BasePage {
     }
 
     throw new Error(
-      "Personal details did not open after Add New Customer (expected DOB, Choose Date, First Name, Title, or email block).",
+      "Customer details step did not open after Add New Customer (expected Personal, Business, or Trust details).",
     );
   }
 
