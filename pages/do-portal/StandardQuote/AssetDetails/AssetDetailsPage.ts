@@ -73,7 +73,7 @@ export class DOAssetDetailsPage extends BasePage {
       `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[6]`,
     );
     /** OL / FL / CSA-B: label varies (`Asset Summary`, `Asset & Insurance Summary`, etc.). */
-    const quoteHost = page.locator("app-quote-details, app-standard-quote").first();
+    const quoteHost = this.resolveQuoteShell(page);
     this.assetInsuranceTradeInSummaryHyperlink =
       this.assetSummaryOpenTrigger(quoteHost);
     this.assetyEditButton = page.locator(".cursor-pointer.fa-pen-to-square");
@@ -3397,14 +3397,24 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
+  private resolveQuoteShell(scope?: Page | Locator): Locator {
+    const quoteShells =
+      scope && typeof (scope as Locator).locator === "function"
+        ? (scope as Locator).locator("app-quote-details, app-standard-quote")
+        : (scope as Page | undefined)?.locator("app-quote-details, app-standard-quote") ??
+          this.page.locator("app-quote-details, app-standard-quote");
+    const visibleQuoteShell = quoteShells.filter({ visible: true }).first();
+    return visibleQuoteShell.or(quoteShells.first()).first();
+  }
+
   /**
    * Opens **Asset / Insurance / Trade-in** summary (label varies: `Asset Summary`,
    * `Asset & Insurance Summary`, `Asset, Insurance & Trade-in`, etc.).
    */
   async openAssetInsuranceTradeInSummary(): Promise<void> {
     this.logStep("Open Asset Insurance Trade In Summary");
-    const quote = this.page.locator("app-quote-details, app-standard-quote").first();
-    await quote.waitFor({ state: "visible", timeout: 60_000 });
+    const quote = this.resolveQuoteShell();
+    await quote.waitFor({ state: "attached", timeout: 60_000 });
     await quote.scrollIntoViewIfNeeded().catch(() => {});
 
     const primary = this.assetInsuranceTradeInSummaryHyperlink;

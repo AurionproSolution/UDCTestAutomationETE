@@ -17,8 +17,7 @@ export class DOReferenceDetailsPage extends BasePage {
   }
 
   /**
-   * “Add contact” modal — scoped by **Contact Type** so we never click inside the wrong
-   * `role=dialog` (toast, confirm, etc.). Prefer **last** match when several exist in the DOM.
+   * “Add contact” modal — inner `role=dialog` (not the outer `p-dynamicdialog` host).
    */
   private contactAddModal(): Locator {
     return this.page
@@ -113,84 +112,211 @@ export class DOReferenceDetailsPage extends BasePage {
     await input.fill(value);
   }
 
-  private contactSignatoryHost(): Locator {
-    const dialog = this.contactAddModal();
-    const signatoryBlock = dialog
-      .locator("div, toggle-checkbox")
-      .filter({ has: dialog.getByText(/^Signatory$/i) })
+  private static readonly SIGNATORY_LABEL_RX = /^Signatory\b/i;
+
+  /** PrimeNG `toggle-checkbox` row for **Signatory** in the Add Contact modal. */
+  private contactSignatoryBlock(): Locator {
+    return this.contactAddModal()
+      .locator("toggle-checkbox")
+      .filter({ hasText: DOReferenceDetailsPage.SIGNATORY_LABEL_RX })
+      .filter({ visible: true })
       .first();
-    return signatoryBlock.locator("p-inputswitch").first();
+  }
+
+  private contactSignatoryLabel(): Locator {
+    return this.contactAddModal()
+      .getByText(DOReferenceDetailsPage.SIGNATORY_LABEL_RX)
+      .filter({ visible: true })
+      .first();
+  }
+
+  private contactSignatorySwitchRoot(): Locator {
+    const block = this.contactSignatoryBlock();
+    return block
+      .locator("[data-pc-name='inputswitch'], .p-inputswitch, p-inputswitch")
+      .first();
+  }
+
+  private async clickContactSignatoryToggleOnce(): Promise<boolean> {
+    const dialog = this.contactAddModal();
+    await dialog.waitFor({ state: "visible", timeout: 20_000 });
+
+    const block = this.contactSignatoryBlock();
+    if (await block.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await block.scrollIntoViewIfNeeded().catch(() => {});
+      const slider = block.locator("span.p-inputswitch-slider:visible").first();
+      if (await slider.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await slider.click({ timeout: 10_000 });
+        return true;
+      }
+      const switchRoot = this.contactSignatorySwitchRoot();
+      if (await switchRoot.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await switchRoot.click({ timeout: 10_000 });
+        return true;
+      }
+    }
+
+    const label = this.contactSignatoryLabel();
+    if (!(await label.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return false;
+    }
+    await label.scrollIntoViewIfNeeded().catch(() => {});
+
+    const toggleRow = label.locator("xpath=ancestor::toggle-checkbox[1]");
+    if (await toggleRow.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      const slider = toggleRow.locator("span.p-inputswitch-slider:visible").first();
+      if (await slider.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await slider.click({ timeout: 10_000 });
+        return true;
+      }
+    }
+
+    const following = label.locator(
+      "xpath=following::span[contains(@class,'p-inputswitch-slider')][1]",
+    );
+    if (await following.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await following.click({ timeout: 10_000 });
+      return true;
+    }
+
+    const shell = label.locator("xpath=ancestor::*[.//p-inputswitch][1]").first();
+    const inShell = shell
+      .locator('span.p-inputswitch-slider[data-pc-section="slider"], span.p-inputswitch-slider')
+      .filter({ visible: true })
+      .first();
+    if (await inShell.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await inShell.click({ timeout: 10_000 });
+      return true;
+    }
+
+    return false;
   }
 
   private async isContactSignatoryYesInModal(): Promise<boolean> {
-    const host = this.contactSignatoryHost();
-    if (!(await host.count())) {
+    const dialog = this.contactAddModal();
+    if (!(await dialog.isVisible({ timeout: 500 }).catch(() => false))) {
       return false;
     }
-    const cls = (await host.getAttribute("class").catch(() => "")) ?? "";
-    if (/p-inputswitch-checked/.test(cls)) {
-      return true;
+
+    const block = this.contactSignatoryBlock();
+    if (await block.isVisible({ timeout: 500 }).catch(() => false)) {
+      const switchRoot = this.contactSignatorySwitchRoot();
+      if (await switchRoot.count()) {
+        const inner = switchRoot.locator(".p-inputswitch.p-component").first();
+        const clsTarget = (await inner.count()) ? inner : switchRoot;
+        const cls = (await clsTarget.getAttribute("class").catch(() => "")) ?? "";
+        if (/p-inputswitch-checked/.test(cls)) {
+          return true;
+        }
+
+        const checkbox = switchRoot.locator('input[type="checkbox"]').first();
+        if (await checkbox.isChecked().catch(() => false)) {
+          return true;
+        }
+        if ((await checkbox.getAttribute("aria-checked").catch(() => "")) === "true") {
+          return true;
+        }
+      }
+
+      if (await block.getByText(/^Yes$/i).isVisible({ timeout: 500 }).catch(() => false)) {
+        return true;
+      }
     }
-    const hidden = host.locator('input[type="checkbox"]').first();
-    if (await hidden.isChecked().catch(() => false)) {
-      return true;
+
+    const label = this.contactSignatoryLabel();
+    if (!(await label.isVisible({ timeout: 500 }).catch(() => false))) {
+      return false;
     }
-    const dialog = this.contactAddModal();
-    return dialog
-      .locator("div, toggle-checkbox")
-      .filter({ has: dialog.getByText(/^Signatory$/i) })
-      .getByText(/^Yes$/i)
-      .isVisible({ timeout: 300 })
-      .catch(() => false);
+
+    const toggleRow = label.locator("xpath=ancestor::toggle-checkbox[1]");
+    if (await toggleRow.isVisible({ timeout: 500 }).catch(() => false)) {
+      const switchRoot = toggleRow
+        .locator("[data-pc-name='inputswitch'], .p-inputswitch, p-inputswitch")
+        .first();
+      const cls = (await switchRoot.getAttribute("class").catch(() => "")) ?? "";
+      if (/p-inputswitch-checked/.test(cls)) {
+        return true;
+      }
+      const checkbox = switchRoot.locator('input[type="checkbox"]').first();
+      if (await checkbox.isChecked().catch(() => false)) {
+        return true;
+      }
+      if (await toggleRow.getByText(/^Yes$/i).isVisible({ timeout: 500 }).catch(() => false)) {
+        return true;
+      }
+    }
+
+    const following = label.locator(
+      "xpath=following::span[contains(@class,'p-inputswitch-slider')][1]",
+    );
+    if (await following.isVisible({ timeout: 500 }).catch(() => false)) {
+      const sw = following.locator("xpath=ancestor::p-inputswitch[1]");
+      const cls = (await sw.getAttribute("class").catch(() => "")) ?? "";
+      if (/p-inputswitch-checked/.test(cls)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
-  /** Turn **Signatory** on in the Add Contact modal (requires **Email** before **Add Contact**). */
+  /** Turn **Signatory** on in the Add Contact modal. */
   async setContactSignatoryYes(): Promise<void> {
-    const dialog = this.contactAddModal();
-    await dialog.getByText(/^Signatory$/i).first().waitFor({ state: "visible", timeout: 15_000 });
+    await this.contactAddModal().waitFor({ state: "visible", timeout: 20_000 });
+    await expect
+      .poll(async () => (await this.contactSignatoryLabel().isVisible().catch(() => false)) ||
+        (await this.contactSignatoryBlock().isVisible().catch(() => false)), {
+        timeout: 20_000,
+      })
+      .toBe(true);
+
     if (await this.isContactSignatoryYesInModal()) {
       return;
     }
 
-    const host = this.contactSignatoryHost();
-    await host.waitFor({ state: "attached", timeout: 10_000 });
-    await host.evaluate((el) => {
-      const shell = el as HTMLElement;
-      if (shell.classList.contains("p-inputswitch-checked")) {
-        return;
-      }
-      const slider = shell.querySelector(".p-inputswitch-slider") as HTMLElement | null;
-      if (slider) {
-        slider.click();
-        return;
-      }
-      const input = shell.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
-      input?.click();
-    });
-
-    if (!(await this.isContactSignatoryYesInModal())) {
-      const signatoryBlock = dialog
-        .locator("div, toggle-checkbox")
-        .filter({ has: dialog.getByText(/^Signatory$/i) })
-        .first();
-      await signatoryBlock.getByText(/^No$/i).click({ force: true }).catch(() => {});
-      await host.evaluate((el) => {
-        (el.querySelector(".p-inputswitch-slider") as HTMLElement | null)?.click();
-      });
+    const clicked = await this.clickContactSignatoryToggleOnce();
+    if (!clicked) {
+      throw new Error(
+        "Signatory toggle not found in Add Contact modal (expected label 'Signatory' with p-inputswitch).",
+      );
     }
 
-    await expect.poll(async () => this.isContactSignatoryYesInModal(), { timeout: 10_000 }).toBe(true);
+    if (!(await this.isContactSignatoryYesInModal())) {
+      await this.clickContactSignatoryToggleOnce().catch(() => {});
+    }
+    if (!(await this.isContactSignatoryYesInModal())) {
+      const block = this.contactSignatoryBlock();
+      await block.getByText(/^No$/i).click({ force: true }).catch(() => {});
+      await this.clickContactSignatoryToggleOnce().catch(() => {});
+    }
+
+    await expect.poll(async () => this.isContactSignatoryYesInModal(), { timeout: 15_000 }).toBe(true);
   }
 
   async enterContactEmail(email: string): Promise<void> {
     const dialog = this.contactAddModal();
-    const input = dialog
-      .getByRole("textbox", { name: /^Email$/i })
-      .first()
-      .or(dialog.locator("input#email, input[type='email']").first());
+    const input = dialog.locator("#email").first();
     await input.waitFor({ state: "visible", timeout: 15_000 });
     await input.click();
     await input.fill(email);
+  }
+
+  /** Mobile **Area Code** in Add Contact modal (`phone` with placeholder Area Code). */
+  async enterContactMobileAreaCode(areaCode: string): Promise<void> {
+    const dialog = this.contactAddModal();
+    const input = dialog.locator("phone input[placeholder='Area Code']").first();
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.click();
+    await input.fill(areaCode);
+  }
+
+  /** Mobile number in Add Contact modal (second `phone` field after area code). */
+  async enterContactMobileNumber(mobileNumber: string): Promise<void> {
+    const dialog = this.contactAddModal();
+    const input = dialog.locator("phone").nth(1).locator("input#phone").first();
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.click();
+    await input.fill(mobileNumber);
   }
 
   async enterContactLastName(value: string): Promise<void> {
@@ -253,12 +379,39 @@ export class DOReferenceDetailsPage extends BasePage {
 
   /** Contact row on Reference Details after **Add Contact** (name + **Signatory** = Yes). */
   async expectContactListedAsSignatory(contactFirstName: string): Promise<void> {
+    await this.expectContactListedInAdvisoryTable({
+      firstName: contactFirstName,
+      signatory: true,
+    });
+  }
+
+  /** Advisory Manager grid row — First Name, Phone, Email, Signatory (UDP-T4710). */
+  async expectContactListedInAdvisoryTable(opts: {
+    firstName: string;
+    lastName?: string;
+    email?: string;
+    phoneFragment?: string;
+    signatory?: boolean;
+  }): Promise<void> {
     const row = this.page
-      .locator("tr, .p-datatable-row, app-contact-details, [class*='contact']")
-      .filter({ hasText: new RegExp(contactFirstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") })
+      .locator("tr")
+      .filter({
+        hasText: new RegExp(opts.firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+      })
       .first();
     await expect(row).toBeVisible({ timeout: 30_000 });
-    await expect(row).toContainText(/\bYes\b/i);
+    if (opts.lastName) {
+      await expect(row).toContainText(new RegExp(opts.lastName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    }
+    if (opts.email) {
+      await expect(row).toContainText(new RegExp(opts.email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    }
+    if (opts.phoneFragment) {
+      await expect(row).toContainText(new RegExp(opts.phoneFragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    }
+    if (opts.signatory) {
+      await expect(row).toContainText(/\bYes\b/i);
+    }
   }
 
   /** **Signing Order** column visible and editable for the named contact. */

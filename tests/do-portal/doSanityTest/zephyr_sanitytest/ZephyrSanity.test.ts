@@ -24,16 +24,16 @@ import {
   CSA_SQ_PROGRAM,
   addManualAssetViaSummary,
   addPhysicalAssetViaMotocheck,
-  addSignatoryContactToReference,
   addSecondDistinctManualAssetViaSummary,
+  addSignatoryContactToReference,
   addTradeInAssetViaMotocheck,
   advanceIndividualBorrowerToPostSubmission,
   assetInsuranceSummaryDialog,
   editManualAssetClearAndRefill,
   expectSummaryPhysicalAssetCount,
   fillMinimalIndividualBorrowerThroughReference,
-  fillSanityTrustCustomerFullDataWithSignatories,
   fillSanityCsaQuickQuote,
+  fillSanityTrustCustomerFullDataWithSignatories,
   fillValidIndividualPersonalBorrower,
   openAddOnsFromAssetDetails,
   openDashboard,
@@ -437,16 +437,31 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   });
 
   test("UDP-T4709 - Add contacts in customer @UDP-T4709", async ({ page }) => {
-    test.setTimeout(480_000);
-    const { customer } = await openSanityCustomerDetailsStep(page);
+    test.setTimeout(600_000);
+    const borrowerName = "Liza Marie Doe";
+
+    const { customer } = await openSanityCustomerDetailsStep(page, uniqueOrigRef("CONT"));
     const ref = await fillMinimalIndividualBorrowerThroughReference(page, customer);
+
     await ref.clickAddContactDetails();
     await ref.selectContactType("Accountant");
     await ref.enterContactFirstName("Alex");
     await ref.enterContactLastName("Referee");
     await ref.clickAddContactInModal();
     await expect(page.getByText(/Alex/i).first()).toBeVisible();
-    await expect(page.getByText(/verification|electronic|manual/i).first()).toBeVisible({ timeout: 15_000 }).catch(() => {});
+
+    await ref.confirmCustomerDetailsCorrect();
+    await ref.advanceFromReferenceDetailsToPostSubmission();
+
+    const post = new DOCustomerQuotePostSubmitPage(page);
+    await post.waitForUploadStep();
+
+    await post.openSigningAndVerificationTab();
+    await post.expectBorrowerListedInSigningVerification(borrowerName, { role: "Borrower" });
+    const verificationPicker = await post.openBorrowerVerificationMethodPicker(borrowerName);
+    await post.expectVerificationMethodPickerOptions(verificationPicker);
+    await post.selectVerificationMethodFromPicker(verificationPicker, "Manual");
+    await post.expectBorrowerManualVerificationStarted(borrowerName);
   });
 
   test("UDP-T4710 - Add Signatory @UDP-T4710", async ({ page }) => {
@@ -458,8 +473,17 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
       firstName: "Sam",
       lastName: "Signatory",
       email: "sam.signatory@example.com",
+      mobileAreaCode: "123",
+      mobileNumber: "897897897",
     });
-    await expect(page.getByText(/Sam\s+Signatory|Sam/i).first()).toBeVisible();
+    await ref.expectContactListedInAdvisoryTable({
+      firstName: "Sam",
+      lastName: "Signatory",
+      email: "sam.signatory@example.com",
+      phoneFragment: "897897897",
+      signatory: true,
+    });
+    await ref.expectSigningOrderEditableForContact("Sam");
   });
 
   test("UDP-T4711 - Save individual customer empty fields validation @UDP-T4711", async ({ page }) => {

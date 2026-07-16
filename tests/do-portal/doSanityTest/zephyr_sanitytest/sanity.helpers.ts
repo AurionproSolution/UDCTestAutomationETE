@@ -708,16 +708,26 @@ export async function addSignatoryContactToReference(
     firstName: string;
     lastName: string;
     email: string;
+    mobileAreaCode?: string;
+    mobileNumber?: string;
   },
 ): Promise<void> {
   await ref.clickAddContactDetails();
   await ref.selectContactType(opts.contactType ?? "Accountant");
   await ref.enterContactFirstName(opts.firstName);
   await ref.enterContactLastName(opts.lastName);
-  await ref.setContactSignatoryYes();
+  await ref.enterContactMobileAreaCode(opts.mobileAreaCode ?? "123");
+  await ref.enterContactMobileNumber(opts.mobileNumber ?? "897897897");
   await ref.enterContactEmail(opts.email);
+  await ref.setContactSignatoryYes();
   await ref.clickAddContactInModal();
-  await ref.expectContactListedAsSignatory(opts.firstName);
+  await ref.expectContactListedInAdvisoryTable({
+    firstName: opts.firstName,
+    lastName: opts.lastName,
+    email: opts.email,
+    phoneFragment: opts.mobileNumber ?? "897897897",
+    signatory: true,
+  });
   await ref.expectSigningOrderEditableForContact(opts.firstName);
 }
 

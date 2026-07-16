@@ -19,6 +19,11 @@ import {
   recordTokenEndpointFromUrl,
   refreshAccessTokenFromFile,
   applyDoPortalAuthToContext,
+  getDoPortalMfaLockPath,
+  readMfaLock,
+  releaseMfaLock,
+  releaseStaleMfaLockIfNeeded,
+  tryAcquireMfaLock,
   trySilentRefreshSession,
 } from "./do-portal-session.helper";
 
@@ -100,7 +105,7 @@ export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
  */
 export async function ensureDoPortalAuthSession(page: Page): Promise<void> {
   const authFile = getDoPortalAuthFile();
-  const lockPath = `${authFile}.mfa.lock`;
+  const lockPath = getDoPortalMfaLockPath(authFile);
   const deadline = Date.now() + DO_PORTAL_MFA_LOCK_WAIT_MS;
 
   const syncBrowserFromFile = async (): Promise<void> => {
@@ -114,6 +119,11 @@ export async function ensureDoPortalAuthSession(page: Page): Promise<void> {
     return;
   }
 
+  logTestStep(
+    "DO auth: session needs MFA — coordinating login (browser will navigate shortly).",
+  );
+  releaseStaleMfaLockIfNeeded(lockPath);
+
   while (Date.now() < deadline) {
     evaluation = await trySilentRefreshSession(authFile);
     if (evaluation.action === "reuse") {
@@ -122,13 +132,9 @@ export async function ensureDoPortalAuthSession(page: Page): Promise<void> {
       return;
     }
 
-    let acquiredLock = false;
-    try {
-      const fd = fs.openSync(lockPath, "wx");
-      fs.writeFileSync(fd, String(process.pid), "utf8");
-      fs.closeSync(fd);
-      acquiredLock = true;
-    } catch {
+    const acquiredLock = tryAcquireMfaLock(lockPath);
+    if (!acquiredLock) {
+      releaseStaleMfaLockIfNeeded(lockPath);
       await new Promise((r) => setTimeout(r, 250));
       continue;
     }
@@ -155,18 +161,16 @@ export async function ensureDoPortalAuthSession(page: Page): Promise<void> {
       logTestStep(`DO auth: MFA login complete — ${evaluation.reason}`);
       return;
     } finally {
-      if (acquiredLock) {
-        try {
-          fs.unlinkSync(lockPath);
-        } catch {
-          // ignore
-        }
-      }
+      releaseMfaLock(lockPath);
     }
   }
 
+  const lockInfo = readMfaLock(lockPath);
+  const lockDetail = lockInfo
+    ? ` Lock held by PID ${lockInfo.pid} since ${lockInfo.startedAt}.`
+    : "";
   throw new Error(
-    `Timed out after ${DO_PORTAL_MFA_LOCK_WAIT_MS / 1000}s waiting for DO portal auth (parallel MFA lock).`,
+    `Timed out after ${DO_PORTAL_MFA_LOCK_WAIT_MS / 1000}s waiting for DO portal auth (parallel MFA lock at ${lockPath}).${lockDetail} Stale lock auto-removal failed; delete playwright/.auth/*.mfa.lock manually if needed.`,
   );
 }
 
