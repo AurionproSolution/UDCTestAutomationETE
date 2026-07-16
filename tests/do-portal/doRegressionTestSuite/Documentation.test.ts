@@ -23,6 +23,11 @@ import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDeta
 import { DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF } from "../../../pages/do-portal/StandardQuote/CustomerDetails/customerQuotePostSubmit";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import settlementData from "../../../testData/do-portal/settlementTestData.json";
+import {
+  completeDocumentationCustomerDetailsAndSubmitToPostSubmission as completeCustomerDetailsAndSubmitToPostSubmission,
+  openDocumentationCsaQuoteThroughPersonalDetails as openCsaQuoteThroughPersonalDetails,
+  openPostSubmissionUploadStep,
+} from "./documentation.helpers";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
 const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
@@ -245,72 +250,6 @@ async function fillMinimalFinancialContinue(fin: DOFinancialPositionPage): Promi
   await fin.clickNextButton();
 }
 
-/** CSA quote through Personal Details (borrower added, not yet submitted). */
-async function openCsaQuoteThroughPersonalDetails(page: Page): Promise<{
-  personal: DOPersonalDetailsPage;
-  post: DOCustomerQuotePostSubmitPage;
-}> {
-  const assetDetailsPage = await openStandardQuoteFromDashboard(page);
-  const addAssetPage = new DOAddAssetPage(page);
-  await assetDetailsPage.chooseProduct(CSA_SQ_PRODUCT);
-  await assetDetailsPage.chooseProgram(CSA_SQ_PROGRAM);
-  await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
-  await assetDetailsPage.clickCalculateButton();
-  await assetDetailsPage.enterOriginationReference("SQ-DOC-Ref");
-  await assetDetailsPage.clickNextButton();
-  const customerDetailsPage = new DOCustomerDetailsPage(page);
-  await customerDetailsPage.waitForAddBorrowerButton();
-  await customerDetailsPage.clickAddBorrowersOrGuarantors();
-  await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
-  await customerDetailsPage.clickAddNewCustomerButton();
-  const personal = new DOPersonalDetailsPage(page);
-  await fillValidIndividualPersonalBorrower(personal);
-  return { personal, post: new DOCustomerQuotePostSubmitPage(page) };
-}
-
-/** Complete Address → Reference and submit to Post Submission. */
-async function completeCustomerDetailsAndSubmitToPostSubmission(
-  page: Page,
-  personal: DOPersonalDetailsPage,
-): Promise<DOCustomerQuotePostSubmitPage> {
-/** CSA-C-Assigned individual borrower through Reference submit → Post Submission Upload. */
-async function openPostSubmissionUploadStep(page: Page): Promise<DOCustomerQuotePostSubmitPage> {
-  const assetDetailsPage = await openStandardQuoteFromDashboard(page);
-  const addAssetPage = new DOAddAssetPage(page);
-  await assetDetailsPage.chooseProduct(CSA_SQ_PRODUCT);
-  await assetDetailsPage.chooseProgram(CSA_SQ_PROGRAM);
-  await prepareCalculableCsaQuote(assetDetailsPage, addAssetPage);
-  await assetDetailsPage.clickCalculateButton();
-  await assetDetailsPage.enterOriginationReference("SQ-DOC-Ref");
-  await assetDetailsPage.clickNextButton();
-  const customerDetailsPage = new DOCustomerDetailsPage(page);
-  await customerDetailsPage.waitForAddBorrowerButton();
-  await customerDetailsPage.clickAddBorrowersOrGuarantors();
-  await customerDetailsPage.searchCustomer.searchByUdcNumber("420");
-  await customerDetailsPage.clickAddNewCustomerButton();
-  const personal = new DOPersonalDetailsPage(page);
-  await fillValidIndividualPersonalBorrower(personal);
-  await personal.clickNextButton();
-  const address = new DOAddressDetailsPage(page);
-  await fillMinimalAddressContinue(page, address, personal);
-  const emp = new DOEmploymentDetailsPage(page);
-  await fillMinimalEmploymentContinue(emp);
-  const fin = new DOFinancialPositionPage(page);
-  await fillMinimalFinancialContinue(fin);
-  const ref = new DOReferenceDetailsPage(page);
-  await ref.waitForReferenceDetailsStep();
-  await ref.clickAddContactDetails();
-  await ref.selectContactType("Accountant");
-  await ref.enterContactFirstName("Alex");
-  await ref.enterContactLastName("Referee");
-  await ref.clickAddContactInModal();
-  await ref.confirmCustomerDetailsCorrect();
-  await ref.advanceFromReferenceDetailsToPostSubmission();
-  const post = new DOCustomerQuotePostSubmitPage(page);
-  await post.waitForUploadStep();
-  return post;
-}
-
 /** CSA Post Submission: upload → Next → submit application → Credit Conditions tab (UDP-T3845+). */
 async function openPostSubmissionWithCreditConditionsTab(
   page: Page,
@@ -331,12 +270,6 @@ async function openExistingPostSubmissionWithCreditConditionsTab(
   const post = await openExistingPostSubmissionFromDashboardQid(page);
   await post.expectCreditConditionsTabVisible();
   return post;
-}
-
-/** CSA-C-Assigned individual borrower through Reference submit → Post Submission Upload. */
-async function openPostSubmissionUploadStep(page: Page): Promise<DOCustomerQuotePostSubmitPage> {
-  const { personal } = await openCsaQuoteThroughPersonalDetails(page);
-  return completeCustomerDetailsAndSubmitToPostSubmission(page, personal);
 }
 
 /**

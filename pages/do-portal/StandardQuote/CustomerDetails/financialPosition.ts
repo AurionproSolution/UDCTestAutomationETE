@@ -1,6 +1,10 @@
 import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
+export type SavedIndividualFinancialSnapshot = {
+  homeOwnership: string;
+};
+
 /**
  * Step — Financial Position:
  * - **Individual:** `app-financial-position` (Liabilities, Income, Expenditure, Essential Outgoings).
@@ -1838,6 +1842,22 @@ export class DOFinancialPositionPage extends BasePage {
     throw new Error(
       "Sole liabilities: could not find Mortgage / Rent monthly amount input (expected <amount> / p-floatlabel / valueClass in row).",
     );
+  }
+
+  /** UDP-T4718 — key individual financial selections match saved values after quote reopen. */
+  async expectSavedIndividualFinancialSnapshot(
+    snapshot: SavedIndividualFinancialSnapshot,
+  ): Promise<void> {
+    this.logStep("Expect saved individual financial snapshot");
+    await this.waitForFinancialPositionStep();
+    const card = this.individualAssetDetailsCard;
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    const combo = card.getByRole("combobox", { name: snapshot.homeOwnership }).first();
+    if (await combo.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect(combo).toBeVisible({ timeout: 10_000 });
+      return;
+    }
+    await expect(card).toContainText(snapshot.homeOwnership, { timeout: 15_000 });
   }
 
   async clickNextButton(): Promise<void> {
