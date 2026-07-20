@@ -1045,6 +1045,33 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectCountryOfCitizenshipOption(countryOfCitizenship);
   }
 
+  private customerRoleDropdownTrigger(): Locator {
+    return this.personalDetailsRoot
+      .locator("label")
+      .filter({ hasText: /Customer Role/i })
+      .first()
+      .locator(
+        "xpath=following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+      );
+  }
+
+  async chooseCustomerRole(role: string | RegExp): Promise<void> {
+    const label = typeof role === "string" ? role : role.source;
+    this.logStep(`Choose customer role: ${label}`);
+    const trig = this.customerRoleDropdownTrigger();
+    await trig.waitFor({ state: "visible", timeout: 15_000 });
+    await trig.click();
+    const name =
+      typeof role === "string"
+        ? new RegExp(`^${role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")
+        : role;
+    await this.page.getByRole("option", { name }).first().click();
+    await this.page
+      .getByRole("listbox")
+      .waitFor({ state: "hidden", timeout: 10_000 })
+      .catch(() => {});
+  }
+
   async clickSavePersonalDetails(): Promise<void> {
     this.logStep("Click Save Personal Details");
     await this.personalDetailsRoot.waitFor({ state: "visible", timeout: 60_000 });

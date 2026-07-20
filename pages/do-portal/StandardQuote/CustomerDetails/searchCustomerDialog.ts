@@ -206,6 +206,19 @@ export class DOSearchCustomerDialog extends BasePage {
   async searchByUdcNumberAsIndividual(customerNumber: string): Promise<void> {
     await this.selectIndividualType();
     await this.searchByUdcNumber(customerNumber);
+  /** Click **Add** on the borrower search result card for an existing UDC customer. */
+  async clickAddFromBorrowerSearchResult(udcCustomerNumber: string): Promise<void> {
+    await this.waitForBorrowerSearchResult(udcCustomerNumber);
+    const resultCard = this.page
+      .locator("div, section, article")
+      .filter({ hasText: udcCustomerNumber })
+      .filter({ hasText: /UDC Customer Number/i })
+      .last();
+    const addBtn = resultCard
+      .getByRole("button", { name: /^Add$/i })
+      .or(this.page.getByRole("button", { name: /^Add$/i }).first());
+    await addBtn.first().click({ timeout: 30_000 });
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
   }
 
   /**
@@ -388,6 +401,10 @@ export class DOSearchCustomerDialog extends BasePage {
       this.page.locator(
         "//span//label[contains(text(),'Title')]/following-sibling::div//span",
       ),
+      this.page.locator("app-business-details").first(),
+      this.page.getByText(/Organisation Type/i).first(),
+      this.page.locator("app-trust-details").first(),
+      this.page.getByText(/Trust Name/i).first(),
     ];
 
     const deadline = Date.now() + 120_000;
