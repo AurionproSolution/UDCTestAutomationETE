@@ -48,6 +48,11 @@ import { DOTrustDetailsPage } from "../../../../pages/do-portal/StandardQuote/Cu
 export const CSA_QQ_PRODUCT = CSA_SQ_PRODUCT;
 /** CSAC Quick Quote program (matches `CSAcAssigned.test.ts` / Quick Quote CSA regression). */
 export const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
+/** CSAB Quick Quote / Standard Quote (matches `CSABAssigned.test.ts`). */
+export const CSAB_SQ_PRODUCT = "CSA-B-Assigned";
+export const CSAB_SQ_PROGRAM = "MYUDC-B-CSA-Assigned MV";
+export const CSAB_QQ_PRODUCT = CSAB_SQ_PRODUCT;
+export const CSAB_QQ_PROGRAM = CSAB_SQ_PROGRAM;
 
 export {
   CSA_SQ_PRODUCT,
@@ -76,8 +81,8 @@ export function uniqueOrigRef(prefix = "SAN"): string {
 }
 
 export async function selectCsaProductAndProgram(asset: DOAssetDetailsPage): Promise<void> {
-  await asset.chooseProduct(CSA_SQ_PRODUCT);
-  await asset.chooseProgram(CSA_SQ_PROGRAM);
+  await asset.chooseProduct(CSAB_SQ_PRODUCT);
+  await asset.chooseProgram(CSAB_SQ_PROGRAM);
 }
 
 export function promotionQuoteCheckbox(page: Page): Locator {
@@ -113,9 +118,18 @@ export async function selectCsaQuickQuoteProductAndProgram(quickQuote: DOQuickQu
   await quickQuote.dismissQuickQuoteDropdownOverlays();
 }
 
-/** CSAC Quick Quote — mandatory payment fields (aligned with `QuickQuote_CSA.test.ts`). */
+export async function selectCsabQuickQuoteProductAndProgram(quickQuote: DOQuickQuotePage): Promise<void> {
+  await quickQuote.selectProduct(CSAB_QQ_PRODUCT);
+  await quickQuote.dismissQuickQuoteDropdownOverlays();
+  if (await quickQuote.programDropdownTrigger.isEnabled().catch(() => false)) {
+    await quickQuote.selectProgram(CSAB_QQ_PROGRAM);
+  }
+  await quickQuote.dismissQuickQuoteDropdownOverlays();
+}
+
+/** CSAB Quick Quote — mandatory payment fields (Zephyr Sanity UDP-T4679–UDP-T4685). */
 export async function fillSanityCsaQuickQuote(quickQuote: DOQuickQuotePage): Promise<void> {
-  await selectCsaQuickQuoteProductAndProgram(quickQuote);
+  await selectCsabQuickQuoteProductAndProgram(quickQuote);
   await quickQuote.selectFrequency("Monthly").catch(() => {});
   await quickQuote.enterInterestRatePercent("9");
   await quickQuote.enterTermsMonths("36");
@@ -690,9 +704,10 @@ export async function fillMinimalIndividualBorrowerThroughReference(
   customer: DOCustomerDetailsPage,
 ): Promise<DOReferenceDetailsPage> {
   await customer.clickAddBorrowersOrGuarantors();
-  await customer.searchCustomer.searchByUdcNumber("420");
+  await customer.searchCustomer.searchByUdcNumberAsIndividual("420");
   await customer.clickAddNewCustomerButton();
   const personal = new DOPersonalDetailsPage(page);
+  await personal.waitForPersonalDetailsEntryReady();
   await fillValidIndividualPersonalBorrower(personal);
   await personal.clickNextButton();
   const address = new DOAddressDetailsPage(page);
@@ -713,7 +728,8 @@ export async function fillExistingIndividualBorrowerThroughReference(
   udcCustomerNumber: string,
 ): Promise<DOReferenceDetailsPage> {
   await customer.clickAddBorrowersOrGuarantors();
-  await customer.searchCustomer.addExistingCustomerFromUdcSearch(udcCustomerNumber);
+  await customer.searchCustomer.searchByUdcNumberAsIndividual(udcCustomerNumber);
+  await customer.searchCustomer.clickAddOnBorrowerSearchResult(udcCustomerNumber);
   const personal = new DOPersonalDetailsPage(page);
   await expect(personal.personalDetailsRoot).toBeVisible({ timeout: 120_000 });
   await personal.clickNextButton();
@@ -965,7 +981,7 @@ export async function selectSearchCustomerTrustType(dlg: Locator): Promise<void>
 export async function verifyT3824BorrowerDataOnReopenedQuote(page: Page): Promise<void> {
   const asset = new DOAssetDetailsPage(page);
   const customer = new DOCustomerDetailsPage(page);
-  await asset.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  await asset.waitForQuoteLoadersToFinish(120_000);
   await asset.clickStandardQuoteStepTab(/Customer\s*Details/i);
   await customer.waitForAddBorrowerButton();
 
@@ -996,7 +1012,7 @@ export async function createSaveAndReopenDocumentationQuote(
   origRef: string,
 ): Promise<void> {
   const { asset } = await openPostSubmissionUploadStepWithAsset(page, origRef);
-  await asset.waitUntilNoVisibleAppLoaderOverlays(120_000);
+  await asset.waitForQuoteLoadersToFinish(120_000);
   const quoteId = await asset.readStandardQuoteIdFromHeader();
   await asset.clickSaveStandardQuoteStep({ originatorRefForRequiredDialog: origRef });
   const dashboard = await openDashboard(page);

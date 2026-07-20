@@ -47,9 +47,22 @@ export class DOPersonalDetailsPage extends BasePage {
   constructor(page: Page) {
     super(page);
     this.personalDetailsRoot = page.locator("app-personal-details").first();
-    this.titleDropdown = page.locator(
-      `//label[text()=' Title ']/following-sibling::div//div[@aria-label='dropdown trigger']`,
-    );
+    const visiblePersonal = page.locator("app-personal-details").filter({ visible: true }).first();
+    this.titleDropdown = visiblePersonal
+      .locator(
+        "xpath=.//label[contains(normalize-space(.),'Title')]//following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+      )
+      .or(
+        visiblePersonal.locator(
+          "xpath=.//label[contains(normalize-space(.),'Title')]/following-sibling::*//*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+        ),
+      )
+      .or(
+        page.locator(
+          "//label[contains(normalize-space(.),'Title')]/following-sibling::div//div[@aria-label='dropdown trigger']",
+        ),
+      )
+      .first();
     this.firstNameInput = page
       .locator("text")
       .filter({ hasText: /^First Name/ })
@@ -182,7 +195,40 @@ export class DOPersonalDetailsPage extends BasePage {
   }
 
   async selectTitle(): Promise<void> {
-    await this.titleDropdown.click();
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.visiblePersonalDetailsRoot().waitFor({ state: "visible", timeout: 120_000 });
+    await this.dismissOpenDropdownPanels();
+    const root = this.visiblePersonalDetailsRoot();
+    const triggers: Locator[] = [
+      this.titleDropdown,
+      root
+        .locator("label")
+        .filter({ hasText: /^Title$/i })
+        .first()
+        .locator(
+          "xpath=following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+        ),
+      root
+        .locator(".p-float-label")
+        .filter({ hasText: /Title/i })
+        .first()
+        .locator(".p-dropdown-trigger, [aria-label='dropdown trigger']")
+        .first(),
+      root.getByRole("combobox", { name: /Title/i }).first(),
+    ];
+    for (const trigger of triggers) {
+      if (!(await trigger.isVisible({ timeout: 5_000 }).catch(() => false))) {
+        continue;
+      }
+      await trigger.scrollIntoViewIfNeeded();
+      try {
+        await trigger.click({ timeout: 30_000 });
+      } catch {
+        await trigger.click({ force: true, timeout: 30_000 });
+      }
+      return;
+    }
+    throw new Error("Personal Details: Title dropdown trigger not found or not visible.");
   }
   async selectTitleOption(title: string): Promise<void> {
     await this.page.getByRole("option", { name: title, exact: true }).click();
@@ -747,6 +793,49 @@ export class DOPersonalDetailsPage extends BasePage {
       .first()
       .waitFor({ state: "hidden", timeout: 5_000 })
       .catch(() => {});
+  }
+
+  /** Loaders cleared and Personal Details entry controls visible (before filling mandatory fields). */
+  async waitForPersonalDetailsEntryReady(): Promise<void> {
+    this.logStep("Wait For Personal Details entry form");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    const business = this.page.locator("app-business-details").filter({ visible: true }).first();
+    const trust = this.page
+      .locator("app-trust-detail, app-trust-details")
+      .filter({ visible: true })
+      .first();
+
+    await expect
+      .poll(
+        async () => {
+          if (await this.visiblePersonalDetailsRoot().isVisible().catch(() => false)) {
+            return "personal";
+          }
+          if (await business.isVisible().catch(() => false)) {
+            return "business";
+          }
+          if (await trust.isVisible().catch(() => false)) {
+            return "trust";
+          }
+          return "";
+        },
+        {
+          timeout: 120_000,
+          message:
+            "Personal Details form did not open — select Individual in Search Customer before Add New Customer.",
+        },
+      )
+      .toBe("personal");
+
+    const root = this.visiblePersonalDetailsRoot();
+    await this.dismissOpenDropdownPanels();
+    const entryMarker = root
+      .getByRole("textbox", { name: /First Name/i })
+      .or(root.locator("text").filter({ hasText: /^First Name/ }).locator("#text"))
+      .or(root.locator("label").filter({ hasText: /^Title$/i }))
+      .or(this.titleDropdown)
+      .first();
+    await expect(entryMarker).toBeVisible({ timeout: 60_000 });
   }
 
   /** Loaders cleared, form visible, **Next** enabled, dependants ages bound (if shown). */

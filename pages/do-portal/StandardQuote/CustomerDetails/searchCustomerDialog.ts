@@ -202,6 +202,12 @@ export class DOSearchCustomerDialog extends BasePage {
     await this.clickSearch();
   }
 
+  /** Individual search type + UDC lookup (required before **Add New Customer** for personal borrowers). */
+  async searchByUdcNumberAsIndividual(customerNumber: string): Promise<void> {
+    await this.selectIndividualType();
+    await this.searchByUdcNumber(customerNumber);
+  }
+
   /**
    * **Trust** search type — search by **Trust Name** with no expected match so **Add New Customer** enables.
    */

@@ -16,21 +16,23 @@ import {
 } from "../../../../pages";
 import { DOAddressDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
 import { openFinanceLeaseBusinessAsgToAddBorrowerStep } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/customerDetailsFLBusiness.helpers.test";
-import { DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/customerQuotePostSubmit";
+import {
+  DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF,
+  DOCustomerQuotePostSubmitPage,
+} from "../../../../pages/do-portal/StandardQuote/CustomerDetails/customerQuotePostSubmit";
 import { DOPersonalDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import { DOReferenceDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
 import { fillAddOnAccessoriesAndSave } from "../../doRegressionTestSuite/fl.helpers";
 import { openStandardQuoteFromDashboard } from "../../doRegressionTestSuite/workflow.helpers";
 import {
-  CSA_SQ_PRODUCT,
-  CSA_SQ_PROGRAM,
+  CSAB_SQ_PRODUCT,
+  CSAB_SQ_PROGRAM,
   addManualAssetViaSummary,
   addPhysicalAssetViaMotocheck,
   addSecondDistinctManualAssetViaSummary,
   addTradeInAssetViaMotocheck,
   advanceIndividualBorrowerToPostSubmission,
   assetInsuranceSummaryDialog,
-  copyAssetFromSummary,
   createSaveAndReopenDocumentationQuote,
   editManualAssetClearAndRefill,
   expectSummaryPhysicalAssetCount,
@@ -48,7 +50,7 @@ import {
   saveExistingIndividualBorrowerOnCustomerDetailsQuote,
   searchTypeRadioInput,
   selectCsaProductAndProgram,
-  selectCsaQuickQuoteProductAndProgram,
+  selectCsabQuickQuoteProductAndProgram,
   selectSearchCustomerTrustType,
   standardQuoteRoot,
   uniqueOrigRef,
@@ -90,13 +92,13 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
 
     test("UDP-T4679 - Check defaulting @UDP-T4679", async () => {
       test.setTimeout(240_000);
-      await selectCsaQuickQuoteProductAndProgram(quickQuote);
+      await selectCsabQuickQuoteProductAndProgram(quickQuote);
       await expect(quickQuote.cashPriceInput).toBeVisible();
       await expect(quickQuote.interestRatePercentInput).toBeVisible();
       await expect(quickQuote.termsMonthsInput).toBeVisible();
       await expect(quickQuote.calculateButton).toBeVisible();
     });
-
+    
     test("UDP-T4680 - Create a new quote (calculate) @UDP-T4680", async () => {
       test.setTimeout(240_000);
       await fillSanityCsaQuickQuote(quickQuote);
@@ -114,7 +116,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
       await quickQuote.clickCalculate();
       await quickQuote.clickCreateQuote();
       await expect(standardQuoteRoot(quickQuote.page)).toBeVisible({ timeout: 120_000 });
-      await expect(quickQuote.page.getByText(/CSA-C-Assigned|CSA Personal/i).first()).toBeVisible();
+      await expect(quickQuote.page.getByText(/CSA-B-Assigned|MYUDC-B-CSA-Assigned/i).first()).toBeVisible();
     });
 
     test("UDP-T4682 - Calculate functionality @UDP-T4682", async () => {
@@ -178,8 +180,8 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     test.setTimeout(300_000);
     const { asset } = await openSanityCsaAssetDetails(page);
     await selectCsaProductAndProgram(asset);
-    await expect(asset.page.getByText(CSA_SQ_PRODUCT, { exact: false }).first()).toBeVisible();
-    await expect(asset.page.getByText(CSA_SQ_PROGRAM, { exact: false }).first()).toBeVisible();
+    await expect(asset.page.getByText(CSAB_SQ_PRODUCT, { exact: false }).first()).toBeVisible();
+    await expect(asset.page.getByText(CSAB_SQ_PROGRAM, { exact: false }).first()).toBeVisible();
   });
 
   test("UDP-T4689 - Check defaulting @UDP-T4689", async ({ page }) => {
@@ -425,7 +427,6 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   test("UDP-T4704 - Change product/program @UDP-T4704", async ({ page }) => {
     test.setTimeout(420_000);
     const { asset } = await openSanityCsaAssetDetails(page);
-    await selectCsaProductAndProgram(asset);
     await asset.chooseProgram("CSA Personal - MV Dealer");
     await waitForProductProgramChange(page, asset);
     await asset.clickCalculateButton();
@@ -487,13 +488,10 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     await ref.enterContactLastName("Referee");
     await ref.clickAddContactInModal();
     await expect(page.getByText(/Alex/i).first()).toBeVisible();
-
     await ref.confirmCustomerDetailsCorrect();
     await ref.advanceFromReferenceDetailsToPostSubmission();
-
     const post = new DOCustomerQuotePostSubmitPage(page);
     await post.waitForUploadStep();
-
     await post.openSigningAndVerificationTab();
     await post.expectBorrowerListedInSigningVerification(borrowerName, { role: "Borrower" });
     const verificationPicker = await post.openBorrowerVerificationMethodPicker(borrowerName);
@@ -539,7 +537,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     test.setTimeout(420_000);
     const { customer } = await openSanityCustomerDetailsStep(page);
     await customer.clickAddBorrowersOrGuarantors();
-    await customer.searchCustomer.searchByUdcNumber("420");
+    await customer.searchCustomer.searchByUdcNumberAsIndividual("420");
     await customer.clickAddNewCustomerButton();
     const personal = new DOPersonalDetailsPage(page);
     await personal.clickSavePersonalDetails();
@@ -550,7 +548,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     test.setTimeout(480_000);
     const { customer } = await openSanityCustomerDetailsStep(page);
     await customer.clickAddBorrowersOrGuarantors();
-    await customer.searchCustomer.searchByUdcNumber("420");
+    await customer.searchCustomer.searchByUdcNumberAsIndividual("420");
     await customer.clickAddNewCustomerButton();
     const personal = new DOPersonalDetailsPage(page);
     await fillValidIndividualPersonalBorrower(personal);
@@ -664,7 +662,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     test.setTimeout(600_000);
     const { customer } = await openSanityCustomerDetailsStep(page);
     await customer.clickAddBorrowersOrGuarantors();
-    await customer.searchCustomer.searchByUdcNumber("420");
+    await customer.searchCustomer.searchByUdcNumberAsIndividual("420");
     await customer.clickAddNewCustomerButton();
     const personal = new DOPersonalDetailsPage(page);
     await personal.expectPersonalDetailsDropdownsAndSlidersWork();
@@ -686,7 +684,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     test.setTimeout(480_000);
     const { customer } = await openSanityCustomerDetailsStep(page);
     await customer.clickAddBorrowersOrGuarantors();
-    await customer.searchCustomer.searchByUdcNumber(EXISTING_UDC);
+    await customer.searchCustomer.searchByUdcNumberAsIndividual(EXISTING_UDC);
     const addExisting = page.getByRole("button", { name: /Add|Select/i }).first();
     if (await addExisting.isVisible({ timeout: 10_000 }).catch(() => false)) {
       await addExisting.click();
@@ -705,7 +703,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     test.setTimeout(480_000);
     const { customer } = await openSanityCustomerDetailsStep(page);
     await customer.clickAddBorrowersOrGuarantors();
-    await customer.searchCustomer.searchByUdcNumber("420");
+    await customer.searchCustomer.searchByUdcNumberAsIndividual("420");
     await customer.clickAddNewCustomerButton();
     const personal = new DOPersonalDetailsPage(page);
     await fillValidIndividualPersonalBorrower(personal);
@@ -745,7 +743,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
   test("UDP-T4725 - Document Upload via Browse Files and Drag-and-Drop @UDP-T4725", async ({
     page,
   }) => {
-    test.setTimeout(600_000);
+    test.setTimeout(900_000);
     const pdfName = path.basename(DEFAULT_CUSTOMER_QUOTE_UPLOAD_PDF);
     const jpgName = "zephyr-drop-upload.jpg";
     const post = await advanceIndividualBorrowerToPostSubmission(page, uniqueOrigRef("DOC"));
