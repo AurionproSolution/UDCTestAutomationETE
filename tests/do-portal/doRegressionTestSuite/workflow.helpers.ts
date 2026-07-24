@@ -18,10 +18,15 @@ import {
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
+import settlementData from "../../../testData/do-portal/settlementTestData.json";
 
 export const CSA_SQ_PRODUCT = "CSA-C-Assigned";
 export const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
-export const TLC_DEALER = "Armstrong Prestige Wellington";
+export const TLC_DEALER =
+  process.env.TLC_DEALER?.trim() ||
+  process.env.DO_DEALER?.trim() ||
+  settlementData.dealer ||
+  "Armstrong Prestige Wellington";
 
 export interface WorkflowApprovedValues {
   cashPrice?: number;
@@ -87,7 +92,7 @@ export function resolveSeedQuoteId(seed: WorkflowSeed): string {
 }
 
 export function standardQuoteRoot(page: Page) {
-  return page.locator("app-quote-details, app-standard-quote").first();
+  return page.locator("app-quote-details, app-standard-quote").filter({ visible: true }).last();
 }
 
 export async function openDashboard(page: Page): Promise<DODashboardPage> {
@@ -132,6 +137,7 @@ export async function addMinimalUsedAsset(
   await addAssetPage.chooseAssetLocation("North Island");
   await addAssetPage.clickSummitButton();
   await addAssetPage.clickCrossButton();
+  await assetDetailsPage.waitForAssetDetailsStepReady();
 }
 
 export async function prepareCalculableCsaQuote(

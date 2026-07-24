@@ -122,13 +122,24 @@ export class DOAddOnsAccessoriesPage extends BasePage {
   }
 
   private addOnsOpenTrigger(): Locator {
-    const name = /Add\s+Ons?\s*(?:&\s*)?\s*Accessories/i;
+    const full =
+      /\+?\s*Add\s*Ons?\s*(?:&|and)\s*Accessories|\+?\s*Addons?\s*&\s*Accessories|Add\s+Ons?\s*(?:&\s*)?\s*Accessories/i;
+    const short = /^\+?\s*Add\s*Ons?$/i;
+    const root = this.standardQuoteRoot;
+    const chargesSection = root.filter({ has: root.getByText(/Additional\s+Charges/i) });
     return this.page
-      .getByRole("link", { name })
-      .or(this.page.getByRole("button", { name }))
-      .or(this.standardQuoteRoot.getByRole("link", { name }))
-      .or(this.standardQuoteRoot.getByRole("button", { name }))
-      .or(this.standardQuoteRoot.locator("a, button").filter({ hasText: name }))
+      .getByRole("link", { name: full })
+      .or(this.page.getByRole("button", { name: full }))
+      .or(root.getByRole("link", { name: full }))
+      .or(root.getByRole("button", { name: full }))
+      .or(root.locator("a, button, [role='button']").filter({ hasText: full }))
+      .or(chargesSection.getByRole("button", { name: short }))
+      .or(chargesSection.locator("gen-button, p-button").filter({ hasText: short }).locator("button"))
+      .or(chargesSection.locator("button.p-button").filter({ hasText: short }))
+      .or(root.getByRole("button", { name: short }))
+      .or(root.locator("gen-button, p-button").filter({ hasText: short }).locator("button"))
+      .or(root.locator("button.p-button-outlined, button.p-button").filter({ hasText: short }))
+      .or(this.page.getByRole("button", { name: short }))
       .first();
   }
 

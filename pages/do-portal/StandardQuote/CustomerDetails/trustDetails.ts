@@ -97,6 +97,20 @@ export class DOTrustDetailsPage extends BasePage {
     await panel.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
   }
 
+  /** Assert FIS AF trust-type list options (UDP-T4470). */
+  async expectTrustTypeDropdownOptions(expectedPatterns: RegExp[]): Promise<void> {
+    this.logStep("Expect Trust Type Dropdown Options");
+    await this.openTrustTypeDropdown();
+    const panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
+    const opts = panel.locator("li[role='option'], .p-dropdown-item").filter({ hasNotText: /^\s*$/ });
+    await expect(opts.first()).toBeVisible({ timeout: 15_000 });
+    for (const pattern of expectedPatterns) {
+      await expect(opts.filter({ hasText: pattern }).first()).toBeVisible({ timeout: 10_000 });
+    }
+    await this.page.keyboard.press("Escape");
+    await panel.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+  }
+
   async touchTrustTypeDropdownWithoutSelection(): Promise<void> {
     this.logStep("Touch Trust Type Dropdown Without Selection");
     await this.touchDropdownWithoutSelection(this.dropdownTriggerNearLabel(/Trust Type/i));

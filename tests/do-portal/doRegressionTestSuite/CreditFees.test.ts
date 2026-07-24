@@ -91,41 +91,7 @@ async function openAddOnAccessoriesPageFromStandardQuote(
   root: Locator,
   assetDetailsPage: DOAssetDetailsPage,
 ): Promise<void> {
-  await assetDetailsPage.waitForQuoteLoadersToFinish();
-  const labelRx =
-    /Add\s*Ons\s*&\s*Accessories|Add\s+Ons\s+and\s+Accessories|Add[-\s]?Ons?\s*[&+]\s*Accessories/i;
-
-  for (const anchor of [
-    root.getByText(/Additional\s+Charges/i),
-    root.getByText(/Charges\s*\+\s*Add/i),
-    root.getByText(/^Charges$/i),
-  ]) {
-    if (await anchor.first().isVisible({ timeout: 2_500 }).catch(() => false)) {
-      await anchor.first().scrollIntoViewIfNeeded();
-      break;
-    }
-  }
-  await root.getByText(labelRx).first().scrollIntoViewIfNeeded().catch(() => {});
-
-  const tryOpen = async (loc: Locator): Promise<boolean> => {
-    const el = loc.first();
-    if (!(await el.isVisible({ timeout: 6_000 }).catch(() => false))) return false;
-    await el.scrollIntoViewIfNeeded();
-    await el.click({ timeout: 20_000 }).catch(() => {});
-    return await page.locator("app-service-plan").isVisible({ timeout: 18_000 }).catch(() => false);
-  };
-
-  const candidates: Locator[] = [
-    root.getByRole("link", { name: labelRx }),
-    root.getByRole("button", { name: labelRx }),
-    root.locator("a, button").filter({ hasText: labelRx }),
-  ];
-
-  for (const c of candidates) {
-    if (await tryOpen(c)) return;
-  }
-
-  throw new Error("Add Ons & Accessories: could not open app-service-plan.");
+  await assetDetailsPage.clickAddonsAndAccessoriesAndExpectScreen();
 }
 
 test.describe("DO Portal — Credit Fees (Zephyr UDP-T3941–UDP-T3951)", () => {
