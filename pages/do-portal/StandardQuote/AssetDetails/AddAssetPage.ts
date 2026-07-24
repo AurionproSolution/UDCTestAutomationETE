@@ -55,9 +55,18 @@ export class DOAddAssetPage extends BasePage {
       .or(page.getByRole("textbox", { name: /Cost of Asset/i }))
       .or(page.getByLabel(/Asset Value|Cost of Asset|Sum Insured Net/i))
       .first();
-    this.conditionDropdown = page.locator(
-      `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[2]`,
-    );
+    this.conditionDropdown = page
+      .locator("app-add-asset, app-asset-details-add-asset, app-standard-quote-add-asset")
+      .filter({ visible: true })
+      .first()
+      .getByText(/^Condition\s*\*?\s*$/i)
+      .locator("xpath=following::div[contains(@class,'p-dropdown')][1]")
+      .or(
+        page.locator(
+          "//label[contains(normalize-space(),'Condition')]/following-sibling::div//div[contains(@class,'p-dropdown')]",
+        ),
+      )
+      .first();
     this.yearInputField = addAssetTextField(page, "Year");
     this.makeInputField = addAssetTextField(page, "Make");
     this.modelInputField = addAssetTextField(page, "Model");
@@ -177,10 +186,88 @@ export class DOAddAssetPage extends BasePage {
     await input.press("Tab");
     await this.page.waitForTimeout(300);
   }
+  private conditionDropdownTrigger(): Locator {
+    return this.conditionDropdown
+      .locator(".p-dropdown-trigger")
+      .or(this.conditionDropdown.getByRole("button", { name: /dropdown trigger/i }))
+      .first();
+  }
+
+  private async readSelectedConditionLabel(): Promise<string> {
+    const combobox = this.conditionDropdown.getByRole("combobox").first();
+    if (await combobox.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return (
+        (await combobox.getAttribute("aria-label")) ??
+        (await combobox.textContent()) ??
+        ""
+      ).trim();
+    }
+    return ((await this.conditionDropdown.locator(".p-dropdown-label").first().textContent()) ?? "").trim();
+  }
+
   async selectCondition(condition: string): Promise<void> {
     this.logStep(`Selected condition: ${this.stepValueDisplay(condition)}`);
-    await this.conditionDropdown.click();
-    await this.page.getByRole("option", { name: condition }).click();
+    const escaped = condition.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const optionPattern = new RegExp(`^\\s*${escaped}\\s*$`, "i");
+
+    const current = await this.readSelectedConditionLabel();
+    if (optionPattern.test(current) || current.toLowerCase() === condition.toLowerCase()) {
+      return;
+    }
+
+    const trigger = this.conditionDropdownTrigger();
+    await expect(trigger).toBeVisible({ timeout: 30_000 });
+
+    const optionWhenOpen = this.page
+      .getByRole("listbox", { name: /Option List/i })
+      .getByRole("option", { name: optionPattern })
+      .first();
+    if (await optionWhenOpen.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await optionWhenOpen.click({ timeout: 15_000 });
+      await this.page.keyboard.press("Escape").catch(() => {});
+      return;
+    }
+
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000).catch(() => {});
+
+    await expect
+      .poll(
+        async () => {
+          const selected = await this.readSelectedConditionLabel();
+          if (optionPattern.test(selected) || selected.toLowerCase() === condition.toLowerCase()) {
+            return true;
+          }
+
+          await trigger.scrollIntoViewIfNeeded().catch(() => {});
+          await trigger
+            .evaluate((el: HTMLElement) => {
+              el.click();
+            })
+            .catch(() => trigger.click({ force: true, timeout: 5_000 }));
+
+          const panel = this.page.locator("div.p-dropdown-panel").filter({ visible: true }).last();
+          const option = panel.getByRole("option", { name: optionPattern }).first();
+          if (await option.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            await option
+              .evaluate((el: HTMLElement) => {
+                el.click();
+              })
+              .catch(() => option.click({ force: true, timeout: 2_000 }));
+          } else {
+            await this.page.keyboard.type(condition.slice(0, 4), { delay: 40 }).catch(() => {});
+            await this.page.keyboard.press("Enter").catch(() => {});
+          }
+
+          await this.page.keyboard.press("Escape").catch(() => {});
+          await this.page.waitForTimeout(400);
+
+          const after = await this.readSelectedConditionLabel();
+          return optionPattern.test(after) || after.toLowerCase() === condition.toLowerCase();
+        },
+        { timeout: 45_000, intervals: [500, 1_000, 1_500, 2_000] },
+      )
+      .toBeTruthy();
   }
   async selectYear(year: string): Promise<void> {
     this.logStep(`Selected year: ${this.stepValueDisplay(year)}`);
@@ -365,19 +452,163 @@ export class DOAddAssetPage extends BasePage {
       await this.summitButton.click({ timeout: 15_000, force: true });
     });
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.waitForAddAssetPostSubmitState();
+  }
+
+  /** Dismiss **Cancel Asset** / unsaved-changes confirm when leaving the full-page editor. */
+  private async dismissAddAssetLeaveConfirmIfOpen(confirmLeave = true): Promise<void> {
+    const dlg = this.page
+      .getByRole("alertdialog")
+      .filter({ hasText: /unsaved changes|Cancel Asset|lost/i })
+      .filter({ visible: true })
+      .first();
+    if (!(await dlg.isVisible({ timeout: 1_500 }).catch(() => false))) {
+      return;
+    }
+    const btn = confirmLeave
+      ? dlg.getByRole("button", { name: /^Yes$/i }).first()
+      : dlg.getByRole("button", { name: /^No$/i }).first();
+    await btn.click({ timeout: 10_000 });
+    await dlg.waitFor({ state: "hidden", timeout: 20_000 }).catch(() => {});
+  }
+
+  /**
+   * Dialog submit closes the wizard (**×** appears). Full-page `/asset/addAsset/edit` usually saves in-place.
+   */
+  private async waitForAddAssetPostSubmitState(): Promise<void> {
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+    await this.dismissAddAssetLeaveConfirmIfOpen(true).catch(() => {});
+
+    if (!/\/asset\/addAsset/i.test(this.page.url())) {
+      return;
+    }
+    if (await this.crossButton.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return;
+    }
+
+    const leftAddAssetRoute = await expect
+      .poll(
+        async () => {
+          await this.dismissAddAssetLeaveConfirmIfOpen(true).catch(() => {});
+          return !/\/asset\/addAsset/i.test(this.page.url());
+        },
+        { timeout: 20_000, intervals: [500, 1_000, 1_500] },
+      )
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+    if (leftAddAssetRoute) {
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000).catch(() => {});
+      return;
+    }
+
+    await expect
+      .poll(
+        async () => {
+          const errs = this.page.locator(
+            ".p-toast-message-error, .p-inline-message-error, .p-message-error",
+          );
+          return (await errs.filter({ visible: true }).count()) === 0;
+        },
+        { timeout: 30_000, intervals: [500, 1_000] },
+      )
+      .toBe(true)
+      .catch(() => {});
+    await this.page.waitForTimeout(1_500);
   }
 
   /** Same control as {@link clickSummitButton} — Submit on Add Asset. */
   async clickSubmitButton(): Promise<void> {
     await this.clickSummitButton();
   }
+
+  /**
+   * FIS IA internal portal opens **Add Asset** as `/asset/addAsset/edit` (full page), not a dialog.
+   * After Submit there is no header **×** — return via history / breadcrumb (not **Create Standard Quote**, which starts a new quote).
+   */
+  private async isStandardQuoteShellVisible(): Promise<boolean> {
+    const shell = this.page.locator("app-quote-details, app-standard-quote").filter({ visible: true }).first();
+    if (await shell.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return true;
+    }
+    if (!/\/standard-quote/i.test(this.page.url())) {
+      return false;
+    }
+    return await this.page
+      .getByText(/Cash Price of Asset|Term|Asset Type/i)
+      .first()
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false);
+  }
+
+  private async waitForStandardQuoteShellVisible(): Promise<void> {
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000).catch(() => {});
+    await expect
+      .poll(async () => this.isStandardQuoteShellVisible(), {
+        timeout: 120_000,
+        intervals: [500, 1_000, 2_000],
+      })
+      .toBe(true);
+  }
+
+  async returnToStandardQuoteFromAddAssetRouteIfNeeded(): Promise<void> {
+    if (!/\/asset\/addAsset/i.test(this.page.url())) {
+      return;
+    }
+    if (await this.isStandardQuoteShellVisible()) {
+      return;
+    }
+
+    this.logStep("Return to Standard Quote from Add Asset full-page route");
+    await this.dismissAddAssetLeaveConfirmIfOpen(true);
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.page.goBack({ waitUntil: "domcontentloaded" }).catch(() => {});
+      await this.dismissAddAssetLeaveConfirmIfOpen(true);
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000).catch(() => {});
+      if (await this.isStandardQuoteShellVisible()) {
+        return;
+      }
+    }
+
+    const quoteRefCrumb = this.page.getByRole("link", { name: /Standard Quote\s*-/i }).first();
+    if (await quoteRefCrumb.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await quoteRefCrumb.click({ timeout: 15_000 });
+      await this.dismissAddAssetLeaveConfirmIfOpen(true);
+      await this.waitForStandardQuoteShellVisible();
+      return;
+    }
+
+    const cancel = this.page.getByRole("button", { name: /^Cancel$/i }).filter({ visible: true }).first();
+    if (await cancel.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await cancel.click({ timeout: 15_000 });
+      await this.dismissAddAssetLeaveConfirmIfOpen(true);
+      if (await this.isStandardQuoteShellVisible()) {
+        return;
+      }
+    }
+
+    const createCrumb = this.page.getByRole("link", { name: /Create Standard Quote/i }).first();
+    if (await createCrumb.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await createCrumb.click({ timeout: 15_000 });
+      await this.dismissAddAssetLeaveConfirmIfOpen(true);
+    } else {
+      await this.page.goBack({ waitUntil: "domcontentloaded" }).catch(() => {});
+      await this.dismissAddAssetLeaveConfirmIfOpen(true);
+    }
+    await this.waitForStandardQuoteShellVisible();
+  }
+
   async clickCrossButton(): Promise<void> {
     const visible = await this.crossButton.isVisible({ timeout: 5_000 }).catch(() => false);
     if (!visible) {
-      this.logStep("Add Asset dialog already closed after Submit — skip close (cross)");
+      this.logStep("Add Asset dialog close (cross) not shown — checking full-page route");
+      await this.returnToStandardQuoteFromAddAssetRouteIfNeeded();
       return;
     }
     this.logStep("Clicked close (cross) on Add Asset");
     await this.crossButton.click({ timeout: 15_000 });
+    await this.returnToStandardQuoteFromAddAssetRouteIfNeeded();
   }
 }

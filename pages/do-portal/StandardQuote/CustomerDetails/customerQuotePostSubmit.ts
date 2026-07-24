@@ -162,16 +162,7 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
 
     await this.waitForUploadProcessingToFinish();
 
-    const footer = this.postSubmissionFooterScope();
-    const footerAdvanceButtons: Locator[] = [
-      footer
-        .locator("button.p-button, button.p-element")
-        .filter({ has: footer.locator("span.p-button-label").filter({ hasText: /^Next$/ }) })
-        .last(),
-      footer.getByRole("button", { name: /Save\s+and\s+Next|Save\s*&\s*Next/i }).last(),
-      footer.locator("button").filter({ has: footer.locator(':text-is("Next")') }).last(),
-      footer.getByRole("button", { name: /^Next$/i }).last(),
-    ];
+    const footerAdvanceButtons = this.postSubmissionFooterNextButtons();
 
     const reachedFullPostSubmission = async (): Promise<boolean> =>
       (await creditTab.isVisible({ timeout: 1_500 }).catch(() => false)) ||
@@ -189,6 +180,67 @@ export class DOCustomerQuotePostSubmitPage extends BasePage {
         intervals: [500, 1_500, 3_000],
       })
       .toBe(true);
+  }
+
+  private postSubmissionFooterNextButtons(): Locator[] {
+    const footer = this.postSubmissionFooterScope();
+    return [
+      footer
+        .locator("button.p-button, button.p-element")
+        .filter({ has: footer.locator("span.p-button-label").filter({ hasText: /^Next$/ }) })
+        .last(),
+      footer.getByRole("button", { name: /Save\s+and\s+Next|Save\s*&\s*Next/i }).last(),
+      footer.locator("button").filter({ has: footer.locator(':text-is("Next")') }).last(),
+      footer.getByRole("button", { name: /^Next$/i }).filter({ visible: true }).last(),
+    ];
+  }
+
+  /**
+   * Post-submit parties (**Borrowers & Guarantors** + Upload) — footer **Next** triggers BLD /
+   * partnership guards without waiting for full Post Submission (UDP-T4472, T4473).
+   */
+  async clickFooterNextForPartnershipValidation(): Promise<void> {
+    this.logStep("Click footer Next for partnership / BLD validation");
+    await this.waitForUploadProcessingToFinish().catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
+
+    const footer = this.postSubmissionFooterScope();
+    const save = footer.getByRole("button", { name: /^Save$/i }).filter({ visible: true }).last();
+    if (await save.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await save.scrollIntoViewIfNeeded().catch(() => {});
+      await this.clickElement(save, 15_000).catch(() => save.click({ force: true, timeout: 15_000 }));
+      await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    }
+
+    const buttons = this.postSubmissionFooterNextButtons();
+    let forceNext = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+      if (await this.isAppLoaderBlocking()) {
+        await this.page.waitForTimeout(400);
+        continue;
+      }
+      for (const btn of buttons) {
+        const ready =
+          (await btn.isVisible({ timeout: 1_500 }).catch(() => false)) &&
+          (await btn.isEnabled().catch(() => false));
+        if (!ready) continue;
+        await btn.scrollIntoViewIfNeeded();
+        try {
+          if (forceNext) {
+            await btn.click({ force: true, timeout: 30_000 });
+          } else {
+            await this.clickElement(btn, 30_000);
+          }
+          await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+          return;
+        } catch {
+          forceNext = true;
+        }
+      }
+      await this.page.waitForTimeout(400);
+    }
+    throw new Error("Post Submission footer Next not clickable for partnership validation");
   }
 
   /** Click sticky footer **Next** / **Save and Next** once the app loader is not intercepting. */

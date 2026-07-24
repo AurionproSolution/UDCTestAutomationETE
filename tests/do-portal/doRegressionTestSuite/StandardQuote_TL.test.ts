@@ -374,6 +374,8 @@ async function openAddOnAccessoriesPageFromStandardQuote(
 
   const labelRx =
     /Add\s*Ons\s*&\s*Accessories|Add\s+Ons\s+and\s+Accessories|Add[-\s]?Ons?\s*[&+]\s*Accessories/i;
+  const shortLabelRx = /^\+?\s*Add\s*Ons?$/i;
+  const chargesSection = root.filter({ has: root.getByText(/Additional\s+Charges/i) });
 
   for (const anchor of [
     root.getByText(/Additional\s+Charges/i),
@@ -389,6 +391,7 @@ async function openAddOnAccessoriesPageFromStandardQuote(
   await page.mouse.wheel(0, 500).catch(() => {});
   await page.waitForTimeout(400);
   await root.getByText(labelRx).first().scrollIntoViewIfNeeded().catch(() => {});
+  await root.getByRole("button", { name: shortLabelRx }).first().scrollIntoViewIfNeeded().catch(() => {});
 
   const tryOpen = async (loc: Locator): Promise<boolean> => {
     const el = loc.first();
@@ -408,6 +411,11 @@ async function openAddOnAccessoriesPageFromStandardQuote(
     root.locator("button, [role='button']").filter({ hasText: labelRx }),
     root.locator("a, button, [role='link']").filter({ hasText: labelRx }),
     root.locator('[class*="cursor-pointer"], [class*="pointer"]').filter({ hasText: labelRx }),
+    chargesSection.getByRole("button", { name: shortLabelRx }),
+    chargesSection.locator("gen-button, p-button").filter({ hasText: shortLabelRx }).locator("button"),
+    root.getByRole("button", { name: shortLabelRx }),
+    root.locator("gen-button, p-button").filter({ hasText: shortLabelRx }).locator("button"),
+    page.getByRole("button", { name: shortLabelRx }),
   ];
 
   for (const c of candidates) {
@@ -429,6 +437,15 @@ async function openAddOnAccessoriesPageFromStandardQuote(
     if (await page.locator("app-service-plan").isVisible({ timeout: 18_000 }).catch(() => false)) {
       return;
     }
+  }
+
+  const shortTextHit = root.getByText(shortLabelRx).first();
+  if (await shortTextHit.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const asBtn = shortTextHit.locator("xpath=ancestor::button[1]");
+    if (await asBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      if (await tryOpen(asBtn)) return;
+    }
+    if (await tryOpen(shortTextHit)) return;
   }
 
   throw new Error(

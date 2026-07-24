@@ -401,15 +401,27 @@ async function openAfVPhysicalSearchAssetDialog(
     .or(summaryDlg.getByRole("link", { name: /Search\s*&\s*Add\s+Asset/i }))
     .first();
 
-  if (await searchAndAdd.isVisible({ timeout: 8_000 }).catch(() => false)) {
+  const searchAndAddEnabled =
+    (await searchAndAdd.isVisible({ timeout: 8_000 }).catch(() => false)) &&
+    (await searchAndAdd.isEnabled().catch(() => false));
+
+  if (searchAndAddEnabled) {
     await searchAndAdd.scrollIntoViewIfNeeded();
     await searchAndAdd.click({ timeout: 15_000 });
   } else {
-    const rowEdit = summaryDlg
-      .locator("i.fa-pen-to-square, i.fa-pen, i.fa-pencil, .pi-pencil")
+    const physicalRow = summaryDlg
+      .locator("table")
+      .first()
+      .locator("tbody tr")
+      .filter({ hasText: /\d{4}|SUZUKI|IGNIS|GLX|Asset/i })
+      .first();
+    const rowEdit = physicalRow
+      .locator("i.fa-pen-to-square, i.fa-pen, i.fa-pencil, .pi-pencil, .pi-pen")
+      .or(physicalRow.locator("td").last().locator("[class*='cursor-pointer'], button, a").first())
       .first();
     if (await rowEdit.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await rowEdit.click({ timeout: 15_000 });
+      await rowEdit.scrollIntoViewIfNeeded();
+      await rowEdit.click({ timeout: 15_000, force: true });
     } else {
       await assetDetailsPage.clickAssetSummaryEditButton();
     }

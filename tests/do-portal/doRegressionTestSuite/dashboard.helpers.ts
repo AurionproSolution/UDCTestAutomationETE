@@ -10,7 +10,11 @@ import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DODashboardPage, DOCustomerStatementPage } from "../../../pages";
 import settlementData from "../../../testData/do-portal/settlementTestData.json";
 
-export const TLC_DEALER = settlementData.dealer || "Armstrong Prestige Wellington";
+export const TLC_DEALER =
+  process.env.TLC_DEALER?.trim() ||
+  process.env.DO_DEALER?.trim() ||
+  settlementData.dealer ||
+  "Armstrong Prestige Wellington";
 
 /** Dealer with AFV product authorisation — required for AFV Loans dashboard grid (UDP-T4390+). */
 export const AFV_DASHBOARD_DEALER =
