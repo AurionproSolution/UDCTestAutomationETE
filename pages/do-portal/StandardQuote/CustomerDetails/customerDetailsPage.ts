@@ -3,9 +3,14 @@ import { BasePage } from "../../../common/BasePage";
 import { DOSearchCustomerDialog } from "./searchCustomerDialog";
 
 const ADD_BORROWER_LABEL = /Add\s+Borrowers?\s*(\/|&|and)\s*Guarantors?/i;
+/** FIS IA internal portal may show a shorter outlined **Add Borrowers** button. */
+const ADD_BORROWER_SHORT_LABEL = /^\+?\s*Add\s+Borrowers?$/i;
 
 function buildAddBorrowersOrGuarantorsButton(page: Page): Locator {
   const quoteCustomerShell = page.locator("app-standard-quote, app-quote-details").first();
+  const borrowersSection = quoteCustomerShell.filter({
+    has: quoteCustomerShell.getByText(/Borrowers?\s*(\/|&|and)\s*Guarantors?/i),
+  });
   const addBorrowerClickableFromText = (root: Locator): Locator =>
     root
       .getByText(ADD_BORROWER_LABEL)
@@ -29,11 +34,20 @@ function buildAddBorrowersOrGuarantorsButton(page: Page): Locator {
     .or(addBorrowerLooseTextClickable(page.locator("body")))
     .or(
       quoteCustomerShell
-        .locator("button.p-button, button.p-element, p-button")
+        .locator("button.p-button, button.p-element, p-button, gen-button")
         .filter({ hasText: ADD_BORROWER_LABEL })
         .first(),
     )
     .or(page.locator("button, a").filter({ hasText: ADD_BORROWER_LABEL }).first())
+    .or(borrowersSection.getByRole("button", { name: ADD_BORROWER_LABEL }))
+    .or(borrowersSection.getByRole("link", { name: ADD_BORROWER_LABEL }))
+    .or(borrowersSection.locator("gen-button, p-button").filter({ hasText: ADD_BORROWER_LABEL }).locator("button"))
+    .or(borrowersSection.locator("button.p-button-outlined, button.p-button").filter({ hasText: ADD_BORROWER_LABEL }))
+    .or(borrowersSection.getByRole("button", { name: ADD_BORROWER_SHORT_LABEL }))
+    .or(borrowersSection.locator("gen-button, p-button").filter({ hasText: ADD_BORROWER_SHORT_LABEL }).locator("button"))
+    .or(quoteCustomerShell.getByRole("button", { name: ADD_BORROWER_SHORT_LABEL }))
+    .or(quoteCustomerShell.locator("gen-button, p-button").filter({ hasText: ADD_BORROWER_SHORT_LABEL }).locator("button"))
+    .or(page.getByRole("button", { name: ADD_BORROWER_SHORT_LABEL }))
     .first();
 }
 
@@ -105,6 +119,23 @@ export class DOCustomerDetailsPage extends BasePage {
       .catch(() => {});
   }
 
+  private async openCustomerDetailsStepTabIfNeeded(): Promise<void> {
+    if (await this.addBorrowersOrGuarantorsButton.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      return;
+    }
+    const root = this.standardQuoteRoot();
+    const tab = root
+      .getByRole("tab", { name: /Customer\s+Details/i })
+      .or(root.getByRole("link", { name: /Customer\s+Details/i }))
+      .or(root.locator("button, a, span, li").filter({ hasText: /^\d*\.?\s*Customer\s+Details$/i }))
+      .first();
+    if (await tab.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await tab.scrollIntoViewIfNeeded().catch(() => {});
+      await tab.click({ timeout: 15_000 }).catch(() => {});
+      await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    }
+  }
+
   async waitForAddBorrowerButton(): Promise<void> {
     this.logStep("Wait for Add Borrowers / Guarantors on Customer Details");
     await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
@@ -112,14 +143,20 @@ export class DOCustomerDetailsPage extends BasePage {
     await expect
       .poll(
         async () => {
+          await this.openCustomerDetailsStepTabIfNeeded();
           const btn = await this.addBorrowersOrGuarantorsButton.isVisible().catch(() => false);
           const personal = await this.page
             .locator("app-personal-details")
             .isVisible()
             .catch(() => false);
-          return btn || personal;
+          const borrowersGrid = await this.standardQuoteRoot()
+            .getByText(/Borrowers?\s*(\/|&|and)\s*Guarantors?/i)
+            .first()
+            .isVisible()
+            .catch(() => false);
+          return btn || personal || borrowersGrid;
         },
-        { timeout: 120_000 },
+        { timeout: 120_000, intervals: [500, 1_000, 2_000] },
       )
       .toBe(true);
     if (await this.addBorrowersOrGuarantorsButton.isVisible().catch(() => false)) {
@@ -129,8 +166,31 @@ export class DOCustomerDetailsPage extends BasePage {
 
   async clickAddBorrowersOrGuarantors(): Promise<void> {
     this.logStep("Click Add Borrowers / Guarantors");
-    await this.addBorrowersOrGuarantorsButton.click();
-    await this.searchCustomer.waitForVisible();
+    await this.waitForAddBorrowerButton();
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
+
+    const trigger = this.addBorrowersOrGuarantorsButton;
+    const innerButton = trigger.locator("button").first();
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+      try {
+        if (await innerButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          await innerButton.scrollIntoViewIfNeeded();
+          await innerButton.click({ timeout: 15_000 });
+        } else {
+          await trigger.scrollIntoViewIfNeeded();
+          await trigger.click({ timeout: 15_000 });
+        }
+        await this.searchCustomer.waitForVisible(30_000);
+        return;
+      } catch (err) {
+        if (attempt === 4) {
+          throw err;
+        }
+        await this.page.waitForTimeout(500);
+      }
+    }
   }
 
   /** @deprecated use {@link clickAddBorrowersOrGuarantors} */

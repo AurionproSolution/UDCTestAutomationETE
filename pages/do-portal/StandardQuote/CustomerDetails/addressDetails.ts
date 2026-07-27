@@ -3194,6 +3194,14 @@ export class DOAddressDetailsPage extends BasePage {
     });
   }
 
+  /** UDP-T3756 / UDP-T4478 — existing FIS customer Address Details slider label. */
+  async expectCreateNewAndCopyToPreviousAddressVisible(): Promise<void> {
+    this.logStep("Expect Create New And Copy To Previous Address visible");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    const label = this.page.getByText(/Create new and copy to previous\s*Address/i).first();
+    await expect(label).toBeVisible({ timeout: 30_000 });
+  }
+
   /** UDP-T3792 — header stepper shows **2. Address Details** after direct tab navigation. */
   async expectAddressDetailsSectionHeaderVisible(): Promise<void> {
     this.logStep('Expect "2. Address Details" header visible');
@@ -3319,15 +3327,89 @@ export class DOAddressDetailsPage extends BasePage {
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
   }
 
+  private async isTrustSwitchOnNearLabel(scope: Page | Locator, labelRx: RegExp): Promise<boolean> {
+    const label = scope.getByText(labelRx).filter({ visible: true }).first();
+    if (!(await label.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      return false;
+    }
+
+    const toggleRow = label.locator("xpath=ancestor::toggle-checkbox[1]");
+    if ((await toggleRow.count()) > 0 && (await toggleRow.isVisible({ timeout: 1_500 }).catch(() => false))) {
+      return await toggleRow
+        .evaluate((el: HTMLElement) => {
+          const cb = el.querySelector<HTMLInputElement>('input[type="checkbox"]');
+          if (cb) return cb.checked;
+          const sw = el.querySelector("[role='switch']");
+          if (sw) return sw.getAttribute("aria-checked") === "true";
+          return (
+            el.querySelector(".p-inputswitch-checked") != null ||
+            el.querySelector("p-inputswitch.p-inputswitch-checked") != null
+          );
+        })
+        .catch(() => false);
+    }
+
+    const container = label
+      .locator("xpath=ancestor::*[.//*[@role='switch' or .//p-inputswitch]][1]")
+      .first();
+    const roleSwitch = container.getByRole("switch").first();
+    if (await roleSwitch.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      return (await roleSwitch.getAttribute("aria-checked")) === "true";
+    }
+
+    const slider = label.locator("xpath=following::span[contains(@class,'p-inputswitch-slider')][1]");
+    if ((await slider.count()) > 0) {
+      return await this.isPrimeSwitchOnFromSliderOrHost(slider);
+    }
+
+    const shell = label.locator("xpath=ancestor::*[.//p-inputswitch][1]").first();
+    const shellSlider = shell.locator(".p-inputswitch-slider").first();
+    if ((await shellSlider.count()) > 0) {
+      return await this.isPrimeSwitchOnFromSliderOrHost(shellSlider);
+    }
+
+    return false;
+  }
+
+  private async clickTrustSwitchNearLabel(scope: Page | Locator, labelRx: RegExp): Promise<boolean> {
+    if (await this.clickPrimeSwitchNearLabel(scope, labelRx)) {
+      return true;
+    }
+
+    const label = scope.getByText(labelRx).filter({ visible: true }).first();
+    if (!(await label.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      return false;
+    }
+    await label.scrollIntoViewIfNeeded({ timeout: 15_000 }).catch(() => {});
+
+    const toggleRow = label.locator("xpath=ancestor::toggle-checkbox[1]");
+    if ((await toggleRow.count()) > 0 && (await toggleRow.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      await this.clickToggleCheckboxRow(toggleRow);
+      return true;
+    }
+
+    const container = label
+      .locator("xpath=ancestor::*[.//*[@role='switch' or .//p-inputswitch]][1]")
+      .first();
+    const roleSwitch = container.getByRole("switch").first();
+    if (await roleSwitch.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await roleSwitch.scrollIntoViewIfNeeded().catch(() => {});
+      await roleSwitch.click({ force: true });
+      return true;
+    }
+
+    return false;
+  }
+
   private async ensureTrustSwitchOnNearLabel(scope: Page | Locator, labelRx: RegExp): Promise<void> {
-    const clicked = await this.clickPrimeSwitchNearLabel(scope, labelRx);
+    if (await this.isTrustSwitchOnNearLabel(scope, labelRx)) {
+      return;
+    }
+    const clicked = await this.clickTrustSwitchNearLabel(scope, labelRx);
     if (!clicked) {
       throw new Error(`Trust Address: toggle not found for ${String(labelRx)}`);
     }
-    const label = scope.getByText(labelRx).first();
-    const shell = label.locator("xpath=ancestor::*[.//p-inputswitch][1]").first();
-    const slider = shell.locator(".p-inputswitch-slider").first();
-    await expect.poll(async () => this.isPrimeSwitchOnFromSliderOrHost(slider), {
+    await expect.poll(async () => this.isTrustSwitchOnNearLabel(scope, labelRx), {
       timeout: 12_000,
     }).toBe(true);
   }
@@ -3337,14 +3419,14 @@ export class DOAddressDetailsPage extends BasePage {
     scope: Page | Locator,
     labelRx: RegExp,
   ): Promise<boolean> {
-    const clicked = await this.clickPrimeSwitchNearLabel(scope, labelRx);
+    if (await this.isTrustSwitchOnNearLabel(scope, labelRx)) {
+      return true;
+    }
+    const clicked = await this.clickTrustSwitchNearLabel(scope, labelRx);
     if (!clicked) {
       return false;
     }
-    const label = scope.getByText(labelRx).first();
-    const shell = label.locator("xpath=ancestor::*[.//p-inputswitch][1]").first();
-    const slider = shell.locator(".p-inputswitch-slider").first();
-    await expect.poll(async () => this.isPrimeSwitchOnFromSliderOrHost(slider), {
+    await expect.poll(async () => this.isTrustSwitchOnNearLabel(scope, labelRx), {
       timeout: 12_000,
     }).toBe(true);
     return true;
@@ -3386,22 +3468,96 @@ export class DOAddressDetailsPage extends BasePage {
     return false;
   }
 
+  private async isTrustPostalAddressReusedFromPhysical(): Promise<boolean> {
+    const physicalSn = (
+      await this.trustInputAfterLabel(this.trustPhysicalAddressRoot, "Street Number").inputValue().catch(() => "")
+    ).trim();
+    const physicalSt = (
+      await this.trustInputAfterLabel(this.trustPhysicalAddressRoot, "Street Name").inputValue().catch(() => "")
+    ).trim();
+    if (!physicalSn || !physicalSt) {
+      return false;
+    }
+    if (!(await this.trustPostalAddressRoot.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      return false;
+    }
+    const postalSn = (
+      await this.trustInputAfterLabel(this.trustPostalAddressRoot, "Street Number").inputValue().catch(() => "")
+    ).trim();
+    const postalSt = (
+      await this.trustInputAfterLabel(this.trustPostalAddressRoot, "Street Name").inputValue().catch(() => "")
+    ).trim();
+    return physicalSn === postalSn && physicalSt === postalSt;
+  }
+
   async setTrustReuseForPostalAddressOn(): Promise<void> {
     this.logStep("Set Trust Reuse For Postal Address On");
     await this.waitForTrustAddressUiSettled();
-    await this.ensureTrustSwitchOnNearLabel(
+    const scopes: (Page | Locator)[] = [
       this.trustPhysicalAddressRoot,
-      REUSE_FOR_POSTAL_ADDRESS_LABEL_RX,
-    );
+      this.trustAddressTopToggleGrid,
+      this.page.locator("app-trust-address-details").first(),
+      this.page,
+    ];
+    for (const scope of scopes) {
+      if (scope !== this.page) {
+        if ((await (scope as Locator).count()) === 0) continue;
+        if (!(await (scope as Locator).isVisible({ timeout: 800 }).catch(() => false))) continue;
+      }
+      if (await this.isTrustSwitchOnNearLabel(scope, REUSE_FOR_POSTAL_ADDRESS_LABEL_RX)) {
+        return;
+      }
+    }
+    for (const scope of scopes) {
+      if (scope !== this.page) {
+        if ((await (scope as Locator).count()) === 0) continue;
+        if (!(await (scope as Locator).isVisible({ timeout: 800 }).catch(() => false))) continue;
+      }
+      try {
+        await this.ensureTrustSwitchOnNearLabel(scope, REUSE_FOR_POSTAL_ADDRESS_LABEL_RX);
+        return;
+      } catch {
+        /* try next scope */
+      }
+    }
+    if (await this.isTrustPostalAddressReusedFromPhysical()) {
+      return;
+    }
+    throw new Error("Trust Address: could not turn on Reuse for Postal Address");
   }
 
   async setTrustReuseForRegisteredAddressOn(): Promise<void> {
     this.logStep("Set Trust Reuse For Registered Address On");
     await this.waitForTrustAddressUiSettled();
-    await this.ensureTrustSwitchOnNearLabel(
+    const labelRx = /Reuse for Registered Address/i;
+    const scopes: (Page | Locator)[] = [
       this.trustPhysicalAddressRoot,
-      /Reuse for Registered Address/i,
-    );
+      this.trustAddressTopToggleGrid,
+      this.page.locator("app-trust-address-details").first(),
+      this.page,
+    ];
+    for (const scope of scopes) {
+      if (scope !== this.page) {
+        if ((await (scope as Locator).count()) === 0) continue;
+        if (!(await (scope as Locator).isVisible({ timeout: 800 }).catch(() => false))) continue;
+      }
+      if (await this.isTrustSwitchOnNearLabel(scope, labelRx)) {
+        return;
+      }
+    }
+    for (const scope of scopes) {
+      if (scope !== this.page) {
+        if ((await (scope as Locator).count()) === 0) continue;
+        if (!(await (scope as Locator).isVisible({ timeout: 800 }).catch(() => false))) continue;
+      }
+      try {
+        await this.ensureTrustSwitchOnNearLabel(scope, labelRx);
+        return;
+      } catch {
+        /* try next scope */
+      }
+    }
+    throw new Error("Trust Address: could not turn on Reuse for Registered Address");
   }
 
   /**

@@ -1,4 +1,4 @@
-import { Locator, Page } from "@playwright/test";
+import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
 /**
@@ -32,6 +32,35 @@ export class DOSoleTraderDetailsPage extends BasePage {
 
   protected stepLogPrefix(): string {
     return "Standard quote — Sole trader details";
+  }
+
+  private async waitUntilNoVisibleAppLoaderOverlays(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const overlays = this.page.locator(".app-loader-overlay");
+      const count = await overlays.count();
+      let anyVisible = false;
+      for (let i = 0; i < count; i++) {
+        if (await overlays.nth(i).isVisible().catch(() => false)) {
+          anyVisible = true;
+          break;
+        }
+      }
+      if (!anyVisible) {
+        return;
+      }
+      await this.page.waitForTimeout(200);
+    }
+  }
+
+  async clickSaveSoleTraderDetails(): Promise<void> {
+    this.logStep("Click Save Sole Trader Details");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    const saveBtn = this.page.getByRole("button", { name: /^Save$/i }).last();
+    await saveBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await expect(saveBtn).toBeVisible({ timeout: 60_000 });
+    await this.clickElement(saveBtn, 60_000);
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
   }
 
   async waitForSoleTraderBusinessDetailsStep(): Promise<void> {
@@ -493,8 +522,11 @@ export class DOSoleTraderDetailsPage extends BasePage {
 
   async clickNextButton(): Promise<void> {
     this.logStep("Click Next Button");
-    await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.nextButton.waitFor({ state: "visible", timeout: 60_000 });
     await this.nextButton.scrollIntoViewIfNeeded();
-    await this.nextButton.click();
+    await expect(this.nextButton).toBeEnabled({ timeout: 30_000 });
+    await this.clickElement(this.nextButton, 60_000);
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
   }
 }

@@ -1045,6 +1045,45 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectCountryOfCitizenshipOption(countryOfCitizenship);
   }
 
+  private customerRoleDropdownTriggerInScope(scope: Locator): Locator {
+    return scope
+      .locator("label")
+      .filter({ hasText: /Customer Role/i })
+      .first()
+      .locator(
+        "xpath=following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+      );
+  }
+
+  private customerRoleDropdownTrigger(): Locator {
+    return this.customerRoleDropdownTriggerInScope(this.personalDetailsRoot);
+  }
+
+  private async resolveCustomerRoleDropdownTrigger(): Promise<Locator> {
+    const scoped = this.customerRoleDropdownTrigger();
+    if (await scoped.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return scoped;
+    }
+    return this.customerRoleDropdownTriggerInScope(this.page.locator("body"));
+  }
+
+  async chooseCustomerRole(role: string | RegExp): Promise<void> {
+    const label = typeof role === "string" ? role : role.source;
+    this.logStep(`Choose customer role: ${label}`);
+    const trig = await this.resolveCustomerRoleDropdownTrigger();
+    await trig.waitFor({ state: "visible", timeout: 15_000 });
+    await trig.click();
+    const name =
+      typeof role === "string"
+        ? new RegExp(`^${role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i")
+        : role;
+    await this.page.getByRole("option", { name }).first().click();
+    await this.page
+      .getByRole("listbox")
+      .waitFor({ state: "hidden", timeout: 10_000 })
+      .catch(() => {});
+  }
+
   async clickSavePersonalDetails(): Promise<void> {
     this.logStep("Click Save Personal Details");
     await this.personalDetailsRoot.waitFor({ state: "visible", timeout: 60_000 });

@@ -1,6 +1,7 @@
 import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common/BasePage";
 import { DOCustomerDetailsPage } from "../CustomerDetails/customerDetailsPage";
+import { DOAddAssetPage } from "./AddAssetPage";
 
 export type DOEditPaymentScheduleSegmentSnapshot = {
   number: string;
@@ -191,7 +192,7 @@ export class DOAssetDetailsPage extends BasePage {
     this.additionalFundsRoot = page.locator("app-additional-funds").first();
     this.additionalFundsInput = this.additionalFundsRoot
       .locator('input#amount[currencymask], input#amount[type="text"]')
-        .first()
+      .first()
       .or(
         this.additionalFundsRoot.locator(
           "xpath=.//*[contains(normalize-space(.),'Additional Funds') and not(contains(.,'Purpose'))]/following::input[@id='amount'][1]",
@@ -371,11 +372,29 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** After navigation to Asset Details: network settle + cash price field visible. */
   async waitForAssetDetailsStepReady(): Promise<void> {
-    await this.standardQuoteRoot().waitFor({
-      state: "visible",
-      timeout: 60_000,
-    });
-  
+    const addAsset = new DOAddAssetPage(this.page);
+    await addAsset.returnToStandardQuoteFromAddAssetRouteIfNeeded();
+
+    await expect
+      .poll(
+        async () => {
+          const shell = this.resolveQuoteShell();
+          if (await shell.isVisible({ timeout: 1_500 }).catch(() => false)) {
+            return true;
+          }
+          if (/\/standard-quote/i.test(this.page.url())) {
+            return await this.page
+              .getByText(/Cash Price of Asset|Term|Asset Type/i)
+              .first()
+              .isVisible({ timeout: 1_500 })
+              .catch(() => false);
+          }
+          return false;
+        },
+        { timeout: 60_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(true);
+
     await expect(this.cashPriceOfAssetInputField).toBeVisible({
       timeout: 60_000,
     });
@@ -1017,7 +1036,7 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
     await this.page.waitForLoadState("networkidle", { timeout: 55_000 }).catch(() => {});
   }
- 
+
   /** Quote shell visible and blocking overlays cleared (faster than {@link waitForQuoteLoadersToFinish}). */
   async waitForStandardQuoteReady(timeoutMs = 120_000): Promise<void> {
     this.logStep("Wait For Standard Quote Ready");
@@ -1283,12 +1302,12 @@ export class DOAssetDetailsPage extends BasePage {
 
     const establishmentLabel = panel.getByText(/Establishment\s+Fee\s+Share/i).first();
     if (await establishmentLabel.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    expect(
-      new RegExp(
-        `Establishment\\s+Fee\\s+Share[\\s\\S]{0,300}?(?:${pricedOrDash.source})`,
-        "i",
-      ).test(panelText),
-    ).toBeTruthy();
+      expect(
+        new RegExp(
+          `Establishment\\s+Fee\\s+Share[\\s\\S]{0,300}?(?:${pricedOrDash.source})`,
+          "i",
+        ).test(panelText),
+      ).toBeTruthy();
     }
   }
 
@@ -2444,7 +2463,6 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(`Enter Balloon Percent And Check Fixed ${percentDigits}`);
     await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
     await this.ensureCashPriceReadyForBalloon();
-    await this.cashPriceOfAsset("$20,000");
     await this.enterBalloonPercent(percentDigits);
     await this.checkBalloonFixedCheckbox();
     await this.expectBalloonFixedCheckboxChecked();
@@ -2823,7 +2841,7 @@ export class DOAssetDetailsPage extends BasePage {
     };
 
     if (await tryFill(this.originationReferenceInputLocator(root))) {
-        return true;
+      return true;
     }
 
     if (
@@ -3273,7 +3291,7 @@ export class DOAssetDetailsPage extends BasePage {
             await this.page.keyboard.press("Enter").catch(() => {});
           }
 
-    await this.page.keyboard.press("Escape").catch(() => {});
+          await this.page.keyboard.press("Escape").catch(() => {});
           await this.page.waitForTimeout(400);
 
           const after = await this.readSelectedConditionLabel();
@@ -3413,6 +3431,8 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async openAssetInsuranceTradeInSummary(): Promise<void> {
     this.logStep("Open Asset Insurance Trade In Summary");
+    await this.waitForAssetDetailsStepReady().catch(() => {});
+
     const quote = this.resolveQuoteShell();
     await quote.waitFor({ state: "attached", timeout: 60_000 });
     await quote.scrollIntoViewIfNeeded().catch(() => {});
@@ -4094,7 +4114,7 @@ export class DOAssetDetailsPage extends BasePage {
       scope
         .getByRole("columnheader", { name: label })
         .or(scope.locator("th").filter({ hasText: label }))
-      .first();
+        .first();
 
     await expect(scheduleHeader(/^Date\b/i)).toBeVisible({ timeout: 15_000 });
     await expect(scheduleHeader(/^Number\b/i)).toBeVisible({ timeout: 10_000 });
@@ -4207,7 +4227,7 @@ export class DOAssetDetailsPage extends BasePage {
           await btn.scrollIntoViewIfNeeded();
           await btn.click({ timeout: 10_000 });
           await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
-        await assertMoneyRowVisible();
+          await assertMoneyRowVisible();
         }
         return;
       }
@@ -4222,12 +4242,12 @@ export class DOAssetDetailsPage extends BasePage {
     for (let i = 0; i < iconCount; i++) {
       const btn = iconToggles.nth(i);
       if (!(await btn.isEnabled().catch(() => false))) {
-          continue;
-        }
+        continue;
+      }
       await btn.scrollIntoViewIfNeeded();
       await btn.click({ timeout: 10_000 });
       await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
-        await assertMoneyRowVisible();
+      await assertMoneyRowVisible();
     }
   }
 
@@ -5481,8 +5501,8 @@ export class DOAssetDetailsPage extends BasePage {
     await calcBtn.click({ timeout: 10_000 });
     await this.waitForLoadingComplete();
     if (opts?.waitForApply !== false) {
-    // Apply enables only after FIS calculation completes — wait for UI state, not spinner alone.
-    await expect(this.editPaymentScheduleApplyButton()).toBeEnabled({ timeout: 60_000 });
+      // Apply enables only after FIS calculation completes — wait for UI state, not spinner alone.
+      await expect(this.editPaymentScheduleApplyButton()).toBeEnabled({ timeout: 60_000 });
     } else {
       await this.waitForQuoteLoadersToFinish().catch(() => {});
     }
@@ -5515,8 +5535,8 @@ export class DOAssetDetailsPage extends BasePage {
     const numberCell = await this.editPaymentScheduleSegmentNumberCell(row);
     const numberInput = numberCell.getByRole("spinbutton").first();
     if (await numberInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await numberInput.fill(number);
-    await numberInput.press("Tab").catch(() => {});
+      await numberInput.fill(number);
+      await numberInput.press("Tab").catch(() => {});
       return;
     }
 
@@ -6249,22 +6269,25 @@ export class DOAssetDetailsPage extends BasePage {
     fieldLabel: string,
   ): Promise<void> {
     const target = Math.round(this.parseDisplayedCurrency(amount) * 100) / 100;
-    const digits = target.toFixed(2);
     await input.waitFor({ state: "visible", timeout: 20_000 });
     await input.scrollIntoViewIfNeeded();
 
-    const typeDigits = async (text: string): Promise<void> => {
-      await input.click({ timeout: 15_000 });
-      await this.page.keyboard.press("Control+A");
-      await this.page.keyboard.press("Backspace").catch(() => {});
-      await this.page.keyboard.type(text, { delay: 45 });
+    const current = await this.readCurrencyInput(input);
+    if (this.currencyDollarsMatch(current, target)) {
+      return;
+    }
+
+    const typeDigits = async (): Promise<void> => {
+      await input.click({ clickCount: 3, timeout: 15_000 });
+      await input.press("Backspace").catch(() => {});
+      await input.pressSequentially(String(Math.round(target)), { delay: 35 });
       await input.press("Tab").catch(() => {});
       await this.waitForQuoteLoadersToFinish().catch(() => {});
     };
 
     let last = Number.NaN;
     for (let attempt = 0; attempt < 10; attempt++) {
-      await typeDigits(attempt % 2 === 0 ? digits : String(Math.round(target)));
+      await typeDigits();
       try {
         await expect
           .poll(async () => this.readCurrencyInput(input), {
@@ -6275,6 +6298,9 @@ export class DOAssetDetailsPage extends BasePage {
         return;
       } catch {
         last = await this.readCurrencyInput(input);
+        if (this.currencyDollarsMatch(last, target)) {
+          return;
+        }
       }
     }
 
@@ -6293,10 +6319,10 @@ export class DOAssetDetailsPage extends BasePage {
       if (keyboardSelectAll) {
         await this.page.keyboard.press("Control+A");
       } else {
-    await input.click({ clickCount: 3 });
+        await input.click({ clickCount: 3 });
       }
-    await input.fill(value);
-    await input.press("Tab").catch(() => {});
+      await input.fill(value);
+      await input.press("Tab").catch(() => {});
     };
 
     let last = Number.NaN;
@@ -8626,10 +8652,10 @@ export class DOAssetDetailsPage extends BasePage {
     const scope = this.paymentScheduleContentScope();
     const labeledAfVRow = (): Locator =>
       scope
-      .locator("tr")
-      .filter({ hasText: /AFV|Assured Future Value/i })
+        .locator("tr")
+        .filter({ hasText: /AFV|Assured Future Value/i })
         .filter({ visible: true })
-      .first();
+        .first();
 
     if (await labeledAfVRow().isVisible({ timeout: 5_000 }).catch(() => false)) {
       await expect.soft(labeledAfVRow()).toBeVisible();
@@ -8747,16 +8773,35 @@ export class DOAssetDetailsPage extends BasePage {
       .waitFor({ state: "visible", timeout: 45_000 });
   }
 
-  private addonsAccessoriesLabelRx(): RegExp {
+  /** Dealer portal — **+ Add Ons & Accessories** link / button. */
+  private addonsAccessoriesFullLabelRx(): RegExp {
     return /\+?\s*Add\s*Ons?\s*(?:&|and)\s*Accessories|\+?\s*Addons?\s*&\s*Accessories/i;
   }
 
+  /** FIS IA internal portal — outlined **Add Ons** button in Additional Charges (no "& Accessories"). */
+  private addonsAccessoriesShortButtonLabelRx(): RegExp {
+    return /^\+?\s*Add\s*Ons?$/i;
+  }
+
+  private addonsAccessoriesLabelRx(): RegExp {
+    return this.addonsAccessoriesFullLabelRx();
+  }
+
   private addonsAccessoriesTrigger(scope: Locator): Locator {
-    const label = this.addonsAccessoriesLabelRx();
+    const full = this.addonsAccessoriesFullLabelRx();
+    const short = this.addonsAccessoriesShortButtonLabelRx();
+    const chargesSection = scope.filter({ has: scope.getByText(/Additional\s+Charges/i) });
     return scope
-      .getByRole("link", { name: label })
-      .or(scope.getByRole("button", { name: label }))
-      .or(scope.locator("a, button, [role='button']").filter({ hasText: label }))
+      .getByRole("link", { name: full })
+      .or(scope.getByRole("button", { name: full }))
+      .or(scope.locator("a, button, [role='button']").filter({ hasText: full }))
+      .or(chargesSection.getByRole("button", { name: short }))
+      .or(chargesSection.locator("gen-button, p-button").filter({ hasText: short }).locator("button"))
+      .or(chargesSection.locator("button.p-button").filter({ hasText: short }))
+      .or(scope.getByRole("button", { name: short }))
+      .or(scope.locator("gen-button, p-button").filter({ hasText: short }).locator("button"))
+      .or(scope.locator("button.p-button-outlined, button.p-button").filter({ hasText: short }))
+      .or(this.page.getByRole("button", { name: short }))
       .first();
   }
 
@@ -8772,7 +8817,12 @@ export class DOAssetDetailsPage extends BasePage {
         break;
       }
     }
-    await root.getByText(this.addonsAccessoriesLabelRx()).first().scrollIntoViewIfNeeded().catch(() => {});
+    await root.getByText(this.addonsAccessoriesFullLabelRx()).first().scrollIntoViewIfNeeded().catch(() => {});
+    await root
+      .getByRole("button", { name: this.addonsAccessoriesShortButtonLabelRx() })
+      .first()
+      .scrollIntoViewIfNeeded()
+      .catch(() => {});
   }
 
   private async expectAddOnsAccessoriesScreenVisible(timeoutMs = 45_000): Promise<void> {
@@ -9488,14 +9538,9 @@ export class DOAssetDetailsPage extends BasePage {
   async clickAddOnsAccessoriesEntryExpectProductProgramRequired(): Promise<void> {
     this.logStep("Click Add Ons entry expecting Product Program required");
     const root = this.standardQuoteRoot();
-    const labelRx =
-      /Add\s*Ons\s*&\s*Accessories|Add\s+Ons\s+and\s+Accessories|Add[-\s]?Ons?\s*[&+]\s*Accessories/i;
-    await root.getByText(labelRx).first().scrollIntoViewIfNeeded().catch(() => {});
-    const entry = root
-      .getByRole("link", { name: labelRx })
-      .or(root.getByRole("button", { name: labelRx }))
-      .or(root.locator("a, button").filter({ hasText: labelRx }))
-      .first();
+    await this.scrollAddonsAccessoriesEntryIntoView(root);
+    const entry = this.addonsAccessoriesTrigger(root);
+    await expect(entry).toBeVisible({ timeout: 30_000 });
     await entry.click({ timeout: 20_000 });
     await this.expectQuoteSurfaceValidation(/Please select Product.*Program to proceed further/i);
   }
