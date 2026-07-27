@@ -202,6 +202,12 @@ export class DOSearchCustomerDialog extends BasePage {
     await this.clickSearch();
   }
 
+  /** Individual search type + UDC lookup (required before **Add New Customer** for personal borrowers). */
+  async searchByUdcNumberAsIndividual(customerNumber: string): Promise<void> {
+    await this.selectIndividualType();
+    await this.searchByUdcNumber(customerNumber);
+  }
+
   /** Business search — **Customer Name** / **Legal Name** (UDP-T4478 existing Partnership). */
   async searchBusinessByLegalName(legalName: string): Promise<void> {
     this.logStep(`Search Business By Legal Name (${legalName})`);

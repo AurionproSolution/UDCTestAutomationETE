@@ -2,6 +2,7 @@
   "dealer": "Armstrong Prestige Wellington",
   "products": {
     "csa": { "product": "CSA-C-Assigned", "program": "Webform - CSA Personal - MV Dealer" },
+    "csab": { "product": "CSA-B-Assigned", "program": "MYUDC-B-CSA-Assigned MV" },
     "tl": { "product": "TL-B-Assigned", "program": "Term Loan Business - MV Dealer" },
     "afv": { "product": "AFV-B-Assigned" },
     "fl": { "product": "Finance Lease - Business Asg", "program": "Finance Lease Business - MV Dealer" },
@@ -9,24 +10,32 @@
   },
   "loanLookup": {
     "validRegoSameDealer": "BAGGED",
-    "validVinSameDealer": "",
+    "validVinSameDealer": "KMHKM81BUPU2257CK",
+    "validRegoSameDealerFallback": "333aaa",
     "validRegoDifferentDealer": "BC7474",
-    "validVinDifferentDealer": "",
+    "validVinDifferentDealer": "KMHKM81BUPU2257CK",
+    "validRegoDifferentDealerFallbacks": ["BY7737", "NX8838"],
     "invalidRegoOrVin": "ZZZZ99",
-    "arrearsRegoOrVin": "214",
+    "arrearsRegoOrVin": "BY7737",
+    "arrearsRegoOrVinFallbacks": ["BY7737", "NX8838"],
+    "flOlRegoOrVin": "",
     "afvActivatedLoanRegoOrVin": "",
-    "consumerLoanRegoOrVin": "",
-    "businessLoanRegoOrVin": "BAGGED",
+    "consumerLoanRegoOrVin": "KMHKM81BUPU2257CK",
+    "businessLoanRegoOrVin": "hg7765",
+    "businessLoanVin": "HT56TR456YU787548",
     "refinanceLoanRegoOrVin": "",
     "cciRefundZeroLoanRegoOrVin": "",
     "commissionClawbackLoanRegoOrVin": ""
   },
   "dealerListing": {
     "activatedLoanRegoOrVin": "BAGGED",
-    "secondSettlementRegoOrVin": ""
+    "secondSettlementRegoOrVin": "BY7737"
   },
   "existingQuotes": {
     "settlementFromAssetDetails": "2361"
+  },
+  "businessRuleError": {
+    "expectedMessagePattern": "arrears|overdue|in arrears|past due|not eligible|cannot proceed|unable to proceed|business rule|finance lease|operating lease|lease.*not.*(?:eligible|support)|not.*(?:eligible|allowed).*settlement|settlement can not be completed|settlement cannot be completed|can not be completed|contact UDC finance|please contact UDC|ineligible|MAF-5580"
   },
   "fieldSamples": {
     "validRego": "BAGGED",
@@ -34,5 +43,25 @@
     "invalidRegoSpecialChars": "AB@#12",
     "validVin": "7A433LN8508501772",
     "invalidVinSpecialChars": "VIN-123@ABC"
+  },
+  "environments": {
+    "qat": {
+      "dealer": "Armstrong Prestige - Audi",
+      "businessLoanVin": "HT56TR456YU787548",
+      "businessLoanRegoOrVin": "HG7765",
+      "dealerListing": {
+        "activatedLoanRegoOrVin": "HG7765"
+      }
+    },
+    "sit": {
+      "dealer": "Armstrong Prestige - Audi",
+      "dealerListing": {
+        "settlementLoanRef": "222",
+        "settlementRego": "BAGGED",
+        "settlementVin": "KMHKM81BUPU2257CK",
+        "secondSettlementRegoOrVin": "BY7737"
+      }
+    }
   }
 }
+

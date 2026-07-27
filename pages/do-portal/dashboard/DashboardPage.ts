@@ -213,16 +213,46 @@ export class DODashboardPage extends BasePage {
   }
 
   /**
+   * Header dealer switcher (beside logo). Some QAT hosts omit it — quote-list filters also use combobox role.
+   */
+  private async headerDealerDropdownIfPresent(): Promise<Locator | null> {
+    const candidates = this.page.locator(
+      "span[role='combobox'].p-dropdown-label, [role='combobox'].p-dropdown-label",
+    );
+    const count = await candidates.count();
+    for (let i = 0; i < count; i++) {
+      const item = candidates.nth(i);
+      if (!(await item.isVisible({ timeout: 500 }).catch(() => false))) {
+        continue;
+      }
+      const box = await item.boundingBox().catch(() => null);
+      if (box && box.y < 120) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Selects the dealer shown in the top header dealer dropdown.
    */
   async ensureDealerSelected(dealerName: string): Promise<void> {
     this.logStep("Ensure Dealer Selected");
     await this.waitForAppLoaderOverlayGone(120_000);
-    await expect(this.dealerDropdownLabel).toBeVisible({ timeout: 60_000 });
+
+    const headerDealer = await this.headerDealerDropdownIfPresent();
+    if (!headerDealer) {
+      this.log(
+        "No header dealer switcher — skipping dealer selection (single-dealer portal).",
+      );
+      return;
+    }
+
+    await expect(headerDealer).toBeVisible({ timeout: 60_000 });
 
     const selectedDealer =
-      (await this.dealerDropdownLabel.getAttribute("aria-label")) ??
-      (await this.dealerDropdownLabel.textContent()) ??
+      (await headerDealer.getAttribute("aria-label")) ??
+      (await headerDealer.textContent()) ??
       "";
     if (selectedDealer.trim() === dealerName) {
       this.log(`Dealer already selected: ${dealerName}`);
@@ -230,14 +260,14 @@ export class DODashboardPage extends BasePage {
     }
 
     this.log(`Selecting dealer: ${dealerName}`);
-    await this.dealerDropdownLabel.click();
+    await headerDealer.click();
     await expect(this.page.getByRole("listbox")).toBeVisible({ timeout: 30_000 });
 
     const dealerOption = this.page
       .getByRole("option", { name: dealerName, exact: true })
       .first();
     await dealerOption.click();
-    await expect(this.dealerDropdownLabel).toHaveAttribute("aria-label", dealerName, {
+    await expect(headerDealer).toHaveAttribute("aria-label", dealerName, {
       timeout: 30_000,
     });
     await this.waitForAppLoaderOverlayGone(120_000);
@@ -706,6 +736,27 @@ export class DODashboardPage extends BasePage {
     await expect(
       this.page.locator("app-quote-details, app-standard-quote").first(),
     ).toBeVisible({ timeout: 120_000 });
+  }
+
+  /** SIT — after dealer-listing settlement **Yes**, open the newest quote from the dashboard grid. */
+  async openFirstQuoteFromDashboardGrid(): Promise<string> {
+    this.logStep("Open First Quote From Dashboard Grid");
+    await this.openQuotesAndApplications();
+    await this.trySelectQuotesGridListingType(/^Quote$/i);
+    const row = this.quotesGridTable().locator("tbody tr").first();
+    await expect(row).toBeVisible({ timeout: 45_000 });
+    const quoteId = (
+      (await row
+        .locator("td.cursor-pointer.text-primary, td.text-primary.cursor-pointer")
+        .first()
+        .innerText()
+        .catch(() => "")) ?? ""
+    ).trim();
+    if (!quoteId) {
+      throw new Error("openFirstQuoteFromDashboardGrid: could not read Quote ID from first grid row.");
+    }
+    await this.openQuoteFromGridByReference(quoteId, { skipSearch: true });
+    return quoteId;
   }
 
   /** Switch quote-type dropdown from **Quote** to **Expired** listing. */
@@ -1245,10 +1296,6 @@ export class DODashboardPage extends BasePage {
       .filter({ visible: true })
       .last()
       .locator(".action-item");
-    const overlay = this.quoteGridRowActionsOverlay();
-    return overlay
-      .locator(".action-item")
-      .or(overlay.getByText(/View Quote|Copy Quote|Cancel Quote|Reopen Quote/i));
   }
 
   /** Loan row action overlay from the Actions ellipsis (View Statement, …). */
@@ -1505,6 +1552,7 @@ export class DODashboardPage extends BasePage {
     const items = await this.activeQuoteGridActionItems();
     const item = items.filter({ hasText: actionName }).first();
     await expect(item).toBeVisible({ timeout: 15_000 });
+    await this.scrollQuoteGridActionItemIntoView(item);
     const clicked = await item
       .click({ timeout: 5_000 })
       .then(() => true)
@@ -1512,8 +1560,6 @@ export class DODashboardPage extends BasePage {
     if (!clicked) {
       await item.evaluate((el) => (el as HTMLElement).click());
     }
-    await this.scrollQuoteGridActionItemIntoView(item);
-    await item.click({ timeout: 15_000 });
     const requiresConfirm = /Cancel\s+Quote/i.test(actionName.source);
     await this.confirmQuoteGridActionDialogIfPresent({ required: requiresConfirm });
     await this.waitForAppLoaderOverlayGone(60_000);

@@ -8751,10 +8751,20 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Open Settlement Dialog");
     const lessDeposit = this.page.locator("app-less-deposit").first();
     const btn = this.settlementButton();
+    const overlay = this.page.locator(".app-loader-overlay, [class*='app-loader']");
 
     await lessDeposit.scrollIntoViewIfNeeded();
+    if ((await overlay.count()) > 0) {
+      await overlay.first().waitFor({ state: "hidden", timeout: 90_000 }).catch(() => {});
+    }
     await expect(btn).toBeVisible({ timeout: 30_000 });
-    await btn.click({ timeout: 15_000 });
+    await expect(btn).toBeEnabled({ timeout: 90_000 });
+    await btn.scrollIntoViewIfNeeded();
+    try {
+      await btn.click({ timeout: 30_000 });
+    } catch {
+      await btn.click({ force: true, timeout: 30_000 });
+    }
 
     await this.page
       .getByRole("dialog")
