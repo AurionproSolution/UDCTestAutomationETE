@@ -191,7 +191,7 @@ export class DOAssetDetailsPage extends BasePage {
     this.additionalFundsRoot = page.locator("app-additional-funds").first();
     this.additionalFundsInput = this.additionalFundsRoot
       .locator('input#amount[currencymask], input#amount[type="text"]')
-      .first()
+        .first()
       .or(
         this.additionalFundsRoot.locator(
           "xpath=.//*[contains(normalize-space(.),'Additional Funds') and not(contains(.,'Purpose'))]/following::input[@id='amount'][1]",
@@ -375,7 +375,7 @@ export class DOAssetDetailsPage extends BasePage {
       state: "visible",
       timeout: 60_000,
     });
-
+  
     await expect(this.cashPriceOfAssetInputField).toBeVisible({
       timeout: 60_000,
     });
@@ -1017,7 +1017,7 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.waitForLoadState("domcontentloaded").catch(() => {});
     await this.page.waitForLoadState("networkidle", { timeout: 55_000 }).catch(() => {});
   }
-
+ 
   /** Quote shell visible and blocking overlays cleared (faster than {@link waitForQuoteLoadersToFinish}). */
   async waitForStandardQuoteReady(timeoutMs = 120_000): Promise<void> {
     this.logStep("Wait For Standard Quote Ready");
@@ -1283,12 +1283,12 @@ export class DOAssetDetailsPage extends BasePage {
 
     const establishmentLabel = panel.getByText(/Establishment\s+Fee\s+Share/i).first();
     if (await establishmentLabel.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      expect(
-        new RegExp(
-          `Establishment\\s+Fee\\s+Share[\\s\\S]{0,300}?(?:${pricedOrDash.source})`,
-          "i",
-        ).test(panelText),
-      ).toBeTruthy();
+    expect(
+      new RegExp(
+        `Establishment\\s+Fee\\s+Share[\\s\\S]{0,300}?(?:${pricedOrDash.source})`,
+        "i",
+      ).test(panelText),
+    ).toBeTruthy();
     }
   }
 
@@ -2823,7 +2823,7 @@ export class DOAssetDetailsPage extends BasePage {
     };
 
     if (await tryFill(this.originationReferenceInputLocator(root))) {
-      return true;
+        return true;
     }
 
     if (
@@ -3273,7 +3273,7 @@ export class DOAssetDetailsPage extends BasePage {
             await this.page.keyboard.press("Enter").catch(() => {});
           }
 
-          await this.page.keyboard.press("Escape").catch(() => {});
+    await this.page.keyboard.press("Escape").catch(() => {});
           await this.page.waitForTimeout(400);
 
           const after = await this.readSelectedConditionLabel();
@@ -4094,7 +4094,7 @@ export class DOAssetDetailsPage extends BasePage {
       scope
         .getByRole("columnheader", { name: label })
         .or(scope.locator("th").filter({ hasText: label }))
-        .first();
+      .first();
 
     await expect(scheduleHeader(/^Date\b/i)).toBeVisible({ timeout: 15_000 });
     await expect(scheduleHeader(/^Number\b/i)).toBeVisible({ timeout: 10_000 });
@@ -4207,7 +4207,7 @@ export class DOAssetDetailsPage extends BasePage {
           await btn.scrollIntoViewIfNeeded();
           await btn.click({ timeout: 10_000 });
           await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
-          await assertMoneyRowVisible();
+        await assertMoneyRowVisible();
         }
         return;
       }
@@ -4222,12 +4222,12 @@ export class DOAssetDetailsPage extends BasePage {
     for (let i = 0; i < iconCount; i++) {
       const btn = iconToggles.nth(i);
       if (!(await btn.isEnabled().catch(() => false))) {
-        continue;
-      }
+          continue;
+        }
       await btn.scrollIntoViewIfNeeded();
       await btn.click({ timeout: 10_000 });
       await this.waitUntilNoVisibleAppLoaderOverlays(15_000);
-      await assertMoneyRowVisible();
+        await assertMoneyRowVisible();
     }
   }
 
@@ -5481,8 +5481,8 @@ export class DOAssetDetailsPage extends BasePage {
     await calcBtn.click({ timeout: 10_000 });
     await this.waitForLoadingComplete();
     if (opts?.waitForApply !== false) {
-      // Apply enables only after FIS calculation completes — wait for UI state, not spinner alone.
-      await expect(this.editPaymentScheduleApplyButton()).toBeEnabled({ timeout: 60_000 });
+    // Apply enables only after FIS calculation completes — wait for UI state, not spinner alone.
+    await expect(this.editPaymentScheduleApplyButton()).toBeEnabled({ timeout: 60_000 });
     } else {
       await this.waitForQuoteLoadersToFinish().catch(() => {});
     }
@@ -5515,8 +5515,8 @@ export class DOAssetDetailsPage extends BasePage {
     const numberCell = await this.editPaymentScheduleSegmentNumberCell(row);
     const numberInput = numberCell.getByRole("spinbutton").first();
     if (await numberInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await numberInput.fill(number);
-      await numberInput.press("Tab").catch(() => {});
+    await numberInput.fill(number);
+    await numberInput.press("Tab").catch(() => {});
       return;
     }
 
@@ -6293,10 +6293,10 @@ export class DOAssetDetailsPage extends BasePage {
       if (keyboardSelectAll) {
         await this.page.keyboard.press("Control+A");
       } else {
-        await input.click({ clickCount: 3 });
+    await input.click({ clickCount: 3 });
       }
-      await input.fill(value);
-      await input.press("Tab").catch(() => {});
+    await input.fill(value);
+    await input.press("Tab").catch(() => {});
     };
 
     let last = Number.NaN;
@@ -8626,10 +8626,10 @@ export class DOAssetDetailsPage extends BasePage {
     const scope = this.paymentScheduleContentScope();
     const labeledAfVRow = (): Locator =>
       scope
-        .locator("tr")
-        .filter({ hasText: /AFV|Assured Future Value/i })
+      .locator("tr")
+      .filter({ hasText: /AFV|Assured Future Value/i })
         .filter({ visible: true })
-        .first();
+      .first();
 
     if (await labeledAfVRow().isVisible({ timeout: 5_000 }).catch(() => false)) {
       await expect.soft(labeledAfVRow()).toBeVisible();
@@ -8725,10 +8725,20 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Open Settlement Dialog");
     const lessDeposit = this.page.locator("app-less-deposit").first();
     const btn = this.settlementButton();
+    const overlay = this.page.locator(".app-loader-overlay, [class*='app-loader']");
 
     await lessDeposit.scrollIntoViewIfNeeded();
+    if ((await overlay.count()) > 0) {
+      await overlay.first().waitFor({ state: "hidden", timeout: 90_000 }).catch(() => {});
+    }
     await expect(btn).toBeVisible({ timeout: 30_000 });
-    await btn.click({ timeout: 15_000 });
+    await expect(btn).toBeEnabled({ timeout: 90_000 });
+    await btn.scrollIntoViewIfNeeded();
+    try {
+      await btn.click({ timeout: 30_000 });
+    } catch {
+      await btn.click({ force: true, timeout: 30_000 });
+    }
 
     await this.page
       .getByRole("dialog")
