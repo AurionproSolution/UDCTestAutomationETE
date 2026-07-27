@@ -1045,8 +1045,8 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectCountryOfCitizenshipOption(countryOfCitizenship);
   }
 
-  private customerRoleDropdownTrigger(): Locator {
-    return this.personalDetailsRoot
+  private customerRoleDropdownTriggerInScope(scope: Locator): Locator {
+    return scope
       .locator("label")
       .filter({ hasText: /Customer Role/i })
       .first()
@@ -1055,10 +1055,22 @@ export class DOPersonalDetailsPage extends BasePage {
       );
   }
 
+  private customerRoleDropdownTrigger(): Locator {
+    return this.customerRoleDropdownTriggerInScope(this.personalDetailsRoot);
+  }
+
+  private async resolveCustomerRoleDropdownTrigger(): Promise<Locator> {
+    const scoped = this.customerRoleDropdownTrigger();
+    if (await scoped.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return scoped;
+    }
+    return this.customerRoleDropdownTriggerInScope(this.page.locator("body"));
+  }
+
   async chooseCustomerRole(role: string | RegExp): Promise<void> {
     const label = typeof role === "string" ? role : role.source;
     this.logStep(`Choose customer role: ${label}`);
-    const trig = this.customerRoleDropdownTrigger();
+    const trig = await this.resolveCustomerRoleDropdownTrigger();
     await trig.waitFor({ state: "visible", timeout: 15_000 });
     await trig.click();
     const name =

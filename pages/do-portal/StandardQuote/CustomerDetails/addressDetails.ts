@@ -3194,6 +3194,14 @@ export class DOAddressDetailsPage extends BasePage {
     });
   }
 
+  /** UDP-T3756 / UDP-T4478 — existing FIS customer Address Details slider label. */
+  async expectCreateNewAndCopyToPreviousAddressVisible(): Promise<void> {
+    this.logStep("Expect Create New And Copy To Previous Address visible");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    const label = this.page.getByText(/Create new and copy to previous\s*Address/i).first();
+    await expect(label).toBeVisible({ timeout: 30_000 });
+  }
+
   /** UDP-T3792 — header stepper shows **2. Address Details** after direct tab navigation. */
   async expectAddressDetailsSectionHeaderVisible(): Promise<void> {
     this.logStep('Expect "2. Address Details" header visible');

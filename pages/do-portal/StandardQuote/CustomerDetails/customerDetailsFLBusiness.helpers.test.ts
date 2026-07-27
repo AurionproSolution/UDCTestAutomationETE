@@ -62,19 +62,35 @@ export async function openFinanceLeaseBusinessAsgToAddBorrowerStep(
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.chooseProduct(FL_SQ_PRODUCT);
   await assetDetailsPage.chooseProgram(FL_SQ_PROGRAM);
-  await assetDetailsPage.enterOriginationReference(origRef);
+  await assetDetailsPage.enterOriginationReferenceFinanceLease(origRef);
   await addMinimalFlUsedAsset(assetDetailsPage, addAssetPage);
+  await assetDetailsPage.waitForAssetDetailsStepReady();
   await assetDetailsPage.termsOfFinance("36");
   await assetDetailsPage.interestRate("4");
   await assetDetailsPage.ensureLoanDateAndFirstPaymentReadyForCalculate();
   await assetDetailsPage.clickCalculateButton();
   await assetDetailsPage.enterResidualValuePercentFinanceLease("20");
   await assetDetailsPage.interestRate("4");
-  await assetDetailsPage.enterOriginationReference(origRef);
+  await assetDetailsPage.enterOriginationReferenceFinanceLease(origRef);
   await assetDetailsPage.clickCalculateButton();
-  await assetDetailsPage.enterOriginationReference(origRef);
-  await assetDetailsPage.clickNextButton();
-  await customerDetailsPage.waitForAddBorrowerButton();
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+  await assetDetailsPage.enterOriginationReferenceFinanceLease(origRef);
+  await assetDetailsPage
+    .clickSaveStandardQuoteStep({ originatorRefForRequiredDialog: origRef })
+    .catch(() => {});
+  await assetDetailsPage.waitForQuoteLoadersToFinish();
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await assetDetailsPage.clickNextButtonFinanceLease(origRef);
+    try {
+      await customerDetailsPage.waitForAddBorrowerButton();
+      return customerDetailsPage;
+    } catch (err) {
+      if (attempt === 2) throw err;
+      await assetDetailsPage.enterOriginationReferenceFinanceLease(origRef);
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+    }
+  }
   return customerDetailsPage;
 }
 

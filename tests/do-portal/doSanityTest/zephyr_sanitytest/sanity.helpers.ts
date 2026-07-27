@@ -40,6 +40,8 @@ import {
 import { DOPersonalDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import { DOReferenceDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
 import { DOBusinessDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/businessDetails";
+import { DOSearchCustomerDialog } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/searchCustomerDialog";
+import { DOSoleTraderDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/soleTraderDetails";
 import {
   DOC_T3824_BORROWER,
   openPostSubmissionUploadStepWithAsset,
@@ -755,6 +757,7 @@ export async function editManualAssetClearAndRefill(
   await fillManualAssetDetails(addAsset, after, { afterClear: true });
   await addAsset.clickSummitButton();
   await addAsset.clickCrossButton();
+  await asset.waitForAssetDetailsStepReady();
 }
 
 export async function addSecondDistinctManualAssetViaSummary(
@@ -767,6 +770,7 @@ export async function addSecondDistinctManualAssetViaSummary(
   await fillManualAssetDetails(addAsset, details, { afterClear: true });
   await addAsset.clickSummitButton();
   await addAsset.clickCrossButton();
+  await asset.waitForAssetDetailsStepReady();
   await asset.closeAssetInsuranceSummaryDialog().catch(() => {});
 }
 
@@ -793,6 +797,7 @@ export async function copyAssetFromSummary(page: Page, asset: DOAssetDetailsPage
   await openCopiedAssetEditorFromSummary(page, asset, addAsset);
   await addAsset.clickSummitButton();
   await addAsset.clickCrossButton();
+  await asset.waitForAssetDetailsStepReady();
   await asset.closeAssetInsuranceSummaryDialog().catch(() => {});
 }
 
@@ -808,6 +813,7 @@ export async function addManualAssetViaSummary(
   await fillManualAssetDetails(addAsset, details);
   await addAsset.clickSummitButton();
   await addAsset.clickCrossButton();
+  await asset.waitForAssetDetailsStepReady();
 }
 
 export async function removeLastAssetFromSummary(page: Page, asset: DOAssetDetailsPage): Promise<void> {
@@ -1164,7 +1170,19 @@ export async function waitForSearchCustomerDialog(page: Page): Promise<Locator> 
 }
 
 export function searchTypeRadioInput(dlg: Locator, value: "individual" | "business" | "trust"): Locator {
-  return dlg.locator(`input[type="radio"][value="${value}"]`).first();
+  const root = dlg.locator("app-search-customer").first();
+  return root
+    .locator(`input[type="radio"][name="searchCustomer"][value="${value}"]`)
+    .first()
+    .or(root.locator(`input[type="radio"][value="${value}"]`).first());
+}
+
+/** Search Customer dialog — select **Individual** and verify the radio is checked (FL Business Asg defaults to Business). */
+export async function selectIndividualTypeInSearchDialog(page: Page, dlg?: Locator): Promise<void> {
+  const dialog = dlg ?? (await waitForSearchCustomerDialog(page));
+  const search = new DOSearchCustomerDialog(page);
+  await search.selectIndividualType();
+  await expect(searchTypeRadioInput(dialog, "individual")).toBeChecked({ timeout: 20_000 });
 }
 
 /** UDC number that should not match — enables **Add New Customer** after Search. */
@@ -1232,20 +1250,158 @@ async function navigateToBorrowerSummaryIfAvailable(page: Page): Promise<void> {
 }
 
 export async function returnToBorrowerSummaryForPartyObserve(page: Page): Promise<void> {
+  if (
+    await page
+      .getByText(/Borrowers\s*&\s*Guarantors/i)
+      .first()
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false)
+  ) {
+    return;
+  }
+
+  const inNestedPartyEditor =
+    (await page
+      .getByRole("link", { name: /Business\s*-\s*\d+/i })
+      .first()
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false)) ||
+    (await page
+      .getByRole("link", { name: /Individual\s*-/i })
+      .first()
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false)) ||
+    (await page
+      .locator("app-business-details, app-personal-details, app-trust-details")
+      .first()
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false));
+
+  if (inNestedPartyEditor) {
+    await returnToPostSubmitPartiesView(page);
+    return;
+  }
+
   const ref = new DOReferenceDetailsPage(page);
   if (await ref.addContactDetailsButton.isVisible({ timeout: 8_000 }).catch(() => false)) {
     await navigateToBorrowerSummaryIfAvailable(page);
     return;
   }
   await navigateToBorrowerSummaryIfAvailable(page);
+
+  if (
+    !(await page
+      .getByText(/Borrowers\s*&\s*Guarantors/i)
+      .first()
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false))
+  ) {
+    await returnToPostSubmitPartiesView(page).catch(() => {});
+  }
+}
+
+const PARTY_HOST_SELECTOR =
+  "app-customer-parties, app-borrower-summary, app-parties, app-customer-quote-post-submit, app-post-submission";
+
+const BORROWERS_GUARANTORS_HEADING_RX = /Borrowers?\s*([&/]|and)\s*Guarantors?/i;
+
+const PARTY_ROW_SELECTOR =
+  "tbody > tr, tr.p-selectable-row, tr[role='row'], .p-datatable-tbody > tr, .p-datatable-row, [role='row']";
+
+/** Header row in the parties grid — exclude when matching data rows. */
+const PARTY_GRID_HEADER_RX = /^Name\s+UDC\s+Number/i;
+
+function borrowersGuarantorsSection(page: Page): Locator {
+  return page
+    .locator("*")
+    .filter({ has: page.getByText(BORROWERS_GUARANTORS_HEADING_RX) })
+    .first();
+}
+
+function partyDataRows(scope: Locator, namePattern: RegExp): Locator {
+  return scope
+    .locator(PARTY_ROW_SELECTOR)
+    .filter({ hasText: namePattern })
+    .filter({ hasNotText: PARTY_GRID_HEADER_RX });
+}
+
+function partyTableRowsByName(scope: Locator, namePattern: RegExp): Locator {
+  return scope
+    .locator("table tbody tr")
+    .filter({ hasText: namePattern })
+    .filter({ hasNotText: PARTY_GRID_HEADER_RX });
+}
+
+function partyRowsByAccessibleName(scope: Locator, namePattern: RegExp): Locator {
+  return scope.getByRole("row", { name: namePattern }).filter({ hasNotText: PARTY_GRID_HEADER_RX });
+}
+
+async function pickNamedPartyRow(scope: Locator, namePattern: RegExp): Promise<Locator | undefined> {
+  const strategies = [
+    () => partyRowsByAccessibleName(scope, namePattern),
+    () => partyTableRowsByName(scope, namePattern),
+    () => partyDataRows(scope, namePattern),
+  ];
+
+  for (const build of strategies) {
+    const candidates = build();
+    const count = await candidates.count();
+    if (count === 0) {
+      continue;
+    }
+    if (count === 1) {
+      return candidates.first();
+    }
+
+    for (let i = 0; i < count; i++) {
+      const row = candidates.nth(i);
+      const nameCell = row.locator("td").first();
+      if (!(await nameCell.isVisible({ timeout: 800 }).catch(() => false))) {
+        continue;
+      }
+      const cellText = ((await nameCell.textContent()) ?? "").trim();
+      if (namePattern.test(cellText)) {
+        return row;
+      }
+    }
+
+    return candidates.first();
+  }
+
+  return undefined;
 }
 
 export function partyRowByName(page: Page, namePattern: RegExp): Locator {
-  const candidates = page.locator("tr, [role='row'], .p-datatable-row, li, section, div.grid, div.row, div");
-  return candidates
-    .filter({ hasText: namePattern })
+  const root = standardQuoteRoot(page);
+  const borrowersSection = borrowersGuarantorsSection(page);
+
+  return partyRowsByAccessibleName(borrowersSection, namePattern)
     .first()
-    .or(standardQuoteRoot(page).locator("tr, [role='row'], .p-datatable-row, li, section, div").filter({ hasText: namePattern }).first());
+    .or(partyTableRowsByName(borrowersSection, namePattern).first())
+    .or(partyDataRows(borrowersSection, namePattern).first())
+    .or(partyRowsByAccessibleName(root, namePattern).first())
+    .or(partyTableRowsByName(root, namePattern).first())
+    .or(partyDataRows(root, namePattern).first())
+    .first();
+}
+
+/** When the parties grid duplicates name text (breadcrumb + row), pick the table row. */
+export async function resolvePartyRowByName(page: Page, namePattern: RegExp): Promise<Locator> {
+  const root = standardQuoteRoot(page);
+  const scopes = [
+    borrowersGuarantorsSection(page),
+    page.locator(PARTY_HOST_SELECTOR).filter({ visible: true }).first(),
+    root,
+  ];
+
+  for (const scope of scopes) {
+    const picked = await pickNamedPartyRow(scope, namePattern);
+    if (picked) {
+      return picked;
+    }
+  }
+
+  return partyRowByName(page, namePattern);
 }
 
 async function tryEnableCopyPrimaryBorrowerAddress(page: Page): Promise<boolean> {
@@ -1269,17 +1425,29 @@ export async function expectPartyRowShowsRole(
   namePattern: RegExp,
   rolePattern: RegExp,
 ): Promise<void> {
-  const row = partyRowByName(page, namePattern);
+  const row = await resolvePartyRowByName(page, namePattern);
   await expect(row).toBeVisible({ timeout: 60_000 });
+
+  const roleCombo = row.getByRole("combobox").first();
+  if (await roleCombo.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await expect(roleCombo).toContainText(rolePattern);
+    return;
+  }
+
+  const roleCell = row
+    .locator("td, [role='gridcell'], span, div, label")
+    .filter({ hasText: rolePattern })
+    .first();
+  if (await roleCell.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await expect(roleCell).toContainText(rolePattern);
+    return;
+  }
+
   await expect(row).toContainText(rolePattern);
 }
 
 export async function clickEditPartyFromPartiesList(page: Page, namePattern: RegExp): Promise<void> {
-  const root = standardQuoteRoot(page);
-  const scopedRow = root
-    .locator("tr, [role='row'], .p-datatable-row, .p-datatable-tbody > tr, li, section")
-    .filter({ hasText: namePattern })
-    .first();
+  const scopedRow = await resolvePartyRowByName(page, namePattern);
   const editInRow = scopedRow
     .getByRole("button", { name: /^Edit$/i })
     .or(scopedRow.getByRole("link", { name: /^Edit$/i }))
@@ -1383,13 +1551,55 @@ async function fillCoBorrowerAddressSaveOnly(page: Page, address: DOAddressDetai
   await address.clickSaveAddressDetails();
 }
 
-async function returnToPostSubmitPartiesView(page: Page): Promise<void> {
-  const quoteCrumb = page.getByRole("link", { name: /Standard Quote\s*-/i }).first();
-  if (await quoteCrumb.isVisible({ timeout: 8_000 }).catch(() => false)) {
-    await quoteCrumb.click({ timeout: 20_000 });
-    await page.waitForTimeout(800);
+async function dismissUnsavedChangesCancelDialogIfVisible(page: Page): Promise<void> {
+  const confirmDlg = page
+    .locator("p-confirmdialog, .p-confirm-dialog, [role='alertdialog']")
+    .filter({ visible: true })
+    .filter({ hasText: /unsaved changes|lost|cancel/i })
+    .first();
+  if (!(await confirmDlg.isVisible({ timeout: 3_000 }).catch(() => false))) {
+    return;
   }
-  await navigateToBorrowerSummaryIfAvailable(page);
+  const discardBtn = confirmDlg
+    .getByRole("button", { name: /^(Yes|OK|Confirm|Discard)$/i })
+    .or(confirmDlg.locator("button.p-confirm-dialog-accept").first())
+    .first();
+  await discardBtn.click({ timeout: 10_000 });
+  await expect(confirmDlg).toBeHidden({ timeout: 20_000 }).catch(() => {});
+}
+
+async function returnToPostSubmitPartiesView(page: Page): Promise<void> {
+  const post = new DOCustomerQuotePostSubmitPage(page);
+  const quoteCrumb = page.getByRole("link", { name: /Standard Quote\s*-/i }).first();
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (await quoteCrumb.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await quoteCrumb.click({ timeout: 20_000 }).catch(() => {});
+      await dismissUnsavedChangesCancelDialogIfVisible(page);
+      await page.waitForLoadState("domcontentloaded").catch(() => {});
+      await page.waitForTimeout(1_000);
+    }
+    if (
+      await page
+        .getByText(/Borrowers\s*&\s*Guarantors/i)
+        .first()
+        .isVisible({ timeout: 3_000 })
+        .catch(() => false)
+    ) {
+      break;
+    }
+  }
+
+  if (
+    !(await page
+      .getByText(/Borrowers\s*&\s*Guarantors/i)
+      .first()
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false))
+  ) {
+    await post.clickPostSubmissionStepTab().catch(() => {});
+  }
+  await post.waitForUploadStep();
 }
 
 /** Add a second existing UDC Individual as Co-Borrower from Post Submission. Returns a name pattern for party assertions. */
@@ -1400,20 +1610,35 @@ export async function addSecondIndividualCoBorrowerFromPostSubmit(
   const post = new DOCustomerQuotePostSubmitPage(page);
   const customer = new DOCustomerDetailsPage(page);
   await post.clickAddBorrowersOrGuarantorsButton();
+  await customer.searchCustomer.waitForVisible();
+  await customer.searchCustomer.selectIndividualType();
   await customer.searchCustomer.searchByUdcNumber(udcNumber);
   await customer.searchCustomer.clickAddFromBorrowerSearchResult(udcNumber);
 
   const personal = new DOPersonalDetailsPage(page);
-  await expect(personal.personalDetailsRoot).toBeVisible({ timeout: 120_000 });
-  await personal.chooseCustomerRole(/^Co[\s-]*Borrower$/i);
+  const soleRoot = page.locator("app-sole-trade").filter({ visible: true }).first();
+  await expect(personal.personalDetailsRoot.or(soleRoot)).toBeVisible({ timeout: 120_000 });
+  const isSoleTrader = await soleRoot.isVisible({ timeout: 2_000 }).catch(() => false);
+
+  const coBorrowerRole = page.getByRole("combobox", { name: /Co[\s-]*Borrower/i }).first();
+  if (!(await coBorrowerRole.isVisible({ timeout: 5_000 }).catch(() => false))) {
+    await personal.chooseCustomerRole(/^Co[\s-]*Borrower$/i);
+  }
+
   const firstName = ((await personal.firstNameInput.inputValue().catch(() => "")) || "").trim();
   const lastName = ((await personal.lastNameInput.inputValue().catch(() => "")) || "").trim();
   const namePattern = new RegExp(
     firstName.length > 0 ? firstName.split(/\s+/)[0]! : lastName.length > 0 ? lastName : udcNumber,
     "i",
   );
-  await personal.clickSavePersonalDetails();
-  await personal.clickNextButton();
+  if (isSoleTrader) {
+    const sole = new DOSoleTraderDetailsPage(page);
+    await sole.clickSaveSoleTraderDetails();
+    await sole.clickNextButton();
+  } else {
+    await personal.clickSavePersonalDetails();
+    await personal.clickNextButton();
+  }
 
   const address = new DOAddressDetailsPage(page);
   await fillCoBorrowerAddressSaveOnly(page, address);

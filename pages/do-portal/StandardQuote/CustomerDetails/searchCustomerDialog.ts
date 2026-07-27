@@ -206,6 +206,21 @@ export class DOSearchCustomerDialog extends BasePage {
   async searchByUdcNumberAsIndividual(customerNumber: string): Promise<void> {
     await this.selectIndividualType();
     await this.searchByUdcNumber(customerNumber);
+  /** Business search — **Customer Name** / **Legal Name** (UDP-T4478 existing Partnership). */
+  async searchBusinessByLegalName(legalName: string): Promise<void> {
+    this.logStep(`Search Business By Legal Name (${legalName})`);
+    await this.openSearchByDropdown();
+    await this.selectSearchByOption(/Customer Name|Legal Name|Company Name|Trading Name/i);
+    const field = this.dialog
+      .getByRole("textbox")
+      .filter({ visible: true })
+      .first()
+      .or(this.dialog.locator("input.p-inputtext").filter({ visible: true }).first());
+    await field.waitFor({ state: "visible", timeout: 30_000 });
+    await field.fill(legalName);
+    await this.clickSearch();
+  }
+
   /** Click **Add** on the borrower search result card for an existing UDC customer. */
   async clickAddFromBorrowerSearchResult(udcCustomerNumber: string): Promise<void> {
     await this.waitForBorrowerSearchResult(udcCustomerNumber);
@@ -214,6 +229,23 @@ export class DOSearchCustomerDialog extends BasePage {
       .filter({ hasText: udcCustomerNumber })
       .filter({ hasText: /UDC Customer Number/i })
       .last();
+    const addBtn = resultCard
+      .getByRole("button", { name: /^Add$/i })
+      .or(this.page.getByRole("button", { name: /^Add$/i }).first());
+    await addBtn.first().click({ timeout: 30_000 });
+    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+  }
+
+  /** Click **Add** on the first borrower search result card matching a name pattern. */
+  async clickAddFromBorrowerSearchResultByName(namePattern: RegExp): Promise<void> {
+    this.logStep(`Click Add from borrower search result (${namePattern.source})`);
+    await this.page.waitForURL(/borrower-search-result/i, { timeout: 90_000 }).catch(() => {});
+    const resultCard = this.page
+      .locator("div, section, article")
+      .filter({ hasText: namePattern })
+      .filter({ hasText: /UDC Customer Number/i })
+      .first();
+    await expect(resultCard).toBeVisible({ timeout: 90_000 });
     const addBtn = resultCard
       .getByRole("button", { name: /^Add$/i })
       .or(this.page.getByRole("button", { name: /^Add$/i }).first());
@@ -240,33 +272,49 @@ export class DOSearchCustomerDialog extends BasePage {
 
   /**
    * Set search type to **Individual** (first radio: Individual | Business | Trust).
+   * FL Business Asg quotes default to **Business** — poll until Individual is checked.
    */
   async selectIndividualType(): Promise<void> {
     this.logStep("Select Individual search type");
     await this.waitForVisible();
 
-    const byRole = this.dialog.getByRole("radio", { name: /^Individual$/i });
-    if (await byRole.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await byRole.click({ timeout: 15_000, force: true });
-      await this.page.waitForTimeout(300);
-      return;
-    }
+    const root = this.dialog.locator("app-search-customer").first();
+    const individualInput = root
+      .locator('input[type="radio"][name="searchCustomer"][value="individual"]')
+      .first()
+      .or(root.locator('input[type="radio"][value="individual"]').first());
 
-    const box = this.dialog
-      .locator("p-radiobutton")
-      .filter({ hasText: /^Individual$/i })
-      .locator(".p-radiobutton-box")
-      .first();
-    if (await box.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await box.click({ timeout: 15_000, force: true });
-      await this.page.waitForTimeout(300);
-      return;
-    }
+    await expect
+      .poll(
+        async () => {
+          if (await individualInput.isChecked().catch(() => false)) {
+            return true;
+          }
 
-    await this.dialog
-      .locator("xpath=.//p-radiobutton[1]//div[1]//div[1]")
-      .click({ timeout: 15_000, force: true });
-    await this.page.waitForTimeout(300);
+          const individualBox = root
+            .locator("p-radiobutton")
+            .filter({ hasText: /^Individual$/i })
+            .locator(".p-radiobutton-box")
+            .first()
+            .or(root.locator('p-radiobutton:has(input[value="individual"]) .p-radiobutton-box').first());
+
+          if (await individualBox.isVisible({ timeout: 1_500 }).catch(() => false)) {
+            await individualBox.click({ timeout: 10_000, force: true });
+          } else {
+            const byRole = this.dialog.getByRole("radio", { name: /^Individual$/i });
+            if (await byRole.isVisible({ timeout: 1_500 }).catch(() => false)) {
+              await byRole.click({ timeout: 10_000, force: true });
+            } else {
+              await individualInput.check({ force: true }).catch(() => {});
+            }
+          }
+
+          await this.page.waitForTimeout(300);
+          return await individualInput.isChecked().catch(() => false);
+        },
+        { timeout: 30_000, intervals: [300, 500, 1_000] },
+      )
+      .toBe(true);
   }
 
   /** @deprecated use {@link selectIndividualType} */
@@ -437,9 +485,35 @@ export class DOSearchCustomerDialog extends BasePage {
     await this.page
       .waitForURL(/borrower-search-result/i, { timeout: 90_000 })
       .catch(() => {});
-    await expect(this.page.getByText(udcCustomerNumber, { exact: false }).first()).toBeVisible({
-      timeout: 90_000,
-    });
+
+    const resultCard = this.borrowerSearchResultCard(udcCustomerNumber);
+    await expect
+      .poll(
+        async () => {
+          if (await resultCard.isVisible().catch(() => false)) {
+            return true;
+          }
+          if (
+            await this.page
+              .getByText(udcCustomerNumber, { exact: false })
+              .first()
+              .isVisible()
+              .catch(() => false)
+          ) {
+            return true;
+          }
+          const noResults = this.page.getByText(/no (record|result|customer|match)/i).first();
+          if (await noResults.isVisible({ timeout: 500 }).catch(() => false)) {
+            throw new Error(
+              `Borrower search returned no results for UDC ${udcCustomerNumber} (confirm Individual search type is selected).`,
+            );
+          }
+          return false;
+        },
+        { timeout: 90_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
+
     await expect(this.page.getByText(/UDC Customer Number/i).first()).toBeVisible({
       timeout: 15_000,
     });

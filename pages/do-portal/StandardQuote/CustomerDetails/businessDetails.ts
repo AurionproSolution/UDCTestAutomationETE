@@ -592,9 +592,22 @@ export class DOBusinessDetailsPage extends BasePage {
 
   async clickNextButton(): Promise<void> {
     this.logStep("Click Next Button");
+    await this.waitUntilNoVisibleAppLoaderOverlays(90_000);
     await this.nextButton.waitFor({ state: "visible", timeout: 60000 });
     await this.nextButton.scrollIntoViewIfNeeded();
-    await this.nextButton.click();
+    await this.clickElement(this.nextButton, 60_000);
+  }
+
+  /** Existing FIS business — Organisation Type should read **Partnership** (UDP-T4478). */
+  async expectOrganisationTypePartnership(): Promise<void> {
+    this.logStep("Expect Organisation Type Partnership");
+    const partnershipRx = /Partnership/i;
+    const combobox = this.businessRoot.getByRole("combobox", { name: partnershipRx }).first();
+    if (await combobox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expect(combobox).toBeVisible({ timeout: 15_000 });
+      return;
+    }
+    await expect(this.businessRoot.getByText(partnershipRx).first()).toBeVisible({ timeout: 15_000 });
   }
 
   /**
@@ -737,5 +750,96 @@ export class DOBusinessDetailsPage extends BasePage {
         .filter({ hasText: messagePattern })
         .first(),
     ).toBeVisible({ timeout: 25_000 });
+  }
+
+  private standardQuoteCancelButton(): Locator {
+    return this.page
+      .locator("app-quote-details, app-standard-quote")
+      .first()
+      .getByRole("button", { name: /^Cancel$/i })
+      .first()
+      .or(this.page.getByRole("button", { name: /^Cancel$/i }).first());
+  }
+
+  private unsavedChangesCancelConfirmDialog(): Locator {
+    return this.page
+      .locator("p-confirmdialog, .p-confirm-dialog, [role='alertdialog']")
+      .filter({ visible: true })
+      .filter({ hasText: /unsaved changes|lost|cancel/i })
+      .first();
+  }
+
+  async clickCancelBusinessDetails(): Promise<void> {
+    this.logStep("Click Cancel on Business Details");
+    const cancelBtn = this.standardQuoteCancelButton();
+    await expect(cancelBtn).toBeVisible({ timeout: 30_000 });
+    await cancelBtn.scrollIntoViewIfNeeded();
+    await cancelBtn.click({ timeout: 15_000 });
+  }
+
+  /** After **Cancel** with unsaved Business Details — confirmation copy (UDP-T4479). */
+  async expectUnsavedChangesCancelConfirmation(): Promise<void> {
+    this.logStep("Expect unsaved changes cancel confirmation");
+    const confirmDlg = this.unsavedChangesCancelConfirmDialog();
+    await expect(confirmDlg).toBeVisible({ timeout: 15_000 });
+    await expect(confirmDlg).toContainText(/Any unsaved changes will be lost/i);
+    await expect(confirmDlg).toContainText(/Are you sure you want to cancel/i);
+  }
+
+  async confirmCancelDiscardUnsavedChanges(): Promise<void> {
+    this.logStep("Confirm cancel — discard unsaved changes");
+    const confirmDlg = this.unsavedChangesCancelConfirmDialog();
+    const discardBtn = confirmDlg
+      .getByRole("button", { name: /^(Yes|OK|Confirm|Discard)$/i })
+      .or(confirmDlg.locator("button.p-confirm-dialog-accept").first())
+      .first();
+    await expect(discardBtn).toBeVisible({ timeout: 10_000 });
+    await discardBtn.click({ timeout: 10_000 });
+    await expect(confirmDlg).toBeHidden({ timeout: 20_000 }).catch(() => {});
+  }
+
+  /** Partnership role/org-type guard messages (UDP-T4460, T4472). */
+  async expectPartnershipRoleOrganisationTypeValidation(): Promise<void> {
+    this.logStep("Expect Partnership role / organisation type validation");
+    const patterns = [
+      /There should be 2 co-borrowers required for partnership/i,
+      /Organisation Type should not be Partnership for Co[\s-]*Borrower/i,
+      /Organisation Type should not be Partnership for Guarantor/i,
+      /Customer role should be Borrower when Organisation Type\s*=\s*Partnership/i,
+    ];
+    const toastRoot = this.page.locator(
+      ".p-toast, .p-toast-message, .p-toast-detail, [role='alert'], .p-message, .p-inline-message",
+    );
+
+    await expect
+      .poll(
+        async () => {
+          for (const pattern of patterns) {
+            if (await this.page.getByText(pattern).first().isVisible().catch(() => false)) {
+              return true;
+            }
+            if (await toastRoot.filter({ hasText: pattern }).first().isVisible().catch(() => false)) {
+              return true;
+            }
+            if (await this.businessRoot.getByText(pattern).first().isVisible().catch(() => false)) {
+              return true;
+            }
+          }
+          return false;
+        },
+        { timeout: 30_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
+  }
+
+  /** Save with partial data should not surface mandatory validation (UDP-T4480). */
+  async expectNoMandatoryValidationOnBusinessDetails(): Promise<void> {
+    this.logStep("Expect no mandatory validation on Business Details");
+    await expect(this.businessRoot.getByText(/is required/i)).toHaveCount(0, { timeout: 5_000 });
+    await expect(
+      this.page
+        .locator(".p-toast-message-error, .p-toast-message-warn")
+        .filter({ hasText: /is required/i }),
+    ).toHaveCount(0, { timeout: 3_000 });
   }
 }

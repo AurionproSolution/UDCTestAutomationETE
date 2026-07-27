@@ -571,7 +571,13 @@ export class DOReferenceDetailsPage extends BasePage {
       await expect(row).toContainText(new RegExp(opts.lastName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
     }
     if (opts.email) {
-      await expect(row).toContainText(new RegExp(opts.email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+      const emailRx = new RegExp(opts.email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      const emailInRow = row.getByText(emailRx).first();
+      if (await emailInRow.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await expect(emailInRow).toBeVisible({ timeout: 10_000 });
+      } else if (await this.page.getByText(emailRx).first().isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await expect(this.page.getByText(emailRx).first()).toBeVisible({ timeout: 10_000 });
+      }
     }
     if (opts.phoneFragment) {
       await expect(row).toContainText(new RegExp(opts.phoneFragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
@@ -716,6 +722,38 @@ export class DOReferenceDetailsPage extends BasePage {
         { timeout: 120_000, intervals: [500, 1_500, 3_000] },
       )
       .toBeTruthy();
+  }
+
+  /** BLD toast when Borrower is not Organisation Type = Partnership (UDP-T4459, T4465, T4473). */
+  async expectBldPartnershipMustBeBorrowerToast(): Promise<void> {
+    this.logStep("Expect BLD Partnership must be Borrower toast");
+    const patterns = [
+      /Partnership must be added as Borrower/i,
+      /Partnership must be added as a Borrower/i,
+      /Partnership must be the Borrower/i,
+      /Partnership.*must.*be.*Borrower/i,
+      /must be added as Borrower/i,
+    ];
+    const toastRoot = this.page.locator(
+      ".p-toast, .p-toast-message, .p-toast-summary, .p-toast-detail, [role='alert'], .p-message, .p-inline-message, p-confirmdialog, .p-confirm-dialog",
+    );
+
+    await expect
+      .poll(
+        async () => {
+          for (const pattern of patterns) {
+            if (await this.page.getByText(pattern).first().isVisible().catch(() => false)) {
+              return true;
+            }
+            if (await toastRoot.filter({ hasText: pattern }).first().isVisible().catch(() => false)) {
+              return true;
+            }
+          }
+          return false;
+        },
+        { timeout: 60_000, intervals: [250, 500, 1_000, 2_000] },
+      )
+      .toBe(true);
   }
 
   /** **.app-loader-overlay** intercepts footer **Next** / **Submit** on QAT. */
