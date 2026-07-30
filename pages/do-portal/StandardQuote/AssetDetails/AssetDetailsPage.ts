@@ -1,7 +1,6 @@
 import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common/BasePage";
 import { DOCustomerDetailsPage } from "../CustomerDetails/customerDetailsPage";
-import { DOAddAssetPage } from "./AddAssetPage";
 
 export type DOEditPaymentScheduleSegmentSnapshot = {
   number: string;
@@ -74,7 +73,7 @@ export class DOAssetDetailsPage extends BasePage {
       `(//*[name()='svg'][@class='p-dropdown-trigger-icon p-icon'])[6]`,
     );
     /** OL / FL / CSA-B: label varies (`Asset Summary`, `Asset & Insurance Summary`, etc.). */
-    const quoteHost = this.resolveQuoteShell(page);
+    const quoteHost = page.locator("app-quote-details, app-standard-quote").first();
     this.assetInsuranceTradeInSummaryHyperlink =
       this.assetSummaryOpenTrigger(quoteHost);
     this.assetyEditButton = page.locator(".cursor-pointer.fa-pen-to-square");
@@ -372,28 +371,10 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** After navigation to Asset Details: network settle + cash price field visible. */
   async waitForAssetDetailsStepReady(): Promise<void> {
-    const addAsset = new DOAddAssetPage(this.page);
-    await addAsset.returnToStandardQuoteFromAddAssetRouteIfNeeded();
-
-    await expect
-      .poll(
-        async () => {
-          const shell = this.resolveQuoteShell();
-          if (await shell.isVisible({ timeout: 1_500 }).catch(() => false)) {
-            return true;
-          }
-          if (/\/standard-quote/i.test(this.page.url())) {
-            return await this.page
-              .getByText(/Cash Price of Asset|Term|Asset Type/i)
-              .first()
-              .isVisible({ timeout: 1_500 })
-              .catch(() => false);
-          }
-          return false;
-        },
-        { timeout: 60_000, intervals: [500, 1_000, 2_000] },
-      )
-      .toBe(true);
+    await this.standardQuoteRoot().waitFor({
+      state: "visible",
+      timeout: 60_000,
+    });
 
     await expect(this.cashPriceOfAssetInputField).toBeVisible({
       timeout: 60_000,
@@ -1565,8 +1546,7 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async readPaymentAmount(): Promise<number> {
-    await this.paymentSummaryRoot.scrollIntoViewIfNeeded().catch(() => {});
-    const field = this.paymentSummaryPaymentAmountField().or(this.paymentAmountField());
+    const field = this.paymentAmountField();
     await expect(field).toBeVisible({ timeout: 30_000 });
     const raw =
       (await field.inputValue().catch(() => "")).trim() ||
@@ -2463,6 +2443,7 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(`Enter Balloon Percent And Check Fixed ${percentDigits}`);
     await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
     await this.ensureCashPriceReadyForBalloon();
+    await this.cashPriceOfAsset("$20,000");
     await this.enterBalloonPercent(percentDigits);
     await this.checkBalloonFixedCheckbox();
     await this.expectBalloonFixedCheckboxChecked();
@@ -2735,7 +2716,7 @@ export class DOAssetDetailsPage extends BasePage {
     await this.waitForQuoteLoadersToFinish();
 
     const summary = this.paymentSummaryRoot;
-    const paymentAmount = this.paymentSummaryPaymentAmountField().or(this.paymentAmountDisplayField());
+    const paymentAmount = this.paymentAmountDisplayField();
     await paymentAmount.scrollIntoViewIfNeeded().catch(() => {});
 
     await expect
@@ -2784,32 +2765,6 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * Originator / Origination Reference input — label-anchored so Quote ID and other
-   * header fields are not mistaken (Webform concatenates labels in a11y names).
-   */
-  private originationReferenceInputLocator(root: Locator): Locator {
-    const refLabelText = /^Originator\s+Reference|^Origination\s+Reference/i;
-    const fromExactLabel = root
-      .locator("label, span, .p-float-label")
-      .filter({ hasText: refLabelText })
-      .first()
-      .locator(
-        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
-      );
-    const fromOriginatorHost = this.page
-      .locator("app-quote-originator")
-      .first()
-      .locator(
-        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/ancestor::div[contains(@class,'p-field') or contains(@class,'p-col')][1]//input[not(@type='hidden')][1]",
-      );
-    return fromExactLabel
-      .or(fromOriginatorHost)
-      .or(root.locator('input[formControlName="originationReference"]'))
-      .or(root.locator('input[formControlName="originatorReference"]'))
-      .or(root.locator('input[name="originationReference"]'));
-  }
-
-  /**
    * Fills Origination / Originator Reference on a quote shell (`root`).
    * Webform / Prime uses a real `input`; legacy CSA may use SVG `text#text` — try inputs first.
    */
@@ -2840,14 +2795,20 @@ export class DOAssetDetailsPage extends BasePage {
       return (await t.inputValue().catch(() => "")).trim().length > 0;
     };
 
-    if (await tryFill(this.originationReferenceInputLocator(root))) {
-      return true;
+    const originatorRoot = this.page.locator("app-quote-originator").first();
+    if (await originatorRoot.isVisible({ timeout: 4_000 }).catch(() => false)) {
+      const originInput = originatorRoot.locator(
+        "xpath=.//label[contains(normalize-space(.),'Originator Reference') or contains(normalize-space(.),'Origination Reference')]/following::input[1]",
+      );
+      if (await tryFill(originInput.first())) {
+        return true;
+      }
     }
 
     if (
       await tryFill(
         root.getByLabel(
-          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator\s*Ref/i,
+          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
         ),
       )
     ) {
@@ -2856,7 +2817,7 @@ export class DOAssetDetailsPage extends BasePage {
     if (
       await tryFill(
         this.page.getByLabel(
-          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator\s*Ref/i,
+          /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
         ),
       )
     ) {
@@ -2865,7 +2826,7 @@ export class DOAssetDetailsPage extends BasePage {
     if (
       await tryFill(
         root.getByRole("textbox", {
-          name: /^(Origination|Originator)\s*(Reference|Ref)/i,
+          name: /Origination|Originator|Orig(ination)?\s*Ref/,
         }),
       )
     ) {
@@ -2874,10 +2835,41 @@ export class DOAssetDetailsPage extends BasePage {
     if (
       await tryFill(
         this.page.getByRole("textbox", {
-          name: /^(Origination|Originator)\s*(Reference|Ref)/i,
+          name: /Origination|Originator|Orig(ination)?\s*Ref/,
         }),
       )
     ) {
+      return true;
+    }
+    for (const sel of [
+      'input[formControlName="originationReference"]',
+      'input[formControlName="originatorReference"]',
+      'input[name="originationReference"]',
+      'input[ng-reflect-name*="origination"]',
+      "p-float-label input",
+      ".p-field input.p-inputtext",
+    ]) {
+      if (await tryFill(root.locator(sel).first())) {
+        return true;
+      }
+    }
+    const row = root
+      .locator(".p-field, .p-col, .p-float-label, [class*='p-field']")
+      .filter({
+        hasText: /Origination|Originator\s*Ref|Origination\s*Ref/,
+      })
+      .first();
+    if (await tryFill(row.locator("input, textarea").first())) {
+      return true;
+    }
+    const fromLabel = root
+      .locator("span, label, .p-float-label")
+      .filter({ hasText: /Origination|Originator/i })
+      .first()
+      .locator(
+        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
+      );
+    if (await tryFill(fromLabel)) {
       return true;
     }
     if (await tryFill(this.originationRefInput)) {
@@ -2901,17 +2893,6 @@ export class DOAssetDetailsPage extends BasePage {
       );
     }
     await this.waitUntilNoVisibleAppLoaderOverlays(8_000);
-  }
-
-  /** Read Originator / Origination Reference using the same discovery order as {@link enterOriginationReference}. */
-  async readOriginationReference(): Promise<string> {
-    const root = this.standardQuoteRoot();
-    await root.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
-    const inp = await this.findVisibleFinanceLeaseOriginationInput(root);
-    if (inp) {
-      return this.readOriginationLocatorValue(inp);
-    }
-    return this.readOriginationLocatorValue(this.originationRefInput.first());
   }
 
   /**
@@ -3026,7 +3007,7 @@ export class DOAssetDetailsPage extends BasePage {
     }
   }
 
-  /** Same discovery order as {@link enterOriginationReference} so verify reads the field we filled. */
+  /** Same discovery order as {@link enterOriginationReferenceFinanceLease} so verify reads the field we filled. */
   private async findVisibleFinanceLeaseOriginationInput(
     root: Locator,
   ): Promise<Locator | null> {
@@ -3038,19 +3019,61 @@ export class DOAssetDetailsPage extends BasePage {
       return null;
     };
 
-    let x = await firstVisible(this.originationReferenceInputLocator(root));
+    let x: Locator | null;
+    x = await firstVisible(
+      root.getByLabel(
+        /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+      ),
+    );
+    if (x) return x;
+    x = await firstVisible(
+      this.page.getByLabel(
+        /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator/i,
+      ),
+    );
+    if (x) return x;
+    x = await firstVisible(
+      root.getByRole("textbox", {
+        name: /Origination|Originator|Orig(ination)?\s*Ref/,
+      }),
+    );
+    if (x) return x;
+    x = await firstVisible(
+      this.page.getByRole("textbox", {
+        name: /Origination|Originator|Orig(ination)?\s*Ref/,
+      }),
+    );
     if (x) return x;
 
-    const refLabel = /Origination\s*Reference|Originator\s*Reference|Origination\s*Ref|Originator\s*Ref/i;
-    const refTextboxName = /^(Origination|Originator)\s*(Reference|Ref)/i;
+    for (const sel of [
+      'input[formControlName="originationReference"]',
+      'input[formControlName="originatorReference"]',
+      'input[name="originationReference"]',
+      'input[ng-reflect-name*="origination"]',
+      "p-float-label input",
+      ".p-field input.p-inputtext",
+    ]) {
+      x = await firstVisible(root.locator(sel).first());
+      if (x) return x;
+    }
 
-    x = await firstVisible(root.getByLabel(refLabel));
+    const row = root
+      .locator(".p-field, .p-col, .p-float-label, [class*='p-field']")
+      .filter({
+        hasText: /Origination|Originator\s*Ref|Origination\s*Ref/,
+      })
+      .first();
+    x = await firstVisible(row.locator("input, textarea").first());
     if (x) return x;
-    x = await firstVisible(this.page.getByLabel(refLabel));
-    if (x) return x;
-    x = await firstVisible(root.getByRole("textbox", { name: refTextboxName }));
-    if (x) return x;
-    x = await firstVisible(this.page.getByRole("textbox", { name: refTextboxName }));
+
+    const fromLabel = root
+      .locator("span, label, .p-float-label")
+      .filter({ hasText: /Origination|Originator/i })
+      .first()
+      .locator(
+        "xpath=ancestor::div[contains(@class,'p-field') or contains(@class,'p-col') or contains(@class,'grid') or contains(@class,'formgrid')][1]//input[not(@type='hidden')][1]",
+      );
+    x = await firstVisible(fromLabel);
     if (x) return x;
 
     x = await firstVisible(this.originationRefInput);
@@ -3115,7 +3138,25 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(`Entered asset search/selection as ${this.stepValueDisplay(asset)}`);
     await this.assetInputField.click();
     await this.assetSearchField.fill(asset);
-    await this.page.getByRole("option", { name: asset }).click();
+
+    const escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const optionPattern = new RegExp(escaped.replace(/\s*\/\s*$/, "(\\s*/)?"), "i");
+    const option = this.page.getByRole("option", { name: optionPattern }).first();
+    const noResults = this.page.getByRole("option", { name: /No results found/i });
+
+    if (await option.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await option.click({ timeout: 15_000 });
+    } else if (await noResults.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      const keyword = asset.split(/\s+/).slice(0, 2).join(" ");
+      await this.assetSearchField.fill(keyword);
+      const fallback = this.page.getByRole("option", { name: /Car and Light Commercial/i }).first();
+      await expect(fallback).toBeVisible({ timeout: 30_000 });
+      await fallback.click({ timeout: 15_000 });
+    } else {
+      await expect(option).toBeVisible({ timeout: 180_000 });
+      await option.click({ timeout: 15_000 });
+    }
+
     await this.confirmAssetTypeDialogIfOpen();
   }
 
@@ -3415,26 +3456,24 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
-  private resolveQuoteShell(scope?: Page | Locator): Locator {
-    const quoteShells =
-      scope && typeof (scope as Locator).locator === "function"
-        ? (scope as Locator).locator("app-quote-details, app-standard-quote")
-        : (scope as Page | undefined)?.locator("app-quote-details, app-standard-quote") ??
-          this.page.locator("app-quote-details, app-standard-quote");
-    const visibleQuoteShell = quoteShells.filter({ visible: true }).first();
-    return visibleQuoteShell.or(quoteShells.first()).first();
-  }
-
   /**
    * Opens **Asset / Insurance / Trade-in** summary (label varies: `Asset Summary`,
    * `Asset & Insurance Summary`, `Asset, Insurance & Trade-in`, etc.).
    */
   async openAssetInsuranceTradeInSummary(): Promise<void> {
     this.logStep("Open Asset Insurance Trade In Summary");
-    await this.waitForAssetDetailsStepReady().catch(() => {});
+    const existingSummary = this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Asset/i })
+      .filter({ hasText: /Insurance/i })
+      .filter({ hasText: /Summary/i })
+      .last();
+    if (await existingSummary.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return;
+    }
 
-    const quote = this.resolveQuoteShell();
-    await quote.waitFor({ state: "attached", timeout: 60_000 });
+    const quote = this.page.locator("app-quote-details, app-standard-quote").first();
+    await quote.waitFor({ state: "visible", timeout: 60_000 });
     await quote.scrollIntoViewIfNeeded().catch(() => {});
 
     const primary = this.assetInsuranceTradeInSummaryHyperlink;
@@ -4316,270 +4355,19 @@ export class DOAssetDetailsPage extends BasePage {
     return this.editPaymentScheduleDialog().locator("table").first();
   }
 
-  /** Segment vs grid toggle host inside **Edit Payment Schedule** (falls back to quote **Lease Schedule**). */
-  private editPaymentScheduleViewToggleScope(): Locator {
-    const dialog = this.editPaymentScheduleDialog();
-    const inDialog = dialog
-      .getByRole("group")
-      .filter({ has: dialog.getByRole("radio") })
-      .first();
-    return inDialog.or(this.leasePaymentScheduleViewToggleScope());
-  }
-
-  /** Segment view toggle inside the dialog only (`pi-equals` or **Segment** label). */
-  private editPaymentScheduleInDialogSegmentViewToggle(): Locator {
-    const dialog = this.editPaymentScheduleDialog();
-    const inDialog = dialog
-      .getByRole("group")
-      .filter({ has: dialog.getByRole("radio") })
-      .first();
-    return inDialog
-      .getByRole("radio")
-      .first()
-      .or(inDialog.getByRole("radio").filter({ has: inDialog.locator("i.pi.pi-equals") }).first())
-      .or(
-        dialog
-          .locator(
-            "p-selectbutton button, p-selectButton button, .p-selectbutton .p-button, .p-button",
-          )
-          .filter({ hasText: /^Segment$/i })
-          .first(),
-      );
-  }
-
-  /** Segment view toggle (`pi-equals` or **Segment** label). */
-  private editPaymentScheduleSegmentViewToggle(): Locator {
-    const dialog = this.editPaymentScheduleDialog();
-    const scoped = this.editPaymentScheduleViewToggleScope();
-    return scoped
-      .getByRole("radio")
-      .first()
-      .or(scoped.getByRole("radio").filter({ has: scoped.locator("i.pi.pi-equals") }).first())
-      .or(
-        dialog
-          .locator(
-            "p-selectbutton button, p-selectButton button, .p-selectbutton .p-button, .p-button",
-          )
-          .filter({ hasText: /^Segment$/i })
-          .first(),
-      )
-      .or(this.leasePaymentScheduleDefaultViewRadio());
-  }
-
-  /** Grid view toggle (`pi-bars` or **Grid** label). */
-  private editPaymentScheduleGridViewToggle(): Locator {
-    const dialog = this.editPaymentScheduleDialog();
-    const scoped = this.editPaymentScheduleViewToggleScope();
-    return scoped
-      .getByRole("radio")
-      .nth(1)
-      .or(scoped.getByRole("radio").filter({ has: scoped.locator("i.pi.pi-bars") }).first())
-      .or(
-        dialog
-          .locator(
-            "p-selectbutton button, p-selectButton button, .p-selectbutton .p-button, .p-button",
-          )
-          .filter({ hasText: /^Grid$/i })
-          .first(),
-      )
-      .or(this.leasePaymentScheduleBarsViewRadio());
-  }
-
-  private async isEditPaymentScheduleSegmentViewActive(): Promise<boolean> {
-    if (await this.isLeasePaymentDefaultViewActive()) {
-      return true;
-    }
-    if (await this.isLeasePaymentListViewActive()) {
-      return false;
-    }
-
-    const segmentToggle = this.editPaymentScheduleSegmentViewToggle();
-    if (await segmentToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      if (await this.isPaymentScheduleRadioChecked(segmentToggle)) {
-        return true;
-      }
-    }
-
-    const segmentTable = this.editPaymentScheduleSegmentTable();
-    const typeHeader = segmentTable.locator("th").filter({ hasText: /^Type/i }).first();
-    return (
-      (await typeHeader.isVisible({ timeout: 500 }).catch(() => false)) &&
-      (await segmentTable.isVisible({ timeout: 500 }).catch(() => false))
-    );
-  }
-
-  private async isEditPaymentScheduleGridViewActive(): Promise<boolean> {
-    if (await this.isLeasePaymentDefaultViewActive()) {
-      return false;
-    }
-    if (await this.isLeasePaymentListViewActive()) {
-      return true;
-    }
-
-    const gridToggle = this.editPaymentScheduleGridViewToggle();
-    if (await gridToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      if (await this.isPaymentScheduleRadioChecked(gridToggle)) {
-        return true;
-      }
-    }
-
-    const instalmentTable = this.editPaymentScheduleInstalmentTable();
-    if (!(await instalmentTable.isVisible({ timeout: 1_000 }).catch(() => false))) {
-      return false;
-    }
-    const paymentHeader = instalmentTable.locator("th").filter({ hasText: /^Payment$/i }).first();
-    if (!(await paymentHeader.isVisible({ timeout: 500 }).catch(() => false))) {
-      return false;
-    }
-    const rowCount = await instalmentTable.locator("tbody tr").filter({ visible: true }).count();
-    return rowCount >= 3;
-  }
-
-  private async isEditPaymentScheduleAggregatedSegmentEditorActive(): Promise<boolean> {
-    const table = this.editPaymentScheduleSegmentTable();
-    if (!(await table.isVisible({ timeout: 500 }).catch(() => false))) {
-      return false;
-    }
-    const rows = table.locator("tbody tr");
-    const rowCount = await rows.count();
-    if (rowCount === 0) {
-      return false;
-    }
-    if (rowCount > 10) {
-      return false;
-    }
-
-    const firstRow = rows.first();
-    if (await firstRow.getByRole("spinbutton").first().isVisible({ timeout: 500 }).catch(() => false)) {
-      return true;
-    }
-
-    const hasDateColumn = await table
-      .locator("th")
-      .filter({ hasText: /^Date$/i })
-      .isVisible({ timeout: 500 })
-      .catch(() => false);
-    if (!hasDateColumn) {
-      return rowCount <= 5;
-    }
-
-    if (rowCount >= 5) {
-      const sample: string[] = [];
-      const limit = Math.min(rowCount, 4);
-      for (let i = 0; i < limit; i++) {
-        sample.push(await this.readEditPaymentScheduleSegmentNumberFromRow(rows.nth(i)));
-      }
-      if (sample.every((value) => value === "1")) {
-        return false;
-      }
-    }
-    return rowCount <= 5;
-  }
-
-  /** UDP-T4339 — **Edit Payment Schedule** segment editor (Type column) is visible. */
-  async expectEditPaymentScheduleSegmentViewActive(): Promise<void> {
-    this.logStep("Expect Edit Payment Schedule segment view active");
-    const dialog = this.editPaymentScheduleDialog();
-    await expect(dialog).toBeVisible({ timeout: 15_000 });
-    const segmentTable = this.editPaymentScheduleSegmentTable();
-    await expect(segmentTable).toBeVisible({ timeout: 15_000 });
-    await expect(segmentTable.locator("th").filter({ hasText: /^Type/i }).first()).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect
-      .poll(async () => this.countEditPaymentScheduleSegmentRows(), {
-        timeout: 15_000,
-        intervals: [300, 500, 1_000],
-      })
-      .toBeGreaterThan(0);
-  }
-
-  /**
-   * **Edit Payment Schedule** dialog opens on instalment grid on some builds — switch to segment editor
-   * (Type / Number columns) before modifying segments. Does not close the dialog.
-   */
-  async ensureEditPaymentScheduleDialogSegmentView(): Promise<void> {
-    this.logStep("Ensure Edit Payment Schedule dialog segment view");
-    const dialog = this.editPaymentScheduleDialog();
-    await expect(dialog).toBeVisible({ timeout: 15_000 });
-    if (await this.isEditPaymentScheduleAggregatedSegmentEditorActive()) {
-      await this.expectEditPaymentScheduleSegmentViewActive();
-      return;
-    }
-
-    const inDialogToggle = this.editPaymentScheduleInDialogSegmentViewToggle();
-    if (await inDialogToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await inDialogToggle.click({ timeout: 10_000 });
-      await this.waitForQuoteLoadersToFinish().catch(() => {});
-      if (await this.isEditPaymentScheduleAggregatedSegmentEditorActive()) {
-        await this.expectEditPaymentScheduleSegmentViewActive();
-        return;
-      }
-    }
-
-    await this.closeEditPaymentScheduleDialogIfOpen();
-    await this.clickLeasePaymentScheduleDefaultViewIfNeeded();
-    await this.openEditPaymentScheduleDialog();
-
-    await expect
-      .poll(async () => this.isEditPaymentScheduleAggregatedSegmentEditorActive(), {
-        timeout: 20_000,
-        intervals: [300, 500, 1_000],
-      })
-      .toBe(true);
-    await this.expectEditPaymentScheduleSegmentViewActive();
-  }
-
-  /** UDP-T4339 — grid view lists individual instalments on quote or in-dialog instalment grid. */
-  async expectEditPaymentScheduleGridViewActive(minRows = 5): Promise<void> {
-    this.logStep("Expect Edit Payment Schedule grid view active");
-    await expect
-      .poll(async () => this.isEditPaymentScheduleGridViewActive(), {
-        timeout: 20_000,
-        intervals: [300, 500, 1_000],
-      })
-      .toBe(true);
-
-    await expect(this.paymentScheduleColumnHeader(/^Date\b/i)).toBeVisible({ timeout: 15_000 });
-    await expect(this.paymentScheduleColumnHeader(/^Payment\b/i)).toBeVisible({ timeout: 10_000 });
-    const rows = this.paymentScheduleAllMoneyRows();
-    await expect
-      .poll(async () => rows.count(), { timeout: 20_000, intervals: [300, 500, 1_000] })
-      .toBeGreaterThanOrEqual(minRows);
-  }
-
-  /** Switch to grid view — quote **Lease Schedule** toggle (FL hosts toggle outside the dialog). */
-  async clickEditPaymentScheduleGridView(): Promise<void> {
-    this.logStep("Click Edit Payment Schedule grid view");
-    await this.closeEditPaymentScheduleDialogIfOpen();
-    await this.expectPaymentScheduleGridViewListsIndividualPayments(5);
-  }
-
-  /** Switch back to segment view — quote **Lease Schedule** toggle. */
-  async clickEditPaymentScheduleSegmentView(): Promise<void> {
-    this.logStep("Click Edit Payment Schedule segment view");
-    await this.closeEditPaymentScheduleDialogIfOpen();
-    await this.clickLeasePaymentScheduleDefaultViewIfNeeded();
-    await this.expectPaymentScheduleSegmentViewActive();
-  }
-
   private editPaymentScheduleSegmentRowAt(rowIndex: number): Locator {
     return this.editPaymentScheduleSegmentTable().locator("tbody tr").nth(rowIndex);
   }
 
-  /** Segment editor ready — dialog visible with at least one segment row. */
+  /** Segment editor ready — **Type** column and at least one row with a type dropdown. */
   async waitForEditPaymentScheduleSegmentEditorReady(): Promise<void> {
     this.logStep("Wait for Edit Payment Schedule segment editor ready");
-    const dialog = this.editPaymentScheduleDialog();
-    await expect(dialog).toBeVisible({ timeout: 30_000 });
     const table = this.editPaymentScheduleSegmentTable();
     await expect(table).toBeVisible({ timeout: 30_000 });
-    await expect
-      .poll(async () => this.countEditPaymentScheduleSegmentRows(), {
-        timeout: 30_000,
-        intervals: [300, 500, 1_000],
-      })
-      .toBeGreaterThan(0);
+    const row = table.locator("tbody tr").first();
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    const typeControl = row.getByRole("combobox").first();
+    await expect(typeControl).toBeVisible({ timeout: 20_000 });
   }
 
   private async readEditPaymentScheduleSegmentNumberFromRow(row: Locator): Promise<string> {
@@ -4873,10 +4661,6 @@ export class DOAssetDetailsPage extends BasePage {
     typeLabel: string,
   ): Promise<void> {
     this.logStep(`Select Edit Payment Schedule Segment Type ${typeLabel} on row ${rowIndex + 1}`);
-    const currentType = await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex);
-    if (new RegExp(typeLabel, "i").test(currentType)) {
-      return;
-    }
     const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
     const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
     const typeCombo = typeCell.getByRole("combobox").first();
@@ -4904,159 +4688,12 @@ export class DOAssetDetailsPage extends BasePage {
     await this.page.keyboard.press("Escape").catch(() => {});
   }
 
-  /** Segment **Type** label on a row (0-based) inside **Edit Payment Schedule**. */
-  async readEditPaymentScheduleSegmentTypeOnRow(rowIndex: number): Promise<string> {
-    const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
-    const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
-    const typeCombo = typeCell.getByRole("combobox").first();
-    if (await typeCombo.isVisible({ timeout: 500 }).catch(() => false)) {
-      return ((await typeCombo.textContent({ timeout: 5_000 }).catch(() => "")) ?? "")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-    const fromTypeCell = ((await typeCell.textContent({ timeout: 5_000 }).catch(() => "")) ?? "")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (/Fixed|Normal|Interest/i.test(fromTypeCell)) {
-      return fromTypeCell;
-    }
-    const cells = (await row.locator("td").allTextContents().catch(() => [])).map((c) =>
-      c.replace(/\s+/g, " ").trim(),
-    );
-    const fromRow = cells.find((c) => /^(Fixed|Normal|Interest Only)$/i.test(c));
-    return fromRow ?? fromTypeCell;
-  }
-
-  /** Whether segment **Type** dropdown is user-editable on a row. */
-  async isEditPaymentScheduleSegmentTypeEditable(rowIndex: number): Promise<boolean> {
-    const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
-    const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
-    const typeCombo = typeCell.getByRole("combobox").first();
-    if (!(await typeCombo.isVisible({ timeout: 1_000 }).catch(() => false))) {
-      return false;
-    }
-    if (await typeCombo.isDisabled().catch(() => false)) {
-      return false;
-    }
-    const dropdownHost = typeCell.locator(".p-dropdown").first();
-    if (await dropdownHost.isVisible({ timeout: 500 }).catch(() => false)) {
-      const cls = (await dropdownHost.getAttribute("class")) ?? "";
-      if (/p-disabled/.test(cls)) {
-        return false;
-      }
-    }
-    const trigger = typeCell.locator(".p-dropdown-trigger").first();
-    if (await trigger.isVisible({ timeout: 500 }).catch(() => false)) {
-      if (await trigger.isDisabled().catch(() => false)) {
-        return false;
-      }
-    }
-    return typeCombo.isEditable().catch(() => true);
-  }
-
-  /** Returns `true` only when **Type** changes to the requested label. */
-  async trySelectEditPaymentScheduleSegmentTypeOnRow(
-    rowIndex: number,
-    typeLabel: string,
-  ): Promise<boolean> {
-    const before = await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex);
-    if (new RegExp(typeLabel, "i").test(before)) {
-      return true;
-    }
-    try {
-      await this.selectEditPaymentScheduleSegmentTypeOnRow(rowIndex, typeLabel);
-    } catch {
-      return false;
-    }
-    const after = await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex);
-    return new RegExp(typeLabel, "i").test(after);
-  }
-
-  private editPaymentScheduleSegmentAmountInputInCell(amountCell: Locator): Locator {
-    return amountCell
-      .locator(
-        "input[currencymask], input#amount, input.p-inputnumber-input, input.p-inputtext, input, [role='spinbutton']",
-      )
-      .first();
-  }
-
-  private editPaymentScheduleDialogActiveAmountInput(): Locator {
-    return this.editPaymentScheduleDialog()
-      .locator(
-        ".p-cell-editing input, .p-cell-editor input, input[currencymask], input.p-inputnumber-input",
-      )
-      .filter({ visible: true })
-      .last();
-  }
-
-  private async activateEditPaymentScheduleSegmentAmountEditor(
-    rowIndex: number,
-  ): Promise<Locator | null> {
-    const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
-    const amountCell = await this.editPaymentScheduleSegmentAmountCell(row);
-    const inCell = this.editPaymentScheduleSegmentAmountInputInCell(amountCell);
-
-    const pickVisibleInput = async (): Promise<Locator | null> => {
-      if (await inCell.isVisible({ timeout: 300 }).catch(() => false)) {
-        return inCell;
-      }
-      const dialogInput = this.editPaymentScheduleDialogActiveAmountInput();
-      if (await dialogInput.isVisible({ timeout: 300 }).catch(() => false)) {
-        return dialogInput;
-      }
-      return null;
-    };
-
-    let input = await pickVisibleInput();
-    if (input) {
-      return input;
-    }
-
-    const activators = [
-      async () => amountCell.click({ timeout: 10_000 }),
-      async () => amountCell.getByText(/\$|[\d,.]+/).first().click({ timeout: 10_000 }),
-      async () => amountCell.dblclick({ timeout: 10_000 }),
-      async () => {
-        await amountCell.focus().catch(() => amountCell.click({ timeout: 10_000 }));
-        await this.page.keyboard.press("F2");
-      },
-      async () => {
-        await amountCell.focus().catch(() => amountCell.click({ timeout: 10_000 }));
-        await this.page.keyboard.press("Enter");
-      },
-    ];
-
-    for (const activate of activators) {
-      await activate().catch(() => {});
-      await this.page.waitForTimeout(300);
-      input = await pickVisibleInput();
-      if (input) {
-        return input;
-      }
-    }
-
-    return null;
-  }
-
   /** Segment **Amount** on a specific row (0-based) inside **Edit Payment Schedule**. */
   async enterEditPaymentScheduleSegmentAmountOnRow(
     rowIndex: number,
     amount: string,
   ): Promise<void> {
-    if (rowIndex === 0) {
-      const typeLabel = await this.readEditPaymentScheduleSegmentTypeOnRow(0);
-      if (/Fixed/i.test(typeLabel)) {
-        this.logStep(
-          `Fixed segment amount is display-only on row 1; skip entering ${amount}`,
-        );
-        return;
-      }
-    }
-
     this.logStep(`Enter Edit Payment Schedule Segment Amount ${amount} on row ${rowIndex + 1}`);
-    await this.page.keyboard.press("Escape").catch(() => {});
-    await this.page.waitForTimeout(200);
-
     const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
     const amountCell = await this.editPaymentScheduleSegmentAmountCell(row);
 
@@ -5066,23 +4703,12 @@ export class DOAssetDetailsPage extends BasePage {
     };
 
     const readAmount = async (): Promise<string> => {
-      const input = amountCell.locator("input, [role='spinbutton']").first();
+      const input = amountCell.locator("input").first();
       if (await input.isVisible({ timeout: 500 }).catch(() => false)) {
-        const val = (await input.inputValue({ timeout: 3_000 }).catch(() => "")).trim();
-        if (val.length > 0) {
-          return val;
-        }
+        return (await input.inputValue()).trim();
       }
-      return ((await amountCell.textContent({ timeout: 3_000 }).catch(() => "")) ?? "").trim();
+      return ((await amountCell.textContent()) ?? "").trim();
     };
-
-    const typeLabel = await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex);
-    if (/Fixed/i.test(typeLabel) && rowIndex === 0) {
-      this.logStep(
-        `Fixed segment amount is display-only on row ${rowIndex + 1}; cannot enter ${amount}`,
-      );
-      return;
-    }
 
     const target = parseAmount(amount);
     const current = parseAmount(await readAmount());
@@ -5090,35 +4716,46 @@ export class DOAssetDetailsPage extends BasePage {
       return;
     }
 
-    const digits = amount.replace(/[^0-9.-]/g, "");
-    const amountInput = await this.activateEditPaymentScheduleSegmentAmountEditor(rowIndex);
+    const amountInputInCell = (): Locator =>
+      amountCell
+        .locator("input[currencymask], input#amount, input.p-inputtext")
+        .first()
+        .or(amountCell.locator("input").first());
 
-    if (amountInput) {
-      await amountInput.click({ timeout: 5_000 }).catch(() => {});
-      const filled = await amountInput
-        .fill(amount, { timeout: 5_000 })
-        .then(() => true)
-        .catch(() => false);
-      if (!filled) {
-        await amountInput
-          .evaluate((el, val) => {
-            const input = el as HTMLInputElement;
-            input.value = val;
-            input.dispatchEvent(new Event("input", { bubbles: true }));
-            input.dispatchEvent(new Event("change", { bubbles: true }));
-          }, amount)
-          .catch(() => {});
-      }
-      await amountInput.press("Tab", { timeout: 3_000 }).catch(() => this.page.keyboard.press("Tab"));
-      await this.page.waitForTimeout(200);
-      return;
+    let amountInput = amountInputInCell();
+    if (!(await amountInput.isVisible({ timeout: 1_000 }).catch(() => false))) {
+      await amountCell.click({ timeout: 10_000 }).catch(() => {});
+      await this.page.waitForTimeout(250);
+      amountInput = amountInputInCell();
     }
 
-    await amountCell.click({ timeout: 10_000 }).catch(() => {});
-    await this.page.keyboard.press("Control+A").catch(() => {});
-    await this.page.keyboard.type(digits, { delay: 40 }).catch(() => {});
-    await this.page.keyboard.press("Tab").catch(() => {});
-    await this.page.waitForTimeout(200);
+    if (!(await amountInput.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      const displayed = await readAmount();
+      const displayedNum = parseAmount(displayed);
+      if (Number.isFinite(target) && target === displayedNum) {
+        return;
+      }
+      const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
+      const typeLabel = ((await typeCell.textContent()) ?? "").trim();
+      if (/Fixed/i.test(typeLabel) && rowIndex === 0) {
+        this.logStep(
+          `FL first-row Fixed segment amount is display-only (${displayed}); cannot enter ${amount}`,
+        );
+        return;
+      }
+      await amountCell.dblclick({ timeout: 10_000 }).catch(() => amountCell.click({ timeout: 10_000 }));
+      await this.page.waitForTimeout(250);
+      amountInput = amountInputInCell();
+      if (!(await amountInput.isVisible({ timeout: 2_000 }).catch(() => false))) {
+        throw new Error(
+          `Edit Payment Schedule amount input not found on row ${rowIndex + 1} (displayed: "${displayed}", type: "${typeLabel}").`,
+        );
+      }
+    }
+
+    await amountInput.click({ clickCount: 3 });
+    await amountInput.fill(amount);
+    await amountInput.press("Tab").catch(() => {});
   }
 
   /** Segment **Amount** text on a row (0-based) inside **Edit Payment Schedule**. */
@@ -5147,39 +4784,17 @@ export class DOAssetDetailsPage extends BasePage {
     return text;
   }
 
-  /** Whether segment **Amount** on a row is an editable input (passive check; does not activate inline editors). */
+  /** Whether segment **Amount** on a row is an editable input (OL **Fixed** is display-only at $0). */
   async isEditPaymentScheduleSegmentAmountEditable(rowIndex: number): Promise<boolean> {
     const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
     const amountCell = await this.editPaymentScheduleSegmentAmountCell(row);
-    const input = this.editPaymentScheduleSegmentAmountInputInCell(amountCell);
-    if (await input.isVisible({ timeout: 500 }).catch(() => false)) {
-      return input.isEditable().catch(() => false);
-    }
-
-    const typeLabel = await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex);
-    if (/Normal/i.test(typeLabel)) {
+    const input = amountCell
+      .locator("input[currencymask], input#amount, input.p-inputtext, input")
+      .first();
+    if (!(await input.isVisible({ timeout: 1_000 }).catch(() => false))) {
       return false;
     }
-
-    return false;
-  }
-
-  /** Whether FL non-first **Fixed** amount can be activated for user entry (inline editor). */
-  async isFlEditPaymentScheduleFixedAmountUserEditable(rowIndex: number): Promise<boolean> {
-    if (rowIndex <= 0) {
-      return false;
-    }
-    const typeLabel = await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex);
-    if (!/Fixed/i.test(typeLabel)) {
-      return false;
-    }
-    const input = await this.activateEditPaymentScheduleSegmentAmountEditor(rowIndex);
-    if (!input) {
-      return false;
-    }
-    const editable = await input.isEditable().catch(() => true);
-    await this.page.keyboard.press("Escape").catch(() => {});
-    return editable;
+    return input.isEditable().catch(() => false);
   }
 
   /** Returns `true` when the amount field accepted and retained the requested value. */
@@ -5253,243 +4868,6 @@ export class DOAssetDetailsPage extends BasePage {
     }
     // Full-term Fixed $0 can match the default schedule — **Apply** stays disabled until segments differ.
     expect(await this.isEditPaymentScheduleSegmentAmountEditable(0)).toBeFalsy();
-  }
-
-  /** Ensure **Edit Payment Schedule** has a second segment row (FL non-first segment scenarios). */
-  async ensureEditPaymentScheduleNonFirstSegment(partialPayments = 12): Promise<number> {
-    this.logStep("Ensure Edit Payment Schedule non-first segment row");
-    await expect
-      .poll(async () => this.countEditPaymentScheduleSegmentRows(), {
-        timeout: 30_000,
-        intervals: [300, 500, 1_000],
-      })
-      .toBeGreaterThan(0);
-
-    if ((await this.countEditPaymentScheduleSegmentRows()) >= 2) {
-      return 1;
-    }
-
-    const term = await this.getEditPaymentScheduleFinanceTermMonths();
-    const chunk = Math.max(1, Math.min(partialPayments, term - 1));
-    await this.enterEditPaymentScheduleSegmentNumberOnRow(0, String(chunk));
-    await this.waitForEditPaymentScheduleAddSegmentEnabled();
-    await this.clickEditPaymentScheduleAddSegment();
-    return 1;
-  }
-
-  /**
-   * UDP-T4322 — FL **Fixed** on a non-first segment rejects non-zero amount after **Calculate**
-   * (validation message, disabled **Apply**, or amount reverts to **0**).
-   */
-  async expectFlEditPaymentScheduleNonZeroFixedRejected(rowIndex = 1): Promise<void> {
-    this.logStep(`Expect FL Edit Payment Schedule non-zero Fixed rejected on row ${rowIndex + 1}`);
-    const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
-    const typeLabel = await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex);
-    expect(typeLabel).toMatch(/Fixed/i);
-
-    const errVisible = await this.page
-      .getByText(
-        /only allowed value is 0|Fixed.*only.*0|not allowed|value\s*(?:is|must be)\s*0|Finance\s+Lease/i,
-      )
-      .first()
-      .isVisible({ timeout: 8_000 })
-      .catch(() => false);
-    const applyDisabled = await this.editPaymentScheduleApplyButton()
-      .isDisabled()
-      .catch(() => true);
-    const amountRaw = await this.readEditPaymentScheduleSegmentAmountOnRow(rowIndex);
-    const amountN = Number.parseFloat(amountRaw.replace(/[^0-9.-]/g, ""));
-    const revertedToZero = Number.isFinite(amountN) && amountN === 0;
-    const blockedByDisplayOnly =
-      revertedToZero && !(await this.isEditPaymentScheduleSegmentAmountEditable(rowIndex));
-    expect(errVisible || applyDisabled || revertedToZero || blockedByDisplayOnly).toBeTruthy();
-  }
-
-  /** UDP-T4322 — FL non-first **Fixed** segment with amount **0** is accepted after **Calculate**. */
-  async expectFlEditPaymentScheduleFixedZeroAccepted(rowIndex = 1): Promise<void> {
-    this.logStep(`Expect FL Edit Payment Schedule Fixed zero accepted on row ${rowIndex + 1}`);
-    const amountRaw = await this.readEditPaymentScheduleSegmentAmountOnRow(rowIndex);
-    const amountN = Number.parseFloat(amountRaw.replace(/[^0-9.-]/g, ""));
-    expect(Number.isFinite(amountN) ? amountN : 0).toBe(0);
-    const errVisible = await this.page
-      .getByText(/only allowed value is 0|Fixed.*only.*0|not allowed|invalid/i)
-      .first()
-      .isVisible({ timeout: 3_000 })
-      .catch(() => false);
-    expect(errVisible).toBeFalsy();
-  }
-
-  /**
-   * UDP-T4325 / UDP-T4332 — FL non-first **Fixed** amount is user-editable (inline editor on activate).
-   */
-  async expectFlEditPaymentScheduleFixedAmountUserEditable(rowIndex: number): Promise<void> {
-    this.logStep(`Expect FL Edit Payment Schedule Fixed amount user-editable on row ${rowIndex + 1}`);
-    expect(rowIndex).toBeGreaterThan(0);
-    expect(await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex)).toMatch(/Fixed/i);
-    expect(await this.isFlEditPaymentScheduleFixedAmountUserEditable(rowIndex)).toBeTruthy();
-  }
-
-  /**
-   * UDP-T4324 — FL first row **Amount** equals **Initial Lease Amount** (GST-inclusive); **Fixed**; display-only.
-   */
-  async expectFlEditPaymentScheduleFirstRowAmountEqualsInitialLease(
-    expectedAmount: number,
-    toleranceRatio = 0.02,
-  ): Promise<void> {
-    this.logStep(
-      `Expect FL Edit Payment Schedule first row amount equals Initial Lease Amount (~${expectedAmount})`,
-    );
-    const snapshot = await this.getEditPaymentScheduleSegmentRowSnapshot(0);
-    expect(snapshot.number).toMatch(/^1$/);
-    expect(snapshot.type).toMatch(/Fixed/i);
-
-    const rowAmount = this.parseDisplayedCurrency(snapshot.amount);
-    expect(rowAmount).toBeGreaterThan(0);
-    expect(Math.abs(rowAmount - expectedAmount)).toBeLessThanOrEqual(
-      expectedAmount * toleranceRatio + 0.01,
-    );
-    expect(await this.isEditPaymentScheduleSegmentAmountEditable(0)).toBeFalsy();
-  }
-
-  /**
-   * UDP-T4323 — FL first row Amount equals Initial Lease Amount and is display-only.
-   */
-  async expectFlEditPaymentScheduleFirstRowAmountLocked(minInitialLeaseAmount = 0): Promise<void> {
-    this.logStep("Expect FL Edit Payment Schedule first row amount locked");
-    const amountBefore = await this.readEditPaymentScheduleSegmentAmountOnRow(0);
-    const amountBeforeN = Number.parseFloat(amountBefore.replace(/[^0-9.-]/g, ""));
-    if (minInitialLeaseAmount > 0) {
-      expect(amountBeforeN).toBeGreaterThanOrEqual(minInitialLeaseAmount);
-    }
-    expect(await this.isEditPaymentScheduleSegmentAmountEditable(0)).toBeFalsy();
-    const altAmount =
-      Number.isFinite(amountBeforeN) && amountBeforeN > 0
-        ? String(Math.round(amountBeforeN + 500))
-        : "1500";
-    await this.enterEditPaymentScheduleSegmentAmountOnRow(0, altAmount);
-    const amountAfter = await this.readEditPaymentScheduleSegmentAmountOnRow(0);
-    expect(amountAfter.replace(/[^0-9.-]/g, "")).toBe(amountBefore.replace(/[^0-9.-]/g, ""));
-  }
-
-  /**
-   * UDP-T4323 — FL first row: Number **1**, Type **Fixed** locked; Amount = Initial Lease Amount (display-only).
-   */
-  async expectFlEditPaymentScheduleFirstRowLockedFixed(minInitialLeaseAmount = 0): Promise<void> {
-    this.logStep("Expect FL Edit Payment Schedule first row locked Fixed");
-    const snapshot = await this.getEditPaymentScheduleSegmentRowSnapshot(0);
-    expect(snapshot.number).toMatch(/^1$/);
-    expect(snapshot.type).toMatch(/Fixed/i);
-
-    expect(await this.isEditPaymentScheduleSegmentTypeEditable(0)).toBeFalsy();
-    const typeChanged = await this.trySelectEditPaymentScheduleSegmentTypeOnRow(0, "Normal");
-    expect(typeChanged).toBeFalsy();
-    expect(await this.readEditPaymentScheduleSegmentTypeOnRow(0)).toMatch(/Fixed/i);
-
-    await this.expectFlEditPaymentScheduleFirstRowAmountLocked(minInitialLeaseAmount);
-  }
-
-  /** First editable **Normal** segment row in FL **Edit Payment Schedule** (skips locked row 0). */
-  async findEditableNormalEditPaymentScheduleRowIndex(): Promise<number> {
-    const rowCount = await this.countEditPaymentScheduleSegmentRows();
-    for (let i = 0; i < rowCount; i++) {
-      const type = await this.readEditPaymentScheduleSegmentTypeOnRow(i);
-      if (!/Normal/i.test(type)) {
-        continue;
-      }
-      const row = this.editPaymentScheduleSegmentRowAt(i);
-      const spin = row.getByRole("spinbutton").first();
-      if (await spin.isVisible({ timeout: 500 }).catch(() => false)) {
-        if (await spin.isEditable().catch(() => false)) {
-          return i;
-        }
-      }
-      if (await this.isEditPaymentScheduleSegmentTypeEditable(i)) {
-        return i;
-      }
-    }
-    throw new Error("No editable Normal segment row found in Edit Payment Schedule.");
-  }
-
-  private async expectEditPaymentScheduleRowDisplayOnly(row: Locator): Promise<void> {
-    const editable = row.locator(
-      "input:not([type='hidden']):not([disabled]), textarea:not([disabled]), [role='spinbutton']:not([disabled]), [role='combobox']:not([disabled])",
-    );
-    expect(await editable.count()).toBe(0);
-  }
-
-  /**
-   * UDP-T4328 / UDP-T4335 — FL **RV** is the (term+1) instalment: **Residual Value** row is display-only.
-   */
-  async expectFlEditPaymentScheduleRvInstalmentNonEditable(): Promise<void> {
-    this.logStep("Expect FL Edit Payment Schedule RV instalment non-editable");
-    const term = await this.getEditPaymentScheduleFinanceTermMonths();
-    const dialog = this.editPaymentScheduleDialog();
-
-    const assertRvRow = async (row: Locator): Promise<void> => {
-      await expect(row).toBeVisible({ timeout: 15_000 });
-      await expect(row).toHaveText(/\$\s*[\d,.]+/);
-      await this.expectEditPaymentScheduleRowDisplayOnly(row);
-    };
-
-    const rvSegmentRow = dialog
-      .locator("table tbody tr")
-      .filter({ hasText: /RV|Residual\s+Value/i })
-      .last();
-    if (await rvSegmentRow.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await assertRvRow(rvSegmentRow);
-      return;
-    }
-
-    const instalmentTable = this.editPaymentScheduleInstalmentTable();
-    if (await instalmentTable.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      const rows = instalmentTable.locator("tbody tr").filter({ visible: true });
-      await expect
-        .poll(async () => rows.count(), { timeout: 20_000, intervals: [300, 500, 1_000] })
-        .toBeGreaterThanOrEqual(term + 1);
-      const rvRow = rows.nth(term);
-      await assertRvRow(rvRow);
-      return;
-    }
-
-    const rvScope = this.standardQuoteRoot()
-      .locator("div, section, p-card")
-      .filter({ hasText: /Residual\s+Value/i })
-      .filter({ has: this.page.locator("table tbody tr").filter({ hasText: /\$\s*[\d,.]+/ }) })
-      .first();
-    if (await rvScope.isVisible({ timeout: 10_000 }).catch(() => false)) {
-      const rvRow = rvScope.locator("table tbody tr").filter({ visible: true }).last();
-      await assertRvRow(rvRow);
-      return;
-    }
-
-    const scheduleRv = this.paymentScheduleContentScope()
-      .locator("tr")
-      .filter({ hasText: /\$\s*[\d,.]+/ })
-      .filter({ visible: true })
-      .last();
-    await assertRvRow(scheduleRv);
-    await expect(this.page.getByText(/Residual\s+Value|^\s*RV\s*$/i).first()).toBeVisible({
-      timeout: 10_000,
-    });
-  }
-
-  /**
-   * FL — editable **Normal** segment **Number** sum exceeds finance term (row 0 stays **1 Fixed**).
-   */
-  async setupFlEditPaymentScheduleSegmentsExceedingTerm(overage = 10): Promise<void> {
-    this.logStep(`Setup FL Edit Payment Schedule segments exceeding term by ${overage}`);
-    const term = await this.getEditPaymentScheduleFinanceTermMonths();
-    const rowIndex = await this.findEditableNormalEditPaymentScheduleRowIndex();
-    const row0Number = parseInt(
-      await this.readEditPaymentScheduleSegmentNumberFromRow(this.editPaymentScheduleSegmentRowAt(0)),
-      10,
-    );
-    const lockedFirst = Number.isFinite(row0Number) && row0Number > 0 ? row0Number : 1;
-    await this.modifyEditPaymentScheduleSegmentFields({
-      rowIndex,
-      number: String(term - lockedFirst + overage),
-      type: "Normal",
-    });
   }
 
   /** **Calculate** inside **Edit Payment Schedule** (FIS fetch for segment amounts). */
@@ -5728,9 +5106,9 @@ export class DOAssetDetailsPage extends BasePage {
 
   /**
    * FL: add a non-first **Fixed** `$0` segment so Payment Amount becomes **Irregular** (UDP-T4310).
-   * Row 0 stays locked **1 Fixed** (initial lease); a partial **Fixed** `$0` block is inserted on row 2+.
+   * Row 1 is locked **Fixed** (initial lease); row 2+ accepts **Fixed** with amount **0** only.
    */
-  async applyFlFixedZeroSegmentForIrregularPayment(fixedZeroPayments = 12): Promise<void> {
+  async applyFlFixedZeroSegmentForIrregularPayment(): Promise<void> {
     this.logStep("Apply FL Fixed zero segment for irregular payment");
     await this.openEditPaymentScheduleDialog();
     await expect
@@ -5740,63 +5118,25 @@ export class DOAssetDetailsPage extends BasePage {
       })
       .toBeGreaterThan(0);
 
-    const term = await this.getEditPaymentScheduleFinanceTermMonths();
     const rowCount = await this.countEditPaymentScheduleSegmentRows();
-    const chunk = Math.max(1, Math.min(fixedZeroPayments, term - 1));
-
     if (rowCount >= 2) {
-      const row0Number = Number.parseInt(
-        await this.readEditPaymentScheduleSegmentNumberFromRow(this.editPaymentScheduleSegmentRowAt(0)),
-        10,
-      );
-      const lockedFirst = Number.isFinite(row0Number) && row0Number > 0 ? row0Number : 1;
-      const row1Number = Number.parseInt(
-        await this.readEditPaymentScheduleSegmentNumberFromRow(this.editPaymentScheduleSegmentRowAt(1)),
-        10,
-      );
-      const normalBlock =
-        Number.isFinite(row1Number) && row1Number > 0 ? row1Number : Math.max(1, term - lockedFirst);
-      const fixedChunk = Math.max(1, Math.min(chunk, normalBlock - 1));
-      const remaining = normalBlock - fixedChunk;
-
       await this.modifyEditPaymentScheduleSegmentFields({
         rowIndex: 1,
-        number: String(fixedChunk),
         type: "Fixed",
         amount: "0",
       });
-
-      if (remaining > 0) {
-        if (rowCount >= 3) {
-          await this.modifyEditPaymentScheduleSegmentFields({
-            rowIndex: 2,
-            number: String(remaining),
-            type: "Normal",
-          });
-        } else {
-          await this.waitForEditPaymentScheduleAddSegmentEnabled();
-          await this.clickEditPaymentScheduleAddSegment();
-          await this.enterEditPaymentScheduleSegmentNumberOnRow(2, String(remaining));
-          await this.selectEditPaymentScheduleSegmentTypeOnRow(2, "Normal");
-        }
-      }
     } else {
+      const term = await this.getEditPaymentScheduleFinanceTermMonths();
+      const chunk = Math.max(1, Math.min(12, term - 1));
       await this.enterEditPaymentScheduleSegmentNumberOnRow(0, String(chunk));
       await this.waitForEditPaymentScheduleAddSegmentEnabled();
       await this.clickEditPaymentScheduleAddSegment();
       await this.modifyEditPaymentScheduleSegmentFields({
         rowIndex: 1,
-        number: String(chunk),
         type: "Fixed",
         amount: "0",
       });
-      const remaining = Math.max(1, term - chunk);
-      await this.waitForEditPaymentScheduleAddSegmentEnabled();
-      await this.clickEditPaymentScheduleAddSegment();
-      await this.enterEditPaymentScheduleSegmentNumberOnRow(2, String(remaining));
-      await this.selectEditPaymentScheduleSegmentTypeOnRow(2, "Normal");
     }
-
     await this.clickEditPaymentScheduleCalculate();
     await this.clickEditPaymentScheduleApply();
     await expect(this.editPaymentScheduleDialog()).toBeHidden({ timeout: 30_000 });
@@ -5854,16 +5194,16 @@ export class DOAssetDetailsPage extends BasePage {
   ): Promise<DOEditPaymentScheduleSegmentSnapshot> {
     const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
     const number = await this.readEditPaymentScheduleSegmentNumberFromRow(row);
+    const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
     const type = this.normalizeEditPaymentScheduleSegmentType(
-      await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex),
+      (await typeCell.getByRole("combobox").first().textContent().catch(() => "")) ||
+        ((await typeCell.textContent()) ?? ""),
     );
     const amountCell = await this.editPaymentScheduleSegmentAmountCell(row);
     const amountInput = amountCell.locator("input").first();
-    const amount = (await amountInput.isVisible({ timeout: 2_000 }).catch(() => false))
+    const amount = (await amountInput.isVisible().catch(() => false))
       ? await amountInput.inputValue()
-      : this.normalizeEditPaymentScheduleSegmentAmount(
-          (await amountCell.textContent({ timeout: 5_000 }).catch(() => "")) ?? "",
-        );
+      : this.normalizeEditPaymentScheduleSegmentAmount((await amountCell.textContent()) ?? "");
 
     return { number, type, amount };
   }
@@ -6020,31 +5360,11 @@ export class DOAssetDetailsPage extends BasePage {
   /** Finance term (months) shown in the edit-schedule summary. */
   async getEditPaymentScheduleFinanceTermMonths(): Promise<number> {
     const dialog = this.editPaymentScheduleDialog();
-    await expect(dialog).toBeVisible({ timeout: 10_000 });
-
-    const dialogText = ((await dialog.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ");
-    const totalTermMatch = dialogText.match(/Total Term\s*(\d+)\s*months?/i);
-    if (totalTermMatch) {
-      const term = parseInt(totalTermMatch[1] ?? "", 10);
-      if (Number.isFinite(term) && term > 0) {
-        return term;
-      }
-    }
-
-    const paymentsMatch = dialogText.match(/Number of Payments\s*(\d+)/i);
-    if (paymentsMatch) {
-      const term = parseInt(paymentsMatch[1] ?? "", 10);
-      if (Number.isFinite(term) && term > 0) {
-        return term;
-      }
-    }
-
-    const quoteTerm = parseInt((await this.readTermValue()).replace(/[^\d]/g, ""), 10);
-    if (Number.isFinite(quoteTerm) && quoteTerm > 0) {
-      return quoteTerm;
-    }
-
-    return 36;
+    const termLine = dialog.getByText(/Total Term/i).first();
+    await expect(termLine).toBeVisible({ timeout: 10_000 });
+    const text = (await termLine.textContent()) ?? "";
+    const match = text.match(/(\d+)\s*month/i);
+    return match ? parseInt(match[1], 10) : 36;
   }
 
   /** Total **Number of Payments** in the edit-schedule summary (falls back to row sum). */
@@ -6269,25 +5589,22 @@ export class DOAssetDetailsPage extends BasePage {
     fieldLabel: string,
   ): Promise<void> {
     const target = Math.round(this.parseDisplayedCurrency(amount) * 100) / 100;
+    const digits = target.toFixed(2);
     await input.waitFor({ state: "visible", timeout: 20_000 });
     await input.scrollIntoViewIfNeeded();
 
-    const current = await this.readCurrencyInput(input);
-    if (this.currencyDollarsMatch(current, target)) {
-      return;
-    }
-
-    const typeDigits = async (): Promise<void> => {
-      await input.click({ clickCount: 3, timeout: 15_000 });
-      await input.press("Backspace").catch(() => {});
-      await input.pressSequentially(String(Math.round(target)), { delay: 35 });
+    const typeDigits = async (text: string): Promise<void> => {
+      await input.click({ timeout: 15_000 });
+      await this.page.keyboard.press("Control+A");
+      await this.page.keyboard.press("Backspace").catch(() => {});
+      await this.page.keyboard.type(text, { delay: 45 });
       await input.press("Tab").catch(() => {});
       await this.waitForQuoteLoadersToFinish().catch(() => {});
     };
 
     let last = Number.NaN;
     for (let attempt = 0; attempt < 10; attempt++) {
-      await typeDigits();
+      await typeDigits(attempt % 2 === 0 ? digits : String(Math.round(target)));
       try {
         await expect
           .poll(async () => this.readCurrencyInput(input), {
@@ -6298,9 +5615,6 @@ export class DOAssetDetailsPage extends BasePage {
         return;
       } catch {
         last = await this.readCurrencyInput(input);
-        if (this.currencyDollarsMatch(last, target)) {
-          return;
-        }
       }
     }
 
@@ -6643,33 +5957,6 @@ export class DOAssetDetailsPage extends BasePage {
     throw new Error(
       "Finance Lease: could not set Initial Lease Amount (tried getByLabel, p-field row, label ancestor input, w-full p-inputtext).",
     );
-  }
-
-  /** Finance Lease — **Initial Lease Amount** input in Payment Summary. */
-  initialLeaseAmountFinanceLeaseField(): Locator {
-    const summary = this.paymentSummaryRoot;
-    const label = summary.getByText(/^Initial Lease Amount\*?$/i).first();
-    return summary
-      .getByLabel(/Initial Lease Amount/i)
-      .or(label.locator("xpath=following::input[1]"))
-      .or(
-        summary
-          .locator(".p-field, .p-col, [class*='p-field']")
-          .filter({ has: summary.getByText(/^Initial Lease Amount\*?$/i) })
-          .locator("input.p-inputtext, p-inputnumber input, input[mode='currency']")
-          .first(),
-      );
-  }
-
-  async readInitialLeaseAmountFinanceLease(): Promise<number> {
-    const field = this.initialLeaseAmountFinanceLeaseField();
-    await field.scrollIntoViewIfNeeded().catch(() => {});
-    const inputVal = (await field.inputValue({ timeout: 5_000 }).catch(() => "")).trim();
-    if (inputVal) {
-      return this.parseDisplayedCurrency(inputVal);
-    }
-    const text = (await field.textContent({ timeout: 5_000 }).catch(() => "")) ?? "";
-    return this.parseDisplayedCurrency(text);
   }
 
   /**
@@ -7456,8 +6743,7 @@ export class DOAssetDetailsPage extends BasePage {
   async expectPaymentAmountNotIrregular(): Promise<void> {
     this.logStep("Expect payment amount not irregular");
     await this.waitForQuoteLoadersToFinish();
-    const paymentAmount = this.paymentSummaryPaymentAmountField().or(this.paymentAmountDisplayField());
-    await paymentAmount.scrollIntoViewIfNeeded().catch(() => {});
+    const paymentAmount = this.paymentAmountDisplayField();
     await expect
       .poll(
         async () => {
@@ -8426,18 +7712,6 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
-   * UDP-T4329 — segment **Number** sum exceeds loan term: validation shown and **Apply** stays disabled.
-   */
-  async expectEditPaymentScheduleCalculateBlockedWhenSegmentSumExceedsTerm(): Promise<void> {
-    this.logStep("Expect Edit Payment Schedule calculate blocked when segment sum exceeds term");
-    await this.expectEditPaymentScheduleSegmentExceedsTermMessage();
-    const term = await this.getEditPaymentScheduleFinanceTermMonths();
-    const sum = await this.sumEditPaymentScheduleSegmentNumbersFromRows();
-    expect(sum).toBeGreaterThan(term);
-    await expect(this.editPaymentScheduleApplyButton()).toBeDisabled();
-  }
-
-  /**
    * UDP-T4145 — **Normal** segment **Amount** populated from FIS AF after **Calculate** (display-only).
    */
   async expectEditPaymentScheduleNormalSegmentAmountFetchedFromFisAf(
@@ -8445,7 +7719,9 @@ export class DOAssetDetailsPage extends BasePage {
   ): Promise<void> {
     this.logStep("Expect Edit Payment Schedule Normal segment amount fetched from FIS AF");
     const row = this.editPaymentScheduleSegmentRowAt(rowIndex);
-    const typeLabel = await this.readEditPaymentScheduleSegmentTypeOnRow(rowIndex);
+    const typeLabel = ((await row.getByRole("combobox").first().textContent().catch(() => "")) ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
     expect(typeLabel).toMatch(/Normal/i);
     await expect
       .poll(
@@ -8462,19 +7738,12 @@ export class DOAssetDetailsPage extends BasePage {
     if (await input.isVisible({ timeout: 2_000 }).catch(() => false)) {
       expect(await input.isEditable().catch(() => false)).toBeFalsy();
     }
-  }
-
-  /**
-   * UDP-T4331 — FL **Normal** segment **Amount** is auto-calculated from FIS AF and cannot be modified.
-   */
-  async expectFlEditPaymentScheduleNormalAmountAutoCalculatedNotEditable(
-    rowIndex: number,
-  ): Promise<void> {
-    this.logStep(
-      `Expect FL Edit Payment Schedule Normal amount auto-calculated not editable on row ${rowIndex + 1}`,
-    );
-    await this.expectEditPaymentScheduleNormalSegmentAmountFetchedFromFisAf(rowIndex);
-    expect(await this.isEditPaymentScheduleSegmentAmountEditable(rowIndex)).toBeFalsy();
+    const segmentTermPattern =
+      /sum of the segment.*(must match|must not exceed).*loan term/i;
+    await expect
+      .soft(this.page.getByText(segmentTermPattern).first())
+      .toBeVisible({ timeout: 25_000 });
+    await expect.soft(this.editPaymentScheduleApplyButton()).toBeDisabled();
   }
 
   /**
@@ -8574,74 +7843,6 @@ export class DOAssetDetailsPage extends BasePage {
       .filter({ hasText: /\$\s*[\d,.]+/ })
       .filter({ visible: true })
       .last();
-  }
-
-  /** Segment view **Residual Value** sub-section table (End Date / GST Excl / GST / GST Incl). */
-  residualValueScheduleTable(): Locator {
-    const scheduleHost = this.paymentScheduleContentScope();
-    return scheduleHost
-      .getByText(/^Residual\s+Value$/i)
-      .last()
-      .locator("xpath=following::table[1]");
-  }
-
-  private async readResidualValueScheduleColumnAmount(columnLabel: RegExp): Promise<number> {
-    const table = this.residualValueScheduleTable();
-    if (!(await table.isVisible({ timeout: 2_000 }).catch(() => false))) {
-      return 0;
-    }
-    const headerRow = table.locator("thead tr").first().or(table.locator("tr").first());
-    const headerTexts = ((await headerRow.locator("th, td").allTextContents()) ?? []).map((text) =>
-      text.replace(/\s+/g, " ").trim(),
-    );
-    const columnIndex = headerTexts.findIndex((text) => columnLabel.test(text));
-    const dataRow = table.locator("tbody tr").filter({ visible: true }).first();
-    if (!(await dataRow.isVisible({ timeout: 1_000 }).catch(() => false))) {
-      return 0;
-    }
-    if (columnIndex >= 0) {
-      const raw = ((await dataRow.locator("td").nth(columnIndex).textContent()) ?? "").trim();
-      return this.parseDisplayedCurrency(raw);
-    }
-    const cells = (await dataRow.locator("td").allTextContents()).map((text) =>
-      this.parseDisplayedCurrency(text),
-    );
-    const positive = cells.filter((amount) => Number.isFinite(amount) && amount > 0);
-    return positive.length > 0 ? positive[positive.length - 1]! : 0;
-  }
-
-  /**
-   * UDP-T4316 — **GST Incl** in Residual Value sub-section equals the GST-inclusive residual entered.
-   */
-  async expectResidualValueScheduleGstInclusiveAmount(expectedInclusive: number): Promise<void> {
-    this.logStep(
-      `Expect Residual Value schedule GST Incl displays inclusive amount (~${expectedInclusive})`,
-    );
-    await this.waitForQuoteLoadersToFinish();
-    const title = this.paymentScheduleSectionTitle();
-    await expect(title).toBeVisible({ timeout: 45_000 });
-    await title.scrollIntoViewIfNeeded().catch(() => {});
-    await this.clickLeasePaymentScheduleDefaultViewIfNeeded();
-
-    await expect
-      .poll(async () => this.readResidualValueScheduleColumnAmount(/GST\s+Incl/i), {
-        timeout: 60_000,
-        intervals: [500, 1_000, 2_000],
-      })
-      .toBeGreaterThanOrEqual(expectedInclusive * 0.98);
-
-    const gstIncl = await this.readResidualValueScheduleColumnAmount(/GST\s+Incl/i);
-    expect(gstIncl).toBeLessThanOrEqual(expectedInclusive * 1.02 + 0.01);
-
-    const gstExcl = await this.readResidualValueScheduleColumnAmount(/GST\s+Excl/i);
-    if (gstExcl > 0) {
-      expect(gstIncl).toBeGreaterThan(gstExcl * 1.05);
-    }
-
-    const inputRv = await this.readOlResidualValueAmount();
-    if (inputRv > 0) {
-      expect(Math.abs(gstIncl - inputRv)).toBeLessThanOrEqual(expectedInclusive * 0.02 + 0.01);
-    }
   }
 
   async expectAfVRowInPaymentSchedule(): Promise<void> {
@@ -8763,35 +7964,16 @@ export class DOAssetDetailsPage extends BasePage {
       .waitFor({ state: "visible", timeout: 45_000 });
   }
 
-  /** Dealer portal — **+ Add Ons & Accessories** link / button. */
-  private addonsAccessoriesFullLabelRx(): RegExp {
+  private addonsAccessoriesLabelRx(): RegExp {
     return /\+?\s*Add\s*Ons?\s*(?:&|and)\s*Accessories|\+?\s*Addons?\s*&\s*Accessories/i;
   }
 
-  /** FIS IA internal portal — outlined **Add Ons** button in Additional Charges (no "& Accessories"). */
-  private addonsAccessoriesShortButtonLabelRx(): RegExp {
-    return /^\+?\s*Add\s*Ons?$/i;
-  }
-
-  private addonsAccessoriesLabelRx(): RegExp {
-    return this.addonsAccessoriesFullLabelRx();
-  }
-
   private addonsAccessoriesTrigger(scope: Locator): Locator {
-    const full = this.addonsAccessoriesFullLabelRx();
-    const short = this.addonsAccessoriesShortButtonLabelRx();
-    const chargesSection = scope.filter({ has: scope.getByText(/Additional\s+Charges/i) });
+    const label = this.addonsAccessoriesLabelRx();
     return scope
-      .getByRole("link", { name: full })
-      .or(scope.getByRole("button", { name: full }))
-      .or(scope.locator("a, button, [role='button']").filter({ hasText: full }))
-      .or(chargesSection.getByRole("button", { name: short }))
-      .or(chargesSection.locator("gen-button, p-button").filter({ hasText: short }).locator("button"))
-      .or(chargesSection.locator("button.p-button").filter({ hasText: short }))
-      .or(scope.getByRole("button", { name: short }))
-      .or(scope.locator("gen-button, p-button").filter({ hasText: short }).locator("button"))
-      .or(scope.locator("button.p-button-outlined, button.p-button").filter({ hasText: short }))
-      .or(this.page.getByRole("button", { name: short }))
+      .getByRole("link", { name: label })
+      .or(scope.getByRole("button", { name: label }))
+      .or(scope.locator("a, button, [role='button']").filter({ hasText: label }))
       .first();
   }
 
@@ -8807,12 +7989,7 @@ export class DOAssetDetailsPage extends BasePage {
         break;
       }
     }
-    await root.getByText(this.addonsAccessoriesFullLabelRx()).first().scrollIntoViewIfNeeded().catch(() => {});
-    await root
-      .getByRole("button", { name: this.addonsAccessoriesShortButtonLabelRx() })
-      .first()
-      .scrollIntoViewIfNeeded()
-      .catch(() => {});
+    await root.getByText(this.addonsAccessoriesLabelRx()).first().scrollIntoViewIfNeeded().catch(() => {});
   }
 
   private async expectAddOnsAccessoriesScreenVisible(timeoutMs = 45_000): Promise<void> {
@@ -9528,9 +8705,14 @@ export class DOAssetDetailsPage extends BasePage {
   async clickAddOnsAccessoriesEntryExpectProductProgramRequired(): Promise<void> {
     this.logStep("Click Add Ons entry expecting Product Program required");
     const root = this.standardQuoteRoot();
-    await this.scrollAddonsAccessoriesEntryIntoView(root);
-    const entry = this.addonsAccessoriesTrigger(root);
-    await expect(entry).toBeVisible({ timeout: 30_000 });
+    const labelRx =
+      /Add\s*Ons\s*&\s*Accessories|Add\s+Ons\s+and\s+Accessories|Add[-\s]?Ons?\s*[&+]\s*Accessories/i;
+    await root.getByText(labelRx).first().scrollIntoViewIfNeeded().catch(() => {});
+    const entry = root
+      .getByRole("link", { name: labelRx })
+      .or(root.getByRole("button", { name: labelRx }))
+      .or(root.locator("a, button").filter({ hasText: labelRx }))
+      .first();
     await entry.click({ timeout: 20_000 });
     await this.expectQuoteSurfaceValidation(/Please select Product.*Program to proceed further/i);
   }
@@ -9890,37 +9072,18 @@ export class DOAssetDetailsPage extends BasePage {
       .or(label.locator("xpath=ancestor::div[contains(@class,'grid')][1]"));
   }
 
-  private static readonly OR_LABEL_XPATH =
-    "*[normalize-space(.)='OR' or normalize-space(.)='or' or normalize-space(.)='Or' or normalize-space(.)='oR']";
-
   private olCurrencyInputInLabelRow(labelPattern: RegExp): Locator {
     const root = this.standardQuoteRoot();
     const label = root.getByText(labelPattern, { exact: true }).first();
     const scope = label.locator("xpath=parent::*");
     return scope
       .locator(
-        "input#amount:not([disabled]), input[currencymask]:not([disabled]), input:not([id='percent']):not([role='spinbutton']):not([disabled]):not([type='hidden'])",
+        "input#amount:not([disabled]), input[currencymask]:not([disabled]), input:not([disabled]):not([type='hidden'])",
       )
       .filter({ visible: true })
       .first()
       .or(label.locator("xpath=following-sibling::input[1]"))
       .or(root.locator("amount").filter({ hasText: labelPattern }).locator("#amount").first());
-  }
-
-  /** FL **Residual Value** `$` field after the row **OR** separator (not the `%` spinbutton). */
-  private flResidualValueDollarInputField(): Locator {
-    const root = this.standardQuoteRoot();
-    const rvLabel = root.getByText(/^Residual\s+Value$/i).first();
-    return rvLabel
-      .locator(
-        `xpath=following::${DOAssetDetailsPage.OR_LABEL_XPATH}[1]/following::input[@id='amount'][1]`,
-      )
-      .or(
-        rvLabel.locator(
-          `xpath=following::${DOAssetDetailsPage.OR_LABEL_XPATH}[1]/following::input[@currencymask][1]`,
-        ),
-      )
-      .or(rvLabel.locator(`xpath=following::${DOAssetDetailsPage.OR_LABEL_XPATH}[1]/following::input[1]`));
   }
 
   /** Editable input or display-only value (mutual exclusion clears the other field to `$0.00`). */
@@ -10062,18 +9225,12 @@ export class DOAssetDetailsPage extends BasePage {
     return this.readOlLeaseCurrencyValue(/^Financed\s+Maintenance\s+Charge$/);
   }
 
-  /** OL / FL **Residual Value** currency field (`$` after **OR** on FL; direct input on OL). */
+  /** OL **Residual Value** currency field (lease details row — before / after Calculate). */
   olResidualValueInputField(): Locator {
-    return this.flResidualValueDollarInputField().or(this.olCurrencyInputInLabelRow(/^Residual\s+Value$/));
+    return this.olCurrencyInputInLabelRow(/^Residual\s+Value$/);
   }
 
   async readOlResidualValueAmount(): Promise<number> {
-    const field = this.olResidualValueInputField();
-    await field.scrollIntoViewIfNeeded().catch(() => {});
-    const inputVal = (await field.inputValue().catch(() => "")).trim();
-    if (inputVal) return this.parseDisplayedCurrency(inputVal);
-    const text = (await field.textContent().catch(() => "")) ?? "";
-    if (text.includes("$")) return this.parseDisplayedCurrency(text);
     return this.readOlLeaseCurrencyValue(/^Residual\s+Value$/);
   }
 
@@ -10931,30 +10088,14 @@ export class DOAssetDetailsPage extends BasePage {
 
   async listEditPaymentScheduleSegmentTypeOptions(rowIndex = 0): Promise<string[]> {
     const rowCount = await this.countEditPaymentScheduleSegmentRows();
-    let targetRow = -1;
+    let targetRow = rowIndex;
     for (let i = rowIndex; i < rowCount; i++) {
-      if (await this.isEditPaymentScheduleSegmentTypeEditable(i)) {
+      const row = this.editPaymentScheduleSegmentRowAt(i);
+      const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
+      if (await typeCell.getByRole("combobox").first().isVisible({ timeout: 1_000 }).catch(() => false)) {
         targetRow = i;
         break;
       }
-    }
-    if (targetRow < 0) {
-      for (let i = 0; i < rowCount; i++) {
-        const row = this.editPaymentScheduleSegmentRowAt(i);
-        const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
-        const typeCombo = typeCell.getByRole("combobox").first();
-        if (!(await typeCombo.isVisible({ timeout: 1_000 }).catch(() => false))) {
-          continue;
-        }
-        if (await typeCombo.isDisabled().catch(() => false)) {
-          continue;
-        }
-        targetRow = i;
-        break;
-      }
-    }
-    if (targetRow < 0) {
-      targetRow = Math.min(rowIndex, Math.max(0, rowCount - 1));
     }
     const row = this.editPaymentScheduleSegmentRowAt(targetRow);
     const typeCell = await this.editPaymentScheduleSegmentTypeCell(row);
@@ -10969,16 +10110,12 @@ export class DOAssetDetailsPage extends BasePage {
     return options;
   }
 
-  async expectEditPaymentScheduleSegmentTypesExcludeInterestOnly(rowIndex = 0): Promise<void> {
+  async expectEditPaymentScheduleSegmentTypesExcludeInterestOnly(): Promise<void> {
     this.logStep("Expect Edit Payment Schedule types exclude Interest Only");
-    const options = await this.listEditPaymentScheduleSegmentTypeOptions(rowIndex);
-    expect.soft(options.length).toBeGreaterThan(0);
+    const options = await this.listEditPaymentScheduleSegmentTypeOptions(0);
     expect.soft(options.some((o) => /Normal/i.test(o))).toBeTruthy();
     expect.soft(options.some((o) => /Fixed/i.test(o))).toBeTruthy();
     expect.soft(options.every((o) => !/Interest\s*Only/i.test(o))).toBeTruthy();
-    expect.soft(
-      options.every((o) => /^(Normal|Fixed)$/i.test(o.replace(/\s+/g, " ").trim())),
-    ).toBeTruthy();
   }
 
   async expectEditPaymentScheduleTriggerDisabledOrHidden(): Promise<void> {

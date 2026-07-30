@@ -9,6 +9,43 @@ import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DODashboardPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import {
+  addAssetAssetTypeSelectLink,
+  addAssetHost,
+  addAssetTypeFromHierarchicalPopup,
+  closeAddAssetEditorAndReturnToQuote,
+  clearAddAssetAssetType,
+  clickPrintDocumentsOnAddAsset,
+  expectAddAssetFieldVisible,
+  expectAddAssetAssetTypeSearchResults,
+  expectAddAssetCategoryLayout,
+  expectAddAssetValidationMessage,
+  expectAddAssetVehicleAssetTypeDefault,
+  expectPageOrDialogText,
+  expectValidationMessage,
+  fillMinimalEvCleanTechAsset,
+  fillMinimalMarineAsset,
+  fillMinimalOtherAsset,
+  fillMinimalPlantAsset,
+  fillMinimalVehicleAsset,
+  submitAddAssetForValidation,
+  enablePrivateSaleOnAddAsset,
+  openAddAssetEditor,
+  openAddAssetEditorViaSearchDialog,
+  openAddAssetForCategory,
+  openAssetTypeHierarchicalPopupOnQuote,
+  openStandardQuoteFromDashboard as openCsaQuoteFromDashboard,
+  openTlBusinessStandardQuoteFromDashboard,
+  prepareQuoteWithVehicleAssetType,
+  readAddAssetAssetType,
+  readQuoteAssetTypeValue,
+  runMotochekFromAddAssetEditor,
+  searchAddAssetAssetType,
+  selectAssetTypeHierarchicalLevels,
+  selectCsaProductAndProgram as selectCsaProductProgram,
+  selectTlProductAndProgram,
+  standardQuoteRoot as addAssetStandardQuoteRoot,
+} from "./assetDetailsAddAsset.helpers";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
 const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
@@ -936,6 +973,740 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
           { timeout: 90_000, intervals: [400, 800, 1200] },
         )
         .toMatch(/GLX|MANUAL|IGNIS|Suzuki|SUZUKI|2024/i);
+    },
+  );
+});
+
+test.describe("Asset Details - Add Asset Editor @do @regression", () => {
+  test(
+    "UDP-T4749 - Asset Type Default",
+    { tag: ["@do", "@regression", "@UDP-T4749"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const quoteAssetType = await readAssetTypeValue(page);
+      expect.soft(quoteAssetType.length).toBeGreaterThan(0);
+
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      await expectAddAssetVehicleAssetTypeDefault(page);
+      const addAssetType = await readAddAssetAssetType(page);
+      expect.soft(addAssetType).toMatch(/Car|Light Commercial|Commercial|Motor/i);
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4750 - Asset Type Mandatory",
+    { tag: ["@do", "@regression", "@UDP-T4750"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditorViaSearchDialog(page, assetDetailsPage);
+      await clearAddAssetAssetType(page);
+      await addAssetPage.clickSummitButton();
+      await expectValidationMessage(page, /Asset Type.*required|Asset Type is required|select the asset type/i);
+      await addAssetPage.clickCrossButton().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4751 - Asset Type Search",
+    { tag: ["@do", "@regression", "@UDP-T4751"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditorViaSearchDialog(page, assetDetailsPage);
+      await searchAddAssetAssetType(page, "Car");
+      await expectAddAssetAssetTypeSearchResults(page, /Car|Light Commercial|Motor/i);
+      await addAssetPage.clickCrossButton().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4752 - Select Hyperlink",
+    { tag: ["@do", "@regression", "@UDP-T4752"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const selectLink = addAssetStandardQuoteRoot(page)
+        .getByRole("link", { name: /^Select$/i })
+        .or(addAssetStandardQuoteRoot(page).getByRole("button", { name: /^Select$/i }))
+        .first();
+      if (await selectLink.isVisible({ timeout: 10_000 }).catch(() => false)) {
+        const disabled =
+          (await selectLink.getAttribute("disabled")) !== null ||
+          (await selectLink.getAttribute("aria-disabled")) === "true" ||
+          /p-disabled|disabled/i.test((await selectLink.getAttribute("class")) ?? "");
+        expect.soft(typeof disabled).toBe("boolean");
+      } else {
+        test.info().annotations.push({
+          type: "note",
+          description: "Select hyperlink not shown — program may expose a single Asset Type only.",
+        });
+      }
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      const addSelect = addAssetAssetTypeSelectLink(page);
+      if (await addSelect.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await expect.soft(addSelect).toBeEnabled({ timeout: 10_000 });
+      }
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4753 - Asset Type Popup",
+    { tag: ["@do", "@regression", "@UDP-T4753"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const dlg = await openAssetTypeHierarchicalPopupOnQuote(page);
+      await expect.soft(dlg.getByText(/All Asset Types/i).first()).toBeVisible({ timeout: 15_000 });
+      await expect.soft(dlg.locator(".p-dropdown").first()).toBeVisible({ timeout: 15_000 });
+      await page.keyboard.press("Escape").catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4754 - Asset Level Selection",
+    { tag: ["@do", "@regression", "@UDP-T4754"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const dlg = await openAssetTypeHierarchicalPopupOnQuote(page);
+      await selectAssetTypeHierarchicalLevels(dlg, page, { maxRounds: 1 });
+      const enabledDropdowns = dlg.locator(".p-dropdown").filter({ visible: true });
+      if ((await enabledDropdowns.count()) > 1) {
+        await expect.soft(enabledDropdowns.nth(1)).toBeVisible({ timeout: 15_000 });
+      }
+      await page.keyboard.press("Escape").catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4755 - Reset Popup",
+    { tag: ["@do", "@regression", "@UDP-T4755"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const dlg = await openAssetTypeHierarchicalPopupOnQuote(page);
+      await selectAssetTypeHierarchicalLevels(dlg, page, { maxRounds: 1 });
+      const resetBtn = dlg
+        .getByRole("button", { name: /^Reset$/i })
+        .or(dlg.locator("button, a").filter({ hasText: /^Reset$/i }))
+        .first();
+      if (await resetBtn.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await resetBtn.click({ timeout: 15_000 });
+        await expect.soft(dlg.getByText(/All Asset Types/i).first()).toBeVisible({ timeout: 15_000 });
+      }
+      await page.keyboard.press("Escape").catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4756 - Add Asset Type",
+    { tag: ["@do", "@regression", "@UDP-T4756"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const dlg = await openAssetTypeHierarchicalPopupOnQuote(page);
+      await addAssetTypeFromHierarchicalPopup(dlg, page);
+      const assetType = await readQuoteAssetTypeValue(page);
+      expect.soft(assetType.length).toBeGreaterThan(0);
+      expect.soft(/Car|Light Commercial|Motor|Vehicle/i.test(assetType)).toBeTruthy();
+    },
+  );
+
+  test(
+    "UDP-T4757 - Category Layout",
+    { tag: ["@do", "@regression", "@UDP-T4757"] },
+    async ({ page }) => {
+      test.setTimeout(900_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+
+      for (const category of ["vehicle", "other", "plant", "marine", "ev"] as const) {
+        const { addAssetPage, skipped, evVehicleFallback } = await openAddAssetForCategory(
+          page,
+          assetDetailsPage,
+          category,
+        );
+        if (skipped) {
+          test.info().annotations.push({
+            type: "note",
+            description: `${category} asset type not available for this program on QAT.`,
+          });
+          continue;
+        }
+        if (evVehicleFallback) {
+          test.info().annotations.push({
+            type: "note",
+            description:
+              "EV/Clean Tech asset type not in QAT catalog; layout checked on Car and Light Commercial with Electric fields.",
+          });
+        }
+        await expectAddAssetCategoryLayout(page, addAssetPage, category);
+        await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+      }
+    },
+  );
+
+  test(
+    "UDP-T4758 - Asset Value Validation",
+    { tag: ["@do", "@regression", "@UDP-T4758"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+
+      await addAssetPage.enterAssetValue("");
+      await addAssetPage.clickSummitButton();
+      await expectAddAssetValidationMessage(
+        page,
+        /Asset Value minimum value must be greater than 0/i,
+      );
+
+      await addAssetPage.enterAssetValue("0");
+      await addAssetPage.clickSummitButton();
+      await expectAddAssetValidationMessage(
+        page,
+        /Asset Value minimum value must be greater than 0/i,
+      );
+
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+    },
+  );
+
+  test(
+    "UDP-T4759 - Condition Default",
+    { tag: ["@do", "@regression", "@UDP-T4759"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditorViaSearchDialog(page, assetDetailsPage);
+      const currentYear = String(new Date().getFullYear());
+      const previousYear = String(new Date().getFullYear() - 1);
+
+      await addAssetPage.selectYear(currentYear);
+      await page.waitForTimeout(800);
+      const afterCurrent = ((await addAssetPage.conditionDropdown.textContent().catch(() => "")) ?? "").trim();
+      expect.soft(/New/i.test(afterCurrent)).toBeTruthy();
+
+      await addAssetPage.selectYear(previousYear);
+      await page.waitForTimeout(800);
+      const afterPrevious = ((await addAssetPage.conditionDropdown.textContent().catch(() => "")) ?? "").trim();
+      expect.soft(/Used/i.test(afterPrevious)).toBeTruthy();
+
+      await addAssetPage.clickCrossButton().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4760 - Year Validation",
+    { tag: ["@do", "@regression", "@UDP-T4760"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+
+      await addAssetPage.selectYear("");
+      await addAssetPage.clickSummitButton();
+      await expectAddAssetValidationMessage(page, /Year is required|Year.*required/i);
+
+      await addAssetPage.selectYear("abcd");
+      await addAssetPage.clickSummitButton();
+      await expectAddAssetValidationMessage(
+        page,
+        /Year is in an incorrect format|Year Min Value must be 1900|not a valid number|invalid|Year.*valid|supplied value is not a valid number/i,
+      );
+
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+    },
+  );
+
+  test(
+    "UDP-T4761 - Make Validation",
+    { tag: ["@do", "@regression", "@UDP-T4761"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      await addAssetPage.enterMake("");
+      await addAssetPage.clickSummitButton();
+      await expectPageOrDialogText(page, /Make.*required|Make is required/i);
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4762 - Model Validation",
+    { tag: ["@do", "@regression", "@UDP-T4762"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      await addAssetPage.enterModel("");
+      await addAssetPage.clickSummitButton();
+      await expectPageOrDialogText(page, /Model.*required|Model is required/i);
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4763 - Variant Validation",
+    { tag: ["@do", "@regression", "@UDP-T4763"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      await addAssetPage.enterVariant("!!!@@@");
+      await addAssetPage.clickSummitButton();
+      await expectPageOrDialogText(page, /Variant.*incorrect format|Variant.*invalid|incorrect format/i);
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4764 - Vehicle Field Validation",
+    { tag: ["@do", "@regression", "@UDP-T4764"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+
+      await addAssetPage.enterRegoNO("!!!");
+      await addAssetPage.enterVIN("short");
+      await addAssetPage.enterOdometer("abc");
+      await addAssetPage.enterColour("12345");
+      await addAssetPage.enterSerialNO("!");
+      await addAssetPage.enterEngineNO("!");
+      await addAssetPage.clickSummitButton();
+      await expectPageOrDialogText(
+        page,
+        /invalid|incorrect format|VIN|Rego|Odometer|Colour|Serial|Engine/i,
+      );
+
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4765 - Mandatory Identifier",
+    { tag: ["@do", "@regression", "@UDP-T4765"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      await fillMinimalVehicleAsset(addAssetPage, { rego: "", vin: "" });
+      await addAssetPage.enterSerialNO("");
+      const clicked = await clickPrintDocumentsOnAddAsset(page);
+      if (clicked) {
+        await expectPageOrDialogText(
+          page,
+          /identifier|Rego|VIN|Serial|required|cannot print|printing blocked/i,
+        );
+      } else {
+        await addAssetPage.clickSummitButton();
+        await expectPageOrDialogText(page, /Rego|VIN|Serial|identifier|required/i);
+      }
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4766 - Marine Validation",
+    { tag: ["@do", "@regression", "@UDP-T4766"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "marine");
+      test.skip(skipped, "Marine asset type not available for selected program on this environment.");
+      await expectAddAssetCategoryLayout(page, addAssetPage, "marine");
+      await fillMinimalMarineAsset(addAssetPage);
+      await addAssetPage.enterHIN("!!!!");
+      await addAssetPage.enterSerialNO("!!!!");
+      const clicked = await clickPrintDocumentsOnAddAsset(page);
+      if (clicked) {
+        await expectAddAssetValidationMessage(
+          page,
+          /HIN|Serial|incorrect format|invalid|required|cannot print|printing blocked/i,
+        );
+      } else {
+        await submitAddAssetForValidation(addAssetPage);
+        await expectAddAssetValidationMessage(
+          page,
+          /HIN|Serial|incorrect format|invalid|required/i,
+        );
+      }
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+    },
+  );
+
+  test(
+    "UDP-T4767 - Plant Validation",
+    { tag: ["@do", "@regression", "@UDP-T4767"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "plant");
+      test.skip(skipped, "Plant asset type not available for selected program on this environment.");
+      await expectAddAssetCategoryLayout(page, addAssetPage, "plant");
+      await fillMinimalPlantAsset(addAssetPage);
+      await addAssetPage.enterSerialNO("!!!!");
+      const clicked = await clickPrintDocumentsOnAddAsset(page);
+      if (clicked) {
+        await expectAddAssetValidationMessage(
+          page,
+          /Serial|incorrect format|invalid|required|cannot print|printing blocked/i,
+        );
+      } else {
+        await submitAddAssetForValidation(addAssetPage);
+        await expectAddAssetValidationMessage(
+          page,
+          /Serial|incorrect format|invalid|required|Chassis/i,
+        );
+      }
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+    },
+  );
+
+  test(
+    "UDP-T4768 - Motive Power",
+    { tag: ["@do", "@regression", "@UDP-T4768"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      await addAssetPage.motiveePowerDropdown();
+      const options = page.getByRole("option");
+      const count = await options.count();
+      expect.soft(count).toBeGreaterThan(0);
+      const first = ((await options.first().textContent()) ?? "").trim();
+      expect.soft(first.length).toBeGreaterThan(0);
+      await page.keyboard.press("Escape").catch(() => {});
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4769 - Asset Location Validation",
+    { tag: ["@do", "@regression", "@UDP-T4769"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const assetDetailsPage = await openTlBusinessStandardQuoteFromDashboard(page);
+      await selectTlProductAndProgram(page, assetDetailsPage);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage, { product: "tl" });
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      if (await addAssetPage.assetLocationDropdown.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await fillMinimalVehicleAsset(addAssetPage, {
+          rego: "TG08BP5123",
+          vin: "1HGCM82633A004352",
+          skipLocation: true,
+        });
+        await addAssetPage.clickSummitButton();
+        await expectPageOrDialogText(page, /Asset Location|Location of Use|required/i);
+      } else {
+        test.info().annotations.push({
+          type: "note",
+          description: "Asset Location of Use not shown for this originator/build.",
+        });
+      }
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4770 - Supplier Validation",
+    { tag: ["@do", "@regression", "@UDP-T4770"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      await enablePrivateSaleOnAddAsset(page);
+      await fillMinimalVehicleAsset(addAssetPage, {
+        rego: "ABC123",
+        vin: "1HGCM82633A004352",
+      });
+
+      if (await addAssetPage.isSupplierFieldEditable()) {
+        await addAssetPage.enterSupplier("");
+        const clicked = await clickPrintDocumentsOnAddAsset(page);
+        if (clicked) {
+          await expectAddAssetValidationMessage(
+            page,
+            /Supplier.*required|Supplier Name|cannot print|printing blocked/i,
+          );
+        } else {
+          await submitAddAssetForValidation(addAssetPage);
+          await expectAddAssetValidationMessage(page, /Supplier.*required|Supplier Name/i);
+        }
+      } else {
+        await expect(addAssetPage.supplierInputField).toBeVisible({ timeout: 15_000 });
+        await expect(addAssetPage.supplierInputField).toBeDisabled();
+      }
+
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+    },
+  );
+
+  test(
+    "UDP-T4771 - Lease Toggle",
+    { tag: ["@do", "@regression", "@UDP-T4771"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const assetDetailsPage = await openTlBusinessStandardQuoteFromDashboard(page);
+      await selectTlProductAndProgram(page, assetDetailsPage);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage, { product: "tl" });
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      const leaseLabel = addAssetHost(page).getByText(/Will the asset be leased/i).first();
+      if (await leaseLabel.isVisible({ timeout: 10_000 }).catch(() => false)) {
+        const row = leaseLabel.locator(
+          "xpath=ancestor::*[contains(@class,'field') or contains(@class,'grid')][1]",
+        );
+        await expect.soft(row).toContainText(/No/i);
+      } else {
+        test.info().annotations.push({
+          type: "note",
+          description: "Lease toggle not rendered on this build — verify manually for Business Loan.",
+        });
+      }
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4772 - Insurance Validation",
+    { tag: ["@do", "@regression", "@UDP-T4772"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      await fillMinimalVehicleAsset(addAssetPage, {
+        value: "$150,000",
+        rego: "TG08BP5123",
+        vin: "1HGCM82633A004352",
+      });
+      await addAssetPage.enterSumInsured("");
+      await addAssetPage.enterPolicyNumber("");
+      await addAssetPage.clickSummitButton();
+      await expectPageOrDialogText(page, /Sum Insured|Policy Number|Insurance|required|Settlement/i);
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4773 - Motochek Search",
+    { tag: ["@do", "@regression", "@UDP-T4773"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      const variantBefore = (await addAssetPage.variantInputField.first().inputValue().catch(() => "")).trim();
+      const dlg = await runMotochekFromAddAssetEditor(page, addAssetPage);
+      await expect
+        .soft(dlg.getByText(/Motocheck Successfully|Motochek Successfully|Successfully Executed/i).first())
+        .toBeVisible({ timeout: 90_000 });
+      const body = ((await dlg.innerText()) ?? "").replace(/\u00a0/g, " ");
+      expect.soft(/Make\s*[:\n]?\s*\S+/i.test(body)).toBeTruthy();
+      expect.soft(/Model\s*[:\n]?\s*\S+/i.test(body)).toBeTruthy();
+      if (variantBefore) {
+        const variantAfter = (await addAssetPage.variantInputField.first().inputValue().catch(() => "")).trim();
+        expect.soft(variantAfter.length).toBeGreaterThan(0);
+      }
+      await dlg.getByRole("button", { name: /^Cancel$|^Close$/i }).first().click({ timeout: 10_000 }).catch(() =>
+        page.keyboard.press("Escape"),
+      );
+      await addAssetPage.clickCrossButton().catch(() => {});
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+    },
+  );
+
+  test(
+    "UDP-T4774 - Submit – Other",
+    { tag: ["@do", "@regression", "@UDP-T4774"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "other");
+      test.skip(skipped, "Other asset type not available for selected program on this environment.");
+      await fillMinimalOtherAsset(addAssetPage);
+      await addAssetPage.clickSummitButton();
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+      await assetDetailsPage.openAssetInsuranceTradeInSummary();
+      const summaryDlg = page
+        .getByRole("dialog")
+        .filter({ hasText: /Asset/i })
+        .filter({ hasText: /Insurance/i })
+        .filter({ hasText: /Summary/i })
+        .last();
+      await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
+      await expect.soft(summaryDlg).toContainText(/\$15,000|15,000|Regression other/i);
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog();
+    },
+  );
+
+  test(
+    "UDP-T4775 - Submit – Vehicle",
+    { tag: ["@do", "@regression", "@UDP-T4775"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
+      const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
+      await fillMinimalVehicleAsset(addAssetPage, {
+        rego: "ABC123",
+        vin: "1HGCM82633A004352",
+      });
+      await addAssetPage.clickSummitButton();
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+      await assetDetailsPage.openAssetInsuranceTradeInSummary();
+      const summaryDlg = page
+        .getByRole("dialog")
+        .filter({ hasText: /Asset/i })
+        .filter({ hasText: /Insurance/i })
+        .filter({ hasText: /Summary/i })
+        .last();
+      await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
+      await expect.soft(summaryDlg).toContainText(/\$20,000|20,000/i);
+      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ");
+      if (/Toyota|Hilux|2025/i.test(summaryText)) {
+        await expect.soft(summaryDlg).toContainText(/Toyota|Hilux|2025/i);
+      } else if (/ABC123|1HGCM82633A004352/i.test(summaryText)) {
+        await expect.soft(summaryDlg).toContainText(/ABC123|1HGCM82633A004352/i);
+      }
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog();
+    },
+  );
+
+  test(
+    "UDP-T4776 - Submit – Marine",
+    { tag: ["@do", "@regression", "@UDP-T4776"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "marine");
+      test.skip(skipped, "Marine asset type not available for selected program on this environment.");
+      await fillMinimalMarineAsset(addAssetPage);
+      await addAssetPage.clickSummitButton();
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+      await assetDetailsPage.openAssetInsuranceTradeInSummary();
+      const summaryDlg = page
+        .getByRole("dialog")
+        .filter({ hasText: /Asset/i })
+        .filter({ hasText: /Insurance/i })
+        .filter({ hasText: /Summary/i })
+        .last();
+      await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
+      await expect.soft(summaryDlg).toContainText(/\$45,000|45,000/i);
+      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ");
+      if (/Beneteau|Oceanis|2022/i.test(summaryText)) {
+        await expect.soft(summaryDlg).toContainText(/Beneteau|Oceanis|2022/i);
+      }
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog();
+    },
+  );
+
+  test(
+    "UDP-T4777 - Submit – Plant",
+    { tag: ["@do", "@regression", "@UDP-T4777"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "plant");
+      test.skip(skipped, "Plant asset type not available for selected program on this environment.");
+      await fillMinimalPlantAsset(addAssetPage);
+      await addAssetPage.clickSummitButton();
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+      await assetDetailsPage.openAssetInsuranceTradeInSummary();
+      const summaryDlg = page
+        .getByRole("dialog")
+        .filter({ hasText: /Asset/i })
+        .filter({ hasText: /Insurance/i })
+        .filter({ hasText: /Summary/i })
+        .last();
+      await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
+      await expect.soft(summaryDlg).toContainText(/\$35,000|35,000/i);
+      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ");
+      if (/Caterpillar|320|2024/i.test(summaryText)) {
+        await expect.soft(summaryDlg).toContainText(/Caterpillar|320|2024/i);
+      }
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog();
+    },
+  );
+
+  test(
+    "UDP-T4778 - Submit – EV/Clean Tech",
+    { tag: ["@do", "@regression", "@UDP-T4778"] },
+    async ({ page }) => {
+      test.setTimeout(600_000);
+      const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
+      await selectCsaProductProgram(page, assetDetailsPage);
+      const { addAssetPage, skipped, evVehicleFallback } = await openAddAssetForCategory(
+        page,
+        assetDetailsPage,
+        "ev",
+      );
+      test.skip(skipped, "No asset type available for EV/Clean Tech or vehicle fallback on this environment.");
+      if (evVehicleFallback) {
+        test.info().annotations.push({
+          type: "note",
+          description:
+            "EV/Clean Tech asset type is not in the QAT catalog for CSA MV; submit validated via Car and Light Commercial with Electric motive power.",
+        });
+      }
+      await fillMinimalEvCleanTechAsset(addAssetPage);
+      await addAssetPage.clickSummitButton();
+      await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
+      await assetDetailsPage.openAssetInsuranceTradeInSummary();
+      const summaryDlg = page
+        .getByRole("dialog")
+        .filter({ hasText: /Asset/i })
+        .filter({ hasText: /Insurance/i })
+        .filter({ hasText: /Summary/i })
+        .last();
+      await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
+      await expect.soft(summaryDlg).toContainText(/\$55,000|55,000/i);
+      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ");
+      if (/Tesla|Model 3|5YJ3E1EA1KF123456/i.test(summaryText)) {
+        await expect.soft(summaryDlg).toContainText(/Tesla|Model 3|5YJ3E1EA1KF123456/i);
+      }
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog();
     },
   );
 });

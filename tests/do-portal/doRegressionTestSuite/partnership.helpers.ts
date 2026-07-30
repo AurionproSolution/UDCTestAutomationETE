@@ -35,20 +35,23 @@ import {
   selectTrustTypeSearchNoMatchUdcAndAddNewCustomer,
   waitForSearchCustomerDialog,
 } from "../doSanityTest/zephyr_sanitytest/sanity.helpers";
+import {
+  EXISTING_UDC_BUSINESS,
+  EXISTING_UDC_INDIVIDUAL,
+  EXISTING_UDC_PARTNERSHIP,
+  EXISTING_UDC_SECOND_INDIVIDUAL,
+} from "../../../testData/do-portal/doExistingCustomerData";
 
 export const PARTNERSHIP_LEGAL_NAME = "Partnership Regression Ltd";
 export const PARTNERSHIP_TRADING_NAME = "Partner Trade Co";
 export const INCORPORATED_LEGAL_NAME = "Incorp Business Regression Ltd";
 
-export const EXISTING_UDC_INDIVIDUAL =
-  process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "1183304";
-export const EXISTING_UDC_SECOND_INDIVIDUAL =
-  process.env.UDC_EXISTING_SECOND_CUSTOMER_NUMBER?.trim() || "1183681";
-export const EXISTING_UDC_BUSINESS =
-  process.env.UDC_EXISTING_BUSINESS_CUSTOMER_NUMBER?.trim() || "1183317";
-/** FIS Partnership entity for existing-customer flows (UDP-T4478). Override via `UDC_EXISTING_PARTNERSHIP_CUSTOMER_NUMBER`. */
-export const EXISTING_UDC_PARTNERSHIP =
-  process.env.UDC_EXISTING_PARTNERSHIP_CUSTOMER_NUMBER?.trim() || "";
+export {
+  EXISTING_UDC_BUSINESS,
+  EXISTING_UDC_INDIVIDUAL,
+  EXISTING_UDC_PARTNERSHIP,
+  EXISTING_UDC_SECOND_INDIVIDUAL,
+};
 
 function standardQuoteRoot(page: Page): Locator {
   return page.locator("app-quote-details, app-standard-quote").first();

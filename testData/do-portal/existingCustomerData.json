@@ -1,0 +1,23 @@
+{
+  "description": "FIS existing UDC customer numbers per TEST_ENV. Env vars (UDC_EXISTING_*) still override these values.",
+  "default": {
+    "individual": "1183304",
+    "secondIndividual": "1183681",
+    "business": "1183317",
+    "partnership": ""
+  },
+  "environments": {
+    "qat": {
+      "individual": "1183304",
+      "secondIndividual": "1183681",
+      "business": "1183317",
+      "partnership": ""
+    },
+    "sit": {
+      "individual": "",
+      "secondIndividual": "",
+      "business": "",
+      "partnership": ""
+    }
+  }
+}
