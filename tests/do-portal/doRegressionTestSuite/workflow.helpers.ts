@@ -137,6 +137,8 @@ export async function addMinimalUsedAsset(
   await addAssetPage.chooseAssetLocation("North Island");
   await addAssetPage.clickSummitButton();
   await addAssetPage.clickCrossButton();
+  await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+  await assetDetailsPage.page.keyboard.press("Escape").catch(() => {});
   await assetDetailsPage.waitForAssetDetailsStepReady();
 }
 

@@ -2443,7 +2443,6 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(`Enter Balloon Percent And Check Fixed ${percentDigits}`);
     await this.waitUntilNoVisibleAppLoaderOverlays(20_000);
     await this.ensureCashPriceReadyForBalloon();
-    await this.cashPriceOfAsset("$20,000");
     await this.enterBalloonPercent(percentDigits);
     await this.checkBalloonFixedCheckbox();
     await this.expectBalloonFixedCheckboxChecked();

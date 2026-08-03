@@ -33,6 +33,7 @@ import {
   prepareCalculableCsaQuote,
   standardQuoteRoot,
 } from "../../doRegressionTestSuite/workflow.helpers";
+import { ensureCsaProductAndProgram } from "../../doRegressionTestSuite/assetDetailsAddAsset.helpers";
 import {
   FL_SQ_PRODUCT,
   FL_SQ_PROGRAM,
@@ -108,8 +109,14 @@ export async function expectSanityPrimaryBorrowerOnCustomerDetailsStep(page: Pag
 }
 
 export async function selectCsaProductAndProgram(asset: DOAssetDetailsPage): Promise<void> {
-  await asset.chooseProduct(CSA_SQ_PRODUCT);
-  await asset.chooseProgram(CSA_SQ_PROGRAM);
+  await ensureCsaProductAndProgram(asset.page, asset);
+}
+
+/** Assert a CSA/MV dealer program is selected (Webform or MYUDC dealer default on QAT). */
+export async function expectCsaSanityProgramSelected(asset: DOAssetDetailsPage): Promise<void> {
+  const programLabel = (await asset.readSelectedProgramLabel().catch(() => "")).trim();
+  expect(programLabel.length).toBeGreaterThan(0);
+  expect(programLabel).toMatch(/CSA|MYUDC|MV\s*Dealer/i);
 }
 
 export function promotionQuoteCheckbox(page: Page): Locator {

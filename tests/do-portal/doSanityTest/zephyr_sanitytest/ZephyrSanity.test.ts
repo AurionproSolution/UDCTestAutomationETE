@@ -24,7 +24,6 @@ import { fillAddOnAccessoriesAndSave } from "../../doRegressionTestSuite/fl.help
 import { openStandardQuoteFromDashboard } from "../../doRegressionTestSuite/workflow.helpers";
 import {
   CSA_SQ_PRODUCT,
-  CSA_SQ_PROGRAM,
   addManualAssetViaSummary,
   addPhysicalAssetViaMotocheck,
   addSecondDistinctManualAssetViaSummary,
@@ -60,6 +59,7 @@ import {
   searchTypeRadioInput,
   selectBusinessTypeSearchNoMatchUdcAndAddNewCustomer,
   selectTrustTypeSearchNoMatchUdcAndAddNewCustomer,
+  expectCsaSanityProgramSelected,
   selectCsaProductAndProgram,
   selectCsaQuickQuoteProductAndProgram,
   selectSearchCustomerTrustType,
@@ -195,7 +195,7 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
     const { asset } = await openSanityCsaAssetDetails(page);
     await selectCsaProductAndProgram(asset);
     await expect(asset.page.getByText(CSA_SQ_PRODUCT, { exact: false }).first()).toBeVisible();
-    await expect(asset.page.getByText(CSA_SQ_PROGRAM, { exact: false }).first()).toBeVisible();
+    await expectCsaSanityProgramSelected(asset);
   });
 
   test("UDP-T4689 - Check defaulting @UDP-T4689", async ({ page }) => {
