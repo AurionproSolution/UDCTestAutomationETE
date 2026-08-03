@@ -68,8 +68,10 @@ import {
   waitForSearchCustomerDialog
 } from "./sanity.helpers";
 
-const EXISTING_UDC = process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "1183304";
-const EXISTING_UDC_SECOND = process.env.UDC_EXISTING_SECOND_CUSTOMER_NUMBER?.trim() || "1183681";
+import {
+  EXISTING_UDC_INDIVIDUAL as EXISTING_UDC,
+  EXISTING_UDC_SECOND_INDIVIDUAL as EXISTING_UDC_SECOND,
+} from "../../../../testData/do-portal/doExistingCustomerData";
 
 async function waitForProductProgramChange(page: Page, asset: DOAssetDetailsPage): Promise<void> {
   const loaders = page.locator(".app-loader-overlay, .p-progress-spinner, .p-blockui");

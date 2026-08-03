@@ -29,13 +29,10 @@ const TLC_DEALER = "Armstrong Prestige Wellington";
 /** Default Originator Reference for Customer Details suite (`prepareCalculableCsaQuote` + post-Calculate replenish). */
 const CSA_CUSTOMER_DETAILS_ORIG_REF = "SQ-CSA-CD-Ref";
 
-/** QAT Individual customer for search / FIS pre-population (UDP-T3714, T3720, T3743). Override via `UDC_EXISTING_CUSTOMER_NUMBER`. */
-const EXISTING_UDC_CUSTOMER_NUMBER =
-  process.env.UDC_EXISTING_CUSTOMER_NUMBER?.trim() || "1183304";
-
-/** QAT Business customer for FIS pre-population (UDP-T3750). Override via `UDC_EXISTING_BUSINESS_CUSTOMER_NUMBER`. */
-const EXISTING_UDC_BUSINESS_CUSTOMER_NUMBER =
-  process.env.UDC_EXISTING_BUSINESS_CUSTOMER_NUMBER?.trim() || "1183317";
+import {
+  EXISTING_UDC_BUSINESS as EXISTING_UDC_BUSINESS_CUSTOMER_NUMBER,
+  EXISTING_UDC_INDIVIDUAL as EXISTING_UDC_CUSTOMER_NUMBER,
+} from "../../../testData/do-portal/doExistingCustomerData";
 
 function standardQuoteRoot(page: Page): Locator {
   return page.locator("app-quote-details, app-standard-quote").first();

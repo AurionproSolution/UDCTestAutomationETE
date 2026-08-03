@@ -99,6 +99,20 @@ export interface FormFieldData {
   };
 }
 
+/** FIS existing UDC customer numbers for DO portal regression / sanity. */
+export interface DoExistingCustomerNumbers {
+  individual: string;
+  secondIndividual: string;
+  business: string;
+  partnership: string;
+}
+
+export interface DoExistingCustomerTestData {
+  description?: string;
+  default: DoExistingCustomerNumbers;
+  environments?: Partial<Record<string, DoExistingCustomerNumbers>>;
+}
+
 // ============ Portal-Specific Types ============
 
 // DO Portal Types

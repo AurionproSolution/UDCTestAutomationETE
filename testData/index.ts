@@ -31,6 +31,14 @@ export function loadLoginData(portal: Portal) {
   return loadTestData(portal, 'loginData');
 }
 
+export {
+  getDoExistingCustomerNumbers,
+  EXISTING_UDC_INDIVIDUAL,
+  EXISTING_UDC_SECOND_INDIVIDUAL,
+  EXISTING_UDC_BUSINESS,
+  EXISTING_UDC_PARTNERSHIP,
+} from './do-portal/doExistingCustomerData';
+
 
 
 

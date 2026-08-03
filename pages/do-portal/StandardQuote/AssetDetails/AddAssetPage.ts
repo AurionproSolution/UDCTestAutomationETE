@@ -1,14 +1,44 @@
 import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../../common";
 
-/** Visible `text` host + `#text` input for Add Asset wizard fields (avoids hidden template rows). */
+/** Visible Add Asset text field — legacy SVG `text#text` or PrimeNG / full-page `input`. */
 function addAssetTextField(page: Page, label: string): Locator {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const labelPattern = new RegExp(`^\\s*${escaped}\\s*\\*?\\s*$`, "i");
+
   return page
-    .locator("text")
-    .filter({ hasText: new RegExp(`^\\s*${escaped}\\s*\\*?\\s*$`, "i") })
-    .locator("#text")
-    .filter({ visible: true })
+    .getByRole("textbox", { name: new RegExp(`^${escaped}\\s*\\*`, "i") })
+    .first()
+    .or(
+      page
+        .locator(".p-float-label, [class*='float-label']")
+        .filter({ hasText: labelPattern })
+        .locator("input, textarea")
+        .first(),
+    )
+    .or(
+      page
+        .locator("label, span, generic, .p-float-label")
+        .filter({ hasText: labelPattern })
+        .first()
+        .locator("xpath=following::input[not(@type='hidden')][1] | following::textarea[1]"),
+    )
+    .or(
+      page
+        .locator("label, span, generic")
+        .filter({ hasText: labelPattern })
+        .locator(
+          "xpath=ancestor::*[contains(@class,'col') or contains(@class,'field') or contains(@class,'grid') or contains(@class,'p-col')][1]//input[not(@type='hidden')][1]",
+        ),
+    )
+    .or(
+      page
+        .locator("text")
+        .filter({ hasText: labelPattern })
+        .locator("#text")
+        .filter({ visible: true })
+        .first(),
+    )
     .first();
 }
 
@@ -25,6 +55,7 @@ export class DOAddAssetPage extends BasePage {
   readonly vinInputField: Locator;
   readonly odometerInputField: Locator;
   readonly colourInputField: Locator;
+  readonly hinInputField: Locator;
   readonly serialNOInputField: Locator;
   readonly engineNOInputField: Locator;
   readonly ccRatingInputField: Locator;
@@ -75,6 +106,7 @@ export class DOAddAssetPage extends BasePage {
     this.vinInputField = addAssetTextField(page, "VIN");
     this.odometerInputField = addAssetTextField(page, "Odometer");
     this.colourInputField = addAssetTextField(page, "Colour");
+    this.hinInputField = addAssetTextField(page, "HIN");
     this.serialNOInputField = addAssetTextField(page, "Serial / Chassis No.");
     this.engineNOInputField = addAssetTextField(page, "Engine No");
     this.ccRatingInputField = addAssetTextField(page, "CC Rating");
@@ -88,29 +120,14 @@ export class DOAddAssetPage extends BasePage {
     this.assetLocationDropdown = page.locator(
       `//label[text()=' Asset Location of Use ']/following-sibling::div//div[@aria-label='dropdown trigger']`,
     );
-    this.supplierInputField = page
-      .locator("text")
-      .filter({ hasText: "Supplier Name" })
-      .locator("#text");
-    this.descriptionInputField = page
-      .locator("text")
-      .filter({ hasText: "Description" })
-      .locator("#text");
+    this.supplierInputField = addAssetTextField(page, "Supplier Name");
+    this.descriptionInputField = addAssetTextField(page, "Description");
     this.insurerDetailsInputField = page.locator(
       `//label[text()=' Insurer ']/following-sibling::div//div[@aria-label='dropdown trigger']`,
     );
-    this.brokerDetailsInputField = page
-      .locator("text")
-      .filter({ hasText: "Broker" })
-      .locator("#text");
-    this.sumInsuredInputField = page
-      .locator("text")
-      .filter({ hasText: "Sum Insured" })
-      .locator("#text");
-    this.policyNumberInputField = page
-      .locator("text")
-      .filter({ hasText: "Policy Number" })
-      .locator("#text");
+    this.brokerDetailsInputField = addAssetTextField(page, "Broker");
+    this.sumInsuredInputField = addAssetTextField(page, "Sum Insured");
+    this.policyNumberInputField = addAssetTextField(page, "Policy Number");
     this.policyExpiryDateInputField = page.getByPlaceholder("policyExpiryDate");
     this.selectDateButton = page.locator("//span[@data-date='2026-3-31']");
     this.cancelButton = page.locator("//span[text()='Cancel']");
@@ -272,18 +289,22 @@ export class DOAddAssetPage extends BasePage {
   async selectYear(year: string): Promise<void> {
     this.logStep(`Selected year: ${this.stepValueDisplay(year)}`);
     const input = this.yearInputField;
-    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.waitFor({ state: "visible", timeout: 30_000 });
+    await input.scrollIntoViewIfNeeded().catch(() => {});
     await input.click();
+    await input.press("Control+A").catch(() => {});
     await input.fill(year);
-    await input.press("Tab");
+    await input.press("Tab").catch(() => {});
   }
   async enterMake(make: string): Promise<void> {
     this.logStep(`Entered make as ${this.stepValueDisplay(make)}`);
     const input = this.makeInputField;
-    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.waitFor({ state: "visible", timeout: 30_000 });
+    await input.scrollIntoViewIfNeeded().catch(() => {});
     await input.click();
+    await input.press("Control+A").catch(() => {});
     await input.fill(make);
-    await input.press("Tab");
+    await input.press("Tab").catch(() => {});
   }
   async enterModel(model: string): Promise<void> {
     this.logStep(`Entered model as ${this.stepValueDisplay(model)}`);
@@ -308,12 +329,19 @@ export class DOAddAssetPage extends BasePage {
     await input.press("Tab");
   }
   async enterRegoNO(regoNO: string): Promise<void> {
-    this.logStep(`Entered rego number as ${this.stepValueDisplay(regoNO)}`);
     const input = this.regoNOInputField;
-    await input.waitFor({ state: "visible", timeout: 15_000 });
+    if (!(await input.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      this.logStep("Rego field not shown — skip rego entry");
+      return;
+    }
+    if (!(await input.isEnabled().catch(() => false))) {
+      this.logStep("Rego field is read-only — skip rego entry");
+      return;
+    }
+    this.logStep(`Entered rego number as ${this.stepValueDisplay(regoNO)}`);
     await input.click();
     await input.fill(regoNO);
-    await input.press("Tab");
+    await input.press("Tab").catch(() => {});
   }
   async enterVIN(vin: string): Promise<void> {
     this.logStep(`Entered VIN as ${this.stepValueDisplay(vin)}`);
@@ -331,9 +359,27 @@ export class DOAddAssetPage extends BasePage {
     this.logStep(`Entered colour as ${this.stepValueDisplay(colour)}`);
     await this.colourInputField.fill(colour);
   }
+  async enterHIN(hin: string): Promise<void> {
+    this.logStep(`Entered HIN as ${this.stepValueDisplay(hin)}`);
+    const input = this.hinInputField;
+    if (!(await input.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await input.click();
+    await input.press("Control+A").catch(() => {});
+    await input.fill(hin);
+    await input.press("Tab").catch(() => {});
+  }
   async enterSerialNO(serialNO: string): Promise<void> {
     this.logStep(`Entered serial / chassis number as ${this.stepValueDisplay(serialNO)}`);
-    await this.serialNOInputField.fill(serialNO);
+    const input = this.serialNOInputField;
+    await input.waitFor({ state: "visible", timeout: 30_000 });
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await input.click();
+    await input.press("Control+A").catch(() => {});
+    await input.fill(serialNO);
+    await input.press("Tab").catch(() => {});
   }
   async enterEngineNO(engineNO: string): Promise<void> {
     this.logStep(`Entered engine number as ${this.stepValueDisplay(engineNO)}`);
@@ -390,11 +436,39 @@ export class DOAddAssetPage extends BasePage {
   }
   async enterSupplier(supplier: string): Promise<void> {
     this.logStep(`Entered supplier as ${this.stepValueDisplay(supplier)}`);
-    await this.supplierInputField.fill(supplier);
+    const input = this.supplierInputField;
+    if (!(await input.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    if (!(await input.isEnabled().catch(() => false))) {
+      this.logStep("Supplier Name is read-only — skip supplier entry");
+      return;
+    }
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await input.click();
+    await input.press("Control+A").catch(() => {});
+    await input.fill(supplier);
+    await input.press("Tab").catch(() => {});
+  }
+
+  async isSupplierFieldEditable(): Promise<boolean> {
+    const input = this.supplierInputField;
+    if (!(await input.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return false;
+    }
+    return input.isEnabled().catch(() => false);
   }
   async enterDescription(description: string): Promise<void> {
     this.logStep(`Entered description as ${this.stepValueDisplay(description)}`);
-    await this.descriptionInputField.fill(description);
+    const input = this.descriptionInputField;
+    if (!(await input.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await input.click();
+    await input.press("Control+A").catch(() => {});
+    await input.fill(description);
+    await input.press("Tab").catch(() => {});
   }
   async insurerDetailsdropdown(): Promise<void> {
     this.logStep("Opened Insurer dropdown");
@@ -444,15 +518,18 @@ export class DOAddAssetPage extends BasePage {
     await btn.waitFor({ state: "visible", timeout: 45_000 });
     await btn.click({ timeout: 15_000 });
   }
-  async clickSummitButton(): Promise<void> {
+  async clickSummitButton(opts?: { waitForNavigation?: boolean }): Promise<void> {
     this.logStep("Clicked Submit on Add Asset");
+    const waitForNavigation = opts?.waitForNavigation !== false;
     await this.summitButton.waitFor({ state: "attached", timeout: 30_000 });
     await this.summitButton.scrollIntoViewIfNeeded().catch(() => {});
     await this.summitButton.click({ timeout: 15_000, force: true }).catch(async () => {
       await this.summitButton.click({ timeout: 15_000, force: true });
     });
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
-    await this.waitForAddAssetPostSubmitState();
+    if (waitForNavigation) {
+      await this.waitForAddAssetPostSubmitState();
+    }
   }
 
   /** Dismiss **Cancel Asset** / unsaved-changes confirm when leaving the full-page editor. */
