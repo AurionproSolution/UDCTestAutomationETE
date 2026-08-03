@@ -61,8 +61,8 @@ const environments: Record<Environment, EnvironmentConfig> = {
       name: "DO Portal - SIT",
     },
     rss: {
-      baseUrl: "https://rss-qat.udc.com",
-      apiUrl: "https://api-rss-qat.udc.com",
+      baseUrl: "https://udc-test.fiscloudservices.com/SITRSSPortal/",
+      apiUrl: "https://udc-test.fiscloudservices.com",
       name: "RSS Portal - SIT",
     },
     css: {

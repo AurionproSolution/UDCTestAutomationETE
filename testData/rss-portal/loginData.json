@@ -36,5 +36,25 @@
       "password": "somepassword",
       "expectedError": "Username is required."
     }
-  ]
+  ],
+  "environments": {
+    "sit": {
+      "totpSecret": "R2NSSLUZUHUVNMYWF5X2DE5TXEAPHK7R",
+      "validUsers": [
+        {
+          "username": "deepak.paramanick1",
+          "password": "(SIT)APudcAF@2211",
+          "role": "admin",
+          "email": "rss_admin@udc.com"
+        }
+      ],
+      "invalidUsers": [
+        {
+          "username": "invalid_rss",
+          "password": "wrongpass",
+          "expectedError": "Authentication failed."
+        }
+      ]
+    }
+  }
 }

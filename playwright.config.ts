@@ -3,6 +3,7 @@
  * Supports DO, RSS, and CSS portals with environment-based configuration
  *
  * DO portal: shared session via playwright/do-portal-auth.setup.ts → playwright/.auth/do-portal.json
+ * RSS portal: shared session via playwright/rss-portal-auth.setup.ts → playwright/.auth/rss-portal.json
  * Chromium only; headed mode everywhere (CI uses Xvfb — see .github/workflows/playwright.yml).
  *
  * @see https://playwright.dev/docs/test-configuration
@@ -18,6 +19,8 @@ import * as os from "os";
 import path from "path";
 import { getDoPortalAuthFile } from "./playwright/do-portal-auth.helper";
 import { hasUsableDoPortalAuthFile } from "./playwright/do-portal-session.helper";
+import { getRssPortalAuthFile } from "./playwright/rss-portal-auth.helper";
+import { hasUsableRssPortalAuthFile } from "./playwright/rss-portal-session.helper";
 
 /** VS Code / Cursor Test Explorer: one project is always enabled (see docs/test-explorer.md). */
 const ideMode = process.env.PLAYWRIGHT_IDE === "1";
@@ -74,6 +77,14 @@ const useGlobalDoAuth =
   !process.env.CI || process.env.PLAYWRIGHT_USE_DO_GLOBAL_AUTH === "1";
 
 /**
+ * OTP during rss-portal-auth.setup cannot run unattended on GitHub-hosted runners.
+ * - Local / non-CI: always use global RSS storage (single login per run).
+ * - CI: set PLAYWRIGHT_USE_RSS_GLOBAL_AUTH=1 when you have unattended storage or a self-hosted runner.
+ */
+const useGlobalRssAuth =
+  !process.env.CI || process.env.PLAYWRIGHT_USE_RSS_GLOBAL_AUTH === "1";
+
+/**
  * Only attach storageState after do-portal-auth.setup has created the file.
  * A path to a missing file can break project registration (e.g. VS Code Test Explorer lists no DO tests).
  */
@@ -83,6 +94,17 @@ function doPortalResolvedUse(): typeof maximizedChrome & {
   if (!useGlobalDoAuth) return maximizedChrome;
   const authFile = getDoPortalAuthFile();
   if (fs.existsSync(authFile) && hasUsableDoPortalAuthFile(authFile)) {
+    return { ...maximizedChrome, storageState: authFile };
+  }
+  return maximizedChrome;
+}
+
+function rssPortalResolvedUse(): typeof maximizedChrome & {
+  storageState?: string;
+} {
+  if (!useGlobalRssAuth) return maximizedChrome;
+  const authFile = getRssPortalAuthFile();
+  if (fs.existsSync(authFile) && hasUsableRssPortalAuthFile(authFile)) {
     return { ...maximizedChrome, storageState: authFile };
   }
   return maximizedChrome;
@@ -104,6 +126,21 @@ const doPortalChromiumProject = {
     : { use: maximizedChrome }),
 };
 
+const rssPortalAuthSetupProject = {
+  name: "rss-portal-auth-setup",
+  testDir: "./playwright",
+  testMatch: "**/rss-portal-auth.setup.ts",
+  use: maximizedChrome,
+};
+
+const rssPortalChromiumProject = {
+  name: "rss-portal-chromium",
+  testDir: "./tests/rss-portal",
+  ...(useGlobalRssAuth
+    ? { dependencies: ["rss-portal-auth-setup"] as const, use: rssPortalResolvedUse() }
+    : { use: maximizedChrome }),
+};
+
 const tagPortalTestIgnore = [
   "**/udc-perf-test-data.test.ts",
   ...(useGlobalDoAuth ? [] : ["**/do-portal/**"]),
@@ -122,6 +159,7 @@ const ideChromiumProject = {
 
 const ciProjects = [
   ...(useGlobalDoAuth ? [doPortalAuthSetupProject] : []),
+  ...(useGlobalRssAuth ? [rssPortalAuthSetupProject] : []),
 
   doPortalChromiumProject,
 
@@ -140,11 +178,7 @@ const ciProjects = [
     use: maximizedChrome,
   },
 
-  {
-    name: "rss-portal-chromium",
-    testDir: "./tests/rss-portal",
-    use: maximizedChrome,
-  },
+  rssPortalChromiumProject,
 
   {
     name: "css-portal-chromium",
