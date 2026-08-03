@@ -18,7 +18,7 @@ import { TableUtils } from '../utils/tableUtils';
 
 // Import test data
 import { getDoPortalLoginData } from '../testData/do-portal/doLoginData';
-import rssLoginData from '../testData/rss-portal/loginData.json';
+import { ensureRssPortalAuthSession } from '../playwright/rss-portal-auth.helper';
 import cssLoginData from '../testData/css-portal/loginData.json';
 
 // ============ Type Definitions ============
@@ -117,10 +117,7 @@ export const test = base.extend<PortalFixtures>({
 
   // Pre-authenticated RSS Portal page
   rssAuthenticatedPage: async ({ page }, use) => {
-    const loginPage = new RSSLoginPage(page);
-    await loginPage.navigate();
-    await loginPage.loginWithTestData(rssLoginData.validUsers[0]);
-    await page.waitForLoadState('networkidle');
+    await ensureRssPortalAuthSession(page);
     await use(page);
   },
 
@@ -185,9 +182,7 @@ export async function getAuthenticatedPage(page: Page, portal: PortalType): Prom
       break;
     }
     case 'rss': {
-      const loginPage = new RSSLoginPage(page);
-      await loginPage.navigate();
-      await loginPage.loginWithTestData(rssLoginData.validUsers[0]);
+      await ensureRssPortalAuthSession(page);
       break;
     }
     case 'css': {

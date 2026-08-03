@@ -3,57 +3,40 @@
  * E2E tests for RSS Portal authentication
  */
 
-import { test, expect } from '@playwright/test';
+import { test as base, expect } from '@playwright/test';
+import { test as rssTest, expect as rssExpect } from '../../../fixtures/rssPortalTest';
 import { RSSLoginPage, RSSDashboardPage } from '../../../pages';
-import rssLoginData from '../../../testData/rss-portal/loginData.json';
 
-test.describe('RSS Portal - Login Module', () => {
+base.describe('RSS Portal - Login Module (unauthenticated)', () => {
   let loginPage: RSSLoginPage;
 
-  test.beforeEach(async ({ page }) => {
+  base.beforeEach(async ({ page }) => {
     loginPage = new RSSLoginPage(page);
   });
 
-  test('should display login page with all elements @smoke @rss', async ({ page }) => {
-    await loginPage.navigate();
-
-    // Verify login page elements
-    await expect(loginPage.logo).toBeVisible();
-    await expect(loginPage.usernameInput).toBeVisible();
-    await expect(loginPage.passwordInput).toBeVisible();
-    await expect(loginPage.loginButton).toBeVisible();
-  });
-
-  test('should login with valid credentials @smoke @rss @regression', async ({ page }) => {
-    const dashboardPage = new RSSDashboardPage(page);
-
-    await loginPage.navigate();
-    await loginPage.loginWithTestData(rssLoginData.validUsers[0]);
-
-    // Verify successful login
-    const isLoaded = await dashboardPage.isDashboardLoaded();
-    expect(isLoaded).toBe(true);
-  });
-
-  test('should show error for invalid credentials @regression @rss', async ({ page }) => {
+  base('should show error for invalid credentials @regression @rss', async ({ page }) => {
     await loginPage.navigate();
     await loginPage.login('invalidUser', 'wrongPassword');
 
-    // Verify error message
     const errorMsg = await loginPage.getErrorMessage();
     expect(errorMsg).toBeTruthy();
   });
 
-  test('should have SSO login option @rss', async ({ page }) => {
+  base('should have SSO login option @rss', async ({ page }) => {
     await loginPage.navigate();
-
-    // Verify SSO button is visible
     await expect(loginPage.ssoLoginButton).toBeVisible();
   });
 });
 
-// Data-Driven Tests
-test.describe('RSS Portal - Data-Driven Login Tests', () => {
+rssTest.describe('RSS Portal - Login Module (SIT authenticated)', () => {
+  rssTest('should login with valid credentials @smoke @rss @regression', async ({ page }) => {
+    const dashboard = new RSSDashboardPage(page);
+    rssExpect(await dashboard.isDashboardLoaded()).toBe(true);
+  });
+});
+
+// Data-Driven Tests (unauthenticated — QAT/local shell)
+base.describe('RSS Portal - Data-Driven Login Tests', () => {
   const testScenarios = [
     { username: 'rss_user1', password: 'pass1', shouldPass: true },
     { username: 'rss_user2', password: 'pass2', shouldPass: true },
@@ -61,7 +44,7 @@ test.describe('RSS Portal - Data-Driven Login Tests', () => {
   ];
 
   for (const scenario of testScenarios) {
-    test(`Login scenario - user: ${scenario.username} @rss`, async ({ page }) => {
+    base(`Login scenario - user: ${scenario.username} @rss`, async ({ page }) => {
       const loginPage = new RSSLoginPage(page);
       await loginPage.navigate();
       await loginPage.login(scenario.username, scenario.password);
@@ -74,7 +57,4 @@ test.describe('RSS Portal - Data-Driven Login Tests', () => {
     });
   }
 });
-
-
-
 

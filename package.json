@@ -14,6 +14,8 @@
     "test:do:sanity": "npx playwright test tests/do-portal/doSanityTest --project=do-portal-chromium",
     "test:do:perf": "npx playwright test --project=do-portal-perf-data",
     "test:rss": "npx playwright test --project=rss-portal-chromium",
+    "test:rss:auth": "npx playwright test --project=rss-portal-auth-setup",
+    "test:rss:sit": "cross-env TEST_ENV=sit npx playwright test --project=rss-portal-chromium",
     "test:css": "npx playwright test --project=css-portal-chromium",
     "test:smoke": "npx playwright test --project=all-portals-smoke",
     "test:regression": "npx playwright test --project=all-portals-regression",

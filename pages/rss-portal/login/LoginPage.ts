@@ -4,6 +4,7 @@
  */
 
 import { expect, Page, Locator } from '@playwright/test';
+import speakeasy from 'speakeasy';
 import { BasePage } from '../../common/BasePage';
 import { RSS_BASE_URL } from '../../../config/env';
 import { CommonUtils } from '../../../utils/commonUtils';
@@ -67,9 +68,33 @@ export class RSSLoginPage extends BasePage {
   private static readonly LOGIN_ERROR_OUTCOME =
     '.alert-danger, [role="alert"]:not(.ruf-statusbar-wrapper)';
 
+  /** FIS / IdP cookie strip — can block typing into Username until dismissed. */
+  private async dismissCookieConsentIfPresent(p: Page): Promise<void> {
+    const accept = p.getByRole('button', { name: /^Accept$/i }).first();
+    if (await accept.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await accept.click({ timeout: 10_000 }).catch(() => {});
+      await p.waitForTimeout(400);
+      return;
+    }
+    const decline = p.getByRole('button', { name: /^Decline$/i }).first();
+    if (await decline.isVisible({ timeout: 500 }).catch(() => false)) {
+      await decline.click({ timeout: 10_000 }).catch(() => {});
+      return;
+    }
+    const close = p
+      .getByRole('button', { name: /^Close$/i })
+      .or(p.locator('[aria-label="Close"], [aria-label="close"]'))
+      .first();
+    if (await close.isVisible({ timeout: 500 }).catch(() => false)) {
+      await close.click({ timeout: 5_000 }).catch(() => {});
+    }
+  }
+
   /** First matching IdP username control (same family as DO portal FIS). */
   private async resolveIdpUsernameField(p: Page): Promise<Locator | null> {
     const candidates: Locator[] = [
+      p.getByRole('searchbox', { name: /User ID\s*\/\s*Alias/i }),
+      p.getByRole('textbox', { name: /User ID\s*\/\s*Alias/i }),
       p.getByRole('searchbox', { name: /Username/i }),
       p.getByRole('textbox', { name: /Username|Email|User ID/i }),
       p.getByLabel(/username|email|user id/i),
@@ -94,13 +119,92 @@ export class RSSLoginPage extends BasePage {
       .catch(() => false);
   }
 
+  private otpInputs(p: Page): Locator {
+    return p.locator(
+      [
+        'input.otp-input',
+        "input[name*='otp' i]",
+        "input[id*='otp' i]",
+        "input[autocomplete='one-time-code']",
+      ].join(', '),
+    );
+  }
+
+  private deviceTrustRadio(p: Page): Locator {
+    return p.getByRole('radio', {
+      name: /yes,?\s*this is my (computer|mobile device)/i,
+    });
+  }
+
+  private async fillTotpIfPrompted(surface: Page, totpSecret?: string): Promise<boolean> {
+    const otpInputs = this.otpInputs(surface);
+    const firstVisible = await otpInputs
+      .first()
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false);
+    if (!firstVisible) return false;
+
+    if (!totpSecret) {
+      throw new Error(
+        'SIT OTP prompt detected, but RSS_PORTAL_TOTP_SECRET is not set. Set it in your environment and retry.',
+      );
+    }
+
+    const otp = speakeasy.totp({
+      secret: totpSecret,
+      encoding: 'base32',
+      step: 30,
+      digits: 6,
+    });
+
+    this.log('SIT OTP prompt detected; entering generated TOTP.');
+    const count = await otpInputs.count();
+    const visibleInputs: Locator[] = [];
+    for (let i = 0; i < count; i++) {
+      const input = otpInputs.nth(i);
+      if (await input.isVisible({ timeout: 500 }).catch(() => false)) {
+        visibleInputs.push(input);
+      }
+    }
+
+    if (visibleInputs.length > 1) {
+      const digits = otp.split('');
+      for (let index = 0; index < digits.length && index < visibleInputs.length; index++) {
+        await visibleInputs[index].focus();
+        await surface.keyboard.type(digits[index]);
+      }
+      await surface.waitForTimeout(500);
+      return true;
+    }
+
+    const target = visibleInputs[0] ?? otpInputs.first();
+    await target.focus();
+    await target.fill(otp);
+    await surface.waitForTimeout(500);
+    return true;
+  }
+
+  /** FIS may skip device-trust when the browser is already trusted. */
+  private async selectDeviceTrustIfPrompted(surface: Page): Promise<void> {
+    const radio = this.deviceTrustRadio(surface).first();
+    const visible = await radio.isVisible({ timeout: 3_000 }).catch(() => false);
+    if (!visible) {
+      this.log('Device-trust prompt not shown — skipping.');
+      return;
+    }
+
+    this.log('Selecting device-trust option (Yes, this is my computer / mobile device)');
+    await radio.click({ timeout: 10_000 });
+    await expect(radio).toBeChecked({ timeout: 5_000 }).catch(() => {});
+  }
+
   /**
    * Same pattern as DO portal: always use “Login with FIS”, then resolve whether the form is on this page or a new one.
    * If the opener closes after FIS, fills must run on the new page or Playwright throws “Target page … has been closed”.
    */
-  private async openFisLoginSurface(totalTimeoutMs = 30_000): Promise<Page> {
+  private async openFisLoginSurface(totalTimeoutMs = 45_000): Promise<Page> {
     this.log('Clicking Login with FIS');
-    await this.waitForVisible(this.loginWithFisButton, 15_000);
+    await this.waitForVisible(this.loginWithFisButton, 90_000);
     await this.clickElement(this.loginWithFisButton);
     try {
       await this.waitForLoadingComplete(15_000);
@@ -123,6 +227,41 @@ export class RSSLoginPage extends BasePage {
   }
 
   /**
+   * Post-SSO **Select Application** launcher with Retail Self Service card.
+   */
+  async isAppLauncherVisible(): Promise<boolean> {
+    const selectApp = this.page.getByText(/Select Application/i).first();
+    const onLauncher =
+      (await selectApp.isVisible({ timeout: 3_000 }).catch(() => false)) &&
+      (await this.retailSelfServiceCardOn(this.page)
+        .isVisible({ timeout: 2_000 })
+        .catch(() => false));
+    return onLauncher;
+  }
+
+  /**
+   * After FIS sign-in the IdP tab may close; the portal may be on another tab in the same context.
+   */
+  private async waitForPortalPageAfterSignIn(timeoutMs = 90_000): Promise<Page> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      for (const pg of this.page.context().pages()) {
+        if (pg.isClosed()) continue;
+        const url = pg.url();
+        if (/udc-test\.fiscloudservices\.com\/SITRSSPortal/i.test(url)) {
+          await pg.bringToFront().catch(() => {});
+          this.sessionPage = pg;
+          return pg;
+        }
+      }
+      await this.page.waitForTimeout(300);
+    }
+    throw new Error(
+      'Expected RSS Portal URL after FIS sign-in on an open browser tab (check popup blocker / SSO redirect).',
+    );
+  }
+
+  /**
    * FIS often lands on the same IdP flow as DO (searchbox → Proceed → password → Sign in).
    * Falls back to a single-page RSS form when those controls are absent.
    */
@@ -130,34 +269,33 @@ export class RSSLoginPage extends BasePage {
     surface: Page,
     username: string,
     password: string,
+    totpSecret?: string,
   ): Promise<void> {
     const utils = new CommonUtils(surface);
     const idpUsername = await this.resolveIdpUsernameField(surface);
 
     if (idpUsername) {
       this.log('Using IdP / FIS credential steps (username → Proceed → password → Sign in)');
+      await this.dismissCookieConsentIfPresent(surface);
+      await idpUsername.click({ timeout: 10_000 }).catch(() => {});
       await utils.fill(idpUsername, username);
+
       const proceed = surface.getByRole('button', { name: 'Proceed' });
-      await proceed.waitFor({ state: 'visible', timeout: 15_000 });
+      await proceed.waitFor({ state: 'visible', timeout: 20_000 });
       await utils.click(proceed);
 
       const idpPassword = surface.getByRole('textbox', { name: /Password/i });
-      await idpPassword.waitFor({ state: 'visible', timeout: 15_000 });
+      await idpPassword.waitFor({ state: 'visible', timeout: 30_000 });
       await utils.fill(idpPassword, password);
       await idpPassword.press('Tab').catch(() => {});
 
-      const trustComputer = surface.getByRole('radio', {
-        name: /Yes, this is my computer/i,
-      });
-      if (
-        await trustComputer.isVisible({ timeout: 15_000 }).catch(() => false)
-      ) {
-        await utils.click(trustComputer);
-      }
+      await this.fillTotpIfPrompted(surface, totpSecret);
+      await this.selectDeviceTrustIfPrompted(surface);
+      await this.fillTotpIfPrompted(surface, totpSecret);
 
       const signIn = surface.getByRole('button', { name: /Sign in/i });
       await signIn.waitFor({ state: 'visible', timeout: 15_000 });
-      await expect(signIn).toBeEnabled({ timeout: 60_000 });
+      await expect(signIn).toBeEnabled({ timeout: 90_000 });
       await utils.click(signIn);
       return;
     }
@@ -174,7 +312,7 @@ export class RSSLoginPage extends BasePage {
 
   private async waitForLoadingOn(page: Page, timeout = 30_000): Promise<void> {
     const spinner = page.locator(
-      '.loading, .spinner, [data-testid="loading"]',
+      '.loading, .spinner, [data-testid="loading"], .app-loader-overlay, .p-progressspinner',
     );
     try {
       await spinner.waitFor({ state: 'hidden', timeout });
@@ -233,6 +371,14 @@ export class RSSLoginPage extends BasePage {
     const targetUrl = urlOverride ?? this.url;
     this.log(`Navigating to RSS Portal login page: ${targetUrl}`);
     await this.navigateTo(targetUrl);
+    await this.page.waitForLoadState('load');
+
+    if (await this.isAppLauncherVisible()) {
+      this.log('App launcher visible — SSO session already active; skipping Login with FIS.');
+      return;
+    }
+
+    await expect(this.loginWithFisButton).toBeVisible({ timeout: 90_000 });
   }
 
   /**
@@ -242,17 +388,26 @@ export class RSSLoginPage extends BasePage {
   async login(
     username: string,
     password: string,
-    options?: { navigationTimeoutMs?: number },
+    options?: { navigationTimeoutMs?: number; totpSecret?: string },
   ): Promise<void> {
     this.logStep("Login");
     const navigationTimeoutMs = options?.navigationTimeoutMs ?? 30_000;
+    const totpSecret = options?.totpSecret;
+
+    if (await this.isAppLauncherVisible()) {
+      await this.selectRetailSelfService();
+      return;
+    }
+
     this.log(`Logging in to RSS Portal as: ${username}`);
     const surface = await this.openFisLoginSurface();
     this.sessionPage = surface;
 
-    await this.enterCredentialsOnSurface(surface, username, password);
-    await this.waitForLoadingOn(surface, 15_000);
-    await this.waitForLoginOutcomeOn(surface, navigationTimeoutMs);
+    await this.enterCredentialsOnSurface(surface, username, password, totpSecret);
+
+    const portalPage = await this.waitForPortalPageAfterSignIn(navigationTimeoutMs);
+    await this.waitForLoadingOn(portalPage, 15_000);
+    await this.waitForLoginOutcomeOn(portalPage, navigationTimeoutMs);
     await this.selectRetailSelfService();
   }
 
@@ -260,11 +415,14 @@ export class RSSLoginPage extends BasePage {
    * Login with test data from JSON
    */
   async loginWithTestData(
-    testData: { username: string; password: string },
+    testData: { username: string; password: string; totpSecret?: string },
     options?: { navigationTimeoutMs?: number },
   ): Promise<void> {
     this.logStep("Login With Test Data");
-    await this.login(testData.username, testData.password, options);
+    await this.login(testData.username, testData.password, {
+      navigationTimeoutMs: options?.navigationTimeoutMs,
+      totpSecret: testData.totpSecret,
+    });
   }
 
   /**
@@ -309,10 +467,14 @@ export class RSSLoginPage extends BasePage {
    * Post-auth “Select Application” landing (`app-landing` card row).
    * Same idea as DO portal’s Quotes & Applications navigation after FIS sign-in.
    */
-  private retailSelfServiceCard(): Locator {
-    return this.getSessionPage()
+  private retailSelfServiceCardOn(page: Page): Locator {
+    return page
       .locator('app-landing div.border-1.cursor-pointer')
       .filter({ hasText: /Retail Self Service/i });
+  }
+
+  private retailSelfServiceCard(): Locator {
+    return this.retailSelfServiceCardOn(this.getSessionPage());
   }
 
   /** Chooses Retail Self Service so the RSS shell / dashboard can load. */
@@ -366,7 +528,4 @@ export class RSSLoginPage extends BasePage {
     return await this.isVisible(this.logo);
   }
 }
-
-
-
 
