@@ -7,13 +7,14 @@
 import { chromium, type BrowserContext, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { rssPortalTotpSecret, RSS_PORTAL_MFA_LOCK_WAIT_MS } from "../config/rss-portal-auth.config";
+import { rssPortalTotpSecret, RSS_PORTAL_MFA_LOCK_WAIT_MS, RSS_PORTAL_MANUAL_OTP_TIMEOUT_MS } from "../config/rss-portal-auth.config";
 import { RSS_BASE_URL, getCurrentEnv } from "../config/env";
 import { RSSLoginPage, RSSDashboardPage } from "../pages";
-import { getRssPortalLoginData } from "../testData/rss-portal/rssLoginData";
+import { getRssPortalAuthUser } from "../testData/rss-portal/rssLoginData";
 import { logTestStep } from "../utils/testStepLog";
 import { rssPortalAuthOrigins } from "../config/rss-portal-auth.config";
 import {
+  captureAccessTokenFromAuthResponse,
   discoverAndSaveAuthMeta,
   evaluateRssPortalSession,
   readStorageStateFile,
@@ -27,6 +28,13 @@ import {
   trySilentRefreshSession,
   saveRssPortalStorageState,
   waitForRssPortalTokensOnPage,
+  takePendingCapturedTokens,
+  injectRssPortalAccessTokenCookie,
+  getTokensFromPage,
+  tryAppNativeSilentRefresh,
+  isCookieTokenKey,
+  looksLikeJwt,
+  persistRssPortalTokensForStorageState,
 } from "./rss-portal-session.helper";
 
 export function getRssPortalAuthFile(): string {
@@ -39,60 +47,130 @@ export function getRssPortalAuthFile(): string {
 }
 
 function attachTokenDiscoveryListeners(page: Page): void {
-  page.on("response", (response) => {
+  const context = page.context();
+  context.on("response", (response) => {
     if (response.request().method() === "POST") {
       recordTokenEndpointFromUrl(response.url());
     }
+    if (!/\/token|oauth|auth|login|session|userinfo/i.test(response.url())) return;
+    void (async () => {
+      const contentType = response.headers()["content-type"] ?? "";
+      if (!/json/i.test(contentType)) return;
+      try {
+        const body: unknown = await response.json();
+        captureAccessTokenFromAuthResponse(response.url(), body);
+      } catch {
+        // Non-JSON or consumed body — ignore.
+      }
+    })();
   });
 }
 
 function findPortalPageInContext(context: BrowserContext): Page | undefined {
-  const portalPattern = /fiscloudservices\.com\/SITRSSPortal/i;
+  const portalHost = (() => {
+    try {
+      return new URL(RSS_BASE_URL()).hostname;
+    } catch {
+      return undefined;
+    }
+  })();
   for (const pg of context.pages()) {
-    if (!pg.isClosed() && portalPattern.test(pg.url())) {
-      return pg;
+    if (pg.isClosed()) continue;
+    const url = pg.url();
+    if (/udc-test\.fiscloudservices\.com\/SITRSSPortal/i.test(url)) return pg;
+    if (portalHost) {
+      try {
+        if (new URL(url).hostname === portalHost) return pg;
+      } catch {
+        // Ignore non-URL tabs.
+      }
     }
   }
   return undefined;
 }
 
-export async function loginRssPortalAndSaveStorage(page: Page): Promise<void> {
+export async function loginRssPortalAndSaveStorage(page: Page): Promise<Page> {
   const authFile = getRssPortalAuthFile();
-  const loginData = getRssPortalLoginData();
+  const authUser = getRssPortalAuthUser();
   const env = getCurrentEnv();
   const baseUrl = RSS_BASE_URL();
-  const totpSecret = rssPortalTotpSecret();
+  const manualOtp = authUser.mfaMode === "manual";
+  const totpSecret = manualOtp ? undefined : rssPortalTotpSecret();
 
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
   attachTokenDiscoveryListeners(page);
 
   logTestStep(
-    `RSS auth: environment=${env}, url=${baseUrl}, user=${loginData.validUsers[0].username}`,
+    `RSS auth: environment=${env}, url=${baseUrl}, user=${authUser.username}, mfa=${manualOtp ? "manual" : "totp"}`,
   );
 
   const loginPage = new RSSLoginPage(page);
   await loginPage.navigate(baseUrl);
-  await loginPage.loginWithTestData({
-    ...loginData.validUsers[0],
-    totpSecret,
-  });
+  await loginPage.loginWithTestData(
+    {
+      ...authUser,
+      totpSecret,
+    },
+    {
+      manualOtpTimeoutMs: RSS_PORTAL_MANUAL_OTP_TIMEOUT_MS,
+    },
+  );
 
   const portalPage = findPortalPageInContext(page.context()) ?? loginPage.getSessionPage();
   await portalPage.bringToFront().catch(() => {});
-  const dashboardPage = new RSSDashboardPage(portalPage);
-  const dashboardLoaded = await dashboardPage.isDashboardLoaded();
-  if (!dashboardLoaded) {
-    throw new Error("RSS auth saved but dashboard did not load after Retail Self Service selection.");
-  }
 
-  const discoveredTokens = await waitForRssPortalTokensOnPage(portalPage);
-  if (discoveredTokens) {
-    logTestStep("RSS auth: JWT tokens discovered in browser before save.");
-  } else {
-    logTestStep(
-      "RSS auth: no JWT in browser storage yet — saving cookie SSO session (reuse up to 15 min).",
+  const dashboardUrl = `${baseUrl.replace(/\/$/, "")}/rss/dashboard`;
+  await portalPage.goto(dashboardUrl, { waitUntil: "load" });
+
+  const dashboardPage = new RSSDashboardPage(portalPage);
+  if (!(await dashboardPage.isDashboardLoaded())) {
+    throw new Error(
+      "RSS auth: dashboard did not load after navigating to /rss/dashboard.",
     );
   }
+
+  await tryAppNativeSilentRefresh(portalPage);
+
+  let discoveredTokens = await waitForRssPortalTokensOnPage(portalPage);
+  if (!discoveredTokens) {
+    const captured = takePendingCapturedTokens();
+    if (captured) {
+      await injectRssPortalAccessTokenCookie(
+        portalPage,
+        captured.accessToken,
+        captured.refreshToken,
+      );
+      discoveredTokens = await getTokensFromPage(portalPage);
+      logTestStep("RSS auth: injected mfe_access_token from captured auth response.");
+    }
+  }
+  if (!discoveredTokens) {
+    throw new Error(
+      "RSS auth: mfe_access_token not found after dashboard load. Session not saved — re-run MFA login.",
+    );
+  }
+
+  if (!isCookieTokenKey(discoveredTokens.accessTokenKey)) {
+    await injectRssPortalAccessTokenCookie(
+      portalPage,
+      discoveredTokens.accessToken,
+      discoveredTokens.refreshToken,
+    );
+    await persistRssPortalTokensForStorageState(portalPage, discoveredTokens);
+    discoveredTokens = await getTokensFromPage(portalPage);
+    logTestStep(
+      "RSS auth: persisted access token as mfe_access_token cookie and localStorage for storageState.",
+    );
+  } else {
+    await persistRssPortalTokensForStorageState(portalPage, discoveredTokens);
+  }
+
+  if (!discoveredTokens?.accessToken || !looksLikeJwt(discoveredTokens.accessToken)) {
+    throw new Error(
+      "RSS auth: could not persist mfe_access_token cookie before save.",
+    );
+  }
+  logTestStep("RSS auth: JWT tokens discovered in browser before save.");
 
   logTestStep(`Saving RSS portal storage state to ${authFile}`);
   await saveRssPortalStorageState(portalPage.context(), { stampSessionSavedAt: true });
@@ -103,6 +181,8 @@ export async function loginRssPortalAndSaveStorage(page: Page): Promise<void> {
       `RSS auth saved but session is not reusable: ${evaluation.reason}`,
     );
   }
+
+  return portalPage;
 }
 
 /**
@@ -111,8 +191,17 @@ export async function loginRssPortalAndSaveStorage(page: Page): Promise<void> {
  */
 export async function ensureRssPortalDashboardReady(page: Page): Promise<Page> {
   const loginPage = new RSSLoginPage(page);
-  const portalRoot = rssPortalAuthOrigins()[0];
+  const dashboardUrl = `${RSS_BASE_URL().replace(/\/$/, "")}/rss/dashboard`;
 
+  await page.goto(dashboardUrl, { waitUntil: "load" });
+
+  let sessionPage = loginPage.getSessionPage();
+  const dashboard = new RSSDashboardPage(sessionPage);
+  if (await dashboard.isDashboardLoaded()) {
+    return sessionPage;
+  }
+
+  const portalRoot = rssPortalAuthOrigins()[0];
   await page.goto(portalRoot, { waitUntil: "load" });
 
   if (await loginPage.isAppLauncherVisible()) {
@@ -130,9 +219,18 @@ export async function ensureRssPortalDashboardReady(page: Page): Promise<Page> {
     }
   }
 
-  const sessionPage = loginPage.getSessionPage();
-  const dashboard = new RSSDashboardPage(sessionPage);
-  if (!(await dashboard.isDashboardLoaded())) {
+  sessionPage = loginPage.getSessionPage();
+  const shellVisible = await sessionPage
+    .locator("app-sidemenu nav.sidebar, app-rss ion-segment[role='tablist']")
+    .first()
+    .isVisible({ timeout: 20_000 })
+    .catch(() => false);
+  if (!shellVisible || !/\/rss\/dashboard/i.test(sessionPage.url())) {
+    await sessionPage.goto(dashboardUrl, { waitUntil: "load" });
+  }
+
+  const dashboardAfterLauncher = new RSSDashboardPage(sessionPage);
+  if (!(await dashboardAfterLauncher.isDashboardLoaded())) {
     throw new Error("RSS dashboard did not load after applying stored session.");
   }
   return sessionPage;
@@ -140,10 +238,13 @@ export async function ensureRssPortalDashboardReady(page: Page): Promise<Page> {
 
 /**
  * Ensures a reusable RSS session for parallel tests with a single shared credential.
- * 1. Silent refresh_token grant when JWT ages out (no FIS login).
- * 2. Coordinated MFA — only one worker logs in; others wait and reuse the saved file.
+ * When RSS_PORTAL_LOGIN_EVERY_RUN is on (default), globalSetup clears saved auth so this
+ * always runs MFA once per Playwright invocation; parallel workers reuse the file saved in that run.
+ *
+ * @returns Session page already on the dashboard when this worker performed MFA; otherwise undefined
+ *          (caller should run ensureRssPortalDashboardReady).
  */
-export async function ensureRssPortalAuthSession(page: Page): Promise<void> {
+export async function ensureRssPortalAuthSession(page: Page): Promise<Page | undefined> {
   const authFile = getRssPortalAuthFile();
   const lockPath = getRssPortalMfaLockPath(authFile);
   const deadline = Date.now() + RSS_PORTAL_MFA_LOCK_WAIT_MS;
@@ -156,7 +257,7 @@ export async function ensureRssPortalAuthSession(page: Page): Promise<void> {
   if (evaluation.action === "reuse") {
     await syncBrowserFromFile();
     logTestStep(`RSS auth: ${evaluation.reason}`);
-    return;
+    return undefined;
   }
 
   logTestStep(
@@ -169,7 +270,7 @@ export async function ensureRssPortalAuthSession(page: Page): Promise<void> {
     if (evaluation.action === "reuse") {
       await syncBrowserFromFile();
       logTestStep(`RSS auth: ${evaluation.reason}`);
-      return;
+      return undefined;
     }
 
     const acquiredLock = tryAcquireMfaLock(lockPath);
@@ -184,12 +285,12 @@ export async function ensureRssPortalAuthSession(page: Page): Promise<void> {
       if (evaluation.action === "reuse") {
         await syncBrowserFromFile();
         logTestStep(`RSS auth: ${evaluation.reason}`);
-        return;
+        return undefined;
       }
 
       logTestStep(`RSS auth: ${evaluation.reason} — running coordinated MFA login.`);
       await page.context().clearCookies();
-      await loginRssPortalAndSaveStorage(page);
+      const sessionPage = await loginRssPortalAndSaveStorage(page);
 
       evaluation = evaluateRssPortalSession(authFile);
       if (evaluation.action !== "reuse") {
@@ -197,9 +298,8 @@ export async function ensureRssPortalAuthSession(page: Page): Promise<void> {
           `RSS portal session is not reusable after MFA login: ${evaluation.reason}`,
         );
       }
-      await syncBrowserFromFile();
       logTestStep(`RSS auth: MFA login complete — ${evaluation.reason}`);
-      return;
+      return sessionPage;
     } finally {
       releaseMfaLock(lockPath);
     }

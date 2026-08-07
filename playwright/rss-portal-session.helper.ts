@@ -633,26 +633,6 @@ export function evaluateRssPortalSessionFromState(
   const tokens = discoverTokensFromStorageState(state, meta);
 
   if (!tokens) {
-    const savedAtMs = resolveSessionSavedAtMs(meta, undefined, filePath);
-    const ageMinutes =
-      savedAtMs !== undefined ? Math.round((nowMs - savedAtMs) / 60_000) : undefined;
-    const maxAgeMinutes = Math.round(RSS_PORTAL_MAX_SESSION_REUSE_AGE_MS / 60_000);
-
-    if (hasRssPortalHostSessionCookies(state) && meta?.sessionSavedAt) {
-      if (savedAtMs !== undefined && nowMs - savedAtMs <= RSS_PORTAL_MAX_SESSION_REUSE_AGE_MS) {
-        return {
-          action: "reuse",
-          reason: `Cookie SSO session fresh (${ageMinutes ?? "?"} min) — no JWT in storage.`,
-          ageMinutes,
-        };
-      }
-      return {
-        action: "mfa",
-        reason: `Cookie SSO session age ${ageMinutes ?? "?"} min exceeds ${maxAgeMinutes} min — MFA login required.`,
-        ageMinutes,
-      };
-    }
-
     return { action: "mfa", reason: "No discoverable access token in saved session." };
   }
 
@@ -733,9 +713,109 @@ export function hasUsableRssPortalAuthFile(filePath = getRssPortalAuthFile()): b
   const state = readStorageStateFile(filePath);
   if (!state) return false;
   const meta = readAuthMeta();
-  return (
-    discoverTokensFromStorageState(state, meta) !== undefined ||
-    hasRssPortalHostSessionCookies(state)
+  return discoverTokensFromStorageState(state, meta) !== undefined;
+}
+
+/** Remove saved RSS storageState and auth meta (fresh MFA on next ensureRssPortalAuthSession). */
+export function clearSavedRssPortalAuthFiles(): void {
+  const authFile = getRssPortalAuthFile();
+  const metaPath = path.join(process.cwd(), getRssPortalAuthMetaFileRel());
+  for (const filePath of [authFile, metaPath, getRssPortalMfaLockPath(authFile)]) {
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {
+      // Best-effort cleanup before coordinated MFA.
+    }
+  }
+}
+
+/** Tokens captured from auth API responses during MFA login (before the app persists them). */
+export interface CapturedPortalTokens {
+  accessToken: string;
+  refreshToken?: string;
+}
+
+let pendingCapturedTokens: CapturedPortalTokens | undefined;
+
+export function captureAccessTokenFromAuthResponse(url: string, body: unknown): void {
+  if (!/\/token|oauth|auth|login|session|userinfo/i.test(url)) return;
+  if (!body || typeof body !== "object") return;
+  const record = body as Record<string, unknown>;
+  const access = record.access_token;
+  if (typeof access === "string" && looksLikeJwt(access)) {
+    pendingCapturedTokens = {
+      accessToken: access,
+      refreshToken:
+        typeof record.refresh_token === "string" ? record.refresh_token : undefined,
+    };
+  }
+}
+
+export function takePendingCapturedTokens(): CapturedPortalTokens | undefined {
+  const tokens = pendingCapturedTokens;
+  pendingCapturedTokens = undefined;
+  return tokens;
+}
+
+export async function injectRssPortalAccessTokenCookie(
+  page: Page,
+  accessToken: string,
+  refreshToken?: string,
+): Promise<void> {
+  const host = rssPortalHostname();
+  const tokens: DiscoveredTokens = {
+    origin: `https://${host}`,
+    accessToken,
+    accessTokenKey: `${RSS_PORTAL_COOKIE_TOKEN_KEY_PREFIX}mfe_access_token`,
+    refreshToken,
+    refreshTokenKey: refreshToken
+      ? `${RSS_PORTAL_COOKIE_TOKEN_KEY_PREFIX}mfe_refresh_token`
+      : undefined,
+    expiresAtMs: parseJwtExpiryMs(accessToken),
+    cookieDomain: host,
+    cookiePath: "/",
+  };
+  await applyTokensToPage(page, tokens, accessToken, refreshToken);
+}
+
+/** Copy discovered tokens into localStorage so Playwright storageState can persist them. */
+export async function persistRssPortalTokensForStorageState(
+  page: Page,
+  tokens: DiscoveredTokens,
+): Promise<void> {
+  await page.evaluate(
+    ({ origin, accessKey, refreshKey, access, refresh, oidcKey }) => {
+      if (window.location.origin !== origin) return;
+      if (oidcKey) {
+        const raw = localStorage.getItem(oidcKey) ?? sessionStorage.getItem(oidcKey) ?? "{}";
+        const oidc = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        oidc.access_token = access;
+        if (refresh) oidc.refresh_token = refresh;
+        localStorage.setItem(oidcKey, JSON.stringify(oidc));
+        return;
+      }
+      const fromSession = sessionStorage.getItem(accessKey);
+      localStorage.setItem(accessKey, fromSession ?? access);
+      if (refresh && refreshKey) {
+        const refreshFromSession = sessionStorage.getItem(refreshKey);
+        localStorage.setItem(refreshKey, refreshFromSession ?? refresh);
+      }
+    },
+    {
+      origin: tokens.origin,
+      accessKey: isCookieTokenKey(tokens.accessTokenKey)
+        ? "access_token"
+        : tokens.accessTokenKey,
+      refreshKey:
+        tokens.refreshTokenKey && !isCookieTokenKey(tokens.refreshTokenKey)
+          ? tokens.refreshTokenKey
+          : tokens.refreshToken
+            ? "refresh_token"
+            : undefined,
+      access: tokens.accessToken,
+      refresh: tokens.refreshToken,
+      oidcKey: tokens.oidcUserKey,
+    },
   );
 }
 
@@ -755,36 +835,58 @@ export async function waitForRssPortalTokensOnPage(
 
 export async function getTokensFromPage(page: Page): Promise<DiscoveredTokens | undefined> {
   const meta = readAuthMeta();
+
+  // Prefer HTTP cookies (e.g. mfe_access_token) over localStorage duplicates.
+  const fromCookies = await getTokensFromContextCookies(page, meta);
+  if (fromCookies) return fromCookies;
+
   const origins = rssPortalAuthOrigins();
   for (const origin of origins) {
-    const entries = await page.evaluate((o) => {
-      const result: Array<{ name: string; value: string }> = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key) result.push({ name: key, value: localStorage.getItem(key) ?? "" });
-      }
-      return result;
-    }, origin).catch(() => null);
+    const entries = await page
+      .evaluate((o) => {
+        const read = (storage: Storage) => {
+          const result: Array<{ name: string; value: string }> = [];
+          for (let i = 0; i < storage.length; i++) {
+            const key = storage.key(i);
+            if (key) result.push({ name: key, value: storage.getItem(key) ?? "" });
+          }
+          return result;
+        };
+        if (window.location.origin !== o) return null;
+        return {
+          localStorage: read(window.localStorage),
+          sessionStorage: read(window.sessionStorage),
+        };
+      }, origin)
+      .catch(() => null);
 
-    if (!entries?.length) continue;
-    const found = discoverTokensInOrigin(origin, entries, meta);
+    if (!entries) continue;
+    const combined = [...entries.localStorage, ...entries.sessionStorage];
+    if (!combined.length) continue;
+    const found = discoverTokensInOrigin(origin, combined, meta);
     if (found) return found;
   }
 
   const currentOrigin = new URL(page.url()).origin;
-  const entries = await page.evaluate(() => {
-    const result: Array<{ name: string; value: string }> = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key) result.push({ name: key, value: localStorage.getItem(key) ?? "" });
-    }
-    return result;
-  }).catch(() => []);
+  const entries = await page
+    .evaluate(() => {
+      const read = (storage: Storage) => {
+        const result: Array<{ name: string; value: string }> = [];
+        for (let i = 0; i < storage.length; i++) {
+          const key = storage.key(i);
+          if (key) result.push({ name: key, value: storage.getItem(key) ?? "" });
+        }
+        return result;
+      };
+      return {
+        localStorage: read(window.localStorage),
+        sessionStorage: read(window.sessionStorage),
+      };
+    })
+    .catch(() => ({ localStorage: [], sessionStorage: [] }));
 
-  const fromCookies = await getTokensFromContextCookies(page, meta);
-  if (fromCookies) return fromCookies;
-
-  return discoverTokensInOrigin(currentOrigin, entries, meta);
+  const combined = [...entries.localStorage, ...entries.sessionStorage];
+  return discoverTokensInOrigin(currentOrigin, combined, meta);
 }
 
 async function getTokensFromContextCookies(
@@ -978,7 +1080,7 @@ function applyTokensToStorageState(
   }
 }
 
-async function tryAppNativeSilentRefresh(page: Page): Promise<boolean> {
+export async function tryAppNativeSilentRefresh(page: Page): Promise<boolean> {
   return page
     .evaluate(async () => {
       const w = window as unknown as Record<string, unknown>;
@@ -1121,24 +1223,37 @@ async function applyTokensToPage(
 ): Promise<void> {
   if (isCookieTokenKey(tokens.accessTokenKey)) {
     const accessName = cookieNameFromTokenKey(tokens.accessTokenKey);
-    const domain = tokens.cookieDomain ?? portalHostnames()[0];
-    const path = tokens.cookiePath ?? "/";
     const expMs = parseJwtExpiryMs(newAccess);
+    const cookieUrl = (() => {
+      try {
+        const current = page.url();
+        if (current && !current.startsWith("about:")) {
+          return new URL(current).origin + "/";
+        }
+      } catch {
+        // Fall back to configured portal origin.
+      }
+      const origin = tokens.origin.replace(/\/$/, "");
+      return `${origin}/`;
+    })();
+    const sharedCookie = {
+      url: cookieUrl,
+      expires: expMs ? Math.floor(expMs / 1000) : undefined,
+      secure: cookieUrl.startsWith("https:"),
+      sameSite: "Lax" as const,
+    };
     await page.context().addCookies([
       {
         name: accessName,
         value: newAccess,
-        domain,
-        path,
-        expires: expMs ? Math.floor(expMs / 1000) : undefined,
+        ...sharedCookie,
       },
       ...(newRefresh && tokens.refreshTokenKey && isCookieTokenKey(tokens.refreshTokenKey)
         ? [
             {
               name: cookieNameFromTokenKey(tokens.refreshTokenKey),
               value: newRefresh,
-              domain,
-              path,
+              ...sharedCookie,
             },
           ]
         : []),
@@ -1272,6 +1387,23 @@ export async function ensureFreshRssPortalStorageFile(): Promise<TokenRefreshRes
   return refreshAccessTokenFromFile();
 }
 
+/** localStorage keys that are not auth-related and bloat storageState (e.g. VALIDATION_CONFIG ~3.7 MB). */
+const RSS_PORTAL_NON_AUTH_LOCAL_STORAGE_KEYS = new Set(["VALIDATION_CONFIG"]);
+
+function filterNonAuthLocalStorage(
+  state: PlaywrightStorageState,
+): PlaywrightStorageState {
+  return {
+    cookies: state.cookies,
+    origins: (state.origins ?? []).map((origin) => ({
+      ...origin,
+      localStorage: (origin.localStorage ?? []).filter(
+        (entry) => !RSS_PORTAL_NON_AUTH_LOCAL_STORAGE_KEYS.has(entry.name),
+      ),
+    })),
+  };
+}
+
 export async function saveRssPortalStorageState(
   context: BrowserContext,
   options: DiscoverAuthMetaOptions = {},
@@ -1279,19 +1411,36 @@ export async function saveRssPortalStorageState(
   const authFile = getRssPortalAuthFile();
   await withStorageFileLock(async () => {
     fs.mkdirSync(path.dirname(authFile), { recursive: true });
-    await context.storageState({ path: authFile });
-    const state = readStorageStateFile(authFile);
-    if (state) discoverAndSaveAuthMeta(state, options);
+    const rawState = await context.storageState();
+    const state = filterNonAuthLocalStorage(rawState);
+    fs.writeFileSync(authFile, JSON.stringify(state, null, 2));
+    discoverAndSaveAuthMeta(state, options);
   });
 }
 
-/** Load saved cookies into an existing context (after MFA in fixture / stale reuseBrowser). */
+/** Load saved cookies and localStorage into an existing context. */
 export async function applyRssPortalAuthToContext(
   context: BrowserContext,
   filePath = getRssPortalAuthFile(),
 ): Promise<void> {
   const state = readStorageStateFile(filePath);
-  if (!state?.cookies?.length) return;
+  if (!state) return;
+
+  if (state.origins?.length) {
+    await context.addInitScript((origins) => {
+      const match = origins.find((o) => o.origin === window.location.origin);
+      if (!match?.localStorage?.length) return;
+      for (const entry of match.localStorage) {
+        try {
+          localStorage.setItem(entry.name, entry.value);
+        } catch {
+          // Ignore quota / security errors for non-auth keys.
+        }
+      }
+    }, state.origins);
+  }
+
+  if (!state.cookies?.length) return;
 
   await context.clearCookies();
   const cookies = state.cookies
@@ -1357,8 +1506,9 @@ export function startRssPortalSessionKeepAlive(
       const tokens = await getTokensFromPage(page);
       const meta = readAuthMeta();
       if (!tokens) {
-        await saveRssPortalStorageState(page.context(), { stampLastRefreshedAt: true });
-        logTestStep("RSS session keepalive: cookie SSO session — re-saved storage state.");
+        logTestStep(
+          "RSS session keepalive: no access token in browser — skipping save (MFA required on next test).",
+        );
         return;
       }
       const jwtExpiringSoon =
@@ -1386,8 +1536,6 @@ export function startRssPortalSessionKeepAlive(
   const timer = setInterval(() => {
     void tick();
   }, intervalMs);
-
-  void tick();
 
   return {
     stop: () => {

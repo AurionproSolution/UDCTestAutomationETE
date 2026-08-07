@@ -10,6 +10,8 @@ export interface LoginCredentials {
   password: string;
   role?: string;
   email?: string;
+  /** `totp` = automated TOTP; `manual` = pause for headed OTP entry in the browser. */
+  mfaMode?: "totp" | "manual";
 }
 
 export interface LoginTestData {

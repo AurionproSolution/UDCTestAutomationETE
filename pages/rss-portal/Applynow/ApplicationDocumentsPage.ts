@@ -48,10 +48,25 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
 
   async waitForApplicationDocumentsStep(): Promise<void> {
     this.logStep("Wait For Application Documents Step");
-    await expect(this.page.getByText(/Application documents/i).first()).toBeVisible({
-      timeout: 120_000,
-    });
+    await expect
+      .poll(
+        async () => {
+          const fileInputCount = await this.page.locator('#fileInput, input[type="file"]').count();
+          if (fileInputCount > 0) return true;
+          return this.page
+            .getByText(/Browse Files|Upload documents|Supporting document/i)
+            .first()
+            .isVisible()
+            .catch(() => false);
+        },
+        { timeout: 120_000, intervals: [250, 500, 1_000, 2_000] },
+      )
+      .toBe(true);
     await this.waitForLoadingComplete();
+  }
+
+  private fileUploadInput(): Locator {
+    return this.page.locator('#fileInput, input[type="file"]').first();
   }
 
   /**
@@ -62,7 +77,7 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
   ): Promise<void> {
     this.logStep("Upload Supporting Document");
     await this.waitForProgressSpinnersHidden();
-    const input = this.page.locator("#fileInput");
+    const input = this.fileUploadInput();
     await input.waitFor({ state: "attached", timeout: 30_000 });
     await input.setInputFiles(filePath);
     await this.waitForLoadingComplete();
@@ -94,6 +109,19 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
     await this.checkIonCheckboxByName("legalConfirmed");
   }
 
+  async fillNotes(notes: string): Promise<void> {
+    this.logStep("Fill Notes");
+    const notesInput = this.page
+      .getByLabel(/Notes/i)
+      .or(this.page.locator('[formcontrolname="notes"] textarea, [formcontrolname="notes"] input'))
+      .or(this.page.getByPlaceholder(/Notes/i))
+      .first();
+    if (await notesInput.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await this.clickAndFillElement(notesInput, notes);
+      await this.waitForLoadingComplete();
+    }
+  }
+
   /** Footer primary — solid Submit (same pattern as `:text-is("Next")`). */
   async clickSubmit(clickTimeoutMs = 60_000): Promise<void> {
     this.logStep("Click Submit");
@@ -106,5 +134,34 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
     await this.scrollIfNeeded(submit);
     await this.clickElement(submit, clickTimeoutMs);
     await this.waitForLoadingComplete();
+  }
+
+  async expectQuoteCreatedConfirmation(): Promise<void> {
+    this.logStep("Expect Quote Created Confirmation");
+    await expect(
+      this.page
+        .getByText(/quote|contract|created|submitted|confirmation/i)
+        .first(),
+    ).toBeVisible({ timeout: 120_000 });
+    await expect(
+      this.page.getByText(/Quote|Loan|Contract/i).first(),
+    ).toBeVisible({ timeout: 60_000 });
+  }
+
+  async submitApplicationWithDocuments(options?: {
+    notes?: string;
+    useApplyId?: boolean;
+  }): Promise<void> {
+    this.logStep("Submit Application With Documents");
+    await this.uploadSupportingDocument();
+    if (options?.useApplyId) {
+      await this.checkApplyIdStartVerification();
+    }
+    await this.confirmLegalAcknowledgements();
+    if (options?.notes) {
+      await this.fillNotes(options.notes);
+    }
+    await this.clickSubmit();
+    await this.expectQuoteCreatedConfirmation();
   }
 }

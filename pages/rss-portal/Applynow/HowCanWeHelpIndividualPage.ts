@@ -26,11 +26,6 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
   readonly individualTileButton: Locator;
   /** Tile: Business — `img[alt="business"]` / `Business` label inside `button.business-btn`. */
   readonly businessTileButton: Locator;
-  /**
-   * “What would you like to do?” — `p-dropdown` bound as `purchaseThrough`
-   * (label-based XPath avoids reliance on minified `ng-reflect-*` only).
-   */
-  readonly purchaseThroughDropdownRoot: Locator;
 
   constructor(page: Page) {
     super(page);
@@ -44,11 +39,26 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
       })
       .or(page.locator("button.business-btn").filter({ hasText: /^Business$/i }))
       .first();
-    const byFormName = page.locator('p-dropdown[ng-reflect-name="purchaseThrough"]');
-    const byLabel = page.locator(
-      "xpath=//label[contains(normalize-space(.),'What would you like to do')]/following::p-dropdown[1]",
-    );
-    this.purchaseThroughDropdownRoot = byFormName.or(byLabel).first();
+  }
+
+  private applyNowRoot(): Locator {
+    return this.page.locator("app-apply-now");
+  }
+
+  /**
+   * “What would you like to do?” dropdown inside Apply Now step 1.
+   * Label-scoped — `ng-reflect-name="purchaseThrough"` can match a stale hidden control on QAT.
+   */
+  private purchaseThroughDropdownRoot(): Locator {
+    return this.applyNowRoot()
+      .locator(
+        "xpath=.//label[contains(normalize-space(.),'What would you like to do')]/following::p-dropdown[1]",
+      )
+      .first();
+  }
+
+  private purchaseThroughCombobox(): Locator {
+    return this.purchaseThroughDropdownRoot().locator('[role="combobox"]').first();
   }
 
   protected stepLogPrefix(): string {
@@ -71,6 +81,29 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
     await this.individualTileButton.waitFor({ state: "visible", timeout: 15_000 });
     await this.clickElement(this.individualTileButton);
     await this.waitForLoadingComplete();
+    await expect
+      .poll(
+        async () => {
+          const selectedByIcon = this.page
+            .locator(
+              "button.business-btn .clicked-icon-class, button.business-btn .selected-icon-class, button.business-btn .selected-icon-name-class",
+            )
+            .filter({ has: this.page.locator('img[alt="individual"]') })
+            .first();
+          if (await selectedByIcon.isVisible().catch(() => false)) {
+            return true;
+          }
+          const selectedButton = this.individualTileButton.filter({
+            has: this.page.locator(
+              ".clicked-icon-class, .selected-icon-class, .selected-icon-name-class",
+            ),
+          });
+          return selectedButton.isVisible().catch(() => false);
+        },
+        { timeout: 30_000, intervals: [200, 500, 1_000] },
+      )
+      .toBe(true);
+    await this.purchaseThroughDropdownRoot().waitFor({ state: "visible", timeout: 30_000 });
   }
 
   /** Selects the Business applicant type tile. */
@@ -79,58 +112,183 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
     await this.businessTileButton.waitFor({ state: "visible", timeout: 15_000 });
     await this.clickElement(this.businessTileButton);
     await this.waitForLoadingComplete();
+    await expect
+      .poll(
+        async () =>
+          this.page
+            .locator("button.business-btn .clicked-icon-class, button.business-btn .selected-icon-name-class")
+            .filter({ hasText: /Business/i })
+            .first()
+            .isVisible()
+            .catch(() => false),
+        { timeout: 30_000, intervals: [200, 500, 1_000] },
+      )
+      .toBe(true);
+    await this.purchaseThroughDropdownRoot().waitFor({ state: "visible", timeout: 30_000 });
   }
 
   private escapeRx(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
+  private purchaseThroughOptionPatterns(optionLabel: string): RegExp[] {
+    const patterns: RegExp[] = [new RegExp(this.escapeRx(optionLabel), "i")];
+    if (/conditional\s+approval/i.test(optionLabel)) {
+      patterns.push(/conditional\s+approval/i);
+    }
+    if (/purchase through.*dealership/i.test(optionLabel)) {
+      patterns.push(/purchase through.*dealership/i);
+    }
+    if (/^others$/i.test(optionLabel.trim())) {
+      patterns.push(/^others$/i);
+    }
+    return patterns;
+  }
+
+  private isPlaceholderPurchaseThroughLabel(label: string): boolean {
+    const normalized = label.replace(/\s+/g, " ").trim();
+    return (
+      !normalized ||
+      /^--\s*select/i.test(normalized) ||
+      /^select(\s+option)?$/i.test(normalized)
+    );
+  }
+
+  private async readPurchaseThroughDisplayValue(combobox: Locator): Promise<string> {
+    const aria = (await combobox.getAttribute("aria-label").catch(() => "")) ?? "";
+    const text = (await combobox.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+    return `${aria} ${text}`.replace(/\s+/g, " ").trim();
+  }
+
+  private async isPurchaseThroughOptionSelected(
+    combobox: Locator,
+    patterns: RegExp[],
+  ): Promise<boolean> {
+    const display = await this.readPurchaseThroughDisplayValue(combobox);
+    if (this.isPlaceholderPurchaseThroughLabel(display)) {
+      return false;
+    }
+    return patterns.some((pattern) => pattern.test(display));
+  }
+
+  private async clickPrimeNgDropdownOption(
+    panel: Locator,
+    patterns: RegExp[],
+  ): Promise<boolean> {
+    for (const pattern of patterns) {
+      const row = panel
+        .locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item")
+        .filter({ hasText: pattern })
+        .first();
+      if (await row.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await row.scrollIntoViewIfNeeded();
+        try {
+          await row.click({ timeout: 15_000 });
+        } catch {
+          await row.click({ force: true, timeout: 15_000 });
+        }
+        return true;
+      }
+
+      const byRole = this.page.getByRole("option", { name: pattern }).first();
+      if (await byRole.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await byRole.scrollIntoViewIfNeeded();
+        try {
+          await byRole.click({ timeout: 15_000 });
+        } catch {
+          await byRole.click({ force: true, timeout: 15_000 });
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Waits until no visible PrimeNG progress spinner is blocking the Apply Now step. */
+  private async waitForProgressSpinnersHidden(timeoutMs = 300_000): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const items = this.page.locator("p-progressspinner");
+          const count = await items.count();
+          for (let i = 0; i < count; i++) {
+            if (await items.nth(i).isVisible().catch(() => false)) {
+              return false;
+            }
+          }
+          return true;
+        },
+        { timeout: timeoutMs, intervals: [200, 400, 800, 1500] },
+      )
+      .toBe(true);
+  }
+
   /**
    * PrimeNG attaches `.p-dropdown-panel` to `body`; hidden panels stay in DOM — use a visible panel.
    * Opens via `[role=combobox]` first (matches the label span users click), then the chevron trigger.
    */
-  private async pickPrimeNgDropdownOption(optionLabel: string): Promise<void> {
-    const root = this.purchaseThroughDropdownRoot;
+  private async pickPrimeNgDropdownOption(
+    root: Locator,
+    optionLabel: string,
+  ): Promise<void> {
+    const patterns = this.purchaseThroughOptionPatterns(optionLabel);
     await root.waitFor({ state: "visible", timeout: 15_000 });
-
-    const looseName = new RegExp(this.escapeRx(optionLabel), "i");
+    await this.waitForProgressSpinnersHidden();
     const combobox = root.locator('[role="combobox"]').first();
     const trigger = root
       .locator(".p-dropdown-trigger, [aria-label='dropdown trigger']")
       .first();
+    const dropdownClickTimeoutMs = 90_000;
 
-    await combobox.scrollIntoViewIfNeeded();
-    if (await combobox.isVisible().catch(() => false)) {
-      await this.clickElement(combobox);
-    } else {
-      await trigger.waitFor({ state: "visible", timeout: 15_000 });
-      await this.clickElement(trigger);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (await this.isPurchaseThroughOptionSelected(combobox, patterns)) {
+        return;
+      }
+
+      await this.page.keyboard.press("Escape").catch(() => undefined);
+      await combobox.scrollIntoViewIfNeeded();
+      if (await combobox.isVisible().catch(() => false)) {
+        await this.clickElement(combobox, dropdownClickTimeoutMs);
+      } else {
+        await trigger.waitFor({ state: "visible", timeout: 15_000 });
+        await this.clickElement(trigger, dropdownClickTimeoutMs);
+      }
+
+      const visiblePanel = this.page.locator(".p-dropdown-panel").filter({ visible: true });
+      await visiblePanel.last().waitFor({ state: "visible", timeout: 12_000 });
+      const panel = visiblePanel.last();
+      const clicked = await this.clickPrimeNgDropdownOption(panel, patterns);
+      if (!clicked) {
+        throw new Error(`Purchase-through option not found in dropdown: ${optionLabel}`);
+      }
+
+      await visiblePanel
+        .last()
+        .waitFor({ state: "hidden", timeout: 5_000 })
+        .catch(() => undefined);
+      await this.waitForLoadingComplete();
+
+      if (await this.isPurchaseThroughOptionSelected(combobox, patterns)) {
+        return;
+      }
     }
 
-    const visiblePanel = this.page.locator(".p-dropdown-panel").filter({ visible: true });
-    await visiblePanel.last().waitFor({ state: "visible", timeout: 12_000 });
+    await expect
+      .poll(async () => this.isPurchaseThroughOptionSelected(combobox, patterns), {
+        timeout: 20_000,
+        intervals: [250, 500, 1_000],
+      })
+      .toBe(true);
+  }
 
-    const panel = visiblePanel.last();
-    const row = panel
-      .locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item")
-      .filter({ hasText: looseName })
-      .first();
-
-    if (await row.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await row.click();
-    } else {
-      const byRole = this.page.getByRole("option", { name: looseName }).first();
-      await byRole.waitFor({ state: "visible", timeout: 8000 });
-      await byRole.click();
-    }
-
-    await this.waitForLoadingComplete();
+  private async pickPurchaseThroughOption(optionLabel: string): Promise<void> {
+    await this.pickPrimeNgDropdownOption(this.purchaseThroughDropdownRoot(), optionLabel);
   }
 
   /** Sets “What would you like to do?” to Purchase through a dealership. */
   async selectPurchaseThroughDealership(): Promise<void> {
     this.logStep("Select Purchase Through Dealership");
-    await this.pickPrimeNgDropdownOption("Purchase through a dealership");
+    await this.pickPurchaseThroughOption("Purchase through a dealership");
   }
 
   /**
@@ -138,7 +296,37 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
    */
   async selectConditionalApproval(): Promise<void> {
     this.logStep("Select Conditional Approval");
-    await this.pickPrimeNgDropdownOption("I am after a Conditional Approval");
+    await this.pickPurchaseThroughOption("I am after a Conditional Approval");
+  }
+
+  /** Sets “What would you like to do?” to **Others**. */
+  async selectOthers(): Promise<void> {
+    this.logStep("Select Others");
+    await this.pickPurchaseThroughOption("Others");
+  }
+
+  /** Mandatory free-text when **Others** is selected. */
+  async fillPleaseTellUs(reason: string): Promise<void> {
+    this.logStep("Fill Please Tell Us");
+    const input = this.page
+      .getByLabel(/Please tell us/i)
+      .or(this.page.locator('[formcontrolname="pleaseTellUs"] input, [name="pleaseTellUs"]'))
+      .or(
+        this.page.locator(
+          "xpath=//label[contains(.,'Please tell us')]/following::input[1] | //label[contains(.,'Please tell us')]/following::textarea[1]",
+        ),
+      )
+      .first();
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await this.clickAndFillElement(input, reason);
+    await this.waitForLoadingComplete();
+  }
+
+  async expectOthersSelected(timeoutMs = 15_000): Promise<void> {
+    this.logStep("Expect Others Selected");
+    await expect(this.purchaseThroughCombobox()).toContainText(/Others/i, {
+      timeout: timeoutMs,
+    });
   }
 
   /** Asserts the purchase-through dropdown shows “Purchase through a dealership”. */
@@ -146,21 +334,16 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
     timeoutMs = 15_000,
   ): Promise<void> {
     this.logStep("Expect Purchase Through Dealership Selected");
-    const face = this.purchaseThroughDropdownRoot
-      .locator('[role="combobox"]')
-      .first();
-    await expect(face).toContainText(/Purchase through a dealership/i, {
-      timeout: timeoutMs,
-    });
+    await expect(this.purchaseThroughCombobox()).toContainText(
+      /Purchase through a dealership/i,
+      { timeout: timeoutMs },
+    );
   }
 
   /** Asserts “What would you like to do?” shows **I am after a Conditional Approval**. */
   async expectConditionalApprovalSelected(timeoutMs = 15_000): Promise<void> {
     this.logStep("Expect Conditional Approval Selected");
-    const face = this.purchaseThroughDropdownRoot
-      .locator('[role="combobox"]')
-      .first();
-    await expect(face).toContainText(
+    await expect(this.purchaseThroughCombobox()).toContainText(
       /I\s+am\s+after\s+a\s+Conditional\s+Approval/i,
       { timeout: timeoutMs },
     );
@@ -251,7 +434,21 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
       await byRole.waitFor({ state: "visible", timeout: 8000 });
       await byRole.click();
     }
+    await visiblePanel
+      .last()
+      .waitFor({ state: "hidden", timeout: 5_000 })
+      .catch(() => undefined);
     await this.waitForLoadingComplete();
+    await expect
+      .poll(
+        async () => {
+          const aria = (await combobox.getAttribute("aria-label").catch(() => "")) ?? "";
+          const text = (await combobox.innerText().catch(() => "")).replace(/\s+/g, " ");
+          return looseName.test(`${aria} ${text}`);
+        },
+        { timeout: 20_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
   }
 
   async waitForDealershipSection(): Promise<void> {
@@ -268,7 +465,13 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
    * Waits up to `timeoutMgs` (default 5 min) for the combobox to become enabled.
    */
   dealershipDropdownRoot(): Locator {
-    return this.page.locator('p-dropdown[ng-reflect-name="selectDelearship"]');
+    return this.page
+      .locator("app-apply-now")
+      .locator(
+        "xpath=.//label[contains(.,'Select a UDC Dealership you have used before')]/following::p-dropdown[1]",
+      )
+      .filter({ visible: true })
+      .first();
   }
 
   async waitForDealersLoaded(timeoutMs = 300_000): Promise<void> {
@@ -292,33 +495,396 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     await this.waitForLoadingComplete();
   }
 
+  private applyNowRoot(): Locator {
+    return this.page.locator("app-apply-now");
+  }
+
+  private isPlaceholderDealerLabel(label: string): boolean {
+    const normalized = label.replace(/\s+/g, " ").trim();
+    return !normalized || /^--\s*select/i.test(normalized);
+  }
+
+  private async openPrimeNgDropdownPanel(root: Locator): Promise<Locator> {
+    await root.waitFor({ state: "visible", timeout: 15_000 });
+    await this.waitForProgressSpinnersHidden();
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+
+    const combobox = root.locator('[role="combobox"]').first();
+    const trigger = root
+      .locator(".p-dropdown-trigger, [aria-label='dropdown trigger']")
+      .first();
+    await combobox.scrollIntoViewIfNeeded();
+    const dropdownClickTimeoutMs = 90_000;
+    if (await combobox.isVisible().catch(() => false)) {
+      await this.clickElement(combobox, dropdownClickTimeoutMs);
+    } else {
+      await trigger.waitFor({ state: "visible", timeout: 15_000 });
+      await this.clickElement(trigger, dropdownClickTimeoutMs);
+    }
+
+    const visiblePanel = this.page.locator(".p-dropdown-panel").filter({ visible: true });
+    await visiblePanel.last().waitFor({ state: "visible", timeout: 12_000 });
+    return visiblePanel.last();
+  }
+
+  private async readVisibleDropdownOptionLabels(panel: Locator): Promise<string[]> {
+    const items = panel.locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item");
+    await items
+      .first()
+      .waitFor({ state: "visible", timeout: 8_000 })
+      .catch(() => undefined);
+    const count = await items.count();
+    const labels: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const text = (await items.nth(i).innerText()).replace(/\s+/g, " ").trim();
+      if (!this.isPlaceholderDealerLabel(text)) {
+        labels.push(text);
+      }
+    }
+    return labels;
+  }
+
+  private usedBeforeDealerCombobox(): Locator {
+    return this.dealershipDropdownRoot().locator('[role="combobox"]').first();
+  }
+
+  private async readUsedBeforeDealerDisplayValue(): Promise<string> {
+    const combobox = this.usedBeforeDealerCombobox();
+    const aria = (await combobox.getAttribute("aria-label").catch(() => "")) ?? "";
+    const text = (await combobox.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+    return `${aria} ${text}`.replace(/\s+/g, " ").trim();
+  }
+
+  async isDealershipSelectionValid(): Promise<boolean> {
+    const usedBeforeText = await this.readUsedBeforeDealerDisplayValue();
+    if (!this.isPlaceholderDealerLabel(usedBeforeText)) {
+      return true;
+    }
+    const anotherSearch = this.anotherDealershipSearchInput();
+    const anotherText = (await anotherSearch.inputValue().catch(() => "")).trim();
+    return anotherText.length > 0;
+  }
+
+  private async waitForUsedBeforeDealerSelected(
+    optionLabel?: string,
+    timeoutMs = 30_000,
+  ): Promise<void> {
+    const labelPattern = optionLabel
+      ? new RegExp(this.escapeRx(optionLabel), "i")
+      : undefined;
+    await expect
+      .poll(
+        async () => {
+          const display = await this.readUsedBeforeDealerDisplayValue();
+          if (this.isPlaceholderDealerLabel(display)) {
+            return false;
+          }
+          if (!labelPattern) {
+            return true;
+          }
+          return labelPattern.test(display);
+        },
+        { timeout: timeoutMs, intervals: [250, 500, 1_000, 2_000] },
+      )
+      .toBe(true);
+  }
+
+  /**
+   * Picks a dealer from the “used before” PrimeNG dropdown and waits until the face value updates.
+   */
+  private async pickDealerFromUsedBeforeDropdown(optionLabel?: string): Promise<string> {
+    const root = this.dealershipDropdownRoot();
+    const panel = await this.openPrimeNgDropdownPanel(root);
+    const items = panel.locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item");
+    const labelPattern = optionLabel
+      ? new RegExp(this.escapeRx(optionLabel), "i")
+      : undefined;
+
+    const count = await items.count();
+    for (let i = 0; i < count; i++) {
+      const item = items.nth(i);
+      const text = (await item.innerText()).replace(/\s+/g, " ").trim();
+      if (this.isPlaceholderDealerLabel(text)) {
+        continue;
+      }
+      if (labelPattern && !labelPattern.test(text)) {
+        continue;
+      }
+      await item.scrollIntoViewIfNeeded();
+      await item.click({ timeout: 15_000 });
+      await panel.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => undefined);
+      await this.waitForProgressSpinnersHidden();
+      await this.waitForLoadingComplete();
+      await this.waitForUsedBeforeDealerSelected(text);
+      return text;
+    }
+
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+    throw new Error(
+      optionLabel
+        ? `Dealership option not found in “used before” dropdown: ${optionLabel}`
+        : "No selectable dealership options in “used before” dropdown.",
+    );
+  }
+
+  /** Opens “used before” dropdown and returns non-placeholder option labels (panel closed afterward). */
+  async getDealerUsedBeforeOptionLabels(): Promise<string[]> {
+    this.logStep("Get Dealer Used Before Option Labels");
+    const root = this.dealershipDropdownRoot();
+    const panel = await this.openPrimeNgDropdownPanel(root);
+    const labels = await this.readVisibleDropdownOptionLabels(panel);
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+    return labels;
+  }
+
+  private async pickFirstPrimeNgDropdownOption(root: Locator): Promise<string> {
+    const panel = await this.openPrimeNgDropdownPanel(root);
+    const items = panel.locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item");
+    const count = await items.count();
+    for (let i = 0; i < count; i++) {
+      const item = items.nth(i);
+      const text = (await item.innerText()).replace(/\s+/g, " ").trim();
+      if (this.isPlaceholderDealerLabel(text)) {
+        continue;
+      }
+      await item.click();
+      await panel.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => undefined);
+      await this.waitForLoadingComplete();
+      return text;
+    }
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+    throw new Error("No dealership options found in “used before” dropdown.");
+  }
+
+  private anotherDealershipSearchInput(): Locator {
+    return this.applyNowRoot()
+      .locator(
+        "xpath=.//label[contains(.,'Select Another UDC Dealership')]/following::input[1] | .//label[contains(.,'Select Another UDC Dealership')]/following::*[@role='combobox'][1]",
+      )
+      .first();
+  }
+
+  /**
+   * When the party has no prior dealerships, pick one via **Select Another UDC Dealership** search.
+   */
+  async selectAnotherDealershipBySearch(query: string): Promise<string> {
+    this.logStep(`Select Another Dealership By Search — ${query}`);
+    const input = this.anotherDealershipSearchInput();
+    await input.waitFor({ state: "visible", timeout: 20_000 });
+    await this.waitForProgressSpinnersHidden();
+    await input.scrollIntoViewIfNeeded();
+    await input.click({ timeout: 15_000 });
+    await input.fill("");
+    await input.pressSequentially(query, { delay: 80 });
+    await this.page.waitForTimeout(600);
+
+    const panel = this.page.locator(".p-autocomplete-panel").filter({ visible: true });
+    const row = panel
+      .locator(".p-autocomplete-item, li[role='option'], .p-dropdown-item")
+      .filter({ hasNotText: /^--\s*select/i })
+      .first();
+    const byRole = this.page
+      .getByRole("option")
+      .filter({ hasNotText: /^--\s*select/i })
+      .first();
+
+    if (await row.isVisible({ timeout: 30_000 }).catch(() => false)) {
+      const label = (await row.innerText()).replace(/\s+/g, " ").trim();
+      await row.click();
+      await panel.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => undefined);
+      await this.waitForProgressSpinnersHidden();
+      await this.waitForLoadingComplete();
+      return label;
+    }
+
+    await byRole.waitFor({ state: "visible", timeout: 30_000 });
+    const label = (await byRole.innerText()).replace(/\s+/g, " ").trim();
+    await byRole.click();
+    await this.waitForProgressSpinnersHidden();
+    await this.waitForLoadingComplete();
+    return label;
+  }
+
+  /**
+   * Picks a dealership for Apply Now: preferred “used before” label when listed, else first history dealer,
+   * else searches **Select Another UDC Dealership** (common for QAT parties with no prior dealer history).
+   */
+  async selectDealershipForApplyNow(options?: {
+    preferredLabel?: string;
+    fallbackSearch?: string;
+  }): Promise<string> {
+    this.logStep("Select Dealership For Apply Now");
+    const preferred = options?.preferredLabel?.trim();
+    const fallbackSearch = options?.fallbackSearch?.trim() || "10";
+    const usedBeforeLabels = await this.getDealerUsedBeforeOptionLabels();
+    const candidates: string[] = [];
+
+    if (preferred) {
+      const preferredMatch = usedBeforeLabels.find((label) =>
+        new RegExp(this.escapeRx(preferred), "i").test(label),
+      );
+      if (preferredMatch) {
+        candidates.push(preferredMatch);
+      }
+    }
+
+    for (const label of usedBeforeLabels) {
+      if (!candidates.includes(label)) {
+        candidates.push(label);
+      }
+    }
+
+    for (const label of candidates) {
+      try {
+        const selected = await this.pickDealerFromUsedBeforeDropdown(label);
+        if (await this.isDealershipSelectionValid()) {
+          return selected;
+        }
+      } catch {
+        // try next candidate / fallback search
+      }
+    }
+
+    try {
+      const selected = await this.pickDealerFromUsedBeforeDropdown();
+      if (await this.isDealershipSelectionValid()) {
+        return selected;
+      }
+    } catch {
+      // fall through to search
+    }
+
+    const searchTerms = [fallbackSearch, "UDC", "motor"].filter(
+      (term, index, all) => term && all.indexOf(term) === index,
+    );
+    for (const term of searchTerms) {
+      try {
+        const selected = await this.selectAnotherDealershipBySearch(term);
+        if (await this.isDealershipSelectionValid()) {
+          return selected;
+        }
+      } catch {
+        // try next search term
+      }
+    }
+
+    throw new Error(
+      "Could not select a dealership via history dropdown or search on Apply Now.",
+    );
+  }
+
+  async expectDealershipSelected(): Promise<void> {
+    this.logStep("Expect Dealership Selected");
+    const dealershipBlock = this.applyNowRoot().locator(
+      "xpath=.//label[contains(.,'Select a UDC Dealership you have used before')]/ancestor::*[contains(@class,'col') or self::div][1]",
+    );
+    await expect(dealershipBlock.getByText(/^Please Complete$/i)).toBeHidden({
+      timeout: 15_000,
+    });
+    const usedBefore = this.dealershipDropdownRoot().locator('[role="combobox"]').first();
+    const usedBeforeText = (await usedBefore.innerText()).replace(/\s+/g, " ").trim();
+    const anotherSearch = this.anotherDealershipSearchInput();
+    const anotherText = (await anotherSearch.inputValue().catch(() => "")).trim();
+
+    expect(
+      !this.isPlaceholderDealerLabel(usedBeforeText) || anotherText.length > 0,
+      "A dealership must be selected via history dropdown or search.",
+    ).toBe(true);
+  }
+
   /**
    * `p-dropdown` bound as `selectDelearship` (server-side spelling).
    */
   async selectDealerYouHaveUsedBefore(dealerLabel: string): Promise<void> {
     this.logStep("Select Dealer You Have Used Before");
-    const root = this.dealershipDropdownRoot();
-    await this.pickPrimeNgDropdownOption(root, dealerLabel);
+    await this.pickDealerFromUsedBeforeDropdown(dealerLabel);
+  }
+
+  /**
+   * Asset-type tile grid (“What are you looking to purchase?”) — not the summary row of an
+   * already-added asset (that row also shows “Car or Van” and would skip re-selection).
+   */
+  private assetTypePickerRoot(): Locator {
+    return this.assetRoot
+      .locator(
+        'xpath=.//*[self::h5 or self::p or self::span][contains(normalize-space(.),"What are you looking to purchase")]/following::*[self::div or self::generic][1]',
+      )
+      .first();
+  }
+
+  private carOrVanPickerButton(): Locator {
+    return this.assetTypePickerRoot()
+      .locator("button")
+      .filter({ hasText: /Car or Van/i })
+      .first();
+  }
+
+  private carOrVanPickerIconTile(): Locator {
+    return this.assetTypePickerRoot()
+      .locator(".icon-container")
+      .filter({ hasText: /Car or Van/i })
+      .first();
+  }
+
+  private async resolveCarOrVanPickerTile(): Promise<Locator> {
+    const button = this.carOrVanPickerButton();
+    if (await button.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      return button;
+    }
+    return this.carOrVanPickerIconTile();
+  }
+
+  private async isCarOrVanSelectedInPicker(): Promise<boolean> {
+    const picker = this.assetTypePickerRoot();
+    const selectedMarkers = ".selected-icon-class, .clicked-icon-class, .selected-icon-name-class, .clicked-icon-class_business";
+    const selectedButton = picker
+      .locator("button")
+      .filter({ hasText: /Car or Van/i })
+      .filter({ has: picker.locator(selectedMarkers) })
+      .first();
+    if (await selectedButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return true;
+    }
+    const selectedIcon = picker
+      .locator(".icon-container")
+      .filter({ hasText: /Car or Van/i })
+      .filter({ has: picker.locator(".selected-icon-class, .clicked-icon-class") })
+      .first();
+    return selectedIcon.isVisible({ timeout: 2_000 }).catch(() => false);
+  }
+
+  private async waitForEditablePurchasePriceInput(scope: Locator): Promise<Locator> {
+    let resolved: Locator | undefined;
+    await expect
+      .poll(
+        async () => {
+          try {
+            resolved = await this.resolveEditablePurchasePriceInput(scope);
+            return await resolved.isVisible().catch(() => false);
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 60_000, intervals: [250, 500, 1_000, 2_000] },
+      )
+      .toBe(true);
+    return resolved!;
   }
 
   /** Ensures “Car or Van” asset type tile is selected (desktop `app-asset-select` layout). */
   async ensureCarOrVanAssetTypeSelected(): Promise<void> {
     this.logStep("Ensure Car Or Van Asset Type Selected");
     await this.waitForProgressSpinnersHidden(60_000);
-    const tile = this.assetRoot
-      .locator(".icon-container")
-      .filter({ hasText: /Car or Van/i })
-      .first();
+    const tile = await this.resolveCarOrVanPickerTile();
     await tile.waitFor({ state: "visible", timeout: 15_000 });
-    const selected = this.assetRoot.locator(".selected-icon-class").filter({
-      hasText: /Car or Van/i,
-    });
-    if (await selected.isVisible().catch(() => false)) {
+    if (await this.isCarOrVanSelectedInPicker()) {
+      await this.waitForEditablePurchasePriceInput(await this.assetFormScope()).catch(() => undefined);
       return;
     }
     await this.clickElement(tile);
     await this.waitForLoadingComplete();
     await this.waitForProgressSpinnersHidden(60_000);
+    await this.waitForEditablePurchasePriceInput(await this.assetFormScope());
   }
 
   /**
@@ -330,6 +896,20 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     this.logStep("Ensure Car Or Light Commercial Asset Type Selected");
     await this.waitForProgressSpinnersHidden(60_000);
 
+    const selectedBusinessButton = this.assetRoot
+      .locator("button")
+      .filter({ hasText: /Car or Light Commercial/i })
+      .filter({
+        has: this.page.locator(
+          ".clicked-icon-class_business, .selected-icon-class, .clicked-icon-class, .selected-icon-name-class",
+        ),
+      })
+      .first();
+
+    if (await selectedBusinessButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return;
+    }
+
     const selectedTile = this.assetRoot
       .locator("div.icon-container_business.clicked-icon-class_business")
       .filter({ visible: true })
@@ -337,6 +917,18 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
       .first();
 
     if (await selectedTile.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      return;
+    }
+
+    const buttonTile = this.assetRoot
+      .locator("button")
+      .filter({ hasText: /Car or Light Commercial/i })
+      .first();
+    if (await buttonTile.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await this.scrollIfNeeded(buttonTile);
+      await this.clickElement(buttonTile);
+      await this.waitForLoadingComplete();
+      await this.waitForProgressSpinnersHidden(60_000);
       return;
     }
 
@@ -351,7 +943,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     await this.waitForLoadingComplete();
     await this.waitForProgressSpinnersHidden(60_000);
 
-    await expect(selectedTile).toBeVisible({ timeout: 20_000 });
+    await expect(selectedTile.or(selectedBusinessButton)).toBeVisible({ timeout: 20_000 });
   }
 
   /** Visible asset form: `.web` (desktop) or `.mobile` — both exist in DOM; filling the hidden block does nothing in the UI. */
@@ -372,12 +964,14 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
    * Avoid binding to `ng-*` validation classes; those change after edit.
    */
 
-  /** Hub: `input.w-full.text-sm.p-inputtext.price-input` (visible). */
-  private hubPurchasePriceInput(): Locator {
-    return this.page
-      .locator("input.w-full.text-sm.p-inputtext.price-input")
+  /** Hub: editable purchase-price entry on SIT/QAT (`formcontrolname="purchasePrice"` + `price-input`). */
+  private hubPurchasePriceInput(scope: Locator): Locator {
+    return scope
+      .locator(
+        'input[formcontrolname="purchasePrice"], input.w-full.text-sm.p-inputtext.price-input[currencymask], input.w-full.text-sm.p-inputtext.price-input, amount input[currencymask]',
+      )
       .filter({ visible: true })
-      .first();
+      .last();
   }
 
   /** Desktop row: Make = ion-col(2), Model = (3), Rego = (4) under `form ion-row`. */
@@ -406,6 +1000,213 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
       .filter({ hasText: /^[+＋]?\s*Add(\s+Another\s+Asset)?$/i });
   }
 
+  private addAnotherAssetButton(): Locator {
+    return this.assetRoot
+      .getByRole("button", { name: /Add Another Asset/i })
+      .filter({ visible: true })
+      .first();
+  }
+
+  /** Opens a new asset row after the first asset has been added to the quote. */
+  async clickAddAnotherAsset(): Promise<void> {
+    this.logStep("Click Add Another Asset");
+    const btn = this.addAnotherAssetButton();
+    await btn.waitFor({ state: "visible", timeout: 20_000 });
+    await this.scrollIfNeeded(btn);
+    await this.clickElement(btn);
+    await this.waitForProgressSpinnersHidden(120_000);
+    await this.waitForLoadingComplete();
+  }
+
+  /**
+   * Returns the asset `form` that should receive the next row of values
+   * (last empty purchase-price row, or the only visible form on first asset).
+   */
+  private async editableAssetRowScope(): Promise<Locator> {
+    const scope = await this.assetFormScope();
+    const rowContainers = scope.locator("form").filter({ visible: true });
+    const containerCount = await rowContainers.count();
+    const containers =
+      containerCount > 0
+        ? rowContainers
+        : scope.locator("form, ion-row, .asset-row").filter({ visible: true });
+
+    const count = await containers.count();
+    for (let i = count - 1; i >= 0; i--) {
+      const row = containers.nth(i);
+      try {
+        const priceInput = await this.resolveEditablePurchasePriceInput(row);
+        const raw = (await priceInput.inputValue().catch(() => "")).replace(/[^0-9.]/g, "");
+        if (!raw || Number.parseFloat(raw) === 0) {
+          return row;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return scope;
+  }
+
+  private async isPurchasePriceInputEditable(input: Locator): Promise<boolean> {
+    const readonly = await input.getAttribute("readonly");
+    if (readonly !== null && readonly !== "false") {
+      return false;
+    }
+    return !(await input.isDisabled().catch(() => false));
+  }
+
+  private currencyDigitsMatch(displayValue: string, wantDigits: string): boolean {
+    const got = displayValue.replace(/\D/g, "");
+    const want = wantDigits.replace(/\D/g, "");
+    if (!want) return true;
+    if (!got) return false;
+    if (got === want || got.endsWith(want) || want.endsWith(got)) {
+      return true;
+    }
+    const gotNum = Number.parseInt(got, 10);
+    const wantNum = Number.parseInt(want, 10);
+    if (Number.isNaN(gotNum) || Number.isNaN(wantNum)) {
+      return false;
+    }
+    // $50,000.00 → "5000000" vs want "50000"
+    return gotNum === wantNum || Math.round(gotNum / 100) === wantNum;
+  }
+
+  /** Skips readonly summary rows; prefers the last empty editable purchase-price field. */
+  private async resolveEditablePurchasePriceInput(scope: Locator): Promise<Locator> {
+    const selectorGroups = [
+      scope
+        .locator(
+          'input[formcontrolname="purchasePrice"], input.w-full.text-sm.p-inputtext.price-input[currencymask], input.w-full.text-sm.p-inputtext.price-input',
+        )
+        .filter({ visible: true }),
+      scope
+        .locator(
+          'xpath=.//*[contains(normalize-space(.),"Purchase Price")]/following::input[1]',
+        )
+        .filter({ visible: true }),
+      scope.locator('input[id="amount"]:not([readonly])').filter({ visible: true }),
+      scope.locator("input[currencymask]:not([readonly])").filter({ visible: true }),
+    ];
+
+    const editable: Locator[] = [];
+    for (const group of selectorGroups) {
+      const count = await group.count();
+      for (let i = 0; i < count; i++) {
+        const candidate = group.nth(i);
+        if (await this.isPurchasePriceInputEditable(candidate)) {
+          editable.push(candidate);
+        }
+      }
+    }
+
+    if (editable.length === 0) {
+      throw new Error("No editable Purchase Price input found in asset row scope.");
+    }
+
+    for (let i = editable.length - 1; i >= 0; i--) {
+      const raw = (await editable[i].inputValue().catch(() => "")).replace(/[^0-9.]/g, "");
+      if (!raw || Number.parseFloat(raw) === 0) {
+        return editable[i];
+      }
+    }
+
+    return editable[editable.length - 1];
+  }
+
+  private labeledAssetFieldBlock(scope: Locator, labelPattern: RegExp): Locator {
+    return scope
+      .locator("div, ion-col")
+      .filter({ has: scope.locator("label, p, span").filter({ hasText: labelPattern }) })
+      .filter({ visible: true })
+      .last();
+  }
+
+  private async typeCurrencyIntoField(input: Locator, value: string): Promise<void> {
+    const digits = (value.replace(/[^0-9]/g, "") || "0").replace(/^0+/, "") || "0";
+    await input.scrollIntoViewIfNeeded();
+
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await input.click({ clickCount: 3, timeout: 30_000 });
+      await input.press("Backspace").catch(() => undefined);
+      await input.press("Control+A").catch(() => undefined);
+      await input.press("Backspace").catch(() => undefined);
+      await input.pressSequentially(digits, { delay: 80 });
+      await input.press("Tab");
+      await this.page.waitForTimeout(500);
+
+      const display = (await input.inputValue().catch(() => "")) ?? "";
+      if (this.currencyDigitsMatch(display, digits)) {
+        return;
+      }
+    }
+
+    const last = (await input.inputValue().catch(() => "")) ?? "";
+    throw new Error(
+      `Currency field did not accept "${digits}" after retries (last value: "${last}").`,
+    );
+  }
+
+  private async fillAssetTextField(
+    scope: Locator,
+    labelPattern: RegExp,
+    value: string,
+  ): Promise<void> {
+    const block = this.labeledAssetFieldBlock(scope, labelPattern);
+    const input = block.locator("input").filter({ visible: true }).first();
+    await input.waitFor({ state: "visible", timeout: 20_000 });
+    await this.typeIntoField(input, value);
+  }
+
+  private assetFieldInput(scope: Locator, label: string): Locator {
+    return scope
+      .locator(
+        `xpath=.//*[self::label or self::p or self::span][normalize-space(.)="${label}"]/following::input[1]`,
+      )
+      .first();
+  }
+
+  private assetYearControl(scope: Locator): Locator {
+    return scope
+      .locator(
+        `xpath=.//*[self::label or self::p or self::span][contains(normalize-space(.),"Year")]/following::*[@role="combobox" or self::input][1]`,
+      )
+      .first();
+  }
+
+  private async fillAssetYearField(scope: Locator, year: string): Promise<void> {
+    const control = scope.locator('[role="combobox"]').filter({ visible: true }).first();
+    await control.waitFor({ state: "visible", timeout: 20_000 });
+    await control.scrollIntoViewIfNeeded();
+    await control.click({ timeout: 15_000 });
+
+    const yearDialog = this.page
+      .locator('.p-datepicker, [role="dialog"]')
+      .filter({ visible: true })
+      .last();
+    await yearDialog.waitFor({ state: "visible", timeout: 10_000 });
+
+    const yearCell = yearDialog
+      .locator(
+        ".p-yearpicker-year, .p-datepicker-year, span, div, button",
+      )
+      .filter({ hasText: new RegExp(`^${this.escapeRx(year)}$`) })
+      .first();
+
+    if (await yearCell.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await yearCell.click();
+    } else {
+      await yearDialog
+        .locator(`xpath=.//*[normalize-space(.)="${year}"]`)
+        .first()
+        .click();
+    }
+
+    await yearDialog.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => undefined);
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+  }
+
   private async typeIntoField(input: Locator, value: string): Promise<void> {
     await input.scrollIntoViewIfNeeded();
     await input.click({ timeout: 30_000 });
@@ -418,39 +1219,32 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
    * Purchase Price — prefer Selector Hub `price-input`; then legacy `amount` / label fallbacks.
    */
   private async fillPurchasePrice(scope: Locator, value: string): Promise<void> {
+    const input = await this.resolveEditablePurchasePriceInput(scope);
+    await this.typeCurrencyIntoField(input, value);
+  }
+
+  /** Make / Model / Rego / Year — visible input order on Business QAT (price, make, model, rego), then year combobox. */
+  private async fillNameFieldsRow(scope: Locator, data: CarOrVanAssetData): Promise<void> {
+    const inputs = scope.locator("input").filter({ visible: true });
+    const inputCount = await inputs.count();
+    if (inputCount >= 4) {
+      await this.typeIntoField(inputs.nth(1), data.make);
+      await this.typeIntoField(inputs.nth(2), data.model);
+      await this.typeIntoField(inputs.nth(3), data.rego);
+      await this.fillAssetYearField(scope, data.year);
+      return;
+    }
+
     try {
-      const hub = this.hubPurchasePriceInput();
-      await hub.waitFor({ state: "visible", timeout: 35_000 });
-      await this.typeIntoField(hub, value);
+      await this.typeIntoField(this.assetFieldInput(scope, "Make"), data.make);
+      await this.typeIntoField(this.assetFieldInput(scope, "Model"), data.model);
+      await this.typeIntoField(this.assetFieldInput(scope, "Rego"), data.rego);
+      await this.fillAssetYearField(scope, data.year);
       return;
     } catch {
       // fallbacks
     }
-    const amountInput = scope.locator("amount").first().locator("input");
-    try {
-      await amountInput.waitFor({ state: "visible", timeout: 15_000 });
-      await this.typeIntoField(amountInput, value);
-      return;
-    } catch {
-      // continue
-    }
-    try {
-      const byLabel = scope.getByLabel(/Purchase Price/i);
-      await byLabel.waitFor({ state: "visible", timeout: 15_000 });
-      await this.typeIntoField(byLabel, value);
-      return;
-    } catch {
-      // continue
-    }
-    const loose = scope.locator(
-      'xpath=.//*[contains(normalize-space(.),"Purchase Price")]/following::input[1]',
-    );
-    await loose.waitFor({ state: "visible", timeout: 15_000 });
-    await this.typeIntoField(loose, value);
-  }
 
-  /** Make / Model / Rego / Year — prefer Hub ion-col chain; then `name input` / labels. */
-  private async fillNameFieldsRow(scope: Locator, data: CarOrVanAssetData): Promise<void> {
     try {
       await this.hubMakeInput(scope).waitFor({ state: "visible", timeout: 20_000 });
       await this.typeIntoField(this.hubMakeInput(scope), data.make);
@@ -462,13 +1256,13 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
       // fallbacks
     }
 
-    const inputs = scope.locator("name input");
-    const n = await inputs.count();
+    const nameInputs = scope.locator("name input");
+    const n = await nameInputs.count();
     if (n >= 4) {
-      await this.typeIntoField(inputs.nth(0), data.make);
-      await this.typeIntoField(inputs.nth(1), data.model);
-      await this.typeIntoField(inputs.nth(2), data.rego);
-      await this.typeIntoField(inputs.nth(3), data.year);
+      await this.typeIntoField(nameInputs.nth(0), data.make);
+      await this.typeIntoField(nameInputs.nth(1), data.model);
+      await this.typeIntoField(nameInputs.nth(2), data.rego);
+      await this.typeIntoField(nameInputs.nth(3), data.year);
       return;
     }
 
@@ -512,20 +1306,21 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
    */
   private async fillVehicleAssetRowFieldsAfterTileSelected(
     data: CarOrVanAssetData,
+    options?: { rowScope?: Locator },
   ): Promise<void> {
-    const scope = await this.assetFormScope();
-    await scope.scrollIntoViewIfNeeded();
+    const rowScope = options?.rowScope ?? (await this.assetFormScope());
+    await rowScope.scrollIntoViewIfNeeded();
     await this.waitForProgressSpinnersHidden(120_000);
 
-    await this.fillPurchasePrice(scope, data.purchasePrice);
-    await this.fillNameFieldsRow(scope, data);
+    await this.fillPurchasePrice(rowScope, data.purchasePrice);
+    await this.fillNameFieldsRow(rowScope, data);
 
-    const addHub = this.hubAddButton(scope);
+    const addHub = this.hubAddButton(rowScope);
     try {
       await expect(addHub).toBeEnabled({ timeout: 45_000 });
       await this.clickElement(addHub);
     } catch {
-      const addButton = scope.getByRole("button", {
+      const addButton = rowScope.getByRole("button", {
         name: /^[+＋]?\s*Add(\s+Another\s+Asset)?$/i,
       });
       await expect(addButton).toBeEnabled({ timeout: 45_000 });
@@ -552,6 +1347,64 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     await this.fillVehicleAssetRowFieldsAfterTileSelected(data);
   }
 
+  /** Adds another Car or Van row after the first asset was added. */
+  async fillAdditionalCarOrVanAssetRow(data: CarOrVanAssetData): Promise<void> {
+    this.logStep("Fill Additional Car Or Van Asset Row");
+    await this.clickAddAnotherAsset();
+    await this.ensureCarOrVanAssetTypeSelected();
+    const rowScope = await this.editableAssetRowScope();
+    await this.fillVehicleAssetRowFieldsAfterTileSelected(data, { rowScope });
+  }
+
+  /** Adds another Car or Light Commercial row after the first asset was added. */
+  async fillAdditionalCarOrLightCommercialAssetRow(data: CarOrVanAssetData): Promise<void> {
+    this.logStep("Fill Additional Car Or Light Commercial Asset Row");
+    await this.clickAddAnotherAsset();
+    await this.ensureCarOrLightCommercialAssetTypeSelected();
+    const rowScope = await this.editableAssetRowScope();
+    await this.fillVehicleAssetRowFieldsAfterTileSelected(data, { rowScope });
+  }
+
+  async fillMultipleCarOrVanAssets(assets: CarOrVanAssetData[]): Promise<void> {
+    this.logStep(`Fill Multiple Car Or Van Assets — ${assets.length}`);
+    if (assets.length === 0) return;
+    await this.fillCarOrVanAssetRow(assets[0]);
+    for (let i = 1; i < assets.length; i++) {
+      await this.fillAdditionalCarOrVanAssetRow(assets[i]);
+    }
+  }
+
+  async fillMultipleCarOrLightCommercialAssets(assets: CarOrVanAssetData[]): Promise<void> {
+    this.logStep(`Fill Multiple Car Or Light Commercial Assets — ${assets.length}`);
+    if (assets.length === 0) return;
+    await this.fillCarOrLightCommercialAssetRow(assets[0]);
+    for (let i = 1; i < assets.length; i++) {
+      await this.fillAdditionalCarOrLightCommercialAssetRow(assets[i]);
+    }
+  }
+
+  async expectTotalPurchasePriceInRepayment(expectedPattern: RegExp): Promise<void> {
+    this.logStep(`Expect Total Purchase Price In Repayment — ${String(expectedPattern)}`);
+    await this.repaymentRoot.waitFor({ state: "visible", timeout: 20_000 });
+    const totalInput = this.repaymentRoot
+      .locator(
+        'xpath=.//*[contains(normalize-space(.),"Total Purchase Price")]/following::input[1]',
+      )
+      .first();
+    if (await totalInput.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await expect(totalInput).toHaveValue(expectedPattern, { timeout: 15_000 });
+      return;
+    }
+    await expect(this.repaymentRoot).toContainText(expectedPattern, { timeout: 15_000 });
+  }
+
+  async expectRepaymentCalculationTableVisible(): Promise<void> {
+    this.logStep("Expect Repayment Calculation Table Visible");
+    await expect(
+      this.repaymentRoot.getByText(/Installment|Repayment|Interest/i).first(),
+    ).toBeVisible({ timeout: 60_000 });
+  }
+
   /**
    * Same field values as {@link fillCarOrVanAssetRow}, but selects **Car or Light Commercial** (Business apply flow).
    */
@@ -567,29 +1420,42 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     await this.fillVehicleAssetRowFieldsAfterTileSelected(data);
   }
 
+  private repaymentInputAfterLabel(labelText: string): Locator {
+    return this.repaymentRoot
+      .locator(
+        `xpath=.//*[contains(normalize-space(.),"${labelText}")]/following::input[1]`,
+      )
+      .first();
+  }
+
+  private repaymentDropdownAfterLabel(labelText: string): Locator {
+    return this.repaymentRoot
+      .locator(
+        `xpath=.//*[contains(normalize-space(.),"${labelText}")]/following::p-dropdown[1]`,
+      )
+      .first();
+  }
+
   async fillRepaymentCalculatorFields(data: RepaymentCalculatorData): Promise<void> {
     this.logStep("Fill Repayment Calculator Fields");
     await this.repaymentRoot.waitFor({ state: "visible", timeout: 20_000 });
 
-    const depositInput = this.repaymentRoot.locator(
-      '[ng-reflect-name="depositAmount"] input',
-    );
-    await depositInput.waitFor({ state: "visible", timeout: 10_000 });
-    await this.fillElement(depositInput, data.deposit);
+    const depositInput = this.repaymentInputAfterLabel("Deposit");
+    await depositInput.waitFor({ state: "visible", timeout: 15_000 });
+    await this.typeCurrencyIntoField(depositInput, data.deposit);
 
     await this.pickPrimeNgDropdownOption(
-      this.repaymentRoot.locator('p-dropdown[ng-reflect-name="term"]'),
+      this.repaymentDropdownAfterLabel("Term"),
       data.termMonths,
     );
     await this.pickPrimeNgDropdownOption(
-      this.repaymentRoot.locator('p-dropdown[ng-reflect-name="paymentFrequency"]'),
+      this.repaymentDropdownAfterLabel("Frequency"),
       data.frequency,
     );
 
-    const balloonInput = this.repaymentRoot.locator(
-      '[ng-reflect-name="balloonAmount"] input',
-    );
-    await this.fillElement(balloonInput, data.balloon);
+    const balloonInput = this.repaymentInputAfterLabel("Balloon");
+    await balloonInput.waitFor({ state: "visible", timeout: 15_000 });
+    await this.typeCurrencyIntoField(balloonInput, data.balloon);
     await this.waitForLoadingComplete();
   }
 
