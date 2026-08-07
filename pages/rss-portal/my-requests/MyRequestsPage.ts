@@ -35,13 +35,16 @@ export class RSSMyRequestsPage extends BasePage {
       .first();
   }
 
-  /** Data rows in the requests grid (avoid `.dataRow` — not always present in DOM). */
+  /** Data rows currently shown in the requests grid (excludes filtered/hidden PrimeNG rows). */
   requestDataRows(): Locator {
-    return this.requestsTable().locator("tbody tr:has(td)");
+    return this.requestsTable().locator("tbody tr:has(td):visible");
   }
 
   searchInput(): Locator {
-    return this.requestsRoot().locator('input[name="applicationSearchValue"]').first();
+    return this.requestsRoot()
+      .locator('input[name="applicationSearchValue"]')
+      .or(this.page.getByPlaceholder(/Search By Request No\. or Loan No\./i))
+      .first();
   }
 
   searchSubmitButton(): Locator {
@@ -53,11 +56,16 @@ export class RSSMyRequestsPage extends BasePage {
   }
 
   private rowMatchesSearchQuery(row: MyRequestRow, query: string): boolean {
-    const pattern = new RegExp(this.escapeRx(query), "i");
+    const normalizedQuery = this.normalizeCellText(query);
+    if (!normalizedQuery) {
+      return true;
+    }
+    const pattern = new RegExp(this.escapeRx(normalizedQuery), "i");
     return (
       pattern.test(row.requestNo) ||
       pattern.test(row.loanNo) ||
-      pattern.test(row.requestLabel)
+      pattern.test(row.requestLabel) ||
+      pattern.test(row.requestType)
     );
   }
 
@@ -181,11 +189,12 @@ export class RSSMyRequestsPage extends BasePage {
     expect(rows.length).toBeGreaterThanOrEqual(minCount);
   }
 
-  async getVisibleRequestRows(): Promise<MyRequestRow[]> {
-    this.logStep("Get Visible Request Rows");
+  private async readVisibleRequestRows(): Promise<MyRequestRow[]> {
     const table = this.requestsTable();
-    await expect(table).toBeVisible({ timeout: 15_000 });
-    await this.waitForRequestDataRows(1);
+    if (!(await table.isVisible().catch(() => false))) {
+      return [];
+    }
+
     const rowLocators = this.requestDataRows();
     const count = await rowLocators.count();
     const rows: MyRequestRow[] = [];
@@ -207,6 +216,13 @@ export class RSSMyRequestsPage extends BasePage {
     }
 
     return rows;
+  }
+
+  async getVisibleRequestRows(): Promise<MyRequestRow[]> {
+    this.logStep("Get Visible Request Rows");
+    await expect(this.requestsTable()).toBeVisible({ timeout: 15_000 });
+    await this.waitForRequestDataRows(1);
+    return this.readVisibleRequestRows();
   }
 
   requestRowByNumber(requestNo: string): Locator {
@@ -237,12 +253,15 @@ export class RSSMyRequestsPage extends BasePage {
 
   async waitForSearchResults(query: string, timeoutMs = 30_000): Promise<void> {
     this.logStep(`Wait For Search Results — ${query}`);
+    const normalizedQuery = this.normalizeCellText(query);
     await expect
       .poll(
         async () => {
-          const rows = await this.getVisibleRequestRows();
-          if (rows.length === 0) return false;
-          return rows.every((row) => this.rowMatchesSearchQuery(row, query));
+          const rows = await this.readVisibleRequestRows();
+          if (rows.length === 0) {
+            return false;
+          }
+          return rows.every((row) => this.rowMatchesSearchQuery(row, normalizedQuery));
         },
         { timeout: timeoutMs, intervals: [250, 500, 1_000, 2_000] },
       )
@@ -251,7 +270,9 @@ export class RSSMyRequestsPage extends BasePage {
 
   async searchRequests(query: string): Promise<void> {
     this.logStep(`Search Requests — ${query}`);
-    await this.searchInput().fill(query);
+    const searchField = this.searchInput();
+    await searchField.click();
+    await searchField.fill(query);
     await this.submitSearch();
     await this.waitForSearchResults(query);
   }

@@ -313,6 +313,34 @@ export class RSSDashboardPage extends BasePage {
     return labels;
   }
 
+  /** URP-T140 — every party in the header dropdown panel is visible (multi-party user). */
+  async expectHeaderPartyDropdownOptionsVisible(
+    minimumParties = 2,
+    clickTimeoutMs = 90_000,
+  ): Promise<string[]> {
+    this.logStep("Expect Header Party Dropdown Options Visible");
+    const panel = await this.openHeaderBorrowerDropdownPanel(clickTimeoutMs);
+    const items = panel.locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item");
+    await items.first().waitFor({ state: "visible", timeout: 20_000 });
+    const count = await items.count();
+    expect(
+      count,
+      "Logged-in user must have customer visibility of more than one party (Excel precondition).",
+    ).toBeGreaterThanOrEqual(minimumParties);
+
+    const labels: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const item = items.nth(i);
+      await expect(item).toBeVisible({ timeout: 10_000 });
+      const text = (await item.innerText()).replace(/\s+/g, " ").trim();
+      expect(text.length).toBeGreaterThan(0);
+      labels.push(text);
+    }
+
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+    return labels;
+  }
+
   /** Overview summary counts on the dashboard Overview tab. */
   async getOverviewLoanCounts(): Promise<{
     active: number;
@@ -393,27 +421,33 @@ export class RSSDashboardPage extends BasePage {
   }
 
   overviewContractCards(): Locator {
-    return this.page.getByText(/Amount Due/i);
+    return this.overviewLoanCards("active");
+  }
+
+  private overviewLoanCards(section: "active" | "repaid" | "draft"): Locator {
+    const marker = this.overviewSectionMarker(section);
+    return this.overviewLoanArea()
+      .getByRole("listitem")
+      .filter({ hasText: marker });
+  }
+
+  private overviewContractCardsForSection(section: "active" | "repaid" | "draft"): Locator {
+    return this.overviewLoanCards(section);
   }
 
   /** Clicks the first visible active-loan summary card on Overview. */
   async clickFirstActiveLoanCard(): Promise<void> {
     this.logStep("Click First Active Loan Card");
-    const amountDue = this.overviewContractCards().first();
-    await amountDue.waitFor({ state: "visible", timeout: 30_000 });
-    const card = amountDue.locator(
-      "xpath=ancestor::ion-card[1] | ancestor::*[contains(@class,'card')][1]",
-    );
-    if (await card.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await this.clickElement(card.first());
-    } else {
-      await this.clickElement(amountDue);
-    }
+    const card = this.overviewLoanCards("active").first();
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await this.clickElement(card);
     await this.waitForRssShellIdle();
   }
 
-  async getVisibleOverviewContractCardCount(): Promise<number> {
-    return this.overviewContractCards().count();
+  async getVisibleOverviewContractCardCount(
+    section: "active" | "repaid" | "draft" = "active",
+  ): Promise<number> {
+    return this.overviewContractCardsForSection(section).count();
   }
 
   /**
@@ -429,7 +463,7 @@ export class RSSDashboardPage extends BasePage {
     expect(expected).toBeGreaterThanOrEqual(0);
 
     await this.switchOverviewLoanSection(section);
-    const visibleCards = await this.getVisibleOverviewContractCardCount();
+    const visibleCards = await this.getVisibleOverviewContractCardCount(section);
 
     if (expected === 0) {
       expect(visibleCards).toBe(0);
@@ -472,6 +506,147 @@ export class RSSDashboardPage extends BasePage {
       .filter({ hasText: /\S/ })
       .filter({ hasNotText: /Offers|Notifications|What'?s New|No offers at this time/i });
     expect(await offerItems.count()).toBeGreaterThan(0);
+  }
+
+  private overviewSectionMarker(section: "active" | "repaid" | "draft"): RegExp {
+    const markers = {
+      active: /Amount Due/i,
+      repaid: /Last Payment/i,
+      draft: /Amount Financed/i,
+    };
+    return markers[section];
+  }
+
+  private overviewLoanArea(): Locator {
+    return this.page
+      .locator("app-rss")
+      .filter({ has: this.page.getByText(/Welcome Back/i) })
+      .first();
+  }
+
+  /** First contract summary row on Overview for the selected Active / Repaid / Draft tab. */
+  private overviewLoanCard(section: "active" | "repaid" | "draft"): Locator {
+    return this.overviewLoanCards(section).first();
+  }
+
+  private async waitForOverviewLoanCardVisible(section: "active" | "repaid" | "draft"): Promise<void> {
+    await expect(this.overviewLoanCard(section)).toBeVisible({ timeout: 30_000 });
+  }
+
+  private async expectOverviewCardLoanHeaderVisible(card: Locator): Promise<void> {
+    await expect(card.getByText(/\d+\s*\|/).first()).toBeVisible({ timeout: 10_000 });
+    await expect(card.getByText(/Loan|Lease|CSA|TL|FL|AFV|MV|Dealer|Direct/i).first()).toBeVisible({
+      timeout: 10_000,
+    });
+  }
+
+  /** Asset row is an image and/or vehicle description — the UI does not label it "Asset". */
+  private async expectOverviewCardAssetDetailsVisible(card: Locator): Promise<void> {
+    await expect(card.locator("img").first()).toBeVisible({ timeout: 10_000 });
+  }
+
+  /** URP-T159 / T160 / T161 — loan summary card field visibility per Overview tab. */
+  async expectOverviewLoanCardFieldsVisible(
+    section: "active" | "repaid" | "draft",
+  ): Promise<void> {
+    this.logStep(`Expect Overview Loan Card Fields Visible — ${section}`);
+    await this.switchOverviewLoanSection(section);
+    const counts = await this.getOverviewLoanCounts();
+    expect(
+      counts[section],
+      `Party must have at least one ${section} contract for card field visibility (Excel precondition).`,
+    ).toBeGreaterThan(0);
+
+    await this.waitForOverviewLoanCardVisible(section);
+    const card = this.overviewLoanCard(section);
+    await this.expectOverviewCardLoanHeaderVisible(card);
+    await this.expectOverviewCardAssetDetailsVisible(card);
+    await expect(card.getByText(/Frequency/i).first()).toBeVisible({ timeout: 10_000 });
+
+    if (section === "active") {
+      await expect(card.getByText(/Amount Due/i).first()).toBeVisible({ timeout: 10_000 });
+      await expect(card.getByText(/Next Payment/i).first()).toBeVisible({ timeout: 10_000 });
+      return;
+    }
+
+    if (section === "repaid") {
+      await expect(card.getByText(/Amount Due/i).first()).toBeVisible({ timeout: 10_000 });
+      await expect(card.getByText(/Last Payment/i).first()).toBeVisible({ timeout: 10_000 });
+      return;
+    }
+
+    await expect(card.getByText(/Amount Financed/i).first()).toBeVisible({ timeout: 10_000 });
+    await expect(card.getByText(/Term/i).first()).toBeVisible({ timeout: 10_000 });
+  }
+
+  viewMoreOnOverviewButton(): Locator {
+    return this.page
+      .getByRole("button", { name: /View\s*More/i })
+      .or(this.page.getByText(/View\s*More/i))
+      .first();
+  }
+
+  /** URP-T162 — View more loads additional contract cards for the active Overview tab. */
+  async expectViewMoreLoadsAdditionalOverviewCards(
+    section: "active" | "repaid" | "draft",
+  ): Promise<void> {
+    this.logStep(`Expect View More Loads Additional Overview Cards — ${section}`);
+    await this.switchOverviewLoanSection(section);
+    const counts = await this.getOverviewLoanCounts();
+    expect(
+      counts[section],
+      `Party must have more than one ${section} contract for View more (Excel precondition).`,
+    ).toBeGreaterThan(1);
+
+    const before = await this.getVisibleOverviewContractCardCount(section);
+    const viewMore = this.viewMoreOnOverviewButton();
+    await expect(viewMore).toBeVisible({ timeout: 15_000 });
+    await this.clickElement(viewMore);
+    await this.waitForRssShellIdle();
+
+    await expect
+      .poll(async () => this.getVisibleOverviewContractCardCount(section), {
+        timeout: 20_000,
+        intervals: [500, 1_000, 2_000],
+      })
+      .toBeGreaterThan(before);
+  }
+
+  /** URP-T198 — row containing "Your last login was on" plus date/time on Overview. */
+  private overviewLastLoginBanner(): Locator {
+    return this.overviewLoanArea()
+      .getByText(/^Your last login was on$/i)
+      .first()
+      .locator("xpath=..");
+  }
+
+  /** URP-T198 — logged-in date/time on Overview; refresh still shows date and time. */
+  async expectLoginDateTimeVisibleAndUpdatesOnRefresh(): Promise<void> {
+    this.logStep("Expect Login Date Time Visible And Updates On Refresh");
+    await this.expectOverviewTabSelected();
+
+    const loginBanner = this.overviewLastLoginBanner();
+    await expect(loginBanner).toBeVisible({ timeout: 15_000 });
+
+    const loginDate = loginBanner.getByText(/\d{1,2}\/\d{1,2}\/\d{2,4}/).first();
+    const loginTime = loginBanner.getByText(/\d{1,2}:\d{2}\s*(am|pm)/i).first();
+    await expect(loginDate).toBeVisible({ timeout: 10_000 });
+    await expect(loginTime).toBeVisible({ timeout: 10_000 });
+    expect((await loginDate.innerText()).trim().length).toBeGreaterThan(0);
+    expect((await loginTime.innerText()).trim().length).toBeGreaterThan(0);
+
+    await this.page.reload({ waitUntil: "load" });
+    expect(await this.isDashboardLoaded()).toBe(true);
+    await this.expectOverviewTabSelected();
+
+    const loginBannerAfter = this.overviewLastLoginBanner();
+    await expect(loginBannerAfter).toBeVisible({ timeout: 15_000 });
+    await expect(loginBannerAfter.getByText(/\d{1,2}\/\d{1,2}\/\d{2,4}/).first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(loginBannerAfter.getByText(/\d{1,2}:\d{2}\s*(am|pm)/i).first()).toBeVisible({
+      timeout: 10_000,
+    });
   }
 
   /** Opens the toolbar borrower PrimeNG dropdown; returns the visible `.p-dropdown-panel`. */

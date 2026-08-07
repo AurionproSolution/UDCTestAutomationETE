@@ -477,6 +477,36 @@ export class RSSLoansPage extends BasePage {
       .toBe(true);
   }
 
+  private normalizeCurrency(value: string): string {
+    const match = value.replace(/\s+/g, " ").match(/[\d,]+(?:\.\d{2})?/);
+    return match ? match[0].replace(/,/g, "") : value.trim();
+  }
+
+  async getLoanOverdueAmountText(): Promise<string | null> {
+    this.logStep("Get Loan Overdue Amount Text");
+    const summary = this.loanSummaryPanel();
+    const overdueLabel = summary.getByText(/^Overdue$/i).first();
+    if (!(await overdueLabel.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return null;
+    }
+    const row = overdueLabel.locator("xpath=ancestor::*[self::div or self::tr or self::p][1]");
+    return (await row.innerText()).replace(/\s+/g, " ").trim();
+  }
+
+  async getSettlementAmountText(): Promise<string> {
+    this.logStep("Get Settlement Amount Text");
+    const panel = this.settlementsPanel();
+    const text = (await panel.innerText()).replace(/\s+/g, " ");
+    const match = text.match(/\$[\d,]+(?:\.\d{2})?/) ?? text.match(/\d[\d,]*\.\d{2}/);
+    expect(match, "Settlement amount must be populated before reading value.").toBeTruthy();
+    return match![0];
+  }
+
+  isSettlementAmountAtLeast9999(amountText: string): boolean {
+    const numeric = Number(this.normalizeCurrency(amountText));
+    return Number.isFinite(numeric) && numeric >= 9999.99;
+  }
+
   requestFormalSettlementQuoteButton(): Locator {
     return this.settlementsPanel()
       .locator("gen-button, p-button, button")
@@ -915,5 +945,209 @@ export class RSSLoansPage extends BasePage {
     await expect(panel.getByRole("button", { name: /Choose Date/i }).first()).toBeVisible({
       timeout: 10_000,
     });
+  }
+
+  private columnHeaderInTable(table: Locator, name: RegExp): Locator {
+    return table.getByRole("columnheader", { name });
+  }
+
+  private columnSortButton(columnHeader: Locator): Locator {
+    return columnHeader.locator(".p-sortable-column-icon, sortalticon, p-sorticon").first();
+  }
+
+  private columnFilterButton(columnHeader: Locator): Locator {
+    return columnHeader.locator("button.p-column-filter-menu-button").first();
+  }
+
+  private columnFilterOverlay(): Locator {
+    return this.page.locator(".p-column-filter-overlay").filter({ visible: true }).last();
+  }
+
+  private columnFilterMatchDropdown(): Locator {
+    return this.columnFilterOverlay()
+      .locator(".p-column-filter-constraint [role='combobox']")
+      .first();
+  }
+
+  private columnFilterMatchOption(label: RegExp): Locator {
+    return this.page
+      .locator(".p-dropdown-panel")
+      .filter({ visible: true })
+      .last()
+      .locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item")
+      .filter({ hasText: label })
+      .first();
+  }
+
+  private columnFilterValueInput(): Locator {
+    return this.columnFilterOverlay().locator("input.p-column-filter").first();
+  }
+
+  async sortTableColumn(table: Locator, column: RegExp): Promise<void> {
+    this.logStep(`Sort Table Column — ${String(column)}`);
+    const header = this.columnHeaderInTable(table, column);
+    await this.columnSortButton(header).click({ timeout: 15_000 });
+    await this.waitForLoadingComplete();
+  }
+
+  async openTableColumnFilter(table: Locator, column: RegExp): Promise<void> {
+    this.logStep(`Open Table Column Filter — ${String(column)}`);
+    const header = this.columnHeaderInTable(table, column);
+    await this.columnFilterButton(header).click({ timeout: 15_000 });
+    await expect(this.columnFilterOverlay()).toBeVisible({ timeout: 15_000 });
+  }
+
+  async expectTableColumnFilterMatchOptions(labels: RegExp[]): Promise<void> {
+    this.logStep("Expect Table Column Filter Match Options");
+    const matchDropdown = this.columnFilterMatchDropdown();
+    await expect(matchDropdown).toBeVisible({ timeout: 10_000 });
+    await matchDropdown.click();
+    for (const label of labels) {
+      await expect(this.columnFilterMatchOption(label)).toBeVisible({ timeout: 10_000 });
+    }
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+  }
+
+  private async selectTableColumnFilterMatchType(matchType: RegExp): Promise<void> {
+    const matchDropdown = this.columnFilterMatchDropdown();
+    await expect(matchDropdown).toBeVisible({ timeout: 10_000 });
+    await matchDropdown.click();
+    const option = this.columnFilterMatchOption(matchType);
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
+    await this.page
+      .locator(".p-dropdown-panel")
+      .filter({ visible: true })
+      .last()
+      .waitFor({ state: "hidden", timeout: 5_000 })
+      .catch(() => undefined);
+  }
+
+  async filterTableColumn(
+    table: Locator,
+    column: RegExp,
+    matchType: RegExp,
+    value: string,
+  ): Promise<void> {
+    this.logStep(`Filter Table Column — ${String(column)} ${String(matchType)} ${value}`);
+    await this.openTableColumnFilter(table, column);
+    await this.selectTableColumnFilterMatchType(matchType);
+    const valueInput = this.columnFilterValueInput();
+    await expect(valueInput).toBeVisible({ timeout: 10_000 });
+    await valueInput.fill(value);
+    await this.columnFilterOverlay()
+      .getByRole("button", { name: /^Apply$/i })
+      .click({ timeout: 15_000 });
+    await this.waitForLoadingComplete();
+  }
+
+  async clearTableColumnFilter(table: Locator, column: RegExp): Promise<void> {
+    this.logStep(`Clear Table Column Filter — ${String(column)}`);
+    if (!(await this.columnFilterOverlay().isVisible({ timeout: 1_000 }).catch(() => false))) {
+      await this.openTableColumnFilter(table, column);
+    }
+    await this.columnFilterOverlay()
+      .getByRole("button", { name: /^Clear$/i })
+      .click({ timeout: 15_000 });
+    await this.waitForLoadingComplete();
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+  }
+
+  private parseTableDateValue(value: string): number {
+    const match = value.replace(/\s+/g, " ").trim().match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!match) return 0;
+    const [, day, month, year] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day)).getTime();
+  }
+
+  private isAscending(values: number[]): boolean {
+    for (let i = 1; i < values.length; i++) {
+      if (values[i] < values[i - 1]) return false;
+    }
+    return true;
+  }
+
+  private isDescending(values: number[]): boolean {
+    for (let i = 1; i < values.length; i++) {
+      if (values[i] > values[i - 1]) return false;
+    }
+    return true;
+  }
+
+  async readVisibleTableColumnTexts(table: Locator, columnIndex: number): Promise<string[]> {
+    const rows = table.locator("tbody tr:has(td):visible");
+    const count = await rows.count();
+    const values: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const text = (await rows.nth(i).locator("td").nth(columnIndex).innerText())
+        .replace(/\s+/g, " ")
+        .trim();
+      if (text) values.push(text);
+    }
+    return values;
+  }
+
+  async expectTableDateColumnSorted(
+    table: Locator,
+    columnIndex: number,
+    direction: "asc" | "desc",
+  ): Promise<void> {
+    this.logStep(`Expect Table Date Column Sorted — ${direction}`);
+    const values = await this.readVisibleTableColumnTexts(table, columnIndex);
+    const timestamps = values.map((value) => this.parseTableDateValue(value)).filter((v) => v > 0);
+    expect(timestamps.length).toBeGreaterThan(1);
+    if (direction === "asc") {
+      expect(this.isAscending(timestamps)).toBe(true);
+    } else {
+      expect(this.isDescending(timestamps)).toBe(true);
+    }
+  }
+
+  transactionsTable(): Locator {
+    return this.transactionsSectionRegion(/^Transactions$/i)
+      .locator("#transactionList-table, #transactionList table, table")
+      .first();
+  }
+
+  paymentSummaryTable(): Locator {
+    return this.paymentScheduleRegion().locator("table").first();
+  }
+
+  paymentScheduleTable(): Locator {
+    return this.paymentScheduleRegion().locator("table").last();
+  }
+
+  documentsTable(): Locator {
+    return this.documentsTabContent().locator("table").first();
+  }
+
+  async expectGenerateStatementDefaultDateRange(): Promise<void> {
+    this.logStep("Expect Generate Statement Default Date Range");
+    const panel = this.generateStatementPanel();
+    const dateFields = panel.getByRole("combobox");
+    const fromValue = await dateFields.nth(0).inputValue().catch(async () =>
+      (await dateFields.nth(0).innerText()).replace(/\s+/g, " ").trim(),
+    );
+    const toValue = await dateFields.nth(1).inputValue().catch(async () =>
+      (await dateFields.nth(1).innerText()).replace(/\s+/g, " ").trim(),
+    );
+    expect(fromValue).toMatch(/\d{2}\/\d{2}\/\d{4}/);
+    expect(toValue).toMatch(/\d{2}\/\d{2}\/\d{4}/);
+
+    const summaryText = (await this.loanSummaryPanel().innerText()).replace(/\s+/g, " ");
+    const startMatch = summaryText.match(/Start\s*Date\s*(\d{2}\/\d{2}\/\d{4})/i);
+    if (startMatch?.[1]) {
+      expect(fromValue).toContain(startMatch[1]);
+    } else {
+      expect(fromValue.length).toBeGreaterThan(0);
+    }
+
+    const today = new Date();
+    const todayLabel = today.toLocaleDateString("en-NZ", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+    expect(toValue).toContain(todayLabel);
   }
 }

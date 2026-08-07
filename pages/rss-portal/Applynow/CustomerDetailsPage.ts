@@ -1133,4 +1133,72 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
       .toBe(true);
     await this.waitForLoadingComplete();
   }
+
+  async clickApplyNowFooterPrevious(clickTimeoutMs = 60_000): Promise<void> {
+    this.logStep("Click Apply Now Footer Previous");
+    await this.waitForProgressSpinnersHidden();
+    const previous = this.page.locator(':text-is("Previous")').filter({ visible: true }).first();
+    await previous.waitFor({ state: "visible", timeout: 30_000 });
+    await this.clickElement(previous, clickTimeoutMs);
+    await this.waitForLoadingComplete();
+  }
+
+  async expectMandatoryFieldValidationMessage(): Promise<void> {
+    this.logStep("Expect Mandatory Field Validation Message");
+    await expect(
+      this.page
+        .getByText(/mandatory|required|please complete|fill.*field|before moving|add borrower|add guarantor/i)
+        .first(),
+    ).toBeVisible({ timeout: 30_000 });
+  }
+
+  private currentAddressSearchInput(): Locator {
+    return this.page.locator('input[name="physicalSearchValue"]').filter({ visible: true }).first();
+  }
+
+  async searchCurrentAddress(query: string): Promise<void> {
+    this.logStep(`Search Current Address — ${query}`);
+    const searchField = this.currentAddressSearchInput();
+    await expect(searchField).toBeVisible({ timeout: 15_000 });
+    await searchField.click();
+    await searchField.fill(query);
+    await this.waitForLoadingComplete();
+  }
+
+  async expectAddressSearchSuggestions(minCount = 1): Promise<void> {
+    this.logStep("Expect Address Search Suggestions");
+    const suggestions = this.page
+      .locator(".p-autocomplete-panel")
+      .filter({ visible: true })
+      .last()
+      .locator(".p-autocomplete-item, li[role='option'], li");
+    await expect(suggestions.first()).toBeVisible({ timeout: 15_000 });
+    expect(await suggestions.count()).toBeGreaterThanOrEqual(minCount);
+  }
+
+  async expectCustomerDetailsStepVisible(): Promise<void> {
+    this.logStep("Expect Customer Details Step Visible");
+    await this.waitForCustomerDetailsStep();
+    await this.expectLoanSummaryCardVisible();
+  }
+
+  async clickBorrowerTab(): Promise<void> {
+    this.logStep("Click Borrower Tab");
+    const tab = this.page
+      .locator('ion-segment-button[value="borrower"], button, a')
+      .filter({ hasText: /^Borrower$/i })
+      .first();
+    await this.clickElement(tab);
+    await this.waitForLoadingComplete();
+  }
+
+  async clickGuarantorTab(): Promise<void> {
+    this.logStep("Click Guarantor Tab");
+    const tab = this.page
+      .locator('ion-segment-button, button, a')
+      .filter({ hasText: /^Guarantor$/i })
+      .first();
+    await this.clickElement(tab);
+    await this.waitForLoadingComplete();
+  }
 }

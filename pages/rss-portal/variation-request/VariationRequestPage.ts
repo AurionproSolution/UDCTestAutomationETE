@@ -198,33 +198,93 @@ export class RSSVariationRequestPage extends BasePage {
     await this.waitForLoadingComplete();
   }
 
-  async acceptDisclaimerIfVisible(timeoutMs = 30_000): Promise<void> {
-    this.logStep("Accept Disclaimer If Visible");
-    const dialog = this.page
+  private disclaimerDialog(): Locator {
+    return this.page
       .locator("ion-modal, p-dynamicdialog, [role='dialog'], .p-dialog")
       .filter({ hasText: /Disclaimer/i })
       .last();
+  }
+
+  private async isDisclaimerContinueEnabled(dialog: Locator): Promise<boolean> {
+    const continueButton = dialog.getByRole("button", { name: /^Continue$/i });
+    return continueButton.isEnabled().catch(() => false);
+  }
+
+  private async acknowledgeDisclaimerDialog(dialog: Locator): Promise<void> {
+    if (await this.isDisclaimerContinueEnabled(dialog)) {
+      return;
+    }
+
+    const disclaimerBody = dialog
+      .locator(".p-dialog-content, .p-dialog-content-scrollable, [class*='scroll']")
+      .first();
+    if (await disclaimerBody.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await disclaimerBody.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+    }
+
+    const ackTargets = [
+      dialog.getByRole("checkbox", { name: /Please acknowledge the above/i }).first(),
+      dialog.locator("p-checkbox .p-checkbox-box").first(),
+      dialog.locator("p-checkbox").first(),
+      dialog
+        .getByText(/Please acknowledge the above/i)
+        .locator("xpath=ancestor::*[contains(@class,'p-checkbox') or @role='checkbox' or contains(@class,'checkbox')][1]")
+        .first(),
+      dialog.getByText(/Please acknowledge the above/i).first(),
+      dialog.locator("ion-checkbox").first(),
+      dialog.locator('input[type="checkbox"]').first(),
+    ];
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (await this.isDisclaimerContinueEnabled(dialog)) {
+        return;
+      }
+
+      for (const target of ackTargets) {
+        if (!(await target.isVisible({ timeout: 1_000 }).catch(() => false))) {
+          continue;
+        }
+        await target.scrollIntoViewIfNeeded();
+        try {
+          await target.click({ timeout: 10_000 });
+        } catch {
+          await target.click({ force: true, timeout: 10_000 });
+        }
+        if (await this.isDisclaimerContinueEnabled(dialog)) {
+          return;
+        }
+      }
+    }
+
+    const hiddenInput = dialog.locator("p-checkbox input[type='checkbox']").first();
+    if (await hiddenInput.count()) {
+      await hiddenInput.evaluate((el) => {
+        const input = el as HTMLInputElement;
+        input.checked = true;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+
+    await expect
+      .poll(() => this.isDisclaimerContinueEnabled(dialog), {
+        timeout: 15_000,
+        intervals: [250, 500, 1_000],
+      })
+      .toBe(true);
+  }
+
+  async acceptDisclaimerIfVisible(timeoutMs = 30_000): Promise<void> {
+    this.logStep("Accept Disclaimer If Visible");
+    const dialog = this.disclaimerDialog();
     const visible = await dialog.isVisible({ timeout: timeoutMs }).catch(() => false);
     if (!visible) {
       return;
     }
 
-    const ackText = dialog.getByText(/Please acknowledge the above/i).first();
-    const ionCheckbox = dialog.locator("ion-checkbox").first();
-    const primeCheckbox = dialog.locator("p-checkbox .p-checkbox-box").first();
-    const nativeCheckbox = dialog.locator('input[type="checkbox"]').first();
-
-    if (await ionCheckbox.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await this.clickElement(ionCheckbox);
-    } else if (await primeCheckbox.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await this.clickElement(primeCheckbox);
-    } else if (await nativeCheckbox.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      if (!(await nativeCheckbox.isChecked().catch(() => false))) {
-        await this.clickElement(nativeCheckbox);
-      }
-    } else if (await ackText.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await this.clickElement(ackText);
-    }
+    await this.acknowledgeDisclaimerDialog(dialog);
 
     const continueButton = dialog.getByRole("button", { name: /^Continue$/i });
     await expect(continueButton).toBeEnabled({ timeout: 15_000 });
@@ -873,5 +933,224 @@ export class RSSVariationRequestPage extends BasePage {
     await expect(requestNoCell).not.toBeEmpty();
     const requestNo = (await requestNoCell.innerText()).replace(/\s+/g, " ").trim();
     expect(requestNo.length).toBeGreaterThan(0);
+  }
+
+  cancelVariationRequestButton(): Locator {
+    return this.page.getByRole("button", { name: /^Cancel$/i }).first();
+  }
+
+  unsavedChangesDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Any unsaved changes will be lost/i })
+      .first();
+  }
+
+  private preferredContactTimeDropdown(): Locator {
+    return this.page
+      .locator("p-dropdown#preferredContactTime")
+      .or(this.pageDropdownByLabel(/Preferred Contact Time/i))
+      .first();
+  }
+
+  async selectPreferredContactMethod(method: string): Promise<void> {
+    const dropdown = this.page
+      .locator("p-dropdown#preferredContactMethod")
+      .or(this.pageDropdownByLabel(/Preferred Contact Method/i))
+      .first();
+    await this.pickPrimeNgDropdownOptionByLabel(dropdown, method);
+  }
+
+  async selectPreferredContactTime(time: string): Promise<void> {
+    await this.pickPrimeNgDropdownOptionByLabel(this.preferredContactTimeDropdown(), time);
+  }
+
+  async expectPreferredContactTimeDisabled(): Promise<void> {
+    this.logStep("Expect Preferred Contact Time Disabled");
+    const dropdown = this.preferredContactTimeDropdown();
+    const combobox = dropdown.locator('[role="combobox"]').first();
+    await expect
+      .poll(
+        async () => {
+          if (
+            await dropdown
+              .evaluate((el) => el.classList.contains("p-disabled"))
+              .catch(() => false)
+          ) {
+            return true;
+          }
+          return (
+            (await combobox.getAttribute("aria-disabled").catch(() => null)) === "true" ||
+            (await combobox.isDisabled().catch(() => false))
+          );
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+  }
+
+  async expectPreferredContactTimeClearedForEmail(): Promise<void> {
+    this.logStep("Expect Preferred Contact Time Inactive For Email");
+    await this.expectPreferredContactTimeDisabled();
+  }
+
+  async submitAndExpectMandatoryFieldError(): Promise<void> {
+    this.logStep("Submit And Expect Mandatory Field Error");
+    await this.submitVariationRequest();
+    await expect(
+      this.page
+        .getByText(/Please Complete|fill.*mandatory|required field|complete all required/i)
+        .first(),
+    ).toBeVisible({ timeout: 15_000 });
+  }
+
+  async expectUnsavedChangesCancelDialog(): Promise<void> {
+    this.logStep("Expect Unsaved Changes Cancel Dialog");
+    const dialog = this.unsavedChangesDialog();
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await expect(dialog).toContainText(/Any unsaved changes will be lost/i);
+    await expect(dialog.getByRole("button", { name: /^No$/i })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(dialog.getByRole("button", { name: /^Yes$/i })).toBeVisible({
+      timeout: 10_000,
+    });
+  }
+
+  async clickCancelAndExpectUnsavedChangesDialog(): Promise<void> {
+    this.logStep("Click Cancel And Expect Unsaved Changes Dialog");
+    await this.clickElement(this.cancelVariationRequestButton());
+    await this.expectUnsavedChangesCancelDialog();
+  }
+
+  async uploadVariationDocument(filePath: string): Promise<void> {
+    this.logStep("Upload Variation Document");
+    const input = this.page.locator('input[type="file"]').first();
+    await input.waitFor({ state: "attached", timeout: 30_000 });
+    await input.setInputFiles(filePath);
+    await this.waitForLoadingComplete();
+  }
+
+  async expectUploadedDocumentVisible(fileName: string): Promise<void> {
+    this.logStep(`Expect Uploaded Document Visible — ${fileName}`);
+    await expect(this.page.getByText(new RegExp(fileName, "i")).first()).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  async expectUploadValidationError(message: RegExp): Promise<void> {
+    this.logStep(`Expect Upload Validation Error — ${message}`);
+    await expect(this.page.getByText(message).first()).toBeVisible({ timeout: 15_000 });
+  }
+
+  private normalizeCurrency(value: string): string {
+    const match = value.replace(/\s+/g, " ").match(/[\d,]+(?:\.\d{2})?/);
+    return match ? match[0].replace(/,/g, "") : value.trim();
+  }
+
+  async getArrearsAmountText(): Promise<string | null> {
+    const arrearsLabel = this.page.getByText(/^Arrears$/i).first();
+    if (!(await arrearsLabel.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return null;
+    }
+    const row = arrearsLabel.locator("xpath=ancestor::*[self::div or self::tr or self::p][1]");
+    return (await row.innerText()).replace(/\s+/g, " ").trim();
+  }
+
+  async expectArrearsAmountMatchesLoanOverdue(overdueText: string | null): Promise<void> {
+    this.logStep("Expect Arrears Amount Matches Loan Overdue");
+    const arrearsText = await this.getArrearsAmountText();
+    expect(arrearsText, "Arrears amount must be visible on payment arrangement form.").toBeTruthy();
+    expect(overdueText, "Loan overdue amount must be visible on loan summary.").toBeTruthy();
+    expect(this.normalizeCurrency(arrearsText!)).toBe(this.normalizeCurrency(overdueText!));
+  }
+
+  async prepareCategoryDetailForm(
+    category: VariationRequestCategory,
+    options?: { subRequestType?: UpdatePaymentSubRequestType },
+  ): Promise<void> {
+    this.logStep(`Prepare Category Detail Form — ${category}`);
+    await this.selectCategory(category);
+    await this.expectCategorySelected(
+      new RegExp(category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+    );
+
+    if (category === "Update Payment Details") {
+      await this.selectSubRequestType(options?.subRequestType ?? "Change Payment Frequency");
+    }
+
+    await this.acceptDisclaimerIfVisible();
+    const detailVisible =
+      category === "Update Payment Details"
+        ? await this.variationFormRoot()
+            .getByText(/New Payment Frequency|New Payment Date|Current Payment Frequency/i)
+            .first()
+            .isVisible({ timeout: 5_000 })
+            .catch(() => false)
+        : await this.isCategoryDetailFormVisible(category);
+
+    if (!detailVisible) {
+      await this.submitRequestTypeSelection();
+      await this.acceptDisclaimerIfVisible();
+    }
+  }
+
+  async expectCategoryDetailFormVisible(category: VariationRequestCategory): Promise<void> {
+    this.logStep(`Expect Category Detail Form Visible — ${category}`);
+    switch (category) {
+      case "Update Payment Details":
+        await expect(
+          this.page.getByText(/New Payment Frequency|New Payment Date|Current Payment Frequency/i).first(),
+        ).toBeVisible({ timeout: 30_000 });
+        return;
+      case "Make a Lump Sum Payment":
+        await expect(this.page.locator("#amount, input[currencymask]").first()).toBeVisible({
+          timeout: 30_000,
+        });
+        return;
+      case "Variation Request":
+        await expect(
+          this.page.locator("#notes, textarea[name='note'], input[type='file']").first(),
+        ).toBeVisible({ timeout: 30_000 });
+        return;
+      case "Request a Payment Arrangement":
+        await expect(this.page.getByText(/Payment Options/i).first()).toBeVisible({
+          timeout: 30_000,
+        });
+        return;
+      default:
+        throw new Error(`Unsupported variation category: ${category}`);
+    }
+  }
+
+  async openCalendarByLabel(label: RegExp): Promise<void> {
+    const labelText = label.source.replace(/\\/g, "").replace(/^\^|\$$/g, "");
+    const input = this.calendarInputByLabel(label);
+    if (await input.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await input.click({ timeout: 15_000 });
+      return;
+    }
+    const trigger = this.page
+      .locator(
+        `xpath=//*[contains(normalize-space(.),'${labelText}')]/following::p-calendar[1]//button | //*[contains(normalize-space(.),'${labelText}')]/following::*[contains(@class,'p-datepicker')][1]`,
+      )
+      .first();
+    await trigger.click({ timeout: 15_000 });
+  }
+
+  /** URP-T156 — past dates in PrimeNG calendar should be disabled. */
+  async expectCalendarPastDatesDisabled(calendarLabel: RegExp): Promise<void> {
+    this.logStep(`Expect Calendar Past Dates Disabled — ${calendarLabel}`);
+    await this.openCalendarByLabel(calendarLabel);
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const day = yesterday.getDate();
+    const pastDay = this.page
+      .locator(".p-datepicker-calendar td")
+      .filter({ has: this.page.locator("span.p-disabled, span[aria-disabled='true']") })
+      .filter({ hasText: new RegExp(`^${day}$`) })
+      .first();
+    await expect(pastDay).toBeVisible({ timeout: 10_000 });
+    await this.page.keyboard.press("Escape").catch(() => undefined);
   }
 }

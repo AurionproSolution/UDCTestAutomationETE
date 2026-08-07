@@ -4,7 +4,7 @@
  */
 
 import path from "path";
-import { expect, Page } from "@playwright/test";
+import { expect, Locator, Page } from "@playwright/test";
 import { BasePage } from "../../common/BasePage";
 
 /** Default PDF under `testData/rss-portal` (same asset name as DO customer quote upload). */
@@ -163,5 +163,43 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
     }
     await this.clickSubmit();
     await this.expectQuoteCreatedConfirmation();
+  }
+
+  async clickApplyNowFooterPrevious(clickTimeoutMs = 60_000): Promise<void> {
+    this.logStep("Click Apply Now Footer Previous");
+    await this.waitForProgressSpinnersHidden();
+    const previous = this.page.locator(':text-is("Previous")').filter({ visible: true }).first();
+    await previous.waitFor({ state: "visible", timeout: 30_000 });
+    await this.clickElement(previous, clickTimeoutMs);
+    await this.waitForLoadingComplete();
+  }
+
+  async expectSubmitBlockedWithoutAcknowledgement(): Promise<void> {
+    this.logStep("Expect Submit Blocked Without Acknowledgement");
+    await this.uploadSupportingDocument();
+    await this.clickSubmit();
+    await expect(
+      this.page.getByText(/acknowledg|terms|condition|required|mandatory/i).first(),
+    ).toBeVisible({ timeout: 30_000 });
+  }
+
+  async expectInvalidFileTypeRejected(filePath: string): Promise<void> {
+    this.logStep("Expect Invalid File Type Rejected");
+    const input = this.fileUploadInput();
+    await input.waitFor({ state: "attached", timeout: 30_000 });
+    await input.setInputFiles(filePath);
+    await expect(
+      this.page.getByText(/file type|not acceptable|not allowed|invalid/i).first(),
+    ).toBeVisible({ timeout: 30_000 });
+  }
+
+  async expectOversizedFileRejected(filePath: string): Promise<void> {
+    this.logStep("Expect Oversized File Rejected");
+    const input = this.fileUploadInput();
+    await input.waitFor({ state: "attached", timeout: 30_000 });
+    await input.setInputFiles(filePath);
+    await expect(
+      this.page.getByText(/20\s*mb|file size|too large|size limit/i).first(),
+    ).toBeVisible({ timeout: 30_000 });
   }
 }

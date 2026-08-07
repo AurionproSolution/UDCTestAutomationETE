@@ -23,7 +23,7 @@ export { RSSHeaderUserMenuPage } from './header/HeaderUserMenuPage';
 export { RSSMyProfilePage } from './profile/MyProfilePage';
 export { RSSSideMenuPage } from './navigation/SideMenuPage';
 export type { RssDrawerMenuItem } from './navigation/SideMenuPage';
-export { RSSServiceRequestPage } from './service-request/ServiceRequestPage';
+export { RSSServiceRequestPage, RSS_DEFAULT_SERVICE_REQUEST_UPLOAD_PDF } from './service-request/ServiceRequestPage';
 export type { ServiceRequestCategory } from './service-request/ServiceRequestPage';
 export { RSSMyRequestsPage } from './my-requests/MyRequestsPage';
 export type { MyRequestRow } from './my-requests/MyRequestsPage';

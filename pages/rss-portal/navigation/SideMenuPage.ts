@@ -119,17 +119,35 @@ export class RSSSideMenuPage extends BasePage {
     await expect(homeLabel).toBeVisible({ timeout: 15_000 });
   }
 
+  drawerMenuItems(): RssDrawerMenuItem[] {
+    return ["Home", "My Info", "My Requests", "Create Request", "Contact Us"];
+  }
+
   async expectDrawerMenuItemsVisible(): Promise<void> {
     this.logStep("Expect Drawer Menu Items Visible");
-    const items: RssDrawerMenuItem[] = [
-      "Home",
-      "My Info",
-      "My Requests",
-      "Create Request",
-      "Contact Us",
-    ];
-    for (const item of items) {
+    for (const item of this.drawerMenuItems()) {
       await expect(this.menuItemLabel(item)).toBeVisible({ timeout: 10_000 });
+    }
+  }
+
+  /** URP-T138 — drawer labels share the same left edge (left-aligned column). */
+  async expectDrawerMenuItemsLeftAligned(tolerancePx = 4): Promise<void> {
+    this.logStep("Expect Drawer Menu Items Left Aligned");
+    await this.openDrawerIfNeeded();
+    const boxes: { label: string; left: number }[] = [];
+    for (const item of this.drawerMenuItems()) {
+      const label = this.menuItemLabel(item);
+      await expect(label).toBeVisible({ timeout: 10_000 });
+      const box = await label.boundingBox();
+      expect(box, `Bounding box for drawer item "${item}"`).not.toBeNull();
+      boxes.push({ label: item, left: box!.x });
+    }
+    const baseline = boxes[0].left;
+    for (const { label, left } of boxes) {
+      expect(
+        Math.abs(left - baseline),
+        `Drawer item "${label}" should be left-aligned with the other items`,
+      ).toBeLessThanOrEqual(tolerancePx);
     }
   }
 

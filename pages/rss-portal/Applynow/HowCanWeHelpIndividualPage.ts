@@ -348,6 +348,42 @@ export class RSSApplyNowHowCanWeHelpIndividualPage extends BasePage {
       { timeout: timeoutMs },
     );
   }
+
+  async clickApplyNowFooterNext(clickTimeoutMs = 60_000): Promise<void> {
+    this.logStep("Click Apply Now Footer Next");
+    const next = this.page.locator(':text-is("Next")').filter({ visible: true }).first();
+    await next.waitFor({ state: "visible", timeout: 30_000 });
+    await this.clickElement(next, clickTimeoutMs);
+    await this.waitForLoadingComplete();
+  }
+
+  async expectMandatoryFieldValidationMessage(): Promise<void> {
+    this.logStep("Expect Mandatory Field Validation Message");
+    await expect(
+      this.page
+        .getByText(/mandatory|required|please complete|fill.*field|before moving/i)
+        .first(),
+    ).toBeVisible({ timeout: 30_000 });
+  }
+
+  async expectWhatWouldYouLikeToDoOptions(): Promise<void> {
+    this.logStep("Expect What Would You Like To Do Options");
+    const root = this.purchaseThroughDropdownRoot();
+    const combobox = root.locator('[role="combobox"]').first();
+    await this.clickElement(combobox);
+    const panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
+    await panel.waitFor({ state: "visible", timeout: 12_000 });
+    for (const label of [
+      /Purchase through.*Dealership/i,
+      /Conditional approval/i,
+      /^Others$/i,
+    ]) {
+      await expect(panel.locator("li, .p-dropdown-item").filter({ hasText: label }).first()).toBeVisible({
+        timeout: 10_000,
+      });
+    }
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+  }
 }
 
 /**
@@ -1487,13 +1523,70 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
   async clickApplyNowFooterNext(clickTimeoutMs = 60_000): Promise<void> {
     this.logStep("Click Apply Now Footer Next");
     await this.waitForProgressSpinnersHidden();
-    const next = this.page
-      .locator(':text-is("Next")')
-      .filter({ visible: true })
-      .first();
+    const next = this.page.locator(':text-is("Next")').filter({ visible: true }).first();
     await next.waitFor({ state: "visible", timeout: 30_000 });
-    await this.scrollIfNeeded(next);
     await this.clickElement(next, clickTimeoutMs);
     await this.waitForLoadingComplete();
+  }
+
+  async clickApplyNowFooterPrevious(clickTimeoutMs = 60_000): Promise<void> {
+    this.logStep("Click Apply Now Footer Previous");
+    await this.waitForProgressSpinnersHidden();
+    const previous = this.page.locator(':text-is("Previous")').filter({ visible: true }).first();
+    await previous.waitFor({ state: "visible", timeout: 30_000 });
+    await this.clickElement(previous, clickTimeoutMs);
+    await this.waitForLoadingComplete();
+  }
+
+  async expectDealershipDropdownFieldsVisible(): Promise<void> {
+    this.logStep("Expect Dealership Dropdown Fields Visible");
+    await expect(
+      this.page.getByText(/Select a UDC Dealership you have used before/i).first(),
+    ).toBeVisible({ timeout: 15_000 });
+    await expect(this.page.getByText(/Select Another UDC Dealership/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  async expectAnotherDealershipSearchSuggestions(minCount = 1): Promise<void> {
+    this.logStep("Expect Another Dealership Search Suggestions");
+    const input = this.anotherDealershipSearchInput();
+    await input.waitFor({ state: "visible", timeout: 20_000 });
+    await input.click();
+    await input.fill("10");
+    const suggestions = this.page
+      .locator(".p-autocomplete-panel, .p-dropdown-panel")
+      .filter({ visible: true })
+      .last()
+      .locator(".p-autocomplete-item, li[role='option'], .p-dropdown-item");
+    await expect(suggestions.first()).toBeVisible({ timeout: 30_000 });
+    expect(await suggestions.count()).toBeGreaterThanOrEqual(minCount);
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+  }
+
+  private async readRepaymentDropdownOptionLabels(labelText: string): Promise<string[]> {
+    const root = this.repaymentDropdownAfterLabel(labelText);
+    const panel = await this.openPrimeNgDropdownPanel(root);
+    const labels = await this.readVisibleDropdownOptionLabels(panel);
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+    return labels;
+  }
+
+  async expectTermAndFrequencyOptionsPopulated(): Promise<void> {
+    this.logStep("Expect Term And Frequency Options Populated");
+    await this.repaymentRoot.waitFor({ state: "visible", timeout: 20_000 });
+    const termOptions = await this.readRepaymentDropdownOptionLabels("Term");
+    const frequencyOptions = await this.readRepaymentDropdownOptionLabels("Frequency");
+    expect(termOptions.length).toBeGreaterThan(0);
+    expect(frequencyOptions.length).toBeGreaterThan(0);
+  }
+
+  async readInstallmentAmount(): Promise<string> {
+    this.logStep("Read Installment Amount");
+    const installment = this.repaymentRoot
+      .getByText(/\$\s*[\d,]+(?:\.\d{2})?/)
+      .first();
+    await expect(installment).toBeVisible({ timeout: 30_000 });
+    return (await installment.innerText()).replace(/\s+/g, " ").trim();
   }
 }

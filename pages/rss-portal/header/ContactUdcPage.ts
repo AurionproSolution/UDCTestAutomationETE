@@ -34,12 +34,12 @@ export class RSSContactUdcPage extends BasePage {
   }
 
   private dropdownByFieldLabel(label: RegExp): Locator {
-    return this.contactDialog()
-      .locator("label")
-      .filter({ hasText: label })
+    const fieldText = this.contactDialog().getByText(label).first();
+    return fieldText
       .locator("xpath=ancestor::span[1]")
       .locator("p-dropdown")
-      .first();
+      .first()
+      .or(fieldText.locator("xpath=..").locator("p-dropdown").first());
   }
 
   messageTextarea(): Locator {
@@ -169,6 +169,108 @@ export class RSSContactUdcPage extends BasePage {
         data.preferredContactTime,
       );
     }
+  }
+
+  dialogCloseButton(): Locator {
+    return this.contactDialog()
+      .getByText(/^X\s*Close$/i)
+      .first()
+      .or(
+        this.contactDialog()
+          .locator("button.p-dialog-header-close:not(.p-dialog-header-maximize)")
+          .first(),
+      );
+  }
+
+  unsavedChangesDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Any unsaved changes will be lost/i })
+      .first();
+  }
+
+  async selectPreferredContactMethod(method: string): Promise<void> {
+    await this.pickPrimeNgDropdownOption(
+      this.preferredContactMethodDropdown(),
+      method,
+    );
+  }
+
+  async selectPreferredContactTime(time: string): Promise<void> {
+    await this.pickPrimeNgDropdownOption(this.preferredContactTimeDropdown(), time);
+  }
+
+  private preferredContactTimeRow(): Locator {
+    return this.contactDialog()
+      .getByText(/^Preferred Contact Time/i)
+      .first()
+      .locator("xpath=..");
+  }
+
+  async expectPreferredContactTimeDisabled(): Promise<void> {
+    this.logStep("Expect Preferred Contact Time Disabled");
+    await expect(
+      this.preferredContactTimeRow().getByRole("combobox", { disabled: true }),
+    ).toBeVisible({ timeout: 15_000 });
+  }
+
+  async expectPreferredContactTimeCleared(): Promise<void> {
+    this.logStep("Expect Preferred Contact Time Cleared");
+    const label = this.preferredContactTimeRow()
+      .locator(".p-dropdown-label")
+      .first();
+    if (await label.isVisible().catch(() => false)) {
+      const text = (await label.innerText()).replace(/\s+/g, " ").trim();
+      expect(text).toMatch(/^(--\s*Select|Please Complete)?$/i);
+      return;
+    }
+    await expect(
+      this.preferredContactTimeRow().getByRole("combobox", { disabled: true }),
+    ).toBeVisible({ timeout: 10_000 });
+  }
+
+  /** URP-T143 — Message textarea accepts at most 1000 characters. */
+  async expectMessageCharacterLimit1000(): Promise<void> {
+    this.logStep("Expect Message Character Limit 1000");
+    const textarea = this.messageTextarea();
+    await textarea.fill("x".repeat(1001));
+    const value = await textarea.inputValue();
+    expect(value.length).toBeLessThanOrEqual(1000);
+  }
+
+  async submitAndExpectMandatoryFieldError(): Promise<void> {
+    this.logStep("Submit And Expect Mandatory Field Error");
+    await this.submit();
+    await expect(
+      this.page
+        .getByText(/Please Complete|fill.*mandatory|required field|complete all required/i)
+        .first(),
+    ).toBeVisible({ timeout: 15_000 });
+  }
+
+  async expectUnsavedChangesCancelDialog(): Promise<void> {
+    this.logStep("Expect Unsaved Changes Cancel Dialog");
+    const dialog = this.unsavedChangesDialog();
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await expect(dialog).toContainText(/Any unsaved changes will be lost/i);
+    await expect(dialog.getByRole("button", { name: /^No$/i })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(dialog.getByRole("button", { name: /^Yes$/i })).toBeVisible({
+      timeout: 10_000,
+    });
+  }
+
+  async clickCancelAndExpectUnsavedChangesDialog(): Promise<void> {
+    this.logStep("Click Cancel And Expect Unsaved Changes Dialog");
+    await this.clickElement(this.cancelButton());
+    await this.expectUnsavedChangesCancelDialog();
+  }
+
+  async clickCloseAndExpectUnsavedChangesDialog(): Promise<void> {
+    this.logStep("Click Close And Expect Unsaved Changes Dialog");
+    await this.clickElement(this.dialogCloseButton());
+    await this.expectUnsavedChangesCancelDialog();
   }
 
   async submit(): Promise<void> {
