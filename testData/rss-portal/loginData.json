@@ -38,6 +38,24 @@
     }
   ],
   "environments": {
+    "qat": {
+      "validUsers": [
+        {
+          "username": "SIDDHANT.MAGAR",
+          "password": "Mumbai@12345",
+          "role": "admin",
+          "email": "siddhant.magar@udc.com",
+          "mfaMode": "manual"
+        }
+      ],
+      "invalidUsers": [
+        {
+          "username": "invalid_rss",
+          "password": "wrongpass",
+          "expectedError": "Authentication failed."
+        }
+      ]
+    },
     "sit": {
       "totpSecret": "R2NSSLUZUHUVNMYWF5X2DE5TXEAPHK7R",
       "validUsers": [
@@ -45,7 +63,15 @@
           "username": "deepak.paramanick1",
           "password": "(SIT)APudcAF@2211",
           "role": "admin",
-          "email": "rss_admin@udc.com"
+          "email": "rss_admin@udc.com",
+          "mfaMode": "totp"
+        },
+        {
+          "username": "SIDDHANT.MAGAR",
+          "password": "Mumbai@12345",
+          "role": "admin",
+          "email": "siddhant.magar@udc.com",
+          "mfaMode": "manual"
         }
       ],
       "invalidUsers": [

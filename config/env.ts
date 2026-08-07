@@ -44,7 +44,7 @@ const environments: Record<Environment, EnvironmentConfig> = {
       name: "DO Portal - QAT",
     },
     rss: {
-      baseUrl: "https://rss-qat.udc.com",
+      baseUrl: "https://qaportalrss.aurionpro.com/",
       apiUrl: "https://api-rss-qat.udc.com",
       name: "RSS Portal - QAT",
     },

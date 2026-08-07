@@ -1,22 +1,22 @@
 /**
- * RSS Portal — Business Apply Now sanity
- * E2E: login, dashboard, Apply Now — **Business**, dealership, **Car or Light Commercial** asset (same row data as Individual Car/Van test), repayment, About You (profit last year + income radios), application documents & submit.
+ * RSS Portal — Business Apply Now **Conditional Approval** path
+ * E2E: “What would you like to do?” → **I am after a Conditional Approval**, Car or Light Commercial asset, repayment, About You, application documents & submit.
  *
  * Apply Now step 1 + dealership / asset / repayment: `pages/rss-portal/Applynow/HowCanWeHelpIndividualPage.ts`.
  */
 
-import { expect, test } from "../../../fixtures/rssPortalTest";
+import { expect, test } from "../../../../fixtures/rssPortalTest";
 import {
     RSSApplyNowAboutYouIndividualPage,
     RSSApplyNowApplicationDocumentsPage,
     RSSDashboardPage,
     RSSLoginPage,
-} from "../../../pages";
+} from "../../../../pages";
 import {
     RSSApplyNowDealershipAssetRepaymentPage,
     RSSApplyNowHowCanWeHelpIndividualPage,
-} from "../../../pages/rss-portal/Applynow/HowCanWeHelpIndividualPage";
-import { RSS_BASE_URL } from "../../../config/env";
+} from "../../../../pages/rss-portal/Applynow/HowCanWeHelpIndividualPage";
+import { RSS_BASE_URL } from "../../../../config/env";
 
 /** Dealership list API can be slow — wait until the dropdown is enabled before selecting (max 5 min). */
 const DEALERS_LIST_LOAD_TIMEOUT_MS = 300_000;
@@ -59,7 +59,7 @@ const BUSINESS_NET_PROFIT_LAST_YEAR_USD = "$50000.00";
 /** Header borrower list — exact option (SelectorHub `:text-is("…")`). */
 const RSS_HEADER_BORROWER_TEXT_IS = "Christopher Ngahina Robinson";
 
-test.describe("RSS Portal - Business Sanity @rss @smoke", () => {
+test.describe("RSS Portal - Business Conditional Approval @rss @smoke", () => {
   test.beforeEach(async ({ page }) => {
     dashboardPage = new RSSDashboardPage(page);
     applyNowHowCanWeHelpPage = new RSSApplyNowHowCanWeHelpIndividualPage(page);
@@ -68,22 +68,22 @@ test.describe("RSS Portal - Business Sanity @rss @smoke", () => {
     applyNowApplicationDocumentsPage = new RSSApplyNowApplicationDocumentsPage(page);
   });
 
-  test("RSS Business Sanity - Login Dashboard and Apply Now purchase flow", async () => {
+  test("RSS Business Conditional Approval - Login Dashboard and Apply Now flow", async () => {
     test.setTimeout(900_000);
 
     expect(await dashboardPage.isDashboardLoaded()).toBe(true);
-    await dashboardPage.selectHeaderBorrowerProfileByTextIs(RSS_HEADER_BORROWER_TEXT_IS);
+    // await dashboardPage.selectHeaderBorrowerProfileByTextIs(RSS_HEADER_BORROWER_TEXT_IS);
     await dashboardPage.clickApplyNow();
     expect(await dashboardPage.isApplyNowSelected()).toBe(true);
 
     await applyNowHowCanWeHelpPage.waitForHowCanWeHelpStep();
     await applyNowHowCanWeHelpPage.clickBusiness();
-    await applyNowHowCanWeHelpPage.selectPurchaseThroughDealership();
-    await applyNowHowCanWeHelpPage.expectPurchaseThroughDealershipSelected();
+    await applyNowHowCanWeHelpPage.selectConditionalApproval();
+    await applyNowHowCanWeHelpPage.expectConditionalApprovalSelected();
 
-    await applyNowDealershipAssetPage.waitForDealershipSection();
-    await applyNowDealershipAssetPage.waitForDealersLoaded(DEALERS_LIST_LOAD_TIMEOUT_MS);
-    await applyNowDealershipAssetPage.selectDealerYouHaveUsedBefore(DEALERSHIP_USED_BEFORE);
+    // await applyNowDealershipAssetPage.waitForDealershipSection();
+    // await applyNowDealershipAssetPage.waitForDealersLoaded(DEALERS_LIST_LOAD_TIMEOUT_MS);
+    // await applyNowDealershipAssetPage.selectDealerYouHaveUsedBefore(DEALERSHIP_USED_BEFORE);
 
     await applyNowDealershipAssetPage.fillCarOrLightCommercialAssetRow(ASSET_ROW_SAME_DATA);
 

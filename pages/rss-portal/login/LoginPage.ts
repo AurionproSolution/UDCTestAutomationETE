@@ -136,7 +136,44 @@ export class RSSLoginPage extends BasePage {
     });
   }
 
-  private async fillTotpIfPrompted(surface: Page, totpSecret?: string): Promise<boolean> {
+  private async waitForManualOtpEntry(surface: Page, timeoutMs: number): Promise<void> {
+    const otpInputs = this.otpInputs(surface);
+    this.log(
+      `Manual OTP required — enter the code in the browser (timeout ${Math.round(timeoutMs / 1000)}s).`,
+    );
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const visible = await otpInputs
+        .first()
+        .isVisible({ timeout: 1_000 })
+        .catch(() => false);
+      if (!visible) {
+        return;
+      }
+
+      const count = await otpInputs.count();
+      let filledCount = 0;
+      for (let i = 0; i < count; i++) {
+        const value = await otpInputs.nth(i).inputValue().catch(() => "");
+        if (value.trim()) filledCount++;
+      }
+      if (filledCount > 0 && (count === 1 || filledCount >= count)) {
+        return;
+      }
+
+      await surface.waitForTimeout(500);
+    }
+
+    throw new Error(
+      `Timed out waiting for manual OTP entry after ${Math.round(timeoutMs / 1000)}s.`,
+    );
+  }
+
+  private async fillTotpIfPrompted(
+    surface: Page,
+    options?: { totpSecret?: string; manualOtp?: boolean; manualOtpTimeoutMs?: number },
+  ): Promise<boolean> {
     const otpInputs = this.otpInputs(surface);
     const firstVisible = await otpInputs
       .first()
@@ -144,7 +181,12 @@ export class RSSLoginPage extends BasePage {
       .catch(() => false);
     if (!firstVisible) return false;
 
+    const totpSecret = options?.totpSecret;
     if (!totpSecret) {
+      if (options?.manualOtp) {
+        await this.waitForManualOtpEntry(surface, options.manualOtpTimeoutMs ?? 300_000);
+        return true;
+      }
       throw new Error(
         'SIT OTP prompt detected, but RSS_PORTAL_TOTP_SECRET is not set. Set it in your environment and retry.',
       );
@@ -230,13 +272,35 @@ export class RSSLoginPage extends BasePage {
    * Post-SSO **Select Application** launcher with Retail Self Service card.
    */
   async isAppLauncherVisible(): Promise<boolean> {
-    const selectApp = this.page.getByText(/Select Application/i).first();
+    return this.isAppLauncherVisibleOn(this.page);
+  }
+
+  private async isAppLauncherVisibleOn(
+    page: Page,
+    options?: { quick?: boolean },
+  ): Promise<boolean> {
+    const selectTimeout = options?.quick ? 400 : 3_000;
+    const cardTimeout = options?.quick ? 400 : 2_000;
+    const selectApp = page.getByText(/Select Application/i).first();
     const onLauncher =
-      (await selectApp.isVisible({ timeout: 3_000 }).catch(() => false)) &&
-      (await this.retailSelfServiceCardOn(this.page)
-        .isVisible({ timeout: 2_000 })
+      (await selectApp.isVisible({ timeout: selectTimeout }).catch(() => false)) &&
+      (await this.retailSelfServiceCardOn(page)
+        .isVisible({ timeout: cardTimeout })
         .catch(() => false));
     return onLauncher;
+  }
+
+  /** True when a tab URL belongs to the configured RSS portal host (SIT, QAT, etc.). */
+  private matchesRssPortalUrl(url: string): boolean {
+    if (!url || url === "about:blank") return false;
+    if (/udc-test\.fiscloudservices\.com\/SITRSSPortal/i.test(url)) return true;
+    try {
+      const base = new URL(RSS_BASE_URL());
+      const current = new URL(url);
+      return current.hostname === base.hostname;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -248,13 +312,16 @@ export class RSSLoginPage extends BasePage {
       for (const pg of this.page.context().pages()) {
         if (pg.isClosed()) continue;
         const url = pg.url();
-        if (/udc-test\.fiscloudservices\.com\/SITRSSPortal/i.test(url)) {
+        if (
+          this.matchesRssPortalUrl(url) ||
+          (await this.isAppLauncherVisibleOn(pg, { quick: true }))
+        ) {
           await pg.bringToFront().catch(() => {});
           this.sessionPage = pg;
           return pg;
         }
       }
-      await this.page.waitForTimeout(300);
+      await new Promise((r) => setTimeout(r, 300));
     }
     throw new Error(
       'Expected RSS Portal URL after FIS sign-in on an open browser tab (check popup blocker / SSO redirect).',
@@ -269,10 +336,15 @@ export class RSSLoginPage extends BasePage {
     surface: Page,
     username: string,
     password: string,
-    totpSecret?: string,
+    options?: { totpSecret?: string; manualOtp?: boolean; manualOtpTimeoutMs?: number },
   ): Promise<void> {
     const utils = new CommonUtils(surface);
     const idpUsername = await this.resolveIdpUsernameField(surface);
+    const mfaOptions = {
+      totpSecret: options?.totpSecret,
+      manualOtp: options?.manualOtp,
+      manualOtpTimeoutMs: options?.manualOtpTimeoutMs,
+    };
 
     if (idpUsername) {
       this.log('Using IdP / FIS credential steps (username → Proceed → password → Sign in)');
@@ -289,9 +361,9 @@ export class RSSLoginPage extends BasePage {
       await utils.fill(idpPassword, password);
       await idpPassword.press('Tab').catch(() => {});
 
-      await this.fillTotpIfPrompted(surface, totpSecret);
+      await this.fillTotpIfPrompted(surface, mfaOptions);
       await this.selectDeviceTrustIfPrompted(surface);
-      await this.fillTotpIfPrompted(surface, totpSecret);
+      await this.fillTotpIfPrompted(surface, mfaOptions);
 
       const signIn = surface.getByRole('button', { name: /Sign in/i });
       await signIn.waitFor({ state: 'visible', timeout: 15_000 });
@@ -388,11 +460,20 @@ export class RSSLoginPage extends BasePage {
   async login(
     username: string,
     password: string,
-    options?: { navigationTimeoutMs?: number; totpSecret?: string },
+    options?: {
+      navigationTimeoutMs?: number;
+      totpSecret?: string;
+      manualOtp?: boolean;
+      manualOtpTimeoutMs?: number;
+    },
   ): Promise<void> {
     this.logStep("Login");
     const navigationTimeoutMs = options?.navigationTimeoutMs ?? 30_000;
-    const totpSecret = options?.totpSecret;
+    const mfaOptions = {
+      totpSecret: options?.totpSecret,
+      manualOtp: options?.manualOtp,
+      manualOtpTimeoutMs: options?.manualOtpTimeoutMs,
+    };
 
     if (await this.isAppLauncherVisible()) {
       await this.selectRetailSelfService();
@@ -403,7 +484,7 @@ export class RSSLoginPage extends BasePage {
     const surface = await this.openFisLoginSurface();
     this.sessionPage = surface;
 
-    await this.enterCredentialsOnSurface(surface, username, password, totpSecret);
+    await this.enterCredentialsOnSurface(surface, username, password, mfaOptions);
 
     const portalPage = await this.waitForPortalPageAfterSignIn(navigationTimeoutMs);
     await this.waitForLoadingOn(portalPage, 15_000);
@@ -415,13 +496,22 @@ export class RSSLoginPage extends BasePage {
    * Login with test data from JSON
    */
   async loginWithTestData(
-    testData: { username: string; password: string; totpSecret?: string },
-    options?: { navigationTimeoutMs?: number },
+    testData: {
+      username: string;
+      password: string;
+      totpSecret?: string;
+      mfaMode?: "totp" | "manual";
+    },
+    options?: { navigationTimeoutMs?: number; manualOtpTimeoutMs?: number },
   ): Promise<void> {
     this.logStep("Login With Test Data");
+    const manualOtp = testData.mfaMode === "manual";
     await this.login(testData.username, testData.password, {
-      navigationTimeoutMs: options?.navigationTimeoutMs,
-      totpSecret: testData.totpSecret,
+      navigationTimeoutMs:
+        options?.navigationTimeoutMs ?? (manualOtp ? 300_000 : undefined),
+      totpSecret: manualOtp ? undefined : testData.totpSecret,
+      manualOtp,
+      manualOtpTimeoutMs: options?.manualOtpTimeoutMs,
     });
   }
 
@@ -526,6 +616,21 @@ export class RSSLoginPage extends BasePage {
   async isLogoVisible(): Promise<boolean> {
     this.logStep("Is Logo Visible");
     return await this.isVisible(this.logo);
+  }
+
+  /** Landing page after logout — user must sign in again via FIS. */
+  async expectLoginLandingVisible(): Promise<void> {
+    this.logStep("Expect Login Landing Visible");
+    await this.page.waitForLoadState("load");
+    await expect(this.loginWithFisButton).toBeVisible({ timeout: 60_000 });
+  }
+
+  /** Deep-linking to dashboard after logout must not restore an authenticated session. */
+  async expectProtectedRouteRequiresLogin(): Promise<void> {
+    this.logStep("Expect Protected Route Requires Login");
+    const dashboardUrl = `${RSS_BASE_URL().replace(/\/$/, "")}/rss/dashboard`;
+    await this.page.goto(dashboardUrl, { waitUntil: "load" });
+    await this.expectLoginLandingVisible();
   }
 }
 

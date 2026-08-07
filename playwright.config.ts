@@ -21,6 +21,7 @@ import { getDoPortalAuthFile } from "./playwright/do-portal-auth.helper";
 import { hasUsableDoPortalAuthFile } from "./playwright/do-portal-session.helper";
 import { getRssPortalAuthFile } from "./playwright/rss-portal-auth.helper";
 import { hasUsableRssPortalAuthFile } from "./playwright/rss-portal-session.helper";
+import { RSS_PORTAL_LOGIN_EVERY_RUN } from "./config/rss-portal-auth.config";
 
 /** VS Code / Cursor Test Explorer: one project is always enabled (see docs/test-explorer.md). */
 const ideMode = process.env.PLAYWRIGHT_IDE === "1";
@@ -102,7 +103,7 @@ function doPortalResolvedUse(): typeof maximizedChrome & {
 function rssPortalResolvedUse(): typeof maximizedChrome & {
   storageState?: string;
 } {
-  if (!useGlobalRssAuth) return maximizedChrome;
+  if (!useGlobalRssAuth || RSS_PORTAL_LOGIN_EVERY_RUN) return maximizedChrome;
   const authFile = getRssPortalAuthFile();
   if (fs.existsSync(authFile) && hasUsableRssPortalAuthFile(authFile)) {
     return { ...maximizedChrome, storageState: authFile };
@@ -146,13 +147,14 @@ const tagPortalTestIgnore = [
   ...(useGlobalDoAuth ? [] : ["**/do-portal/**"]),
 ];
 
-/** Flat tree for IDE: all portals under tests/, DO auth via globalSetup (no setup project in explorer). */
+/** Flat tree for IDE: all portals under tests/, DO/RSS auth via globalSetup (no setup project in explorer). */
 const ideChromiumProject = {
   name: "udc-chromium",
   testDir: "./tests",
   testIgnore: [
     "**/udc-perf-test-data.test.ts",
     ...(!useGlobalDoAuth ? ["**/do-portal/**"] : []),
+    ...(!useGlobalRssAuth ? ["**/rss-portal/**"] : []),
   ],
   use: useGlobalDoAuth ? doPortalResolvedUse() : maximizedChrome,
 };
@@ -196,6 +198,13 @@ const ciProjects = [
     name: "do-portal-unit",
     testDir: "./tests/do-portal",
     testMatch: "**/do-portal-session.helper.test.ts",
+    use: maximizedChrome,
+  },
+
+  {
+    name: "rss-portal-unit",
+    testDir: "./tests/rss-portal",
+    testMatch: "**/rss-portal-session.helper.test.ts",
     use: maximizedChrome,
   },
 
@@ -263,10 +272,18 @@ export default defineConfig({
     timeout: 180000,
   },
 
-  globalSetup:
-    ideMode && useGlobalDoAuth
-      ? path.join(__dirname, "playwright", "do-portal-global-setup.ts")
-      : undefined,
+  globalSetup: (() => {
+    const files: string[] = [];
+    if (ideMode && useGlobalDoAuth) {
+      files.push(path.join(__dirname, "playwright", "do-portal-global-setup.ts"));
+    }
+    if (ideMode && useGlobalRssAuth) {
+      files.push(path.join(__dirname, "playwright", "rss-portal-global-setup.ts"));
+    } else if (useGlobalRssAuth && RSS_PORTAL_LOGIN_EVERY_RUN) {
+      files.push(path.join(__dirname, "playwright", "rss-portal-global-setup.ts"));
+    }
+    return files.length > 0 ? files : undefined;
+  })(),
 
   projects: ideMode ? [ideChromiumProject] : ciProjects,
 });
