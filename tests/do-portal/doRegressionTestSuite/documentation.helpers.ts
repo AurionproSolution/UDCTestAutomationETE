@@ -23,7 +23,7 @@ import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/Cu
 import { standardQuoteRoot } from "./workflow.helpers";
 
 export const DOC_CSA_SQ_PRODUCT = "CSA-C-Assigned";
-export const DOC_CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
+export const DOC_CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 export const DOC_TLC_DEALER = "Armstrong Prestige Wellington";
 export const DOC_T3824_BORROWER_NAME = /Liza Marie Doe/i;
 

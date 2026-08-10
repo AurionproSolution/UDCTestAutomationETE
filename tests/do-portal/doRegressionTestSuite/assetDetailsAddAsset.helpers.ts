@@ -10,8 +10,10 @@ import { DOAssetDetailsPage, DODashboardPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 
 export const CSA_SQ_PRODUCT = "CSA-C-Assigned";
-export const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
-export const CSA_SQ_ALT_PROGRAM = "CSA Personal - MV Dealer";
+/** SIT (Armstrong Prestige Wellington): Webform program is not offered. */
+export const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
+export const CSA_SQ_ALT_PROGRAM = "MYUDC-C-CSA- Assigned MV";
+export const CSA_SQ_WEBFORM_PROGRAM = "Webform - CSA Personal - MV Dealer";
 /** QAT dealer default for Armstrong Prestige Wellington (CSA-C). */
 export const CSA_SQ_DEALER_PROGRAM = "MYUDC-C-CSA- Assigned MV";
 export const CSA_SQ_DEALER_PROGRAM_ALT = "MYUDC-B-CSA-Assigned MV";
@@ -312,10 +314,11 @@ export async function ensureCsaProductAndProgram(
   if (!isCsaProgramLabel(programLabel) || isCsaProductLabel(programLabel)) {
     const candidates = [
       process.env.CSA_SQ_PROGRAM?.trim(),
-      CSA_SQ_DEALER_PROGRAM,
-      CSA_SQ_DEALER_PROGRAM_ALT,
       CSA_SQ_PROGRAM,
       CSA_SQ_ALT_PROGRAM,
+      CSA_SQ_DEALER_PROGRAM,
+      CSA_SQ_DEALER_PROGRAM_ALT,
+      CSA_SQ_WEBFORM_PROGRAM,
     ].filter((v, i, arr): v is string => Boolean(v?.trim()) && arr.indexOf(v) === i);
 
     for (const program of candidates) {

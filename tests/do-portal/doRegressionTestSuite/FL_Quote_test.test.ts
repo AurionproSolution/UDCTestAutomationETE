@@ -12,7 +12,7 @@ import * as fl from "./fl.helpers";
 import { openStandardQuoteFromDashboard } from "./workflow.helpers";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
-const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
+const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 
 async function openSelectedFlQuickQuote(page: Page) {
   const { quickQuotePage } = await fl.openFlQuickQuoteFromDashboard(page);

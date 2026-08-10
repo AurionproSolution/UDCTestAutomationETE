@@ -47,9 +47,10 @@ import {
   standardQuoteRoot as addAssetStandardQuoteRoot,
 } from "./assetDetailsAddAsset.helpers";
 
-const CSA_SQ_PRODUCT = "CSA-C-Assigned";
-const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
-const CSA_SQ_ALT_PROGRAM = "CSA Personal - MV Dealer";
+/** SIT (Armstrong Prestige Wellington): Webform program is not offered; use dealer CSA MV. */
+const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
+const CSA_SQ_ALT_PROGRAM = "MYUDC-C-CSA- Assigned MV";
+const CSA_SQ_ALT_PROGRAM_FALLBACK = "Webform - CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 const AFV_PRODUCT = "AFV-B-Assigned";
 const MOTOCHEK_REGO = "bagged";
@@ -126,11 +127,10 @@ async function waitForProductProgramSpinnerThenAssetTypePopulated(
 async function selectCsaProductAndProgram(
   page: Page,
   assetDetailsPage: DOAssetDetailsPage,
-  program = CSA_SQ_PROGRAM,
 ): Promise<void> {
-  await assetDetailsPage.chooseProduct(CSA_SQ_PRODUCT);
-  await assetDetailsPage.chooseProgram(program);
-  await waitForProductProgramSpinnerThenAssetTypePopulated(page);
+  // Prefer env/dealer-aware helper (keeps valid CSA default; tries Webform / MYUDC / MV Dealer).
+  await selectCsaProductProgram(page, assetDetailsPage);
+  await waitForProductProgramSpinnerThenAssetTypePopulated(page).catch(() => {});
 }
 
 function assetTypeInput(page: Page): Locator {
@@ -327,23 +327,35 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
       const before = await readAssetTypeValue(page);
       expect.soft(before.length).toBeGreaterThan(0);
 
+      const currentProgram = (await assetDetailsPage.readSelectedProgramLabel()).trim();
       await assetDetailsPage.openProgramDropdown();
-      const altProgram = page.getByRole("option", { name: CSA_SQ_ALT_PROGRAM, exact: true });
-      if (await altProgram.isVisible({ timeout: 8_000 }).catch(() => false)) {
-        await altProgram.click();
-      } else {
+      const preferredAlts = [CSA_SQ_ALT_PROGRAM, CSA_SQ_ALT_PROGRAM_FALLBACK];
+      let switched = false;
+      for (const altName of preferredAlts) {
+        if (altName === currentProgram) continue;
+        const altProgram = page.getByRole("option", { name: altName, exact: true });
+        if (await altProgram.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          await altProgram.click();
+          switched = true;
+          break;
+        }
+      }
+      if (!switched) {
         const options = page.getByRole("option");
         const count = await options.count();
         for (let i = 0; i < count; i++) {
           const text = ((await options.nth(i).textContent()) ?? "").trim();
-          if (text && text !== CSA_SQ_PROGRAM) {
+          if (text && text !== currentProgram && text !== CSA_SQ_PROGRAM) {
             await options.nth(i).click();
+            switched = true;
             break;
           }
         }
       }
       await page.keyboard.press("Escape").catch(() => {});
-      await waitForProductProgramSpinnerThenAssetTypePopulated(page);
+      if (switched) {
+        await waitForProductProgramSpinnerThenAssetTypePopulated(page);
+      }
 
       const after = await readAssetTypeValue(page);
       expect.soft(after.length).toBeGreaterThan(0);

@@ -20,7 +20,7 @@ test("debug schedule dialog html", async ({ page }) => {
   await dashboardPage.selectCSAproduct();
   await standardQuoteRoot(page).waitFor({ state: "visible", timeout: 120_000 });
   await assetDetailsPage.chooseProduct("CSA-C-Assigned");
-  await assetDetailsPage.chooseProgram("Webform - CSA Personal - MV Dealer");
+  await assetDetailsPage.chooseProgram("CSA Personal - MV Dealer");
   await assetDetailsPage.enterAsset("Car and Light Commercial /");
   await assetDetailsPage.selectCondition("Used");
   await assetDetailsPage.openAssetInsuranceTradeInSummary();

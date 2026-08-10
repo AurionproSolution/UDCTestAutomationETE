@@ -304,12 +304,18 @@ export class DOAssetDetailsPage extends BasePage {
     const trigger = this.programDropdownTrigger();
     const escaped = programName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const optionPattern = new RegExp(`^\\s*${escaped}\\s*$`, "i");
+    let missingOptionLogged = false;
 
     await expect
       .poll(
         async () => {
           const selected = await this.readSelectedProgramLabel();
-          if (optionPattern.test(selected) || selected.includes(programName)) {
+          // Exact match, or selected label is a non-empty prefix of the target (UI truncation).
+          if (
+            optionPattern.test(selected) ||
+            selected.includes(programName) ||
+            (selected.length >= 12 && programName.toLowerCase().startsWith(selected.toLowerCase().replace(/\.{2,}$/, "").trim()))
+          ) {
             return true;
           }
 
@@ -328,6 +334,22 @@ export class DOAssetDetailsPage extends BasePage {
               })
               .catch(() => option.click({ force: true, timeout: 2_000 }));
           } else {
+            const available = (await this.page.getByRole("option").allTextContents().catch(() => []))
+              .map((t) => t.trim())
+              .filter((t) => t.length > 0 && !this.isPlaceholderDropdownLabel(t));
+            const hasMatch = available.some(
+              (o) => optionPattern.test(o) || o.includes(programName),
+            );
+            if (!hasMatch && available.length > 0) {
+              if (!missingOptionLogged) {
+                missingOptionLogged = true;
+                this.logStep(
+                  `Program "${programName}" not in dropdown; available: ${available.join(" | ")}`,
+                );
+              }
+              await this.page.keyboard.press("Escape").catch(() => {});
+              return false;
+            }
             await this.page.keyboard.type(programName.slice(0, 8), { delay: 40 }).catch(() => {});
             await this.page.keyboard.press("Enter").catch(() => {});
           }
@@ -336,7 +358,13 @@ export class DOAssetDetailsPage extends BasePage {
           await this.page.waitForTimeout(500);
 
           const after = await this.readSelectedProgramLabel();
-          return optionPattern.test(after) || after.includes(programName) || /AFV/i.test(after);
+          return (
+            optionPattern.test(after) ||
+            after.includes(programName) ||
+            (after.length >= 12 &&
+              programName.toLowerCase().startsWith(after.toLowerCase().replace(/\.{2,}$/, "").trim())) ||
+            /AFV/i.test(after)
+          );
         },
         { timeout: 60_000, intervals: [800, 1_500, 2_000, 3_000] },
       )

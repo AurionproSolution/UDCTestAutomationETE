@@ -11,7 +11,7 @@ import { DOAssetDetailsPage, DOCustomerDetailsPage, DODashboardPage } from "../.
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
-const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
+const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 const EBBETT_DEALER = "Ebbett Volkswagen - Hamilton";
 

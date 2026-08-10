@@ -859,7 +859,7 @@ test(
     await dashboardPage.clickCreateStandardQuote();
     await dashboardPage.selectCSAproduct();
     await assetDetailsPage.chooseProduct("CSA-C-Assigned");
-    await assetDetailsPage.chooseProgram("Webform - CSA Personal - MV Dealer");
+    await assetDetailsPage.chooseProgram("CSA Personal - MV Dealer");
     await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
     await assetDetailsPage.enterAsset("Car and Light Commercial /");
     await assetDetailsPage.selectCondition("Used");

@@ -21,7 +21,7 @@ import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/Cu
 import settlementData from "../../../testData/do-portal/settlementTestData.json";
 
 export const CSA_SQ_PRODUCT = "CSA-C-Assigned";
-export const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
+export const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 export const TLC_DEALER =
   process.env.TLC_DEALER?.trim() ||
   process.env.DO_DEALER?.trim() ||

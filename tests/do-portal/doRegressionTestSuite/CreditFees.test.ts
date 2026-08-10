@@ -10,7 +10,7 @@ import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DODashboardPage } from "../../../pages";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
-const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
+const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 
 function standardQuoteRoot(page: Page): Locator {

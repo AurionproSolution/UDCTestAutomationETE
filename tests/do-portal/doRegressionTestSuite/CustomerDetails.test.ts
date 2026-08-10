@@ -24,7 +24,8 @@ import {
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
-const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
+/** SIT (Armstrong Prestige Wellington): Webform program is not offered. */
+const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 /** Default Originator Reference for Customer Details suite (`prepareCalculableCsaQuote` + post-Calculate replenish). */
 const CSA_CUSTOMER_DETAILS_ORIG_REF = "SQ-CSA-CD-Ref";
@@ -93,7 +94,7 @@ async function prepareCalculableCsaQuote(
 /**
  * Land on **Customer Details** (after Asset Details **Calculate** + **Next**), same entry as UDP-T3690.
  *
- * **CSA Webform note:** the first **Calculate** pricing round-trip can clear **Originator Reference** even
+ * **CSA note:** the first **Calculate** pricing round-trip can clear **Originator Reference** even
  * when it was set in {@link prepareCalculableCsaQuote}. Re-fill after **Calculate** so **Next** reaches
  * Customer Details (otherwise `waitForAddBorrowerButton` times out on Asset Details validation).
  */

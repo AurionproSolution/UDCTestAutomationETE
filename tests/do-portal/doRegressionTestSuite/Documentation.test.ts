@@ -30,7 +30,7 @@ import {
 } from "./documentation.helpers";
 
 const CSA_SQ_PRODUCT = "CSA-C-Assigned";
-const CSA_SQ_PROGRAM = "Webform - CSA Personal - MV Dealer";
+const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 /** Existing open Standard Quote on QAT (Settlement regression seed — UDP-T3860 Scenario 2). */
 const DOC_OPEN_QUOTE_ID = settlementData.existingQuotes.settlementFromAssetDetails;
