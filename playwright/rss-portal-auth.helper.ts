@@ -7,12 +7,16 @@
 import { chromium, type BrowserContext, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { rssPortalTotpSecret, RSS_PORTAL_MFA_LOCK_WAIT_MS, RSS_PORTAL_MANUAL_OTP_TIMEOUT_MS } from "../config/rss-portal-auth.config";
+import {
+  rssPortalTotpSecret,
+  RSS_PORTAL_MFA_LOCK_WAIT_MS,
+  RSS_PORTAL_MANUAL_OTP_TIMEOUT_MS,
+  rssPortalAuthenticationUrl,
+} from "../config/rss-portal-auth.config";
 import { RSS_BASE_URL, getCurrentEnv } from "../config/env";
 import { RSSLoginPage, RSSDashboardPage } from "../pages";
 import { getRssPortalAuthUser } from "../testData/rss-portal/rssLoginData";
 import { logTestStep } from "../utils/testStepLog";
-import { rssPortalAuthOrigins } from "../config/rss-portal-auth.config";
 import {
   captureAccessTokenFromAuthResponse,
   discoverAndSaveAuthMeta,
@@ -186,52 +190,61 @@ export async function loginRssPortalAndSaveStorage(page: Page): Promise<Page> {
 }
 
 /**
- * After cookies/storage are applied, open the RSS shell and land on the dashboard.
- * Handles Select Application → Retail Self Service when the launcher is shown.
+ * After cookies/storage are applied, start at /authentication (Select Application),
+ * choose Retail Self Service, then wait for the RSS dashboard shell.
+ * Unlike DO (which deep-links /dealer/), RSS UI entry with a stored token is the launcher.
+ *
+ * @returns Dashboard page when Select Application → Retail Self Service succeeds; otherwise undefined
+ *          (caller should treat stored session as inactive and run MFA).
  */
-export async function ensureRssPortalDashboardReady(page: Page): Promise<Page> {
+export async function ensureRssPortalDashboardReady(page: Page): Promise<Page | undefined> {
   const loginPage = new RSSLoginPage(page);
+  const authUrl = rssPortalAuthenticationUrl();
   const dashboardUrl = `${RSS_BASE_URL().replace(/\/$/, "")}/rss/dashboard`;
+  const retailCard = page
+    .locator("app-landing div.border-1.cursor-pointer")
+    .filter({ hasText: /Retail Self Service/i });
 
-  await page.goto(dashboardUrl, { waitUntil: "load" });
+  logTestStep(`RSS auth: opening Select Application at ${authUrl}`);
+  await page.goto(authUrl, { waitUntil: "load" });
+
+  // Auth SPA can take several seconds to hydrate stored SSO into Select Application.
+  const launcherVisible = await retailCard
+    .waitFor({ state: "visible", timeout: 25_000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (!launcherVisible) {
+    const onLoginEntry = await loginPage.loginWithFisButton
+      .isVisible({ timeout: 3_000 })
+      .catch(() => false);
+    logTestStep(
+      onLoginEntry
+        ? "RSS auth: Login with FIS shown — stored session not accepted; MFA required"
+        : "RSS auth: Select Application not shown — stored session inactive; MFA required",
+    );
+    return undefined;
+  }
+
+  logTestStep("RSS auth: Select Application visible — clicking Retail Self Service");
+  await loginPage.selectRetailSelfService();
 
   let sessionPage = loginPage.getSessionPage();
-  const dashboard = new RSSDashboardPage(sessionPage);
-  if (await dashboard.isDashboardLoaded()) {
-    return sessionPage;
-  }
-
-  const portalRoot = rssPortalAuthOrigins()[0];
-  await page.goto(portalRoot, { waitUntil: "load" });
-
-  if (await loginPage.isAppLauncherVisible()) {
-    await loginPage.selectRetailSelfService();
-  } else {
-    const onLoginEntry = await loginPage.loginWithFisButton
-      .isVisible({ timeout: 5_000 })
-      .catch(() => false);
-    if (onLoginEntry) {
-      const loginUrl = `${portalRoot.replace(/\/$/, "")}/authentication/login`;
-      await page.goto(loginUrl, { waitUntil: "load" });
-      if (await loginPage.isAppLauncherVisible()) {
-        await loginPage.selectRetailSelfService();
-      }
-    }
-  }
-
-  sessionPage = loginPage.getSessionPage();
   const shellVisible = await sessionPage
     .locator("app-sidemenu nav.sidebar, app-rss ion-segment[role='tablist']")
     .first()
     .isVisible({ timeout: 20_000 })
     .catch(() => false);
-  if (!shellVisible || !/\/rss\/dashboard/i.test(sessionPage.url())) {
+  if (!shellVisible || !/\/rss(\/|$)/i.test(sessionPage.url())) {
     await sessionPage.goto(dashboardUrl, { waitUntil: "load" });
   }
 
-  const dashboardAfterLauncher = new RSSDashboardPage(sessionPage);
-  if (!(await dashboardAfterLauncher.isDashboardLoaded())) {
-    throw new Error("RSS dashboard did not load after applying stored session.");
+  const dashboard = new RSSDashboardPage(sessionPage);
+  if (!(await dashboard.isDashboardLoaded())) {
+    logTestStep(
+      "RSS auth: dashboard did not load after Retail Self Service — treating session as inactive",
+    );
+    return undefined;
   }
   return sessionPage;
 }
@@ -241,23 +254,31 @@ export async function ensureRssPortalDashboardReady(page: Page): Promise<Page> {
  * When RSS_PORTAL_LOGIN_EVERY_RUN is on (default), globalSetup clears saved auth so this
  * always runs MFA once per Playwright invocation; parallel workers reuse the file saved in that run.
  *
- * @returns Session page already on the dashboard when this worker performed MFA; otherwise undefined
- *          (caller should run ensureRssPortalDashboardReady).
+ * Stored-token reuse opens /authentication → Retail Self Service (not DO-style /dealer deep-link).
+ * If the auth SPA still shows Login with FIS, the file JWT is ignored and MFA runs.
+ *
+ * @returns Session page already on the RSS dashboard.
  */
-export async function ensureRssPortalAuthSession(page: Page): Promise<Page | undefined> {
+export async function ensureRssPortalAuthSession(page: Page): Promise<Page> {
   const authFile = getRssPortalAuthFile();
   const lockPath = getRssPortalMfaLockPath(authFile);
   const deadline = Date.now() + RSS_PORTAL_MFA_LOCK_WAIT_MS;
+  /** After /authentication rejects the saved JWT once, skip further UI reuse attempts and MFA. */
+  let storedSessionUiRejected = false;
 
-  const syncBrowserFromFile = async (): Promise<void> => {
+  const tryReuseViaAuthentication = async (reason: string): Promise<Page | undefined> => {
+    if (storedSessionUiRejected) return undefined;
     await applyRssPortalAuthToContext(page.context());
+    logTestStep(`RSS auth: ${reason}`);
+    const activated = await ensureRssPortalDashboardReady(page);
+    if (!activated) storedSessionUiRejected = true;
+    return activated;
   };
 
   let evaluation = await trySilentRefreshSession(authFile);
   if (evaluation.action === "reuse") {
-    await syncBrowserFromFile();
-    logTestStep(`RSS auth: ${evaluation.reason}`);
-    return undefined;
+    const activated = await tryReuseViaAuthentication(evaluation.reason);
+    if (activated) return activated;
   }
 
   logTestStep(
@@ -268,9 +289,8 @@ export async function ensureRssPortalAuthSession(page: Page): Promise<Page | und
   while (Date.now() < deadline) {
     evaluation = await trySilentRefreshSession(authFile);
     if (evaluation.action === "reuse") {
-      await syncBrowserFromFile();
-      logTestStep(`RSS auth: ${evaluation.reason}`);
-      return undefined;
+      const activated = await tryReuseViaAuthentication(evaluation.reason);
+      if (activated) return activated;
     }
 
     const acquiredLock = tryAcquireMfaLock(lockPath);
@@ -281,11 +301,12 @@ export async function ensureRssPortalAuthSession(page: Page): Promise<Page | und
     }
 
     try {
+      // Another worker may have saved a fresh session while we waited for the lock.
+      storedSessionUiRejected = false;
       evaluation = await trySilentRefreshSession(authFile);
       if (evaluation.action === "reuse") {
-        await syncBrowserFromFile();
-        logTestStep(`RSS auth: ${evaluation.reason}`);
-        return undefined;
+        const activated = await tryReuseViaAuthentication(evaluation.reason);
+        if (activated) return activated;
       }
 
       logTestStep(`RSS auth: ${evaluation.reason} — running coordinated MFA login.`);

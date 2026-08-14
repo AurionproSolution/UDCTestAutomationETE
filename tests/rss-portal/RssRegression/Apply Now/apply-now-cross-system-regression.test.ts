@@ -3,10 +3,23 @@
  * Zephyr: /RSS Regression Suite/Apply Now
  * Source: RSS Apply Now Regression Test Cases.xlsx
  *
- * These cases require FIS Enterprise or Application Form (AF) verification outside RSS portal UI.
+ * URP-T134 verifies uploaded Apply Now documents on the created draft quote Documents tab.
+ * Remaining cases require FIS Enterprise or Application Form (AF) verification outside RSS portal UI.
  */
 
 import { test } from "../../../../fixtures/rssPortalTest";
+import {
+  RSSApplyNowApplicationDocumentsPage,
+  RSSApplyNowCustomerDetailsPage,
+  RSSApplyNowDealershipAssetRepaymentPage,
+  RSSApplyNowHowCanWeHelpIndividualPage,
+  RSSDashboardPage,
+  RSSLoansPage,
+} from "../../../../pages";
+import {
+  createIndividualApplyNowDraftWithUploadedDocument,
+  openDraftQuoteDocumentsAndExpectUploadedFile,
+} from "./apply-now-cross-system-regression.helpers";
 
 test.describe("RSS Portal — Apply Now cross-system @rss @regression", () => {
   test.fixme(
@@ -33,11 +46,34 @@ test.describe("RSS Portal — Apply Now cross-system @rss @regression", () => {
     },
   );
 
-  test.fixme(
+  test(
     "URP-T134 - Apply Now - Documents Upload visible on Loans tab after submit",
     { tag: ["@rss", "@regression", "@URP-T134"] },
-    async () => {
+    async ({ page }) => {
       test.setTimeout(900_000);
+
+      const dashboard = new RSSDashboardPage(page);
+      const howCanWeHelp = new RSSApplyNowHowCanWeHelpIndividualPage(page);
+      const assetPage = new RSSApplyNowDealershipAssetRepaymentPage(page);
+      const customerDetails = new RSSApplyNowCustomerDetailsPage(page);
+      const documents = new RSSApplyNowApplicationDocumentsPage(page);
+      const loans = new RSSLoansPage(page);
+
+      const { quoteId, uploadedDocumentName } =
+        await createIndividualApplyNowDraftWithUploadedDocument(
+          dashboard,
+          howCanWeHelp,
+          assetPage,
+          customerDetails,
+          documents,
+        );
+
+      await openDraftQuoteDocumentsAndExpectUploadedFile(
+        dashboard,
+        loans,
+        quoteId,
+        uploadedDocumentName,
+      );
     },
   );
 

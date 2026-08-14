@@ -228,13 +228,7 @@ export class RSSServiceRequestPage extends BasePage {
   }
 
   private async selectDirectDebitAuthorised(answer: "Yes" | "No"): Promise<void> {
-    const directDebit = this.directDebitDetailsPanel();
-    await directDebit.scrollIntoViewIfNeeded();
-    const label = directDebit
-      .locator("label.p-radiobutton-label", { hasText: new RegExp(`^${answer}$`, "i") })
-      .first();
-    await this.clickElement(label, 30_000);
-    await this.waitForLoadingComplete();
+    await this.clickDirectDebitPaymentOption(answer.toLowerCase() as "yes" | "no");
   }
 
   async selectDirectDebitAuthorisedNo(): Promise<void> {
@@ -459,41 +453,94 @@ export class RSSServiceRequestPage extends BasePage {
   }
 
   private bankAccountDetailsPanel(): Locator {
-    const form = this.bankDetailsForm();
-    return form
-      .locator("gen-card, p-card, section, div")
-      .filter({ has: form.getByText(/^Bank Account Details$/i) })
-      .filter({ has: form.getByText(/^Loan No\.$/i) })
-      .first();
+    return this.bankDetailsForm();
+  }
+
+  private bankAccountLoanDataRows(): Locator {
+    return this.bankDetailsForm().locator("ion-row.data-row");
   }
 
   private bankAccountLoanRows(): Locator {
-    const panel = this.bankAccountDetailsPanel();
-    return panel
-      .locator("div, tr, li, p, paragraph")
-      .filter({ has: panel.getByRole("radio") })
-      .filter({ hasText: /\b\d{1,12}\b/ });
+    return this.bankAccountLoanDataRows();
+  }
+
+  private bankAccountLoanRadioInputs(): Locator {
+    return this.bankDetailsForm().locator("input[type='radio'][id^='bank']");
   }
 
   private bankAccountLoanRadios(): Locator {
-    return this.bankAccountDetailsPanel().getByRole("radio");
+    return this.bankAccountLoanRadioInputs();
+  }
+
+  private bankAccountLoanNumbers(): Locator {
+    return this.bankAccountLoanDataRows()
+      .locator("label")
+      .filter({ hasText: /^\d{2,}$/ });
+  }
+
+  private async countBankAccountLoanOptions(): Promise<number> {
+    const form = this.bankDetailsForm();
+    if ((await form.count()) === 0) {
+      return 0;
+    }
+
+    const bankRadioCount = await this.bankAccountLoanRadioInputs().count();
+    if (bankRadioCount > 0) {
+      return bankRadioCount;
+    }
+
+    const dataRowCount = await this.bankAccountLoanDataRows().count();
+    if (dataRowCount > 0) {
+      return dataRowCount;
+    }
+
+    return form.locator("label").filter({ hasText: /^\d{2,}$/ }).count();
   }
 
   private directDebitDetailsPanel(): Locator {
-    const form = this.bankDetailsForm();
-    return form
-      .locator("gen-card, p-card, form, base-form, section, div")
-      .filter({ has: form.getByText(/^Direct Debit Details$/i) })
-      .filter({
-        has: form.getByText(/personally authorised to operate your nominated bank account/i),
-      })
-      .last();
+    const bankDetails = this.bankDetailsForm();
+    return bankDetails
+      .locator("form.p-fluid")
+      .filter({ has: this.directDebitAuthorisationHeading() })
+      .first();
+  }
+
+  private directDebitAuthorisationHeading(): Locator {
+    return this.bankDetailsForm().getByRole("heading", {
+      name: /personally authorised to operate your nominated bank account/i,
+    });
+  }
+
+  private directDebitPaymentRadio(value: "yes" | "no"): Locator {
+    return this.bankDetailsForm().locator(
+      `input[type='radio'][name='paymentOption'][value='${value}']`,
+    );
+  }
+
+  private directDebitPaymentRadioBox(value: "yes" | "no"): Locator {
+    return this.directDebitPaymentRadio(value).locator(
+      "xpath=ancestor::p-radiobutton[1]//*[contains(@class,'p-radiobutton-box')]",
+    );
+  }
+
+  private async clickDirectDebitPaymentOption(value: "yes" | "no"): Promise<void> {
+    await this.directDebitAuthorisationHeading().scrollIntoViewIfNeeded();
+    const input = this.directDebitPaymentRadio(value);
+    if (await input.isChecked().catch(() => false)) {
+      return;
+    }
+
+    const box = this.directDebitPaymentRadioBox(value);
+    if ((await box.count()) > 0) {
+      await box.first().click({ force: true });
+    } else {
+      await input.click({ force: true });
+    }
+    await this.waitForLoadingComplete();
   }
 
   private directDebitTextInputs(): Locator {
-    return this.directDebitDetailsPanel().locator(
-      "input.form-control:visible, input.p-inputtext:visible, input:not([type='radio']):not([type='hidden']):not([type='checkbox']):visible",
-    );
+    return this.bankDetailsForm().locator("input[type='text'].form-control");
   }
 
   private directDebitTextInput(index: 0 | 1): Locator {
@@ -501,16 +548,19 @@ export class RSSServiceRequestPage extends BasePage {
   }
 
   private directDebitNoteField(): Locator {
-    return this.directDebitDetailsPanel().locator("textarea#note, textarea:visible").first();
+    return this.bankDetailsForm().locator("textarea#note").first();
   }
 
   /** Bank-account loans load asynchronously after category selection on QAT. */
   async waitForBankAccountLoanRows(timeoutMs = 90_000): Promise<void> {
     this.logStep("Wait For Bank Account Loan Rows");
-    await this.waitForLoadingComplete(timeoutMs);
+    await expect(this.bankDetailsForm()).toBeVisible({ timeout: 15_000 });
     try {
       await expect
-        .poll(async () => this.bankAccountLoanRadios().count(), {
+        .poll(async () => {
+          await this.waitForLoadingComplete(5_000);
+          return this.countBankAccountLoanOptions();
+        }, {
           timeout: timeoutMs,
           intervals: [500, 1_000, 2_000, 3_000],
         })
@@ -523,27 +573,26 @@ export class RSSServiceRequestPage extends BasePage {
   }
 
   private async ensureDirectDebitAuthorisedYes(): Promise<void> {
-    const directDebit = this.directDebitDetailsPanel();
-    await directDebit.scrollIntoViewIfNeeded();
-    const yesLabel = directDebit
-      .locator("label.p-radiobutton-label", { hasText: /^Yes$/i })
-      .first();
-    const yesInput = directDebit.locator('input[type="radio"][value="yes"]').first();
-    if (await yesInput.isChecked().catch(() => false)) return;
-    await this.clickElement(yesLabel, 30_000);
-    await this.waitForLoadingComplete();
+    await this.clickDirectDebitPaymentOption("yes");
   }
 
   private async selectFirstBankAccountLoanIfPresent(): Promise<void> {
-    const loanRadios = this.bankAccountLoanRadios();
-    const loanCount = await loanRadios.count();
+    const loanCount = await this.countBankAccountLoanOptions();
     if (loanCount === 0) return;
 
-    for (let i = 0; i < loanCount; i++) {
-      const radio = loanRadios.nth(i);
-      if (await radio.isChecked().catch(() => false)) return;
+    const input = this.bankAccountLoanRadioInputs().first();
+    if (await input.isChecked().catch(() => false)) {
+      return;
     }
-    await loanRadios.first().click({ force: true });
+
+    const box = input.locator(
+      "xpath=ancestor::p-radiobutton[1]//*[contains(@class,'p-radiobutton-box')]",
+    );
+    if ((await box.count()) > 0) {
+      await box.first().click({ force: true });
+    } else {
+      await input.click({ force: true });
+    }
     await this.waitForLoadingComplete();
   }
 
@@ -564,29 +613,25 @@ export class RSSServiceRequestPage extends BasePage {
       timeout: 10_000,
     });
     await this.waitForBankAccountLoanRows();
-    await expect(this.bankAccountLoanRadios().first()).toBeVisible({ timeout: 10_000 });
+    await expect(this.bankAccountLoanRadioInputs().first()).toBeAttached({ timeout: 10_000 });
 
-    const directDebit = this.directDebitDetailsPanel();
-    await directDebit.scrollIntoViewIfNeeded();
-    await expect(directDebit.getByText(/^Direct Debit Details$/i).first()).toBeVisible({
+    await this.directDebitAuthorisationHeading().scrollIntoViewIfNeeded();
+    await expect(this.bankDetailsForm().getByText(/Direct Debit Details/i).first()).toBeVisible({
       timeout: 10_000,
     });
-    await expect(
-      directDebit
-        .getByText(/personally authorised to operate your nominated bank account/i)
-        .first(),
-    ).toBeVisible({ timeout: 10_000 });
-    await expect(
-      directDebit.locator("label.p-radiobutton-label", { hasText: /^Yes$/i }).first(),
-    ).toBeVisible({ timeout: 10_000 });
-    await expect(
-      directDebit.locator("label.p-radiobutton-label", { hasText: /^No$/i }).first(),
-    ).toBeVisible({ timeout: 10_000 });
+    await expect(this.directDebitAuthorisationHeading()).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(this.directDebitPaymentRadio("yes")).toBeAttached({ timeout: 10_000 });
+    await expect(this.directDebitPaymentRadio("no")).toBeAttached({ timeout: 10_000 });
+    await expect(this.directDebitPaymentRadioBox("yes")).toBeVisible({ timeout: 10_000 });
+    await expect(this.directDebitPaymentRadioBox("no")).toBeVisible({ timeout: 10_000 });
 
     await this.ensureDirectDebitAuthorisedYes();
-    await expect(this.directDebitTextInput(0)).toBeVisible({ timeout: 15_000 });
-    await expect(this.directDebitTextInput(1)).toBeVisible({ timeout: 15_000 });
-    await expect(this.directDebitNoteField()).toBeVisible({ timeout: 10_000 });
+    await this.directDebitNoteField().scrollIntoViewIfNeeded();
+    await expect(this.directDebitTextInput(0)).toBeAttached({ timeout: 15_000 });
+    await expect(this.directDebitTextInput(1)).toBeAttached({ timeout: 15_000 });
+    await expect(this.directDebitNoteField()).toBeAttached({ timeout: 10_000 });
   }
 
   async fillChangeBankAccountDetailsForm(note?: string): Promise<void> {

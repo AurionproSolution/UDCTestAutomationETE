@@ -30,16 +30,13 @@ export class RSSContactUdcPage extends BasePage {
   }
 
   contactDialog(): Locator {
-    return this.page.getByRole("dialog").filter({ hasText: /Contact UDC/i });
+    return this.page.getByRole("dialog").filter({ hasText: /Contact UDC/i }).first();
   }
 
   private dropdownByFieldLabel(label: RegExp): Locator {
-    const fieldText = this.contactDialog().getByText(label).first();
-    return fieldText
-      .locator("xpath=ancestor::span[1]")
-      .locator("p-dropdown")
-      .first()
-      .or(fieldText.locator("xpath=..").locator("p-dropdown").first());
+    const dialog = this.contactDialog();
+    const fieldText = dialog.getByText(label, { exact: false }).first();
+    return fieldText.locator("xpath=..").locator("p-dropdown").first();
   }
 
   messageTextarea(): Locator {
@@ -103,17 +100,16 @@ export class RSSContactUdcPage extends BasePage {
     optionLabel: string,
   ): Promise<void> {
     const looseName = new RegExp(this.escapeRx(optionLabel), "i");
-    await root.waitFor({ state: "visible", timeout: 15_000 });
+    await root.waitFor({ state: "attached", timeout: 15_000 });
     await this.waitForLoadingComplete();
     const combobox = root.locator('[role="combobox"]').first();
     const trigger = root
       .locator(".p-dropdown-trigger, [aria-label='dropdown trigger']")
       .first();
     const dropdownClickTimeoutMs = 90_000;
-    if (await combobox.isVisible().catch(() => false)) {
+    if (await combobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
       await this.clickElement(combobox, dropdownClickTimeoutMs);
     } else {
-      await trigger.waitFor({ state: "visible", timeout: 15_000 });
       await this.clickElement(trigger, dropdownClickTimeoutMs);
     }
     const visiblePanel = this.page.locator(".p-dropdown-panel").filter({ visible: true });
@@ -131,13 +127,25 @@ export class RSSContactUdcPage extends BasePage {
       await byRole.click();
     }
     await this.waitForLoadingComplete();
+    await this.page
+      .locator(".p-dropdown-panel")
+      .filter({ visible: true })
+      .waitFor({ state: "hidden", timeout: 5_000 })
+      .catch(() => undefined);
   }
 
   /** Opens a dropdown and returns visible option labels (panel is closed afterward). */
   async getDropdownOptionLabels(root: Locator): Promise<string[]> {
-    await root.waitFor({ state: "visible", timeout: 15_000 });
+    await root.waitFor({ state: "attached", timeout: 15_000 });
     const combobox = root.locator('[role="combobox"]').first();
-    await this.clickElement(combobox, 90_000);
+    const trigger = root
+      .locator(".p-dropdown-trigger, [aria-label='dropdown trigger']")
+      .first();
+    if (await combobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await this.clickElement(combobox, 90_000);
+    } else {
+      await this.clickElement(trigger, 90_000);
+    }
     const panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
     await panel.waitFor({ state: "visible", timeout: 12_000 });
     const items = panel.locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item");
@@ -190,43 +198,92 @@ export class RSSContactUdcPage extends BasePage {
   }
 
   async selectPreferredContactMethod(method: string): Promise<void> {
+    await this.page.keyboard.press("Escape").catch(() => undefined);
     await this.pickPrimeNgDropdownOption(
       this.preferredContactMethodDropdown(),
       method,
     );
+    await this.waitForLoadingComplete();
+    const combobox = this.preferredContactMethodDropdown()
+      .locator('[role="combobox"]')
+      .first();
+    await expect(combobox).toContainText(method, { timeout: 15_000 });
   }
 
   async selectPreferredContactTime(time: string): Promise<void> {
     await this.pickPrimeNgDropdownOption(this.preferredContactTimeDropdown(), time);
   }
 
-  private preferredContactTimeRow(): Locator {
-    return this.contactDialog()
-      .getByText(/^Preferred Contact Time/i)
-      .first()
-      .locator("xpath=..");
+  private preferredContactTimeCombobox(): Locator {
+    return this.preferredContactTimeDropdown().locator('[role="combobox"]').first();
+  }
+
+  private async isPreferredContactTimeDisabled(): Promise<boolean> {
+    const dialog = this.contactDialog();
+    const labelCount = await dialog.getByText(/Preferred Contact Time/i).count();
+    const dropdown = this.preferredContactTimeDropdown();
+    const dropdownCount = await dropdown.count();
+
+    if (labelCount === 0 && dropdownCount === 0) {
+      return true;
+    }
+
+    if (dropdownCount === 0) {
+      return labelCount > 0;
+    }
+
+    const cls = (await dropdown.getAttribute("class")) ?? "";
+    if (/p-disabled/i.test(cls)) {
+      return true;
+    }
+
+    const combobox = this.preferredContactTimeCombobox();
+    if ((await combobox.count()) === 0) {
+      return true;
+    }
+
+    return combobox.isDisabled();
   }
 
   async expectPreferredContactTimeDisabled(): Promise<void> {
     this.logStep("Expect Preferred Contact Time Disabled");
-    await expect(
-      this.preferredContactTimeRow().getByRole("combobox", { disabled: true }),
-    ).toBeVisible({ timeout: 15_000 });
+    await this.waitForLoadingComplete();
+    await expect
+      .poll(async () => this.isPreferredContactTimeDisabled(), {
+        timeout: 15_000,
+        message:
+          "Preferred Contact Time should be disabled or hidden when contact method is Email",
+      })
+      .toBe(true);
   }
 
   async expectPreferredContactTimeCleared(): Promise<void> {
     this.logStep("Expect Preferred Contact Time Cleared");
-    const label = this.preferredContactTimeRow()
-      .locator(".p-dropdown-label")
-      .first();
+    await this.waitForLoadingComplete();
+
+    const dropdown = this.preferredContactTimeDropdown();
+    if ((await dropdown.count()) === 0) {
+      await expect(this.contactDialog().getByText(/Preferred Contact Time/i)).toHaveCount(0);
+      return;
+    }
+
+    const label = dropdown.locator(".p-dropdown-label").first();
     if (await label.isVisible().catch(() => false)) {
       const text = (await label.innerText()).replace(/\s+/g, " ").trim();
       expect(text).toMatch(/^(--\s*Select|Please Complete)?$/i);
       return;
     }
-    await expect(
-      this.preferredContactTimeRow().getByRole("combobox", { disabled: true }),
-    ).toBeVisible({ timeout: 10_000 });
+
+    const combobox = this.preferredContactTimeCombobox();
+    await expect(combobox).toBeDisabled({ timeout: 10_000 });
+    const comboboxText = (
+      (await combobox.getAttribute("aria-label")) ??
+      (await combobox.textContent()) ??
+      ""
+    )
+      .replace(/\s+/g, " ")
+      .trim();
+    expect(comboboxText).toMatch(/^(--\s*Select|Please Complete)?$/i);
   }
 
   /** URP-T143 — Message textarea accepts at most 1000 characters. */

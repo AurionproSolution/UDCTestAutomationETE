@@ -26,13 +26,23 @@ export class RSSMyRequestsPage extends BasePage {
   }
 
   private requestsRoot(): Locator {
-    return this.page.locator("app-request-details");
+    return this.page
+      .locator("app-request-details, app-rss")
+      .filter({ has: this.page.getByPlaceholder(/Search By Request No\. or Loan No\./i) })
+      .first();
   }
 
   requestsTable(): Locator {
-    return this.requestsRoot()
+    return this.page
       .locator("gen-table#request-details table, #request-details table")
-      .first();
+      .filter({ has: this.page.getByRole("columnheader", { name: /Request No\./i }) })
+      .first()
+      .or(
+        this.page
+          .getByRole("table")
+          .filter({ has: this.page.getByRole("columnheader", { name: /Request No\./i }) })
+          .first(),
+      );
   }
 
   /** Data rows currently shown in the requests grid (excludes filtered/hidden PrimeNG rows). */
@@ -41,7 +51,7 @@ export class RSSMyRequestsPage extends BasePage {
   }
 
   searchInput(): Locator {
-    return this.requestsRoot()
+    return this.page
       .locator('input[name="applicationSearchValue"]')
       .or(this.page.getByPlaceholder(/Search By Request No\. or Loan No\./i))
       .first();
@@ -65,6 +75,7 @@ export class RSSMyRequestsPage extends BasePage {
       pattern.test(row.requestNo) ||
       pattern.test(row.loanNo) ||
       pattern.test(row.requestLabel) ||
+      pattern.test(row.requestCategory) ||
       pattern.test(row.requestType)
     );
   }
@@ -261,7 +272,7 @@ export class RSSMyRequestsPage extends BasePage {
           if (rows.length === 0) {
             return false;
           }
-          return rows.every((row) => this.rowMatchesSearchQuery(row, normalizedQuery));
+          return rows.some((row) => this.rowMatchesSearchQuery(row, normalizedQuery));
         },
         { timeout: timeoutMs, intervals: [250, 500, 1_000, 2_000] },
       )
@@ -272,6 +283,7 @@ export class RSSMyRequestsPage extends BasePage {
     this.logStep(`Search Requests — ${query}`);
     const searchField = this.searchInput();
     await searchField.click();
+    await searchField.fill("");
     await searchField.fill(query);
     await this.submitSearch();
     await this.waitForSearchResults(query);

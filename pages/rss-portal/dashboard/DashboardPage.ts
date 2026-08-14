@@ -387,6 +387,8 @@ export class RSSDashboardPage extends BasePage {
 
   /** Clicks Overview top tab when another RSS tab is active. */
   async clickOverviewIfNeeded(): Promise<void> {
+    await this.dismissBlockingDialogsIfPresent();
+
     const overviewChecked = this.page.locator(
       'app-rss ion-segment-button[value="overview"].segment-button-checked',
     );
@@ -401,6 +403,26 @@ export class RSSDashboardPage extends BasePage {
       .first();
     await this.clickElement(overviewButton);
     await this.waitForRssShellIdle();
+  }
+
+  private async dismissBlockingDialogsIfPresent(): Promise<void> {
+    const mask = this.page.locator(".p-dialog-mask.p-component-overlay").last();
+    if (!(await mask.isVisible({ timeout: 1_000 }).catch(() => false))) {
+      return;
+    }
+
+    const closeButton = this.page
+      .getByRole("dialog")
+      .getByRole("button", { name: /^Close$/i })
+      .first();
+    if (await closeButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await closeButton.click({ force: true, timeout: 15_000 }).catch(() => undefined);
+    } else {
+      await this.page.keyboard.press("Escape").catch(() => undefined);
+    }
+
+    await expect(mask).toBeHidden({ timeout: 15_000 }).catch(() => undefined);
+    await this.waitForLoadingComplete();
   }
 
   private overviewLoanSectionLabel(section: "active" | "repaid" | "draft"): RegExp {
@@ -442,6 +464,58 @@ export class RSSDashboardPage extends BasePage {
     await expect(card).toBeVisible({ timeout: 30_000 });
     await this.clickElement(card);
     await this.waitForRssShellIdle();
+  }
+
+  private parseQuoteIdFromOverviewCardText(text: string): string | null {
+    const normalized = text.replace(/\s+/g, " ").trim();
+    const pipeMatch = normalized.match(/\b(\d{2,})\s*\|/);
+    if (pipeMatch?.[1]) {
+      return pipeMatch[1];
+    }
+    const leading = normalized.match(/^\s*(\d{2,})\b/);
+    return leading?.[1] ?? null;
+  }
+
+  async readVisibleDraftQuoteIds(): Promise<string[]> {
+    this.logStep("Read Visible Draft Quote Ids");
+    await this.clickOverviewIfNeeded();
+    await this.expectOverviewTabSelected();
+    await this.switchOverviewLoanSection("draft");
+    const cards = this.overviewLoanCards("draft");
+    const count = await cards.count();
+    const ids: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const id = this.parseQuoteIdFromOverviewCardText(await cards.nth(i).innerText());
+      if (id) {
+        ids.push(id);
+      }
+    }
+    return ids;
+  }
+
+  async clickDraftQuoteById(quoteId: string): Promise<void> {
+    this.logStep(`Click Draft Quote By Id — ${quoteId}`);
+    await this.clickOverviewIfNeeded();
+    await this.expectOverviewTabSelected();
+    await this.switchOverviewLoanSection("draft");
+    const escaped = quoteId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const card = this.overviewLoanCards("draft")
+      .filter({ hasText: new RegExp(`\\b${escaped}\\b`) })
+      .first();
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    await this.clickElement(card);
+    await this.waitForRssShellIdle();
+  }
+
+  async resolveNewDraftQuoteId(beforeIds: string[]): Promise<string> {
+    this.logStep("Resolve New Draft Quote Id");
+    const afterIds = await this.readVisibleDraftQuoteIds();
+    const newId = afterIds.find((id) => !beforeIds.includes(id));
+    expect(
+      newId ?? afterIds[0],
+      "A new draft quote must appear on Overview after Apply Now submit.",
+    ).toBeTruthy();
+    return newId ?? afterIds[0]!;
   }
 
   async getVisibleOverviewContractCardCount(
@@ -612,12 +686,14 @@ export class RSSDashboardPage extends BasePage {
       .toBeGreaterThan(before);
   }
 
-  /** URP-T198 — row containing "Your last login was on" plus date/time on Overview. */
+  /** URP-T198 — welcome row containing "Your last login was on" plus date/time on Overview. */
   private overviewLastLoginBanner(): Locator {
     return this.overviewLoanArea()
-      .getByText(/^Your last login was on$/i)
-      .first()
-      .locator("xpath=..");
+      .locator("div, section, ion-row, ion-col, p, span")
+      .filter({ has: this.page.getByText(/Your last login was on/i) })
+      .filter({ has: this.page.getByText(/\d{1,2}\/\d{1,2}\/\d{2,4}/) })
+      .filter({ has: this.page.getByText(/\d{1,2}:\d{2}\s*(am|pm)/i) })
+      .first();
   }
 
   /** URP-T198 — logged-in date/time on Overview; refresh still shows date and time. */
@@ -628,12 +704,10 @@ export class RSSDashboardPage extends BasePage {
     const loginBanner = this.overviewLastLoginBanner();
     await expect(loginBanner).toBeVisible({ timeout: 15_000 });
 
-    const loginDate = loginBanner.getByText(/\d{1,2}\/\d{1,2}\/\d{2,4}/).first();
-    const loginTime = loginBanner.getByText(/\d{1,2}:\d{2}\s*(am|pm)/i).first();
-    await expect(loginDate).toBeVisible({ timeout: 10_000 });
-    await expect(loginTime).toBeVisible({ timeout: 10_000 });
-    expect((await loginDate.innerText()).trim().length).toBeGreaterThan(0);
-    expect((await loginTime.innerText()).trim().length).toBeGreaterThan(0);
+    const bannerText = (await loginBanner.innerText()).replace(/\s+/g, " ").trim();
+    expect(bannerText).toMatch(/Your last login was on/i);
+    expect(bannerText).toMatch(/\d{1,2}\/\d{1,2}\/\d{2,4}/);
+    expect(bannerText).toMatch(/\d{1,2}:\d{2}\s*(am|pm)/i);
 
     await this.page.reload({ waitUntil: "load" });
     expect(await this.isDashboardLoaded()).toBe(true);
@@ -641,12 +715,32 @@ export class RSSDashboardPage extends BasePage {
 
     const loginBannerAfter = this.overviewLastLoginBanner();
     await expect(loginBannerAfter).toBeVisible({ timeout: 15_000 });
-    await expect(loginBannerAfter.getByText(/\d{1,2}\/\d{1,2}\/\d{2,4}/).first()).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(loginBannerAfter.getByText(/\d{1,2}:\d{2}\s*(am|pm)/i).first()).toBeVisible({
-      timeout: 10_000,
-    });
+    const bannerTextAfter = (await loginBannerAfter.innerText()).replace(/\s+/g, " ").trim();
+    expect(bannerTextAfter).toMatch(/\d{1,2}\/\d{1,2}\/\d{2,4}/);
+    expect(bannerTextAfter).toMatch(/\d{1,2}:\d{2}\s*(am|pm)/i);
+  }
+
+  /** URP-T224 — Welcome back card shows username and last login date/time on Overview. */
+  async expectWelcomeBackCardWithLastLoginVisible(): Promise<void> {
+    this.logStep("Expect Welcome Back Card With Last Login Visible");
+    await this.expectOverviewTabSelected();
+
+    const welcomeArea = this.overviewLoanArea()
+      .locator("div, section, ion-row, ion-col, p, span")
+      .filter({ has: this.page.getByText(/Welcome Back/i) })
+      .first();
+    await expect(welcomeArea).toBeVisible({ timeout: 15_000 });
+
+    const welcomeText = (await welcomeArea.innerText()).replace(/\s+/g, " ").trim();
+    expect(welcomeText).toMatch(/Welcome Back,/i);
+    expect(welcomeText.replace(/Welcome Back,/i, "").trim().length).toBeGreaterThan(0);
+
+    const loginBanner = this.overviewLastLoginBanner();
+    await expect(loginBanner).toBeVisible({ timeout: 15_000 });
+    const bannerText = (await loginBanner.innerText()).replace(/\s+/g, " ").trim();
+    expect(bannerText).toMatch(/Your last login was on/i);
+    expect(bannerText).toMatch(/\d{1,2}\/\d{1,2}\/\d{2,4}/);
+    expect(bannerText).toMatch(/\d{1,2}:\d{2}\s*(am|pm)/i);
   }
 
   /** Opens the toolbar borrower PrimeNG dropdown; returns the visible `.p-dropdown-panel`. */

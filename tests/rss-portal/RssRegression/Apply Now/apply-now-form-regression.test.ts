@@ -18,6 +18,7 @@ import {
 import {
   APPLY_NOW_ASSET_CAR_OR_VAN,
   APPLY_NOW_DEALERS_LOAD_TIMEOUT_MS,
+  APPLY_NOW_DEALERSHIP_FALLBACK_SEARCH,
   APPLY_NOW_REPAYMENT,
 } from "../../../../testData/rss-portal/applyNowData";
 import {
@@ -77,7 +78,10 @@ test.describe("RSS Portal — Apply Now form validation @rss @regression", () =>
       await assetPage.expectDealershipDropdownFieldsVisible();
       const usedBeforeLabels = await assetPage.getDealerUsedBeforeOptionLabels();
       expect(usedBeforeLabels.length).toBeGreaterThan(0);
-      await assetPage.expectAnotherDealershipSearchSuggestions();
+      await assetPage.expectAnotherDealershipSearchSuggestions(
+        1,
+        APPLY_NOW_DEALERSHIP_FALLBACK_SEARCH,
+      );
     },
   );
 
@@ -111,7 +115,10 @@ test.describe("RSS Portal — Apply Now form validation @rss @regression", () =>
       await howCanWeHelp.clickIndividual();
       await completeDealershipPurchaseFlow(howCanWeHelp, assetPage);
       await assetPage.fillCarOrVanAssetRow(APPLY_NOW_ASSET_CAR_OR_VAN);
-      await assetPage.fillRepaymentCalculatorFields(APPLY_NOW_REPAYMENT);
+      await assetPage.fillRepaymentCalculatorFields({
+        ...APPLY_NOW_REPAYMENT,
+        termMonths: "12",
+      });
       await assetPage.clickRepaymentCalculate();
       await assetPage.expectRepaymentCalculationTableVisible();
       const firstInstallment = await assetPage.readInstallmentAmount();
@@ -121,7 +128,7 @@ test.describe("RSS Portal — Apply Now form validation @rss @regression", () =>
       });
       await assetPage.clickRepaymentCalculate();
       await assetPage.expectRepaymentCalculationTableVisible();
-      const secondInstallment = await assetPage.readInstallmentAmount();
+      const secondInstallment = await assetPage.expectInstallmentAmountChanged(firstInstallment);
       expect(secondInstallment).not.toBe(firstInstallment);
     },
   );

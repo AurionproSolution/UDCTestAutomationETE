@@ -169,6 +169,7 @@ test.describe("RSS Portal — Variation Request @rss @regression", () => {
       const variation = new RSSVariationRequestPage(page);
 
       await openActiveLoanForServiceRequest(dashboard, loans);
+      await loans.ensureActiveLoanForPaymentArrangementArrearsCheck();
       const overdue = await loans.getLoanOverdueAmountText();
       await loans.openVariationRequestFromLoan();
       await variation.expectVariationRequestScreen();
