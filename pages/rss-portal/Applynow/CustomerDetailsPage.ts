@@ -147,78 +147,265 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
     }
   }
 
-  private companyNameDropdownRoot(): Locator {
-    return this.page
-      .locator(
-        "xpath=.//label[contains(normalize-space(.),'Company Name')]/following::p-dropdown[1]",
-      )
+  private limitedCompanyPanel(): Locator {
+    return this.customerDetailsRoot()
+      .locator(".p-tabview-panel, [role='tabpanel']")
+      .filter({ visible: true })
+      .filter({ has: this.page.getByText(/Company Name/i) })
       .first();
+  }
+
+  private companyNameDropdownRoot(): Locator {
+    const inPanel = this.limitedCompanyPanel()
+      .locator("p-dropdown")
+      .filter({ has: this.page.locator('[role="combobox"]') })
+      .first();
+    const byLabel = this.page.locator(
+      "xpath=.//label[contains(normalize-space(.),'Company Name')]/following::p-dropdown[1]",
+    );
+    const byNearbyText = this.page
+      .getByText(/^Company Name/i)
+      .locator("xpath=following::p-dropdown[1]");
+    return inPanel.or(byLabel).or(byNearbyText).first();
+  }
+
+  private async companyNameSelectedLabelText(): Promise<string> {
+    const root = this.companyNameDropdownRoot();
+    if (!(await root.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      return "";
+    }
+    const label = root.locator(".p-dropdown-label, [class*='p-dropdown-label']").first();
+    if (await label.isVisible().catch(() => false)) {
+      return ((await label.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+    }
+    const combobox = root.locator('[role="combobox"]').first();
+    const aria = (await combobox.getAttribute("aria-label").catch(() => "")) ?? "";
+    const text = ((await combobox.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+    return `${aria} ${text}`.replace(/\s+/g, " ").trim();
+  }
+
+  private async waitForCompanyNameDropdownReady(timeoutMs = 60_000): Promise<void> {
+    const root = this.companyNameDropdownRoot();
+    await root.waitFor({ state: "visible", timeout: 30_000 });
+    const combobox = root.locator('[role="combobox"]').first();
+    const inner = root.locator(".p-dropdown").first();
+    await expect
+      .poll(
+        async () => {
+          const aria = await combobox.getAttribute("aria-disabled");
+          const cls = (await inner.getAttribute("class").catch(() => "")) ?? "";
+          return aria === "false" && !cls.includes("p-disabled");
+        },
+        { timeout: timeoutMs, intervals: [300, 600, 1_200, 2_000] },
+      )
+      .toBe(true);
+    await this.waitForProgressSpinnersHidden(30_000).catch(() => undefined);
+  }
+
+  private async openCompanyNameDropdownPanel(root: Locator): Promise<Locator> {
+    await this.waitForCompanyNameDropdownReady();
+    await root.scrollIntoViewIfNeeded();
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+
+    const combobox = root.locator('[role="combobox"]').first();
+    const trigger = root.locator(".p-dropdown-trigger, [aria-label='dropdown trigger']").first();
+    if (await combobox.isVisible().catch(() => false)) {
+      try {
+        await combobox.click({ timeout: 15_000 });
+      } catch {
+        await trigger.click({ timeout: 15_000, force: true });
+      }
+    } else {
+      await trigger.click({ timeout: 15_000 });
+    }
+
+    const panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
+    await panel.waitFor({ state: "visible", timeout: 15_000 });
+    return panel;
+  }
+
+  private async pickCompanyNameDropdownOption(optionLabel?: RegExp): Promise<string> {
+    const root = this.companyNameDropdownRoot();
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const panel = await this.openCompanyNameDropdownPanel(root);
+      const options = panel.locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item");
+
+      await expect
+        .poll(
+          async () => {
+            const count = await options.count();
+            for (let i = 0; i < count; i++) {
+              const text = ((await options.nth(i).innerText().catch(() => "")) ?? "")
+                .replace(/\s+/g, " ")
+                .trim();
+              if (!text || /^--\s*select/i.test(text)) {
+                continue;
+              }
+              if (!optionLabel || optionLabel.test(text)) {
+                return true;
+              }
+            }
+            return false;
+          },
+          { timeout: 60_000, intervals: [300, 600, 1_200, 2_000] },
+        )
+        .toBe(true);
+
+      let option = options.filter({ hasNotText: /^--\s*select/i }).first();
+      if (optionLabel) {
+        const preferred = options.filter({ hasText: optionLabel }).first();
+        if (await preferred.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          option = preferred;
+        }
+      }
+
+      const label = ((await option.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+      if (!label || /^--\s*select/i.test(label)) {
+        await this.page.keyboard.press("Escape").catch(() => undefined);
+        continue;
+      }
+
+      try {
+        await option.click({ timeout: 10_000 });
+      } catch {
+        await option.click({ force: true, timeout: 10_000 }).catch(async () => {
+          await option.evaluate((el: HTMLElement) => el.click());
+        });
+      }
+
+      await panel.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => undefined);
+      await this.waitForLoadingComplete();
+      await this.waitForProgressSpinnersHidden(20_000).catch(() => undefined);
+
+      if (!(await this.isCompanyNamePlaceholderSelected())) {
+        return label;
+      }
+    }
+
+    throw new Error(
+      "Company Name dropdown has no selectable options or selection did not stick.",
+    );
   }
 
   private async pickFirstPrimeNgDropdownOption(root: Locator): Promise<string> {
     await root.waitFor({ state: "visible", timeout: 15_000 });
-    await this.waitForProgressSpinnersHidden();
+    await this.waitForProgressSpinnersHidden(30_000).catch(() => undefined);
+    await root.scrollIntoViewIfNeeded();
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+
     const combobox = root.locator('[role="combobox"]').first();
     const trigger = root.locator(".p-dropdown-trigger, [aria-label='dropdown trigger']").first();
     if (await combobox.isVisible().catch(() => false)) {
-      await this.clickElement(combobox, 60_000);
+      try {
+        await combobox.click({ timeout: 15_000 });
+      } catch {
+        await trigger.click({ timeout: 15_000, force: true });
+      }
     } else {
-      await this.clickElement(trigger, 60_000);
+      await trigger.click({ timeout: 15_000 });
     }
+
     const panel = this.page.locator(".p-dropdown-panel").filter({ visible: true }).last();
-    await panel.waitFor({ state: "visible", timeout: 12_000 });
-    const option = panel
-      .locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item")
-      .filter({ hasNotText: /^--\s*select/i })
-      .first();
-    const label = ((await option.innerText()) ?? "").replace(/\s+/g, " ").trim();
-    await option.click();
-    await this.waitForLoadingComplete();
-    return label;
+    await panel.waitFor({ state: "visible", timeout: 15_000 });
+    const options = panel.locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item");
+    const count = await options.count();
+    for (let i = 0; i < count; i++) {
+      const option = options.nth(i);
+      const label = ((await option.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+      if (!label || /^--\s*select/i.test(label)) {
+        continue;
+      }
+      try {
+        await option.click({ timeout: 10_000 });
+      } catch {
+        await option.click({ force: true, timeout: 10_000 }).catch(async () => {
+          await option.evaluate((el: HTMLElement) => el.click());
+        });
+      }
+      await panel.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => undefined);
+      await this.waitForLoadingComplete();
+      return label;
+    }
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+    throw new Error("No selectable options found in PrimeNG dropdown.");
   }
 
   async selectCompanyNameFromDropdown(preferredName?: string): Promise<string> {
     this.logStep("Select Company Name From Dropdown");
-    const root = this.companyNameDropdownRoot();
     if (preferredName) {
-      await this.pickPrimeNgDropdownOption(root, new RegExp(this.escapeRx(preferredName), "i"));
-      return preferredName;
+      return this.pickCompanyNameDropdownOption(
+        new RegExp(this.escapeRx(preferredName), "i"),
+      );
     }
-    return this.pickFirstPrimeNgDropdownOption(root);
+    return this.pickCompanyNameDropdownOption();
   }
 
   private async isCompanyNamePlaceholderSelected(): Promise<boolean> {
-    const root = this.companyNameDropdownRoot();
-    if (!(await root.isVisible({ timeout: 3_000 }).catch(() => false))) {
+    const selected = await this.companyNameSelectedLabelText();
+    if (!selected) {
       return false;
     }
-    const combobox = root.locator('[role="combobox"]').first();
-    const aria = (await combobox.getAttribute("aria-label").catch(() => "")) ?? "";
-    const text = (await combobox.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-    return /^--\s*select/i.test(`${aria} ${text}`.trim());
+    return /^--\s*select/i.test(selected);
   }
 
   async ensureCompanyNameSelected(preferredName?: string): Promise<void> {
+    const root = this.companyNameDropdownRoot();
+    if (!(await root.isVisible({ timeout: 15_000 }).catch(() => false))) {
+      return;
+    }
     if (!(await this.isCompanyNamePlaceholderSelected())) {
       return;
     }
     await this.selectCompanyNameFromDropdown(preferredName);
+    if (await this.isCompanyNamePlaceholderSelected()) {
+      throw new Error(
+        "Company Name is still '-- Select --' after selecting from the dropdown.",
+      );
+    }
+  }
+
+  private async isBusinessTypeSelected(type: BusinessType): Promise<boolean> {
+    const label = type === "sole trader" ? /Sole\s*Trader/i : /Limited\s*Company/i;
+    const activeLabel = this.page
+      .locator(".p-radiobutton-label-active, .p-highlight")
+      .filter({ hasText: label })
+      .first();
+    if (await activeLabel.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return true;
+    }
+    const radio = this.page.getByRole("radio", { name: label }).first();
+    if (await radio.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return radio.isChecked().catch(() => false);
+    }
+    return false;
   }
 
   private async clickBusinessTypeOption(type: BusinessType): Promise<void> {
     const label = type === "sole trader" ? /Sole\s*Trader/i : /Limited\s*Company/i;
 
-    const visibleText = this.page.getByText(label).filter({ visible: true }).first();
-    if (await visibleText.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await this.clickElement(visibleText);
-      await this.waitForLoadingComplete();
+    if (await this.isBusinessTypeSelected(type)) {
       return;
     }
 
+    // Prefer the radio control — getByText can hit the Limited Company tab and reset the form.
     const radio = this.page.getByRole("radio", { name: label }).first();
     if (await radio.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await this.clickElement(radio);
       await this.waitForLoadingComplete();
+      await this.waitForProgressSpinnersHidden();
+      return;
+    }
+
+    const radioLabel = this.page
+      .locator(".p-radiobutton-label, label")
+      .filter({ hasText: label })
+      .filter({ visible: true })
+      .first();
+    if (await radioLabel.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await this.clickElement(radioLabel);
+      await this.waitForLoadingComplete();
+      await this.waitForProgressSpinnersHidden();
       return;
     }
 
@@ -230,6 +417,7 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
     if (await tile.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await this.clickElement(tile);
       await this.waitForLoadingComplete();
+      await this.waitForProgressSpinnersHidden();
       return;
     }
 
@@ -257,9 +445,22 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
     const label = type === "sole trader" ? /Sole\s*Trader/i : /Limited\s*Company/i;
 
     await this.clickBusinessTypeOption(type);
+    await this.waitForProgressSpinnersHidden();
 
     const companyDropdown = this.companyNameDropdownRoot();
-    if (await companyDropdown.isVisible({ timeout: 30_000 }).catch(() => false)) {
+    if (type === "limited company") {
+      await companyDropdown.waitFor({ state: "visible", timeout: 60_000 });
+      await this.waitForCompanyNameDropdownReady();
+      await this.ensureCompanyNameSelected();
+      if (await this.isCompanyNamePlaceholderSelected()) {
+        throw new Error(
+          "Limited Company selected but Company Name is still '-- Select --'. Business Details will not appear.",
+        );
+      }
+      return;
+    }
+
+    if (await companyDropdown.isVisible({ timeout: 10_000 }).catch(() => false)) {
       await this.ensureCompanyNameSelected();
       return;
     }
@@ -280,7 +481,7 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
   private async expandHeader(header: Locator): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        await header.scrollIntoViewIfNeeded();
+        await header.scrollIntoViewIfNeeded({ timeout: 15_000 });
         const expanded = await header.getAttribute("aria-expanded");
         if (expanded === "true") {
           return;
@@ -402,17 +603,14 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
   }
 
   private async selectHomeOwnershipIfRequired(): Promise<void> {
-    const assetsWeb = this.financialPositionRoot()
-      .locator("app-financial-asset-details .web")
-      .filter({ visible: true })
-      .first();
-    const livingSituation = assetsWeb.locator('[formgroupname="livingSituation"]');
+    const livingSituation = this.livingSituationGroup();
     if (!(await livingSituation.isVisible({ timeout: 5_000 }).catch(() => false))) {
       return;
     }
     const combobox = livingSituation.locator('[role="combobox"]').first();
     const face = ((await combobox.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
     if (face && !/^--\s*select$/i.test(face) && !/^select$/i.test(face)) {
+      await this.fillHomeOwnershipAmountIfEmpty();
       return;
     }
 
@@ -444,9 +642,54 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
         )
         .toBe(true);
       await this.waitForLoadingComplete();
+      await this.fillHomeOwnershipAmountIfEmpty();
     } catch {
       // Home ownership may be optional for some parties; income question is handled next.
     }
+  }
+
+  private livingSituationGroup(): Locator {
+    return this.financialPositionRoot()
+      .locator("app-financial-asset-details .web")
+      .filter({ visible: true })
+      .first()
+      .locator('[formgroupname="livingSituation"]');
+  }
+
+  /** Home Ownership type without amount blocks footer Next on Sole Trader business flows. */
+  private async fillHomeOwnershipAmountIfEmpty(defaultAmount = "100000"): Promise<void> {
+    const livingSituation = this.livingSituationGroup();
+    if (!(await livingSituation.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+    const combobox = livingSituation.locator('[role="combobox"]').first();
+    const face = ((await combobox.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+    if (!face || /^select$/i.test(face) || /^--\s*select/i.test(face)) {
+      return;
+    }
+
+    const amountField = livingSituation
+      .locator(
+        '[formcontrolname="amount"] input, [formcontrolname="value"] input, spinbutton, input.p-inputtext',
+      )
+      .filter({ visible: true })
+      .first();
+    if (!(await amountField.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+
+    const raw =
+      (await amountField.inputValue().catch(() => "")) ||
+      (await amountField.innerText().catch(() => ""));
+    const numeric = Number(raw.replace(/[^0-9.]/g, ""));
+    if (numeric > 0) {
+      return;
+    }
+
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+    await amountField.scrollIntoViewIfNeeded();
+    await this.typeCurrencyIntoField(amountField, defaultAmount);
+    await this.waitForLoadingComplete();
   }
 
   private async fillEmptyVisibleInputs(scope: Locator, fallback: string): Promise<void> {
@@ -478,6 +721,9 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
   }): Promise<void> {
     this.logStep("Fill Mandatory Customer Sections");
     await this.waitForProgressSpinnersHidden();
+    if (options?.includeBusinessDetails) {
+      await this.ensureCompanyNameSelected();
+    }
     const root = this.customerDetailsRoot().or(this.page.locator("body"));
 
     const sections: RegExp[] = options?.includeBusinessDetails
@@ -559,11 +805,76 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
         await expect(region.getByText(/^Please Complete$/i)).toBeHidden({ timeout: 15_000 });
       }
     }
+    await this.selectHomeOwnershipIfRequired();
+    await this.fillHomeOwnershipAmountIfEmpty();
+    const incomeSection = this.financialIncomeSection();
+    const incomeQuestion = incomeSection.getByText(
+      /income likely to decrease over the next 12 months/i,
+    );
+    if (await incomeQuestion.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await incomeQuestion.scrollIntoViewIfNeeded();
+      await this.clickIncomeDecreaseNo(incomeSection);
+    }
     await this.waitForLoadingComplete();
   }
 
   private coBorrowerSegmentButton(): Locator {
     return this.page.locator('ion-segment-button[value="coBorrower"]').first();
+  }
+
+  private primaryBorrowerSegmentButton(): Locator {
+    return this.page.locator('ion-segment-button[value="borrower"]').first();
+  }
+
+  /** PrimeNG joint borrower tabs — both labels read “Borrower”. */
+  private jointBorrowerTabNav(): Locator {
+    return this.customerDetailsRoot().locator(".p-tabview-nav").first();
+  }
+
+  private jointBorrowerNavItems(): Locator {
+    return this.jointBorrowerTabNav().locator("li");
+  }
+
+  private jointBorrowerRoleTabs(): Locator {
+    return this.customerDetailsRoot().getByRole("tab", { name: /^Borrower$/i });
+  }
+
+  private async activeJointBorrowerTabIndex(): Promise<number> {
+    const navItems = this.jointBorrowerNavItems();
+    if ((await navItems.count()) >= 2) {
+      const count = await navItems.count();
+      for (let i = 0; i < count; i++) {
+        const cls = (await navItems.nth(i).getAttribute("class").catch(() => "")) ?? "";
+        if (/p-highlight|p-tabview-selected/i.test(cls)) {
+          return i;
+        }
+      }
+    }
+
+    const roleTabs = this.jointBorrowerRoleTabs();
+    const tabCount = await roleTabs.count();
+    for (let i = 0; i < tabCount; i++) {
+      const selected = await roleTabs.nth(i).getAttribute("aria-selected");
+      if (selected === "true") {
+        return i;
+      }
+    }
+
+    if (
+      await this.coBorrowerSegmentButton()
+        .evaluate((el) => el.classList.contains("segment-button-checked"))
+        .catch(() => false)
+    ) {
+      return 1;
+    }
+    if (
+      await this.primaryBorrowerSegmentButton()
+        .evaluate((el) => el.classList.contains("segment-button-checked"))
+        .catch(() => false)
+    ) {
+      return 0;
+    }
+    return -1;
   }
 
   private existingJointBorrowerDropdownRoot(): Locator {
@@ -587,38 +898,75 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
   }
 
   private async isCoBorrowerScreenVisible(): Promise<boolean> {
+    if ((await this.activeJointBorrowerTabIndex()) === 1) {
+      return true;
+    }
     if (await this.existingJointBorrowerDropdownRoot().isVisible().catch(() => false)) {
       return true;
     }
     if (await this.addNewBorrowerButton().isVisible().catch(() => false)) {
       return true;
     }
-    if (
-      await this.page
-        .locator("app-co-borrower-personal-detail, app-joint-address-details")
-        .first()
-        .isVisible()
-        .catch(() => false)
-    ) {
-      return true;
-    }
-    const borrowerTabs = this.page.getByRole("tab", { name: /^Borrower$/i });
-    if ((await borrowerTabs.count()) >= 2) {
-      const selected = await borrowerTabs.nth(1).getAttribute("aria-selected");
-      if (selected === "true") {
-        return true;
-      }
-    }
-    return this.coBorrowerSegmentButton()
-      .evaluate((el) => el.classList.contains("segment-button-checked"))
+    return this.page
+      .locator("app-co-borrower-personal-detail, app-joint-address-details")
+      .first()
+      .isVisible()
       .catch(() => false);
   }
 
-  private async waitForCoBorrowerScreen(timeoutMs = 60_000): Promise<void> {
+  private async waitForCoBorrowerScreen(timeoutMs = 30_000): Promise<void> {
     await expect
       .poll(async () => this.isCoBorrowerScreenVisible(), {
         timeout: timeoutMs,
-        intervals: [250, 500, 1_000, 2_000],
+        intervals: [250, 500, 1_000],
+      })
+      .toBe(true);
+  }
+
+  private async clickJointBorrowerTabByIndex(index: 0 | 1): Promise<void> {
+    if ((await this.activeJointBorrowerTabIndex()) === index) {
+      return;
+    }
+
+    const navItems = this.jointBorrowerNavItems();
+    if ((await navItems.count()) > index) {
+      const item = navItems.nth(index);
+      const link = item.locator("a.p-tabview-nav-link, [role='tab'], a").first();
+      await item.scrollIntoViewIfNeeded();
+      try {
+        await link.click({ timeout: 15_000 });
+      } catch {
+        await link.click({ force: true, timeout: 10_000 });
+      }
+      await this.waitForLoadingComplete();
+      await this.waitForProgressSpinnersHidden(20_000).catch(() => undefined);
+    } else if ((await this.jointBorrowerRoleTabs().count()) > index) {
+      const tab = this.jointBorrowerRoleTabs().nth(index);
+      await tab.scrollIntoViewIfNeeded();
+      try {
+        await tab.click({ timeout: 15_000 });
+      } catch {
+        await tab.click({ force: true, timeout: 10_000 });
+      }
+      await this.waitForLoadingComplete();
+      await this.waitForProgressSpinnersHidden(20_000).catch(() => undefined);
+    } else {
+      const segment =
+        index === 0 ? this.primaryBorrowerSegmentButton() : this.coBorrowerSegmentButton();
+      await segment.scrollIntoViewIfNeeded();
+      try {
+        await segment.click({ timeout: 15_000 });
+      } catch {
+        await segment.evaluate((el: HTMLElement) => el.click());
+      }
+      await this.waitForLoadingComplete();
+      await this.waitForProgressSpinnersHidden(20_000).catch(() => undefined);
+    }
+
+    await expect
+      .poll(async () => (await this.activeJointBorrowerTabIndex()) === index, {
+        timeout: 20_000,
+        intervals: [250, 500, 1_000],
       })
       .toBe(true);
   }
@@ -629,73 +977,273 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
     if (await this.isCoBorrowerScreenVisible()) {
       return;
     }
-
-    const borrowerTabs = this.page.getByRole("tab", { name: /^Borrower$/i });
-    if ((await borrowerTabs.count()) >= 2) {
-      await borrowerTabs.nth(1).scrollIntoViewIfNeeded();
-      await borrowerTabs.nth(1).evaluate((el: HTMLElement) => el.click());
-      await this.waitForLoadingComplete();
-      await this.waitForCoBorrowerScreen();
-      return;
-    }
-
-    const segment = this.coBorrowerSegmentButton();
-    if (await segment.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await segment.scrollIntoViewIfNeeded();
-      await segment.evaluate((el: HTMLElement) => el.click());
-      await this.waitForLoadingComplete();
-      await this.waitForCoBorrowerScreen();
-      return;
-    }
-
-    throw new Error("Co-borrower segment not found on joint About You step.");
+    await this.clickJointBorrowerTabByIndex(1);
+    await this.waitForCoBorrowerScreen();
   }
 
   /** Switches from primary borrower to the second borrower tab (joint flow). */
   async clickBorrowerFooterAction(): Promise<void> {
     this.logStep("Click Borrower Footer Action");
-    await this.waitForProgressSpinnersHidden();
+    await this.waitForProgressSpinnersHidden(30_000);
     await this.openCoBorrowerSegment();
+  }
+
+  private guarantorSegmentButton(): Locator {
+    return this.customerDetailsRoot()
+      .locator('ion-segment-button[value="guarantor"], ion-segment-button')
+      .filter({ hasText: /^Guarantor$/i })
+      .first();
+  }
+
+  private guarantorTabNavItems(): Locator {
+    return this.customerDetailsRoot()
+      .locator(".p-tabview-nav li")
+      .filter({ hasText: /^Guarantor$/i });
+  }
+
+  private guarantorNavigationActions(): Locator {
+    return this.customerDetailsRoot()
+      .locator(
+        'ion-segment-button[value="guarantor"], .p-tabview-nav li, [role="tab"], button, ion-button, a',
+      )
+      .filter({ hasText: /^Guarantor$/i })
+      .filter({ visible: true });
+  }
+
+  private async isGuarantorPickerOrSectionVisible(): Promise<boolean> {
+    if (await this.existingGuarantorDropdownRoot().isVisible().catch(() => false)) {
+      return true;
+    }
+    if (await this.addNewGuarantorButton().isVisible().catch(() => false)) {
+      return true;
+    }
+    return this.page
+      .getByText(/Guarantor Name|Existing Guarantor|Not in List/i)
+      .first()
+      .isVisible()
+      .catch(() => false);
+  }
+
+  private async hasGuarantorNavigationOrPickerVisible(): Promise<boolean> {
+    if (await this.isGuarantorPickerOrSectionVisible()) {
+      return true;
+    }
+    if (await this.guarantorTabNavItems().first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return true;
+    }
+    if (await this.guarantorSegmentButton().isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return true;
+    }
+    return this.customerDetailsRoot()
+      .getByRole("tab", { name: /^Guarantor$/i })
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
+  }
+
+  private async isApplicationDocumentsStepVisible(): Promise<boolean> {
+    if ((await this.page.locator('#fileInput, input[type="file"]').count()) > 0) {
+      return true;
+    }
+    if (
+      await this.page
+        .getByRole("tab", { name: /Application documents/i })
+        .isVisible({ timeout: 2_000 })
+        .catch(() => false)
+    ) {
+      return true;
+    }
+    return this.page
+      .getByText(/Acknowledgements/i)
+      .first()
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
+  }
+
+  private async restoreCustomerDetailsFromDocumentsIfNeeded(): Promise<void> {
+    if (!(await this.isApplicationDocumentsStepVisible())) {
+      return;
+    }
+    await this.clickApplyNowFooterPrevious();
+    await this.waitForCustomerDetailsStep();
+  }
+
+  /** Sole Trader on SIT completes About You without a separate guarantor sub-step. */
+  private async isSoleTraderWithoutGuarantorStep(): Promise<boolean> {
+    if (!(await this.isBusinessTypeSelected("sole trader"))) {
+      return false;
+    }
+    return !(await this.hasGuarantorNavigationOrPickerVisible());
+  }
+
+  private async completeFinancialGatesForGuarantorNavigation(): Promise<void> {
+    await this.expandSection(/Financial Position/i);
+    await this.selectHomeOwnershipIfRequired();
+    await this.fillHomeOwnershipAmountIfEmpty();
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+    const incomeSection = this.financialIncomeSection();
+    const incomeQuestion = incomeSection.getByText(
+      /income likely to decrease over the next 12 months/i,
+    );
+    if (await incomeQuestion.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await incomeQuestion.scrollIntoViewIfNeeded();
+      await this.clickIncomeDecreaseNo(incomeSection);
+      await this.waitForLoadingComplete();
+    }
+  }
+
+  /**
+   * Limited Company may use a Guarantor tab. Footer **Next** on Sole Trader skips
+   * straight to Application documents — do not use Next to reach guarantor.
+   */
+  private async advanceToGuarantorViaFooterNext(): Promise<boolean> {
+    if (await this.isGuarantorPickerOrSectionVisible()) {
+      return true;
+    }
+    if (await this.isSoleTraderWithoutGuarantorStep()) {
+      return false;
+    }
+    await this.completeFinancialGatesForGuarantorNavigation();
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+    const next = this.page.getByRole("button", { name: /^Next$/i }).filter({ visible: true }).first();
+    if (!(await next.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return false;
+    }
+    await next.scrollIntoViewIfNeeded();
+    await this.clickElement(next, 60_000);
+    await this.waitForLoadingComplete();
+    await this.waitForProgressSpinnersHidden(30_000).catch(() => undefined);
+
+    if (await this.isApplicationDocumentsStepVisible()) {
+      await this.restoreCustomerDetailsFromDocumentsIfNeeded();
+      return false;
+    }
+
+    try {
+      await expect
+        .poll(async () => this.isGuarantorPickerOrSectionVisible(), {
+          timeout: 15_000,
+          intervals: [500, 1_000, 2_000],
+        })
+        .toBe(true);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async clickGuarantorTabNavIfPresent(): Promise<boolean> {
+    const item = this.guarantorTabNavItems().first();
+    if (!(await item.isVisible({ timeout: 3_000 }).catch(() => false))) {
+      return false;
+    }
+    const link = item.locator("a.p-tabview-nav-link, [role='tab'], a").first();
+    await item.scrollIntoViewIfNeeded();
+    try {
+      await link.click({ timeout: 15_000 });
+    } catch {
+      await link.click({ force: true, timeout: 10_000 });
+    }
+    await this.waitForLoadingComplete();
+    return true;
+  }
+
+  private async clickGuarantorNavigationAction(): Promise<boolean> {
+    if (await this.clickGuarantorTabNavIfPresent()) {
+      return true;
+    }
+
+    const segmentButton = this.guarantorSegmentButton();
+    if (await segmentButton.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await segmentButton.scrollIntoViewIfNeeded();
+      await segmentButton.evaluate((el: HTMLElement) => el.click());
+      await this.waitForLoadingComplete();
+      return true;
+    }
+
+    const tab = this.customerDetailsRoot().getByRole("tab", { name: /^Guarantor$/i }).first();
+    if (await tab.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await tab.evaluate((el: HTMLElement) => el.click());
+      await this.waitForLoadingComplete();
+      return true;
+    }
+
+    const scoped = this.guarantorNavigationActions().first();
+    if (await scoped.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await this.clickElement(scoped, 60_000);
+      await this.waitForLoadingComplete();
+      return true;
+    }
+
+    const subFooter = this.page
+      .getByRole("button", { name: /^Previous$/i })
+      .filter({ visible: true })
+      .first()
+      .locator("xpath=ancestor::div[1]/preceding-sibling::*[1]")
+      .locator("button, ion-button, a, ion-segment-button, div, span")
+      .filter({ hasText: /^Guarantor$/i })
+      .first();
+    if (await subFooter.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await this.clickElement(subFooter, 30_000);
+      await this.waitForLoadingComplete();
+      return true;
+    }
+
+    const pageGuarantor = this.page
+      .getByText(/^Guarantor$/i, { exact: true })
+      .filter({ visible: true })
+      .first();
+    if (await pageGuarantor.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await this.clickElement(pageGuarantor, 30_000);
+      await this.waitForLoadingComplete();
+      return true;
+    }
+
+    return false;
   }
 
   async clickGuarantorFooterAction(): Promise<void> {
     this.logStep("Click Guarantor Footer Action");
-    const guarantor = this.page
-      .locator(':text-is("Guarantor"), button, ion-button')
-      .filter({ hasText: /^Guarantor$/i })
-      .filter({ visible: true })
-      .first();
-    await guarantor.waitFor({ state: "visible", timeout: 30_000 });
-    await this.clickElement(guarantor, 60_000);
-    await this.waitForLoadingComplete();
+    await this.waitForProgressSpinnersHidden(30_000);
+    if (await this.isSoleTraderWithoutGuarantorStep()) {
+      return;
+    }
+    if (await this.clickGuarantorNavigationAction()) {
+      return;
+    }
+    if (await this.advanceToGuarantorViaFooterNext()) {
+      return;
+    }
+    await this.waitForGuarantorPickerVisible(30_000);
   }
 
-  /** QAT uses a Guarantor tab; other environments may use a footer Guarantor action. */
+  /** QAT uses a Guarantor tab; Limited Company on SIT. Sole Trader has no guarantor sub-step. */
   async openGuarantorSection(): Promise<void> {
     this.logStep("Open Guarantor Section");
+    await this.waitForProgressSpinnersHidden(30_000);
+    await this.restoreCustomerDetailsFromDocumentsIfNeeded();
+
+    if (await this.isGuarantorPickerOrSectionVisible()) {
+      return;
+    }
+
+    if (await this.isSoleTraderWithoutGuarantorStep()) {
+      this.logStep("Sole Trader — no guarantor section on this layout");
+      return;
+    }
+
     await this.ensureCompanyNameSelected();
+    await this.completeFinancialGatesForGuarantorNavigation();
 
-    const segmentButton = this.page
-      .locator('ion-segment-button[value="guarantor"]')
-      .filter({ hasText: /^Guarantor$/i })
-      .first();
-    if (await segmentButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await segmentButton.scrollIntoViewIfNeeded();
-      await segmentButton.evaluate((el: HTMLElement) => el.click());
-      await this.waitForLoadingComplete();
+    if (await this.isGuarantorPickerOrSectionVisible()) {
+      return;
+    }
+
+    await this.customerDetailsRoot().scrollIntoViewIfNeeded().catch(() => undefined);
+    if (await this.clickGuarantorNavigationAction()) {
       await this.waitForGuarantorPickerVisible();
       return;
     }
 
-    const tab = this.page.getByRole("tab", { name: /^Guarantor$/i }).first();
-    if (await tab.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await tab.evaluate((el: HTMLElement) => el.click());
-      await this.waitForLoadingComplete();
-      await this.waitForGuarantorPickerVisible();
-      return;
-    }
-
-    await this.clickGuarantorFooterAction();
     await this.waitForGuarantorPickerVisible();
   }
 
@@ -755,7 +1303,20 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
 
   async completeExistingGuarantorFlow(preferredName?: string): Promise<string> {
     this.logStep("Complete Existing Guarantor Flow");
+    await this.restoreCustomerDetailsFromDocumentsIfNeeded();
+
+    if (await this.isApplicationDocumentsStepVisible()) {
+      this.logStep("Application documents visible — guarantor not required for this flow");
+      return "";
+    }
+
     await this.ensureCompanyNameSelected();
+
+    if (await this.isSoleTraderWithoutGuarantorStep()) {
+      this.logStep("Sole Trader — skipping existing guarantor flow");
+      return "";
+    }
+
     await this.openGuarantorSection();
     await this.expectGuarantorSelectionScreen();
     const selected = await this.selectExistingGuarantorFromDropdown(preferredName);
@@ -766,12 +1327,18 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
   async expectCoBorrowerSelectionScreen(): Promise<void> {
     this.logStep("Expect Co-Borrower Selection Screen");
     await this.waitForCoBorrowerScreen();
-    await expect(
-      this.existingJointBorrowerDropdownRoot()
-        .or(this.addNewBorrowerButton())
-        .or(this.page.locator("app-co-borrower-personal-detail").first())
-        .first(),
-    ).toBeVisible({ timeout: 30_000 });
+    const pickerOrForm = this.existingJointBorrowerDropdownRoot()
+      .or(this.addNewBorrowerButton())
+      .or(this.page.locator("app-co-borrower-personal-detail").first())
+      .or(this.page.getByText(/Existing Borrower|Add New Borrower|Personal Details/i).first())
+      .first();
+    await expect(pickerOrForm).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => (await this.activeJointBorrowerTabIndex()) === 1, {
+        timeout: 15_000,
+        intervals: [250, 500],
+      })
+      .toBe(true);
   }
 
   async selectExistingCoBorrowerFromDropdown(preferredName?: string): Promise<string> {
@@ -1117,13 +1684,25 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
     const next = this.page.locator(':text-is("Next")').filter({ visible: true }).first();
     await next.waitFor({ state: "visible", timeout: 30_000 });
     await this.clickElement(next, clickTimeoutMs);
+    await this.waitForLoadingComplete();
+    await this.waitForProgressSpinnersHidden();
+  }
+
+  /**
+   * Happy-path helper: click footer Next and wait until Application Documents is shown.
+   * Use {@link clickApplyNowFooterNext} alone when asserting mandatory-field validation
+   * (Next must stay on About You).
+   */
+  async clickApplyNowFooterNextAndExpectDocuments(clickTimeoutMs = 60_000): Promise<void> {
+    this.logStep("Click Apply Now Footer Next And Expect Documents");
+    await this.clickApplyNowFooterNext(clickTimeoutMs);
     await expect
       .poll(
         async () => {
           const fileInput = await this.page.locator('#fileInput, input[type="file"]').count();
           if (fileInput > 0) return true;
           return this.page
-            .getByText(/Browse Files|Upload documents|Supporting document/i)
+            .getByText(/Browse Files|Upload documents|Supporting document|Application Options/i)
             .first()
             .isVisible()
             .catch(() => false);
@@ -1145,21 +1724,111 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
 
   async expectMandatoryFieldValidationMessage(): Promise<void> {
     this.logStep("Expect Mandatory Field Validation Message");
-    await expect(
-      this.page
-        .getByText(/mandatory|required|please complete|fill.*field|before moving|add borrower|add guarantor/i)
-        .first(),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () => {
+          const textVisible = await this.page
+            .getByText(
+              /mandatory|required|please complete|fill.*field|before moving|add borrower|add guarantor|this field|cannot proceed|complete all/i,
+            )
+            .filter({ visible: true })
+            .first()
+            .isVisible()
+            .catch(() => false);
+          if (textVisible) return true;
+
+          return this.page
+            .locator(
+              ".p-error, .drop-down-error-message, .p-toast-message-error, .p-toast-message-warn, .ng-invalid.ng-touched, .p-invalid",
+            )
+            .filter({ visible: true })
+            .first()
+            .isVisible()
+            .catch(() => false);
+        },
+        { timeout: 30_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
+
+    // Validation tests must remain on About You (not advance to documents).
+    await expect(this.page.locator('#fileInput, input[type="file"]').first()).toBeHidden({
+      timeout: 5_000,
+    }).catch(() => undefined);
+  }
+
+  private addressDetailsRegion(): Locator {
+    return this.sectionScope().getByRole("region", { name: /Address Details/i }).first();
+  }
+
+  private addressDetailsSection(): Locator {
+    return this.addressDetailsRegion();
+  }
+
+  private currentAddressBlock(): Locator {
+    return this.addressDetailsRegion().filter({ hasText: /Current Address/i });
+  }
+
+  private currentAddressTimeFields(): Locator {
+    return this.addressDetailsRegion().getByRole("spinbutton");
   }
 
   private currentAddressSearchInput(): Locator {
-    return this.page.locator('input[name="physicalSearchValue"]').filter({ visible: true }).first();
+    return this.addressDetailsSection()
+      .locator(
+        'input[name="physicalSearchValue"], input[formcontrolname="physicalSearchValue"], .auto-select-field input, p-autocomplete input',
+      )
+      .filter({ visible: true })
+      .first()
+      .or(this.page.locator('input[name="physicalSearchValue"]').filter({ visible: true }).first());
+  }
+
+  private async enableAddressChangeIfSearchHidden(): Promise<void> {
+    const search = this.currentAddressSearchInput();
+    if (await search.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return;
+    }
+
+    const section = this.addressDetailsSection();
+    const changedPrompt = section.getByText(/Has your address changed/i).first();
+    if (!(await changedPrompt.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+
+    const container = changedPrompt.locator(
+      "xpath=ancestor::*[self::div or self::ion-row or self::ion-col][1]",
+    );
+    const yesLabel = container.getByText(/^Yes$/i).first();
+    if (await yesLabel.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await this.clickElement(yesLabel);
+      await this.waitForLoadingComplete();
+      return;
+    }
+
+    const toggle = container.locator('ion-switch, p-inputswitch, [role="switch"]').first();
+    if (await toggle.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      if ((await toggle.getAttribute("aria-checked").catch(() => null)) !== "true") {
+        await toggle.click({ force: true });
+        await this.waitForLoadingComplete();
+      }
+    }
+  }
+
+  private async ensureCurrentAddressSearchVisible(): Promise<void> {
+    await this.waitForProgressSpinnersHidden();
+    await this.expandSection(/Address [Dd]etails/i);
+    await this.enableAddressChangeIfSearchHidden();
+    await expect
+      .poll(
+        async () => this.currentAddressSearchInput().isVisible().catch(() => false),
+        { timeout: 15_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
   }
 
   async searchCurrentAddress(query: string): Promise<void> {
     this.logStep(`Search Current Address — ${query}`);
+    await this.ensureCurrentAddressSearchVisible();
     const searchField = this.currentAddressSearchInput();
-    await expect(searchField).toBeVisible({ timeout: 15_000 });
     await searchField.click();
     await searchField.fill(query);
     await this.waitForLoadingComplete();
@@ -1176,6 +1845,203 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
     expect(await suggestions.count()).toBeGreaterThanOrEqual(minCount);
   }
 
+  async expectAddressDetailsSectionVisible(): Promise<void> {
+    this.logStep("Expect Address Details Section Visible");
+    await this.waitForCustomerDetailsStep();
+    await this.expandSection(/Address [Dd]etails/i);
+    const region = this.addressDetailsRegion();
+    await expect(region).toBeVisible({ timeout: 15_000 });
+    await expect(region.getByText(/Current Address/i).first()).toBeVisible({ timeout: 15_000 });
+  }
+
+  async setCurrentAddressTimeAtAddress(years: string, months: string): Promise<void> {
+    this.logStep(`Set Current Address Time At Address — ${years}y ${months}m`);
+    await this.expandSection(/Address [Dd]etails/i);
+    const region = this.addressDetailsRegion();
+    await region.scrollIntoViewIfNeeded();
+    await expect(region.getByText(/Current Address/i).first()).toBeVisible({ timeout: 15_000 });
+
+    const timeFields = this.currentAddressTimeFields();
+    await expect(timeFields.first()).toBeVisible({ timeout: 15_000 });
+
+    const count = await timeFields.count();
+    expect(count, "Current Address must expose Years and Months time-at-address fields.").toBeGreaterThanOrEqual(
+      2,
+    );
+
+    for (const [index, value] of [
+      [0, years],
+      [1, months],
+    ] as const) {
+      const field = timeFields.nth(index);
+      await field.scrollIntoViewIfNeeded();
+      await field.click({ timeout: 15_000 });
+      await field.fill("");
+      await field.fill(value);
+      await field.press("Tab").catch(() => undefined);
+    }
+    await this.waitForLoadingComplete();
+  }
+
+  private previousAddressDetailsRoot(): Locator {
+    return this.addressDetailsRegion()
+      .locator("app-previous-address, app-previous-address-details")
+      .or(this.addressDetailsRegion().filter({ hasText: /Previous Address/i }))
+      .first();
+  }
+
+  async expectPreviousAddressDetailsVisible(visible = true): Promise<void> {
+    this.logStep(`Expect Previous Address Details Visible — ${visible}`);
+    await this.expandSection(/Address [Dd]etails/i);
+    const root = this.previousAddressDetailsRoot();
+    if (visible) {
+      await expect
+        .poll(
+          async () => {
+            if (await root.isVisible().catch(() => false)) {
+              return true;
+            }
+            return this.addressDetailsRegion()
+              .getByText(/Previous Address/i)
+              .first()
+              .isVisible()
+              .catch(() => false);
+          },
+          { timeout: 15_000, intervals: [250, 500, 1_000] },
+        )
+        .toBe(true);
+      return;
+    }
+    await expect(root).toBeHidden({ timeout: 10_000 });
+  }
+
+  private employmentDetailsRegion(): Locator {
+    return this.sectionScope().getByRole("region", { name: /Employment Details/i }).first();
+  }
+
+  private currentEmploymentBlock(): Locator {
+    return this.employmentDetailsRegion().filter({ hasText: /Current Employment/i });
+  }
+
+  private currentEmploymentTimeFields(): Locator {
+    return this.currentEmploymentBlock().getByRole("spinbutton");
+  }
+
+  private previousEmploymentDetailsRoot(): Locator {
+    return this.employmentDetailsRegion()
+      .locator("app-previous-employment, app-previous-employment-details")
+      .first();
+  }
+
+  private previousEmploymentSectionLabel(): Locator {
+    return this.employmentDetailsRegion()
+      .getByRole("heading", { name: /Previous\s+Employment/i })
+      .or(this.employmentDetailsRegion().getByText(/^Previous Employment$/i))
+      .first();
+  }
+
+  private async enableEmploymentChangeIfTimeFieldsHidden(): Promise<void> {
+    const fields = this.currentEmploymentTimeFields();
+    if (await fields.first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return;
+    }
+
+    const region = this.employmentDetailsRegion();
+    const changedPrompt = region
+      .getByText(/Has your employment|employment details changed|employment changed/i)
+      .first();
+    if (!(await changedPrompt.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return;
+    }
+
+    const container = changedPrompt.locator(
+      "xpath=ancestor::*[self::div or self::ion-row or self::ion-col][1]",
+    );
+    const yesLabel = container.getByText(/^Yes$/i).first();
+    if (await yesLabel.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await this.clickElement(yesLabel);
+      await this.waitForLoadingComplete();
+      return;
+    }
+
+    const toggle = container.locator('ion-switch, p-inputswitch, [role="switch"]').first();
+    if (await toggle.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      if ((await toggle.getAttribute("aria-checked").catch(() => null)) !== "true") {
+        await toggle.click({ force: true });
+        await this.waitForLoadingComplete();
+      }
+    }
+  }
+
+  async expectEmploymentDetailsSectionVisible(): Promise<void> {
+    this.logStep("Expect Employment Details Section Visible");
+    await this.waitForCustomerDetailsStep();
+    await this.expandSection(/Employment [Dd]etails/i);
+    const region = this.employmentDetailsRegion();
+    await expect(region).toBeVisible({ timeout: 15_000 });
+    await expect(region.getByText(/Current Employment/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  async setCurrentEmploymentTimeWithEmployer(years: string, months: string): Promise<void> {
+    this.logStep(`Set Current Employment Time With Employer — ${years}y ${months}m`);
+    await this.expandSection(/Employment [Dd]etails/i);
+    const region = this.employmentDetailsRegion();
+    await region.scrollIntoViewIfNeeded();
+    await expect(region.getByText(/Current Employment/i).first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await this.enableEmploymentChangeIfTimeFieldsHidden();
+
+    const timeFields = this.currentEmploymentTimeFields();
+    await expect(timeFields.first()).toBeVisible({ timeout: 15_000 });
+
+    const count = await timeFields.count();
+    expect(
+      count,
+      "Current Employment must expose Years and Months time-with-employer fields.",
+    ).toBeGreaterThanOrEqual(2);
+
+    for (const [index, value] of [
+      [0, years],
+      [1, months],
+    ] as const) {
+      const field = timeFields.nth(index);
+      await field.scrollIntoViewIfNeeded();
+      await field.click({ timeout: 15_000 });
+      await field.fill("");
+      await field.fill(value);
+      await field.press("Tab").catch(() => undefined);
+    }
+    await this.waitForLoadingComplete();
+  }
+
+  async expectPreviousEmploymentDetailsVisible(visible = true): Promise<void> {
+    this.logStep(`Expect Previous Employment Details Visible — ${visible}`);
+    await this.expandSection(/Employment [Dd]etails/i);
+    const root = this.previousEmploymentDetailsRoot();
+    const label = this.previousEmploymentSectionLabel();
+
+    if (visible) {
+      await expect
+        .poll(
+          async () => {
+            if (await label.isVisible().catch(() => false)) {
+              return true;
+            }
+            return root.isVisible().catch(() => false);
+          },
+          { timeout: 15_000, intervals: [250, 500, 1_000] },
+        )
+        .toBe(true);
+      return;
+    }
+
+    await expect(label).toBeHidden({ timeout: 15_000 });
+    await expect(root).toBeHidden({ timeout: 15_000 });
+  }
+
   async expectCustomerDetailsStepVisible(): Promise<void> {
     this.logStep("Expect Customer Details Step Visible");
     await this.waitForCustomerDetailsStep();
@@ -1184,20 +2050,23 @@ export class RSSApplyNowCustomerDetailsPage extends BasePage {
 
   async clickBorrowerTab(): Promise<void> {
     this.logStep("Click Borrower Tab");
-    const tab = this.page
-      .locator('ion-segment-button[value="borrower"], button, a')
-      .filter({ hasText: /^Borrower$/i })
-      .first();
-    await this.clickElement(tab);
-    await this.waitForLoadingComplete();
+    await this.clickJointBorrowerTabByIndex(0);
   }
 
   async clickGuarantorTab(): Promise<void> {
     this.logStep("Click Guarantor Tab");
-    const tab = this.page
-      .locator('ion-segment-button, button, a')
-      .filter({ hasText: /^Guarantor$/i })
-      .first();
+    if (await this.isSoleTraderWithoutGuarantorStep()) {
+      return;
+    }
+    if (await this.clickGuarantorNavigationAction()) {
+      await this.waitForLoadingComplete();
+      return;
+    }
+    if (await this.advanceToGuarantorViaFooterNext()) {
+      await this.waitForLoadingComplete();
+      return;
+    }
+    const tab = this.guarantorNavigationActions().first();
     await this.clickElement(tab);
     await this.waitForLoadingComplete();
   }

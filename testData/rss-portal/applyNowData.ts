@@ -6,8 +6,14 @@ export const APPLY_NOW_DEALERS_LOAD_TIMEOUT_MS = 300_000;
 /** Preferred SIT dealer when listed under “used before”; QAT parties may need search fallback. */
 export const APPLY_NOW_DEALERSHIP_USED_BEFORE = "1034401-1034401 -";
 
-/** Search term for **Select Another UDC Dealership** when history list is empty. */
-export const APPLY_NOW_DEALERSHIP_FALLBACK_SEARCH = "10";
+/**
+ * Search term for **Select Another UDC Dealership** when history list is empty
+ * (e.g. “No results found” on used-before). Matches Copping Motor Co. / Josh Coppins Motorcycles.
+ */
+export const APPLY_NOW_DEALERSHIP_FALLBACK_SEARCH = "copp";
+
+/** Preferred result label when searching with {@link APPLY_NOW_DEALERSHIP_FALLBACK_SEARCH}. */
+export const APPLY_NOW_DEALERSHIP_FALLBACK_RESULT = "Copping Motor Co.";
 
 export const APPLY_NOW_REPAYMENT: RepaymentCalculatorData = {
   deposit: "$0.02",

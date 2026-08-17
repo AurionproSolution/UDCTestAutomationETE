@@ -4,13 +4,11 @@
  *
  * Auth strategy: MFA login once per Playwright run (globalSetup clears saved session);
  * parallel workers in the same run share the session saved during that login.
+ * Stored-token reuse enters via /authentication → Retail Self Service.
  */
 
 import { test as base, expect } from "@playwright/test";
-import {
-  ensureRssPortalAuthSession,
-  ensureRssPortalDashboardReady,
-} from "../playwright/rss-portal-auth.helper";
+import { ensureRssPortalAuthSession } from "../playwright/rss-portal-auth.helper";
 import {
   installRssPortalAuthRecovery,
   startRssPortalSessionKeepAlive,
@@ -18,8 +16,7 @@ import {
 
 export const test = base.extend({
   page: async ({ page }, use) => {
-    const sessionPage = await ensureRssPortalAuthSession(page);
-    const activePage = sessionPage ?? (await ensureRssPortalDashboardReady(page));
+    const activePage = await ensureRssPortalAuthSession(page);
 
     const uninstallRecovery = installRssPortalAuthRecovery(activePage);
     const keepalive = startRssPortalSessionKeepAlive(activePage);

@@ -136,16 +136,97 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
     await this.waitForLoadingComplete();
   }
 
+  private applyNowSubmissionSuccessDialog(): Locator {
+    return this.page
+      .getByRole("dialog")
+      .filter({ hasText: /Your application has been submitted/i })
+      .first();
+  }
+
+  async dismissApplyNowSubmissionSuccessDialog(): Promise<void> {
+    this.logStep("Dismiss Apply Now Submission Success Dialog");
+    const dialog = this.applyNowSubmissionSuccessDialog();
+    const mask = this.page.locator(".p-dialog-mask.p-component-overlay").last();
+
+    if (!(await dialog.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      if (await mask.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await this.page.keyboard.press("Escape").catch(() => undefined);
+        await expect(mask).toBeHidden({ timeout: 15_000 });
+      }
+      return;
+    }
+
+    const closeButton = dialog
+      .getByRole("button", { name: /^Close$/i })
+      .or(dialog.locator("button.p-dialog-header-close"))
+      .or(this.page.locator('[role="dialog"] button[aria-label="Close"]'))
+      .first();
+
+    if (await closeButton.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await closeButton.click({ force: true, timeout: 15_000 });
+    } else {
+      await this.page.keyboard.press("Escape");
+    }
+
+    await expect(dialog).toBeHidden({ timeout: 15_000 });
+    await expect(mask).toBeHidden({ timeout: 15_000 }).catch(() => undefined);
+    await this.waitForLoadingComplete();
+  }
+
+  private readQuoteIdFromSubmissionConfirmationText(text: string): string {
+    const normalized = text.replace(/\s+/g, " ");
+    const patterns = [
+      /Your\s+Quote\s+No\.?\s*:\s*(\d+)/i,
+      /Quote\s*No\.?\s*[:#-]?\s*(\d+)/i,
+      /\b(\d{2,})\s*\|\s*(?:TL|CSA|FL|AFV|MV|Dealer|Credit|Term|Consumer)/i,
+      /Quote(?:\s*(?:ID|No\.?|Number))?\s*[:#-]?\s*(\d{2,})/i,
+    ];
+    for (const pattern of patterns) {
+      const match = normalized.match(pattern);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+    return "";
+  }
+
   async expectQuoteCreatedConfirmation(): Promise<void> {
     this.logStep("Expect Quote Created Confirmation");
+    await expect(this.applyNowSubmissionSuccessDialog()).toBeVisible({
+      timeout: 120_000,
+    });
     await expect(
-      this.page
-        .getByText(/quote|contract|created|submitted|confirmation/i)
-        .first(),
-    ).toBeVisible({ timeout: 120_000 });
-    await expect(
-      this.page.getByText(/Quote|Loan|Contract/i).first(),
-    ).toBeVisible({ timeout: 60_000 });
+      this.applyNowSubmissionSuccessDialog().getByText(/Your application has been submitted/i),
+    ).toBeVisible({ timeout: 15_000 });
+    await this.waitForLoadingComplete();
+  }
+
+  /** Quote / contract id shown after successful Apply Now submit (e.g. `Your Quote No :546`). */
+  async readCreatedQuoteIdFromConfirmation(): Promise<string> {
+    this.logStep("Read Created Quote Id From Confirmation");
+    await this.expectQuoteCreatedConfirmation();
+
+    try {
+      const dialogText = (await this.applyNowSubmissionSuccessDialog().innerText()).replace(
+        /\s+/g,
+        " ",
+      );
+      let quoteId = this.readQuoteIdFromSubmissionConfirmationText(dialogText);
+      if (!quoteId) {
+        const bodyText = (await this.page.locator("body").innerText()).replace(/\s+/g, " ");
+        quoteId = this.readQuoteIdFromSubmissionConfirmationText(bodyText);
+      }
+
+      expect(quoteId, "Created quote id must be available after Apply Now submit.").toBeTruthy();
+      return quoteId;
+    } finally {
+      await this.dismissApplyNowSubmissionSuccessDialog();
+    }
+  }
+
+  uploadedDocumentNameHint(filePath: string = RSS_DEFAULT_APPLY_NOW_UPLOAD_PDF): string {
+    const baseName = path.basename(filePath);
+    return baseName.replace(/\.[^.]+$/, "").split("(")[0].trim();
   }
 
   async submitApplicationWithDocuments(options?: {
@@ -163,6 +244,7 @@ export class RSSApplyNowApplicationDocumentsPage extends BasePage {
     }
     await this.clickSubmit();
     await this.expectQuoteCreatedConfirmation();
+    await this.dismissApplyNowSubmissionSuccessDialog();
   }
 
   async clickApplyNowFooterPrevious(clickTimeoutMs = 60_000): Promise<void> {
