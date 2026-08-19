@@ -4,7 +4,7 @@
  */
 
 import { test as base, Page } from '@playwright/test';
-import { doPortalTotpSecret } from '../config/do-portal-auth.config';
+import { doPortalTotpSecret, DO_PORTAL_MANUAL_OTP_TIMEOUT_MS, doPortalManualOtpEnabled } from '../config/do-portal-auth.config';
 import { DO_DEALER_STANDARD_QUOTE_URL } from '../config/env';
 import {
   refreshAccessToken,
@@ -17,7 +17,7 @@ import { CommonUtils } from '../utils/commonUtils';
 import { TableUtils } from '../utils/tableUtils';
 
 // Import test data
-import { getDoPortalLoginData } from '../testData/do-portal/doLoginData';
+import { getDoPortalLoginData, getDoPortalAuthUser } from '../testData/do-portal/doLoginData';
 import { ensureRssPortalAuthSession } from '../playwright/rss-portal-auth.helper';
 import cssLoginData from '../testData/css-portal/loginData.json';
 
@@ -87,11 +87,17 @@ export const test = base.extend<PortalFixtures>({
         await dashboardPage.waitForAuthenticatedDashboard();
       } else if (process.env.ALLOW_DO_MFA_RELOGIN === '1') {
         const loginPage = new DOLoginPage(page);
+        const authUser = getDoPortalAuthUser();
+        const manualOtp = authUser.mfaMode === 'manual' || doPortalManualOtpEnabled();
         await loginPage.navigate();
-        await loginPage.loginWithTestData({
-          ...getDoPortalLoginData().validUsers[0],
-          totpSecret: doPortalTotpSecret(),
-        });
+        await loginPage.loginWithTestData(
+          {
+            ...authUser,
+            totpSecret: manualOtp ? undefined : doPortalTotpSecret(),
+            mfaMode: manualOtp ? 'manual' : authUser.mfaMode,
+          },
+          { manualOtpTimeoutMs: DO_PORTAL_MANUAL_OTP_TIMEOUT_MS },
+        );
         await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
         await dashboardPage.waitForAuthenticatedDashboard();
       } else {

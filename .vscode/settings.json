@@ -20,7 +20,7 @@
   "playwright.reuseBrowser": false,
   "playwright.showTrace": false,
   "playwright.env": {
-    "TEST_ENV": "sit",
+    "TEST_ENV": "qat",
     "PLAYWRIGHT_IDE": "1",
     "PLAYWRIGHT_USE_DO_GLOBAL_AUTH": "1",
     "PLAYWRIGHT_USE_RSS_GLOBAL_AUTH": "1",

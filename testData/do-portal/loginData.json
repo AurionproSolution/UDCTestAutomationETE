@@ -76,6 +76,18 @@
           "expectedError": "Account is locked. Contact administrator."
         }
       ]
+    },
+    "qat": {
+      "validUsers": [
+        {
+          "username": "DEEPAK.PARAMANICK",
+          "password": "Mumbai@12345",
+          "role": "admin",
+          "email": "do_admin@udc.com",
+          "mfaMode": "manual"
+        }
+      ],
+      "invalidUsers": []
     }
   }
 }

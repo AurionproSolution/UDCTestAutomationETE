@@ -57,6 +57,22 @@ export const DO_PORTAL_MFA_LOCK_MAX_AGE_MS = Number(
   process.env.DO_PORTAL_MFA_LOCK_MAX_AGE_MS ?? DO_PORTAL_MFA_LOCK_WAIT_MS + 60_000,
 );
 
+/** Max wait for manual OTP entry during headed DO login (QAT / mfaMode=manual). */
+export const DO_PORTAL_MANUAL_OTP_TIMEOUT_MS = Number(
+  process.env.DO_PORTAL_MANUAL_OTP_TIMEOUT_MS ?? 5 * 60 * 1000,
+);
+
+/**
+ * When true, OTP is entered manually in the browser instead of automated TOTP.
+ * Default: enabled on QAT; override with DO_PORTAL_MANUAL_OTP=1|0.
+ */
+export function doPortalManualOtpEnabled(): boolean {
+  const fromEnv = process.env.DO_PORTAL_MANUAL_OTP?.trim();
+  if (fromEnv === "1" || fromEnv?.toLowerCase() === "true") return true;
+  if (fromEnv === "0" || fromEnv?.toLowerCase() === "false") return false;
+  return getCurrentEnv() === "qat";
+}
+
 /** Auto-start keepalive when test timeout exceeds this (15 min). */
 export const DO_PORTAL_LONG_TEST_TIMEOUT_MS = Number(
   process.env.DO_PORTAL_LONG_TEST_TIMEOUT_MS ?? 900_000,
@@ -124,6 +140,7 @@ export function doPortalOAuthClientId(): string | undefined {
  */
 export function doPortalTotpSecret(): string | undefined {
   if (getCurrentEnv() !== "sit") return undefined;
+  if (doPortalManualOtpEnabled()) return undefined;
 
   const fromEnv = process.env.DO_PORTAL_TOTP_SECRET?.trim();
   if (fromEnv) return fromEnv;

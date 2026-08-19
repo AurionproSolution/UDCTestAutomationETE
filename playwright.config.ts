@@ -235,6 +235,11 @@ export default defineConfig({
     "**/*.test.ts",
     "**/do-portal/jira/quickQuotejira.ts",
     "**/do-portal/doSanityTest/jira tickets/quickQuoteissue.ts",
+    "**/do-portal/doSanityTest/jira tickets/USIF-405-decimalAmountDeletion.test.ts",
+    "**/do-portal/doSanityTest/jira tickets/USIF-420-leftNavBrowserZoom.test.ts",
+    "**/do-portal/doSanityTest/jira tickets/USIF-421-tradeAmountAssetValue.test.ts",
+    "**/do-portal/doSanityTest/jira tickets/USIF-431-timeAtEmployment.test.ts",
+    "**/do-portal/doSanityTest/jira tickets/USIF-425-copyPrimaryBorrowerStreetType.test.ts",
   ],
 
   fullyParallel: true,
@@ -259,6 +264,7 @@ export default defineConfig({
 
   use: {
     headless: false,
+    ignoreHTTPSErrors: true,
     trace: process.env.CI ? "on-first-retry" : "on",
     screenshot: process.env.CI ? "only-on-failure" : "on",
     video: process.env.CI ? "retain-on-failure" : "on",

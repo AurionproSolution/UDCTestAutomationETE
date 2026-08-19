@@ -5,7 +5,7 @@
  
 import { expect, Locator, Page } from "@playwright/test";
 import speakeasy from "speakeasy";
-import { DO_BASE_URL } from "../../../config/env";
+import { DO_BASE_URL, isDoPortalUrl } from "../../../config/env";
 import { CommonUtils } from "../../../utils/commonUtils";
 import { BasePage } from "../../common/BasePage";
  
@@ -136,7 +136,44 @@ export class DOLoginPage extends BasePage {
     });
   }
 
-  private async fillTotpIfPrompted(surface: Page, totpSecret?: string): Promise<boolean> {
+  private async waitForManualOtpEntry(surface: Page, timeoutMs: number): Promise<void> {
+    const otpInputs = this.otpInputs(surface);
+    this.log(
+      `Manual OTP required — enter the code in the browser (timeout ${Math.round(timeoutMs / 1000)}s).`,
+    );
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const visible = await otpInputs
+        .first()
+        .isVisible({ timeout: 1_000 })
+        .catch(() => false);
+      if (!visible) {
+        return;
+      }
+
+      const count = await otpInputs.count();
+      let filledCount = 0;
+      for (let i = 0; i < count; i++) {
+        const value = await otpInputs.nth(i).inputValue().catch(() => "");
+        if (value.trim()) filledCount++;
+      }
+      if (filledCount > 0 && (count === 1 || filledCount >= count)) {
+        return;
+      }
+
+      await surface.waitForTimeout(500);
+    }
+
+    throw new Error(
+      `Timed out waiting for manual OTP entry after ${Math.round(timeoutMs / 1000)}s.`,
+    );
+  }
+
+  private async fillTotpIfPrompted(
+    surface: Page,
+    options?: { totpSecret?: string; manualOtp?: boolean; manualOtpTimeoutMs?: number },
+  ): Promise<boolean> {
     const otpInputs = this.otpInputs(surface);
     const firstVisible = await otpInputs
       .first()
@@ -144,9 +181,14 @@ export class DOLoginPage extends BasePage {
       .catch(() => false);
     if (!firstVisible) return false;
 
+    const totpSecret = options?.totpSecret;
     if (!totpSecret) {
+      if (options?.manualOtp) {
+        await this.waitForManualOtpEntry(surface, options.manualOtpTimeoutMs ?? 300_000);
+        return true;
+      }
       throw new Error(
-        "SIT OTP prompt detected, but DO_PORTAL_TOTP_SECRET is not set. Set it in your environment and retry.",
+        "SIT OTP prompt detected, but DO_PORTAL_TOTP_SECRET is not set. Set it in your environment and retry. On QAT, manual OTP is used by default — enter the code in the browser when prompted.",
       );
     }
 
@@ -225,12 +267,22 @@ export class DOLoginPage extends BasePage {
   /**
    * Post-SSO **Select Application** launcher (no Login with FIS on screen).
    */
-  async isAppLauncherVisible(): Promise<boolean> {
-    const selectApp = this.page.getByText(/Select Application/i).first();
+  private async isAppLauncherVisibleOn(
+    page: Page,
+    options?: { quick?: boolean },
+  ): Promise<boolean> {
+    const selectTimeout = options?.quick ? 500 : 3_000;
+    const cardTimeout = options?.quick ? 500 : 2_000;
+    const selectApp = page.getByText(/Select Application/i).first();
+    const quoteAndApp = page.getByRole("link", { name: /Quotes & Applications/i });
     const onLauncher =
-      (await selectApp.isVisible({ timeout: 3_000 }).catch(() => false)) &&
-      (await this.quoteAndAppButton.isVisible({ timeout: 2_000 }).catch(() => false));
+      (await selectApp.isVisible({ timeout: selectTimeout }).catch(() => false)) &&
+      (await quoteAndApp.isVisible({ timeout: cardTimeout }).catch(() => false));
     return onLauncher;
+  }
+
+  async isAppLauncherVisible(): Promise<boolean> {
+    return this.isAppLauncherVisibleOn(this.page);
   }
 
   /**
@@ -242,7 +294,10 @@ export class DOLoginPage extends BasePage {
       for (const pg of this.page.context().pages()) {
         if (pg.isClosed()) continue;
         const url = pg.url();
-        if (/udc-test\.fiscloudservices\.com\/SITDOPortal/i.test(url)) {
+        if (
+          isDoPortalUrl(url) ||
+          (await this.isAppLauncherVisibleOn(pg, { quick: true }))
+        ) {
           await pg.bringToFront().catch(() => {});
           return pg;
         }
@@ -300,7 +355,7 @@ export class DOLoginPage extends BasePage {
   async login(
     username: string,
     password: string,
-    options?: { totpSecret?: string },
+    options?: { totpSecret?: string; manualOtp?: boolean; manualOtpTimeoutMs?: number },
   ): Promise<void> {
     if (await this.isAppLauncherVisible()) {
       await this.enterDealerFromAppLauncher();
@@ -339,10 +394,16 @@ export class DOLoginPage extends BasePage {
     // Blur so Angular/async validators can run and enable Sign in
     await passwordInput.press("Tab").catch(() => {});
 
-    await this.fillTotpIfPrompted(surface, options?.totpSecret);
+    const otpOptions = {
+      totpSecret: options?.totpSecret,
+      manualOtp: options?.manualOtp,
+      manualOtpTimeoutMs: options?.manualOtpTimeoutMs,
+    };
+
+    await this.fillTotpIfPrompted(surface, otpOptions);
     await this.selectDeviceTrustIfPrompted(surface);
     // Some FIS flows show OTP only after device-trust selection.
-    await this.fillTotpIfPrompted(surface, options?.totpSecret);
+    await this.fillTotpIfPrompted(surface, otpOptions);
 
     this.log("Waiting for Sign in button to become enabled");
     const signinButton = surface.getByRole("button", { name: "Sign in" });
@@ -382,14 +443,21 @@ export class DOLoginPage extends BasePage {
   /**
    * Login with test data from JSON
    */
-  async loginWithTestData(testData: {
-    username: string;
-    password: string;
-    totpSecret?: string;
-  }): Promise<void> {
+  async loginWithTestData(
+    testData: {
+      username: string;
+      password: string;
+      totpSecret?: string;
+      mfaMode?: "totp" | "manual";
+    },
+    options?: { manualOtpTimeoutMs?: number },
+  ): Promise<void> {
     this.logStep("Login with test data");
+    const manualOtp = testData.mfaMode === "manual";
     await this.login(testData.username, testData.password, {
-      totpSecret: testData.totpSecret,
+      totpSecret: manualOtp ? undefined : testData.totpSecret,
+      manualOtp,
+      manualOtpTimeoutMs: options?.manualOtpTimeoutMs,
     });
   }
  

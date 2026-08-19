@@ -7,10 +7,15 @@
 import { chromium, type BrowserContext, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { doPortalTotpSecret, DO_PORTAL_MFA_LOCK_WAIT_MS } from "../config/do-portal-auth.config";
-import { DO_BASE_URL, DO_DEALER_STANDARD_QUOTE_URL, getCurrentEnv } from "../config/env";
+import { doPortalTotpSecret, DO_PORTAL_MFA_LOCK_WAIT_MS, DO_PORTAL_MANUAL_OTP_TIMEOUT_MS, doPortalManualOtpEnabled } from "../config/do-portal-auth.config";
+import {
+  DO_BASE_URL,
+  DO_DEALER_STANDARD_QUOTE_URL,
+  getCurrentEnv,
+  isDoPortalUrl,
+} from "../config/env";
 import { DOLoginPage, DODashboardPage } from "../pages";
-import { getDoPortalLoginData } from "../testData/do-portal/doLoginData";
+import { getDoPortalAuthUser } from "../testData/do-portal/doLoginData";
 import { logTestStep } from "../utils/testStepLog";
 import {
   discoverAndSaveAuthMeta,
@@ -48,9 +53,8 @@ function attachTokenDiscoveryListeners(page: Page): void {
 }
 
 function findPortalPageInContext(context: BrowserContext): Page | undefined {
-  const portalPattern = /fiscloudservices\.com\/SITDOPortal/i;
   for (const pg of context.pages()) {
-    if (!pg.isClosed() && portalPattern.test(pg.url())) {
+    if (!pg.isClosed() && isDoPortalUrl(pg.url())) {
       return pg;
     }
   }
@@ -59,24 +63,29 @@ function findPortalPageInContext(context: BrowserContext): Page | undefined {
 
 export async function loginDoPortalAndSaveStorage(page: Page): Promise<void> {
   const authFile = getDoPortalAuthFile();
-  const loginData = getDoPortalLoginData();
+  const authUser = getDoPortalAuthUser();
   const env = getCurrentEnv();
   const baseUrl = DO_BASE_URL();
-  const totpSecret = doPortalTotpSecret();
+  const manualOtp = authUser.mfaMode === "manual" || doPortalManualOtpEnabled();
+  const totpSecret = manualOtp ? undefined : doPortalTotpSecret();
 
   fs.mkdirSync(path.dirname(authFile), { recursive: true });
   attachTokenDiscoveryListeners(page);
 
   logTestStep(
-    `DO auth: environment=${env}, url=${baseUrl}, user=${loginData.validUsers[0].username}`,
+    `DO auth: environment=${env}, url=${baseUrl}, user=${authUser.username}, mfa=${manualOtp ? "manual" : "totp"}`,
   );
 
   const loginPage = new DOLoginPage(page);
   await loginPage.navigate(baseUrl);
-  await loginPage.loginWithTestData({
-    ...loginData.validUsers[0],
-    totpSecret,
-  });
+  await loginPage.loginWithTestData(
+    {
+      ...authUser,
+      totpSecret,
+      mfaMode: manualOtp ? "manual" : authUser.mfaMode,
+    },
+    { manualOtpTimeoutMs: DO_PORTAL_MANUAL_OTP_TIMEOUT_MS },
+  );
 
   const portalPage = findPortalPageInContext(page.context()) ?? page;
   await portalPage.bringToFront().catch(() => {});

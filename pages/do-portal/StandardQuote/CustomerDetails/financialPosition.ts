@@ -985,6 +985,62 @@ export class DOFinancialPositionPage extends BasePage {
     );
   }
 
+  /** USIF-405 — Home Ownership Type row amount field (`#amount` beside the dropdown). */
+  async individualHomeOwnershipAmountInput(): Promise<Locator> {
+    const card = this.individualAssetDetailsCard;
+    await card.waitFor({ state: "visible", timeout: 30_000 });
+    await card.scrollIntoViewIfNeeded();
+
+    const byFc = card.locator(`p-dropdown[formcontrolname="assestHomeOwnerType"]`).first();
+    if (await byFc.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const following = byFc
+        .locator("xpath=following::input[@id='amount'][1]")
+        .filter({ visible: true })
+        .first();
+      if (await following.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        return following;
+      }
+    }
+
+    const fromLabel = card
+      .getByText(/Home Ownership Type/i)
+      .first()
+      .locator("xpath=ancestor::div[.//input[@id='amount']][1]//input[@id='amount']")
+      .filter({ visible: true })
+      .first();
+    await fromLabel.waitFor({ state: "visible", timeout: 20_000 });
+    return fromLabel;
+  }
+
+  /** Normalized digits from a currency `<amount>#amount` input (no `$` / commas). */
+  async readAmountFieldDigits(input: Locator): Promise<string> {
+    await input.waitFor({ state: "visible", timeout: 20_000 });
+    return this.normalizeAmountDigits(await input.inputValue());
+  }
+
+  /** Place caret at the first decimal fraction digit (USIF-405 decimal editing). */
+  async placeCaretAtDecimalFraction(input: Locator): Promise<void> {
+    await input.scrollIntoViewIfNeeded();
+    await input.click({ timeout: 15_000 });
+    await input.evaluate((el: HTMLInputElement) => {
+      const value = el.value ?? "";
+      const dot = value.indexOf(".");
+      const pos = dot >= 0 ? dot + 1 : value.length;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+    });
+  }
+
+  /** Assets (Total) chart / graph host on Financial Position (soft observe in Jira repro). */
+  assetsTotalChartLocator(): Locator {
+    return this.financialRoot
+      .locator(
+        "canvas, p-chart, .p-chart, .highcharts-container, highcharts-root, svg.highcharts-root, [class*='highcharts'], lib-google-chart",
+      )
+      .filter({ visible: true })
+      .first();
+  }
+
   async fillIndividualVehicleValueAmount(value: string): Promise<void> {
     this.logStep(`Filled individual vehicle value as ${this.stepValueDisplay(value)}`);
     const input = this.amountInputInIndividualCardRow(

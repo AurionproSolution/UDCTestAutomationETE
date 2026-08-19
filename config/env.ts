@@ -130,6 +130,20 @@ export const CSS_CONFIG = () => getPortalConfig("css");
 // Export current environment URLs for each portal
 export const DO_BASE_URL = () => DO_CONFIG().baseUrl;
 
+/** True when a tab URL belongs to the configured DO portal host (SIT, QAT, dev, etc.). */
+export function isDoPortalUrl(url: string): boolean {
+  if (!url || url === "about:blank") return false;
+  if (/udc-test\.fiscloudservices\.com\/SITDOPortal/i.test(url)) return true;
+  if (/aurpr-ia\.assetfinance\.myfis\.cloud\/IAUDCPortal/i.test(url)) return true;
+  try {
+    const base = new URL(DO_BASE_URL());
+    const current = new URL(url);
+    return current.hostname === base.hostname;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Authenticated dealer quotes area. The bare {@link DO_BASE_URL} is often the public marketing
  * shell; use this after `storageState` (or post-login) to open the app where dashboard CTAs live.

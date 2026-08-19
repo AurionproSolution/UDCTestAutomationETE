@@ -3214,25 +3214,7 @@ export class DOAssetDetailsPage extends BasePage {
    * Select a condition from the Condition dropdown
    */
   async selectCondition(condition: string) {
-    const current = await this.page
-      .getByRole("combobox")
-      .first()
-      .inputValue()
-      .catch(() => "");
-  
-    if (current.includes(condition)) {
-      return;
-    }
-  
-    await this.conditionDropdown.click();
-  
-    await expect(
-      this.page.getByRole("option", { name: condition })
-    ).toBeVisible({ timeout: 10000 });
-  
-    await this.page
-      .getByRole("option", { name: condition })
-      .click();
+    await this.selectConditionInStandardQuote(condition);
   }
   /**
    * **Condition** on Standard Quote / Asset Details.

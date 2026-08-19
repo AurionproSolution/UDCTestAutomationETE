@@ -608,47 +608,103 @@ export class DOAddressDetailsPage extends BasePage {
     await this.selectResidenceType(residenceType);
   }
 
+  /** Visible address-search options (PrimeNG listbox and/or autocomplete panel). */
+  private addressSearchOptions(match?: RegExp): Locator {
+    const listboxOpts = this.page.getByRole("listbox").last().getByRole("option");
+    const panelOpts = this.page
+      .locator(".p-autocomplete-panel")
+      .last()
+      .locator(".p-autocomplete-item, li");
+    const merged = listboxOpts.or(panelOpts);
+    return match ? merged.filter({ hasText: match }) : merged;
+  }
+
+  private async dismissAddressSearchPanel(): Promise<void> {
+    await this.page
+      .locator(".p-autocomplete-panel")
+      .waitFor({ state: "hidden", timeout: 10_000 })
+      .catch(() => {});
+    await this.page
+      .getByRole("listbox")
+      .waitFor({ state: "hidden", timeout: 5_000 })
+      .catch(() => {});
+    await this.page.keyboard.press("Escape").catch(() => {});
+    await this.page.waitForTimeout(400);
+  }
+
   /**
-   * Physical address search: optionContains is a substring or regex-safe fragment
-   * (full label text often differs by environment).
+   * Type into an address search field and pick a matching autocomplete option.
+   * Does not press Enter (that auto-selects the first hit and breaks strict matching).
+   * Falls back to the nth visible option containing "Road" when no explicit match exists (QAT vs SIT labels differ).
+   */
+  private async fillAddressSearchInputAndPickOption(
+    searchInput: Locator,
+    query: string,
+    optionContains: string | RegExp,
+    roadOptionIndex = 0,
+  ): Promise<void> {
+    const rx =
+      optionContains instanceof RegExp
+        ? optionContains
+        : new RegExp(
+            optionContains.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+            "i",
+          );
+
+    await searchInput.waitFor({ state: "visible", timeout: 60_000 });
+    await searchInput.click();
+    await searchInput.fill("");
+    await searchInput.fill(query);
+    await this.page.waitForTimeout(1_200);
+
+    const explicit = this.addressSearchOptions(rx);
+    await explicit
+      .first()
+      .waitFor({ state: "visible", timeout: 20_000 })
+      .catch(() => {});
+
+    const explicitCount = await explicit.count();
+    if (explicitCount > roadOptionIndex) {
+      await explicit.nth(roadOptionIndex).scrollIntoViewIfNeeded();
+      await explicit.nth(roadOptionIndex).click();
+      await this.dismissAddressSearchPanel();
+      return;
+    }
+
+    const roadOpts = this.addressSearchOptions(/\bRoad\b/i);
+    const roadCount = await roadOpts.count();
+    if (roadCount > roadOptionIndex) {
+      await roadOpts.nth(roadOptionIndex).scrollIntoViewIfNeeded();
+      await roadOpts.nth(roadOptionIndex).click();
+      await this.dismissAddressSearchPanel();
+      return;
+    }
+
+    const anyOpts = this.addressSearchOptions();
+    await anyOpts.first().waitFor({ state: "visible", timeout: 15_000 });
+    await anyOpts.first().scrollIntoViewIfNeeded();
+    await anyOpts.first().click();
+    await this.dismissAddressSearchPanel();
+  }
+
+  /**
+   * Physical address search: optionContains is a substring, regex, or /\bRoad\b/ fallback.
+   * `roadOptionIndex` picks the nth "Road" hit when the exact label differs by environment (QAT vs SIT).
    */
   async fillPhysicalSearchAndSelectAddressOption(
     query: string,
-    optionContains: string,
+    optionContains: string | RegExp,
+    roadOptionIndex = 0,
   ) {
     this.logStep(
-      `Filled physical search "${this.stepValueDisplay(query)}" and picked option matching ${this.stepValueDisplay(optionContains)}`,
+      `Filled physical search "${this.stepValueDisplay(query)}" and picked option matching ${this.stepValueDisplay(String(optionContains))}`,
     );
-    await this.physicalSearchInput.waitFor({
-      state: "visible",
-      timeout: 60000,
-    });
-    await this.physicalSearchInput.click();
-    await this.physicalSearchInput.fill(query);
-    await this.physicalSearchInput.press("Enter");
-    const rx = new RegExp(
-      optionContains.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-      "i",
+    await this.fillAddressSearchInputAndPickOption(
+      this.physicalSearchInput,
+      query,
+      optionContains,
+      roadOptionIndex,
     );
-    const byRole = this.page.getByRole("option", { name: rx }).first();
-    const byPanel = this.page
-      .locator(".p-autocomplete-panel")
-      .locator(".p-autocomplete-item, li")
-      .filter({ hasText: rx })
-      .first();
-    try {
-      await byRole.waitFor({ state: "visible", timeout: 15000 });
-      await byRole.click();
-    } catch {
-      await byPanel.waitFor({ state: "visible", timeout: 15000 });
-      await byPanel.click();
-    }
-    await this.page
-      .locator(".p-autocomplete-panel")
-      .waitFor({ state: "hidden", timeout: 10000 })
-      .catch(() => {});
-    await this.page.keyboard.press("Escape");
-    await this.page.waitForTimeout(400);
   }
 
   /**
@@ -1134,10 +1190,39 @@ export class DOAddressDetailsPage extends BasePage {
   }
 
   private async pickPrimeNgDropdownOption(optionName: string): Promise<void> {
-    const rxOpt = new RegExp(
-      optionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-      "i",
-    );
+    const escaped = optionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const rxOpt = new RegExp(`^${escaped}$`, "i");
+    const panel = this.page.locator(".p-dropdown-panel").last();
+    const panelVisible = await panel
+      .waitFor({ state: "visible", timeout: 12_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (panelVisible) {
+      const filterInput = panel.locator(
+        "input.p-dropdown-filter, .p-dropdown-filter input, input[role='searchbox']",
+      );
+      if (await filterInput.first().isVisible({ timeout: 1500 }).catch(() => false)) {
+        await filterInput.first().fill("");
+        await filterInput.first().fill(optionName);
+        await this.page.waitForTimeout(400);
+      }
+      const opt = panel
+        .locator("li[role='option'], .p-dropdown-item, li.p-dropdown-item")
+        .filter({ hasText: rxOpt })
+        .first()
+        .or(panel.getByRole("option", { name: rxOpt }).first());
+      await opt.waitFor({ state: "visible", timeout: 12_000 });
+      await opt.scrollIntoViewIfNeeded();
+      await opt.click();
+      await this.page
+        .locator(".p-dropdown-panel")
+        .waitFor({ state: "hidden", timeout: 10_000 })
+        .catch(() => {});
+      await this.page.keyboard.press("Escape").catch(() => {});
+      return;
+    }
+
     await this.page.getByRole("option", { name: rxOpt }).first().click();
     await this.page
       .getByRole("listbox")
@@ -1313,11 +1398,228 @@ export class DOAddressDetailsPage extends BasePage {
   async selectPhysicalStreetType(optionName: string) {
     this.logStep(`Selected physical street type: ${this.stepValueDisplay(optionName)}`);
     const root = this.physicalRootOrBlock();
+    const streetTypeLabel = root
+      .locator("text, label")
+      .filter({ hasText: /^Street Type/i })
+      .first();
+    if (await streetTypeLabel.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      const dropdown = streetTypeLabel
+        .locator("xpath=following::div[contains(@class,'p-dropdown')][1]")
+        .first();
+      const trigger = dropdown
+        .locator("button[aria-label='dropdown trigger'], .p-dropdown-trigger")
+        .first();
+      const combobox = dropdown.getByRole("combobox").first();
+      await streetTypeLabel.scrollIntoViewIfNeeded();
+      if (await trigger.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await trigger.click();
+      } else if (await combobox.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await combobox.click();
+      } else {
+        await this.openPhysicalDropdownByLabelAndPick(
+          /Street Type|Street suffix|Suffix/i,
+          optionName,
+          root,
+        );
+        return;
+      }
+      await this.pickPrimeNgDropdownOption(optionName);
+      return;
+    }
     await this.openPhysicalDropdownByLabelAndPick(
       /Street Type|Street suffix|Suffix/i,
       optionName,
       root,
     );
+  }
+
+  async selectPostalStreetType(optionName: string): Promise<void> {
+    this.logStep(`Selected postal street type: ${this.stepValueDisplay(optionName)}`);
+    const card = this.postalStreetFormHost();
+    await card.scrollIntoViewIfNeeded().catch(() => {});
+    const streetTypeLabel = card
+      .locator("text, label")
+      .filter({ hasText: /^Street Type/i })
+      .first();
+    if (await streetTypeLabel.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      const dropdown = streetTypeLabel
+        .locator("xpath=following::div[contains(@class,'p-dropdown')][1]")
+        .first();
+      const trigger = dropdown
+        .locator("button[aria-label='dropdown trigger'], .p-dropdown-trigger")
+        .first();
+      const combobox = dropdown.getByRole("combobox").first();
+      await streetTypeLabel.scrollIntoViewIfNeeded();
+      if (await trigger.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await trigger.click();
+      } else if (await combobox.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await combobox.click();
+      } else {
+        await this.openPhysicalDropdownByLabelAndPick(
+          /Street Type|Street suffix|Suffix/i,
+          optionName,
+          card,
+        );
+        return;
+      }
+      await this.pickPrimeNgDropdownOption(optionName);
+      return;
+    }
+    await this.openPhysicalDropdownByLabelAndPick(
+      /Street Type|Street suffix|Suffix/i,
+      optionName,
+      card,
+    );
+  }
+
+  private async readStreetTypeLabelInScope(root: Locator): Promise<string> {
+    await root.scrollIntoViewIfNeeded().catch(() => {});
+    const streetTypeLabel = root
+      .locator("text, label")
+      .filter({ hasText: /Street Type|Street suffix|Suffix/i })
+      .first();
+    if (!(await streetTypeLabel.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      return "";
+    }
+    const dropdown = streetTypeLabel
+      .locator("xpath=following::div[contains(@class,'p-dropdown')][1]")
+      .first();
+    const combobox = dropdown.getByRole("combobox").first();
+    if (await combobox.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return ((await combobox.textContent()) ?? "").trim();
+    }
+    const labelEl = dropdown.locator(".p-dropdown-label").first();
+    if (await labelEl.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      return ((await labelEl.textContent()) ?? "").trim();
+    }
+    const panel = this.page.locator(".p-dropdown").filter({ has: streetTypeLabel }).first();
+    return ((await panel.locator(".p-dropdown-label").textContent()) ?? "").trim();
+  }
+
+  async readPhysicalStreetTypeLabel(): Promise<string> {
+    this.logStep("Read physical street type label");
+    return this.readStreetTypeLabelInScope(this.physicalRootOrBlock());
+  }
+
+  async readPostalStreetTypeLabel(): Promise<string> {
+    this.logStep("Read postal street type label");
+    await this.postalStreetFormHost().scrollIntoViewIfNeeded().catch(() => {});
+    return this.readStreetTypeLabelInScope(this.postalStreetFormHost());
+  }
+
+  /** USIF-425 — copied residential/postal street type must match primary (e.g. Road, not Broadway). */
+  async expectPhysicalStreetType(expected: string): Promise<void> {
+    this.logStep(`Expect physical street type: ${this.stepValueDisplay(expected)}`);
+    await expect
+      .poll(async () => this.readPhysicalStreetTypeLabel(), { timeout: 30_000 })
+      .toMatch(new RegExp(`^${expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"));
+  }
+
+  async expectPostalStreetType(expected: string): Promise<void> {
+    this.logStep(`Expect postal street type: ${this.stepValueDisplay(expected)}`);
+    await this.postalAddressCard().scrollIntoViewIfNeeded().catch(() => {});
+    await expect
+      .poll(async () => this.readPostalStreetTypeLabel(), { timeout: 30_000 })
+      .toMatch(new RegExp(`^${expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i"));
+  }
+
+  private streetTypeExactRx(streetType: string): RegExp {
+    return new RegExp(`^${streetType.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
+  }
+
+  /** Select street type after manual entry; city lookup can overwrite an earlier pick on QAT. */
+  async ensurePhysicalStreetType(streetType: string): Promise<void> {
+    this.logStep(`Ensure physical street type: ${this.stepValueDisplay(streetType)}`);
+    const rx = this.streetTypeExactRx(streetType);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const current = await this.readPhysicalStreetTypeLabel();
+      if (rx.test(current)) break;
+      await this.selectPhysicalStreetType(streetType);
+      await this.page.keyboard.press("Tab").catch(() => {});
+      await this.page.waitForTimeout(400);
+    }
+    await this.expectPhysicalStreetType(streetType);
+  }
+
+  async ensurePostalStreetType(streetType: string): Promise<void> {
+    this.logStep(`Ensure postal street type: ${this.stepValueDisplay(streetType)}`);
+    await this.postalStreetFormHost().scrollIntoViewIfNeeded().catch(() => {});
+    const rx = this.streetTypeExactRx(streetType);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const current = await this.readPostalStreetTypeLabel();
+      if (rx.test(current)) break;
+      await this.selectPostalStreetType(streetType);
+      await this.page.keyboard.press("Tab").catch(() => {});
+      await this.page.waitForTimeout(400);
+    }
+    await this.expectPostalStreetType(streetType);
+  }
+
+  /**
+   * Manual physical address with explicit Street Type — use a non-lookup street name on QAT
+   * (real names like Queen can auto-map to Broadway; address search data varies by env).
+   */
+  async fillPhysicalManualWithStreetType(data: {
+    streetNumber: string;
+    streetName: string;
+    city: string;
+    country: string;
+    residenceType: string;
+    timeAtYears: string;
+    timeAtMonths: string;
+    streetType: string;
+    postcode?: string;
+  }): Promise<void> {
+    this.logStep(
+      `Fill physical manual with street type ${this.stepValueDisplay(data.streetType)}: ${this.stepValueDisplay(data.streetNumber)} ${this.stepValueDisplay(data.streetName)}`,
+    );
+    await this.physicalAddressRoot.scrollIntoViewIfNeeded().catch(() => {});
+    await this.enterStreetNumber(data.streetNumber);
+    await this.enterStreetName(data.streetName);
+    await this.chooseCountry(data.country);
+    await this.selectResidenceType(data.residenceType);
+    await this.timeAtAddress(data.timeAtYears, data.timeAtMonths);
+    if (data.postcode) await this.enterPhysicalPostcode(data.postcode);
+    await this.enterCity(data.city);
+    await this.ensurePhysicalStreetType(data.streetType);
+  }
+
+  /** Manual postal street address with explicit Street Type (reuse postal = No). */
+  async fillPostalManualWithStreetType(data: {
+    streetNumber: string;
+    streetName: string;
+    city: string;
+    country: string;
+    streetType: string;
+  }): Promise<void> {
+    this.logStep(
+      `Fill postal manual with street type ${this.stepValueDisplay(data.streetType)}: ${this.stepValueDisplay(data.streetNumber)} ${this.stepValueDisplay(data.streetName)}`,
+    );
+    await this.ensureManualPostalAddressVisible();
+    await this.clickPostalStreetType();
+    await this.enterPostalStreetNumber(data.streetNumber);
+    await this.enterPostalStreetName(data.streetName);
+    await this.enterPostalCity(data.city);
+    await this.choosePostalCountry(data.country);
+    await this.ensurePostalStreetType(data.streetType);
+  }
+
+  /** Co-borrower / guarantor — turn on **Copy primary borrower** address slider. */
+  async enableCopyPrimaryBorrowerAddress(): Promise<void> {
+    this.logStep("Enable Copy Primary Borrower Address");
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await expect(this.page.getByText(/Copy primary borrower/i).first()).toBeVisible({
+      timeout: 30_000,
+    });
+    await this.ensureTrustSwitchOnNearLabel(this.page, /Copy primary borrower/i);
+    await this.waitForTrustAddressUiSettled();
+  }
+
+  async expectCopyPrimaryBorrowerSliderVisible(): Promise<void> {
+    this.logStep("Expect Copy Primary Borrower Slider Visible");
+    await expect(this.page.getByText(/Copy primary borrower/i).first()).toBeVisible({
+      timeout: 30_000,
+    });
   }
 
   async enterPhysicalStreetDirection(value: string) {
@@ -2660,9 +2962,83 @@ export class DOAddressDetailsPage extends BasePage {
     await this.choosePreviousCountry(fields.country, root);
   }
 
+  /** True when postal **Street** manual fields (not Postal textarea mode) are shown. */
+  private async isPostalStreetModeActive(): Promise<boolean> {
+    return this.postalCardTextInput(/Street Number/i)
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
+  }
+
+  /**
+   * Select **Street** (not Postal textarea). Radios sit on the postal card wrapper, not inside `app-postal-address`.
+   */
+  private async clickPostalAddressTypeStreet(card: Locator): Promise<void> {
+    const tryClick = async (loc: Locator): Promise<boolean> => {
+      try {
+        await loc.waitFor({ state: "visible", timeout: 8_000 });
+        await loc.scrollIntoViewIfNeeded();
+        await loc.click({ timeout: 8_000 });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const streetPostalRow = card
+      .locator("div, p-radiobuttongroup, fieldset, span")
+      .filter({ has: card.getByText(/^Street$/i) })
+      .filter({ has: card.getByText(/^Postal$/i) })
+      .first();
+
+    if ((await streetPostalRow.count()) > 0 && (await streetPostalRow.isVisible().catch(() => false))) {
+      const streetLabel = streetPostalRow
+        .locator("label, span.p-radiobutton-label, .p-radiobutton-label, .p-button-label")
+        .filter({ hasText: /^Street$/i })
+        .filter({ hasNotText: /Address/i })
+        .first();
+      if (await tryClick(streetLabel)) return;
+      if (await tryClick(streetPostalRow.getByText(/^Street$/i).first())) return;
+      const inputs = streetPostalRow.locator('input[type="radio"]');
+      if ((await inputs.count()) >= 2) {
+        await inputs.nth(1).click({ force: true, timeout: 8_000 });
+        return;
+      }
+      if ((await inputs.count()) === 1) {
+        await inputs.first().click({ force: true, timeout: 8_000 });
+        return;
+      }
+    }
+
+    if (await tryClick(card.locator(':text-is("Street")'))) return;
+
+    const labelStreet = card
+      .locator("label")
+      .filter({ hasText: /^Street$/i })
+      .filter({ hasNotText: /Address/i })
+      .first();
+    if (await tryClick(labelStreet)) return;
+
+    const pRadioStreet = card.locator("p-radiobutton").nth(1);
+    if (await tryClick(pRadioStreet)) return;
+
+    await card.locator('p-radiobutton input[type="radio"]').nth(1).click({
+      timeout: 8_000,
+      force: true,
+    });
+  }
+
   async clickPostalStreetType() {
     this.logStep("Click Postal Street Type");
-    await this.page.getByRole("radio", { name: "Street" }).click();
+    if (await this.isPostalStreetModeActive()) {
+      this.logStep("Postal street mode already active — skip Street radio");
+      return;
+    }
+    const card = this.postalAddressCard();
+    await card.scrollIntoViewIfNeeded().catch(() => {});
+    await this.clickPostalAddressTypeStreet(card);
+    await this.postalCardTextInput(/Street Number/i)
+      .waitFor({ state: "visible", timeout: 15_000 })
+      .catch(() => {});
   }
 
   async fillPostalSearch(query: string) {
@@ -2671,19 +3047,105 @@ export class DOAddressDetailsPage extends BasePage {
     await this.postalSearchInput.fill(query);
   }
 
+  /** Postal address search — same pattern as physical search (e.g. Auckland Road → Street Type Road). */
+  async fillPostalSearchAndSelectAddressOption(
+    query: string,
+    optionContains: string | RegExp,
+    roadOptionIndex = 0,
+  ): Promise<void> {
+    this.logStep(
+      `Filled postal search "${this.stepValueDisplay(query)}" and picked option matching ${this.stepValueDisplay(String(optionContains))}`,
+    );
+    await this.ensureManualPostalAddressVisible();
+    await this.clickPostalStreetType();
+    await this.fillAddressSearchInputAndPickOption(
+      this.postalSearchInput,
+      query,
+      optionContains,
+      roadOptionIndex,
+    );
+  }
+
+  /** Visible `app-postal-address` host (street/postal entry — not the physical card). */
+  private postalStreetFormHost(): Locator {
+    return this.page.locator("app-postal-address").filter({ visible: true }).last();
+  }
+
+  /** Underlined gen-text field in the Postal Address card only. */
+  private postalCardTextInput(labelRx: RegExp): Locator {
+    return this.postalStreetFormHost()
+      .locator("text")
+      .filter({ hasText: labelRx })
+      .locator("#text")
+      .first();
+  }
+
   async enterPostalStreetNumber(streetNumber: string) {
     this.logStep(`Entered postal street number as ${this.stepValueDisplay(streetNumber)}`);
-    await this.postalStreetNumberInput.fill(streetNumber);
+    await this.postalStreetFormHost().scrollIntoViewIfNeeded().catch(() => {});
+    const field = this.postalCardTextInput(/Street Number/i);
+    await this.fillAddressFieldResilient(field, streetNumber, "Postal Street Number");
   }
 
   async enterPostalStreetName(streetName: string) {
     this.logStep(`Entered postal street name as ${this.stepValueDisplay(streetName)}`);
-    await this.postalStreetNameInput.fill(streetName);
+    await this.postalStreetFormHost().scrollIntoViewIfNeeded().catch(() => {});
+    const field = this.postalCardTextInput(/Street Name/i);
+    await this.fillAddressFieldResilient(field, streetName, "Postal Street Name");
   }
 
   async enterPostalCity(city: string) {
     this.logStep(`Entered postal city as ${this.stepValueDisplay(city)}`);
-    await this.postalCityInput.fill(city);
+    const host = this.postalStreetFormHost();
+    await host.scrollIntoViewIfNeeded().catch(() => {});
+
+    const cityInput = host.locator('input[name="postalCity"]').filter({ visible: true }).first();
+    const cityComboNearLabel = host
+      .locator("text, label")
+      .filter({ hasText: /^City\s*\*?$/i })
+      .first()
+      .locator(
+        "xpath=following::input[contains(@class,'p-inputtext') or @role='combobox'][1]",
+      )
+      .first();
+    const resolvedCityInput = (
+      await cityInput.isVisible({ timeout: 2_000 }).catch(() => false)
+    )
+      ? cityInput
+      : cityComboNearLabel;
+
+    if (!city.trim()) {
+      if (await resolvedCityInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await resolvedCityInput.click().catch(() => {});
+        await resolvedCityInput.fill("").catch(() => {});
+        await resolvedCityInput.press("Tab").catch(() => {});
+      }
+      await this.page.keyboard.press("Escape").catch(() => {});
+      return;
+    }
+
+    if (await cityInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await this.fillTrustCityAutocompleteInHost(host, "postalCity", city);
+      return;
+    }
+
+    const rx = new RegExp(city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    await resolvedCityInput.waitFor({ state: "visible", timeout: 20_000 });
+    await resolvedCityInput.scrollIntoViewIfNeeded();
+    await resolvedCityInput.click();
+    await resolvedCityInput.fill("");
+    await resolvedCityInput.type(city, { delay: 30 });
+    const fromPanel = this.page
+      .locator(".p-autocomplete-panel")
+      .getByRole("option", { name: rx })
+      .first();
+    try {
+      await fromPanel.waitFor({ state: "visible", timeout: 8_000 });
+      await fromPanel.click();
+    } catch {
+      await this.page.getByRole("option", { name: rx }).first().click({ timeout: 8_000 });
+    }
+    await this.page.keyboard.press("Escape").catch(() => {});
   }
 
   async choosePostalCountry(country: string) {

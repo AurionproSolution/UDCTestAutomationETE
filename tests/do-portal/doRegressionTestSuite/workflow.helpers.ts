@@ -116,6 +116,7 @@ export async function addMinimalUsedAsset(
   addAssetPage: DOAddAssetPage,
 ): Promise<void> {
   await assetDetailsPage.enterAsset("Car and Light Commercial /");
+  await assetDetailsPage.waitForQuoteLoadersToFinish().catch(() => {});
   await assetDetailsPage.selectCondition("Used");
   await assetDetailsPage.openAssetInsuranceTradeInSummary();
   await assetDetailsPage.clickAssetSummaryEditButton();

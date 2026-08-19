@@ -1,5 +1,5 @@
 import { getCurrentEnv } from "../../config/env";
-import type { LoginTestData, LoginUsers } from "../types";
+import type { LoginCredentials, LoginTestData, LoginUsers } from "../types";
 import loginData from "./loginData.json";
 
 const data = loginData as LoginTestData;
@@ -17,4 +17,22 @@ export function getDoPortalLoginData(): LoginUsers {
       invalidUsers: data.invalidUsers,
     }
   );
+}
+
+/** Active DO auth user for setup/fixtures (first valid user unless DO_PORTAL_USERNAME is set). */
+export function getDoPortalAuthUser(): LoginCredentials {
+  const { validUsers } = getDoPortalLoginData();
+  const requested = process.env.DO_PORTAL_USERNAME?.trim();
+  if (requested) {
+    const match = validUsers.find(
+      (user) => user.username.toLowerCase() === requested.toLowerCase(),
+    );
+    if (!match) {
+      throw new Error(
+        `DO_PORTAL_USERNAME="${requested}" not found in DO loginData for ${getCurrentEnv()}.`,
+      );
+    }
+    return match;
+  }
+  return validUsers[0];
 }

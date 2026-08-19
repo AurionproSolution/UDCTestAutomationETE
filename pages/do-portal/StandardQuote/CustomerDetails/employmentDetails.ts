@@ -801,7 +801,7 @@ export class DOEmploymentDetailsPage extends BasePage {
     expect(value.length).toBeLessThanOrEqual(30);
   }
 
-  /** **Time with Employer** required when employer is entered and years/months are blank or 0/0. */
+  /** **Time with Employer** required when years/months are blank or 0/0 (including USIF-431 occupations with optional employer). */
   async expectCurrentTimeWithEmployerRequiredValidationMessage(): Promise<void> {
     this.logStep("Expect Current Time With Employer Required Validation Message");
     await this.scrollCurrentEmploymentSectionIntoViewForValidation();
@@ -824,6 +824,22 @@ export class DOEmploymentDetailsPage extends BasePage {
     await expect(this.page.getByText(/Time with Employe[e]?r is required/i).first()).toBeVisible({
       timeout: 20_000,
     });
+  }
+
+  /**
+   * USIF-431 / MAF-8526 — Retired, Beneficiary/Unemployed, Unknown (and Retired employment type):
+   * employer name may be blank, but **Time with Employer** must still be mandatory on Save.
+   */
+  async expectTimeAtEmploymentMandatoryWhenEmployerOptional(): Promise<void> {
+    this.logStep("Expect Time At Employment Mandatory When Employer Optional (USIF-431)");
+    await this.scrollCurrentEmploymentSectionIntoViewForValidation();
+    const root = await this.resolveEmploymentFormRoot();
+
+    await expect(root.getByText(/Employer name is required/i)).toHaveCount(0, {
+      timeout: 15_000,
+    });
+    await this.expectEmploymentDetailsStepVisible();
+    await this.expectCurrentTimeWithEmployerRequiredValidationMessage();
   }
 
   async expectCurrentTimeWithEmployerRequiredValidationMessageAbsent(): Promise<void> {
