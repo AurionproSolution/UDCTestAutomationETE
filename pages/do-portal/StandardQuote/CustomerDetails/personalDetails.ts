@@ -1009,6 +1009,33 @@ export class DOPersonalDetailsPage extends BasePage {
   }
 
   /**
+   * USIF-463 — first ribbon navigation away from Personal Details must not show
+   * "Please save the party to proceed" / "Please save to move to another tab".
+   */
+  async expectNoSavePartyRibbonBlockMessage(): Promise<void> {
+    this.logStep("Expect no save-party ribbon block message");
+    const pattern = /Please save (the party to proceed|to move to another tab)/i;
+    const toast = this.page
+      .locator(".p-toast-message, .p-toast-detail, [role='alert']")
+      .filter({ hasText: pattern })
+      .first();
+    await expect(toast).not.toBeVisible({ timeout: 8_000 });
+    await expect(this.page.getByText(pattern).first()).not.toBeVisible({ timeout: 5_000 });
+  }
+
+  /**
+   * Minimum party fields for ribbon auto-save (USIF-463 / MAF-8627): first + last name.
+   */
+  async fillMinimalPartySaveFields(firstName = "Liza", lastName = "Doe"): Promise<void> {
+    this.logStep(`Fill minimal party save fields: ${firstName} ${lastName}`);
+    await this.waitUntilNoVisibleAppLoaderOverlays(120_000);
+    await this.visiblePersonalDetailsRoot().waitFor({ state: "visible", timeout: 120_000 });
+    await this.chooseTitle("Dame");
+    await this.enterFirstName(firstName);
+    await this.enterLastName(lastName);
+  }
+
+  /**
    * After **Save** with required Personal Details left unset, expect inline validation under `app-personal-details`.
    * - **Title** and **No. of Dependants/Dependents** may not show inline copy on every Save/build — **best-effort**.
    * - **Gender** (and other touched Prime dropdowns) should surface **… is required** after open → Escape + Save.

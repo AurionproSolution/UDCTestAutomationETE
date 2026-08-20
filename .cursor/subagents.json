@@ -8,6 +8,13 @@
       "file": ".cursor/agents/test-automation-architect.md"
     },
     {
+      "id": "jira-bug-intake",
+      "name": "Jira Bug Intake",
+      "description": "Extract Jira bug/ticket requirements including description, expectation, notes, comments, images, and video repro steps; write docs/jira-intake/{KEY}/intake.md; run the six-block gate; then generate Playwright tests. Use when user provides a Jira key for a bug with attachments or asks to extract repro from Jira videos.",
+      "model": "inherit",
+      "file": ".cursor/agents/jira-bug-intake.md"
+    },
+    {
       "id": "test-case-writer",
       "name": "Test Case Writer",
       "description": "Use this agent when you need to create Playwright test scripts from JIRA requirements. Fetches JIRA, runs the six-block requirements gate (posts a comment to the reporter via MCP if anything is missing—no test Write until the gate passes unless you explicitly override), then analyzes project patterns and generates Playwright tests per UDC conventions. Optional Step 8: apply test-case-catalog skill for TCC naming and Excel docs.",

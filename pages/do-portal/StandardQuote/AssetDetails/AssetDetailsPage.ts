@@ -2923,6 +2923,25 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   /**
+   * After **Calculate**, Prime/Webform origination ref may need native `input`/`change` + blur
+   * before validation clears (USIF-403 / QAT ribbon navigation).
+   */
+  async ensureOriginationReferencePopulated(origRef: string): Promise<void> {
+    this.logStep(`Ensure origination reference populated as ${this.stepValueDisplay(origRef)}`);
+    await this.enterOriginationReference(origRef);
+    const root = this.standardQuoteRoot();
+    const inp = await this.findVisibleFinanceLeaseOriginationInput(root);
+    if (inp) {
+      await this.patchOriginationInputNativeValue(inp, origRef);
+      await inp.press("Tab").catch(() => {});
+      await this.page.keyboard.press("Escape").catch(() => {});
+    }
+    await expect(this.page.getByText(/^Originator reference is required\.?$/i)).not.toBeVisible({
+      timeout: 15_000,
+    });
+  }
+
+  /**
    * If **Save** opens "The below information is required to save this quote" with **Originator Reference**,
    * fill it and confirm the dialog **Save** (does nothing when the dialog is absent).
    */

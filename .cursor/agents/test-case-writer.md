@@ -69,7 +69,8 @@ Extract from the issue:
 - Summary (for test naming)
 - Description (for test context)
 - **All issue comments** (`fields.comment.comments`): bodies are part of the **requirements corpus** for Step 2.5 (see below).
-- Acceptance Criteria (for test assertions) — from Description, comments, or a dedicated AC field if returned
+- **Intake artifact** (if present): read `docs/jira-intake/{JIRA-ISSUE-KEY}/intake.md` when the file exists. Treat its full contents as part of the requirements corpus (especially **Steps to reproduce**, **Expectation**, **Acceptance criteria**, and **Video-derived observations** from Jira Bug Intake).
+- Acceptance Criteria (for test assertions) — from Description, comments, intake.md, or a dedicated AC field if returned
 - Labels, Components (for portal identification and tagging)
 - Any attachments or linked specifications
 - **Reporter** (`displayName`, `accountId` if present): used only when Step 2.5 posts a “missing requirements” comment — **address and @-mention the reporter**, not the assignee (see Step 2.5).
@@ -85,9 +86,10 @@ The issue must contain enough information to map to **all** blocks below.
 **Requirements corpus (evaluate the gate on this combined text):**
 
 1. **Description** (always).
-2. **Every issue comment body** from `getJiraIssue`’s `comment` field (newest-first in API; scan **all** returned comments). Teams often add **steps, preconditions, paths, and AC** here; **do not** fail the gate only because Description is short if comments supply the missing blocks.
-3. Any **Acceptance Criteria** (or equivalent) field returned on the issue payload.
-4. **Attachments** on the issue (for screenshot/reference).
+2. **`docs/jira-intake/{JIRA-ISSUE-KEY}/intake.md`** when present (from Jira Bug Intake agent) — includes video-derived repro steps, expectation, and acceptance criteria.
+3. **Every issue comment body** from `getJiraIssue`’s `comment` field (newest-first in API; scan **all** returned comments). Teams often add **steps, preconditions, paths, and AC** here; **do not** fail the gate only because Description is short if comments or intake.md supply the missing blocks.
+4. Any **Acceptance Criteria** (or equivalent) field returned on the issue payload.
+5. **Attachments** on the issue (for screenshot/reference).
 
 **Ignore for “satisfied” checks (do not use as the sole source for a block):** comments that are **only** this agent’s prior **“[Test automation] Blocked”** / **“incomplete requirements”** boilerplate with **no** user-authored structure (no `## Summary`, `## Steps`, numbered repro, etc.). If such a comment also contains a user-pasted six-block template below the boilerplate, **count** the user portion.
 

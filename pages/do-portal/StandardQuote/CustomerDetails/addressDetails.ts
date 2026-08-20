@@ -4155,6 +4155,26 @@ export class DOAddressDetailsPage extends BasePage {
     await this.page.keyboard.press("Escape").catch(() => {});
   }
 
+  /** USIF-428 — physical City input must have a non-empty value after copy-primary-borrower. */
+  async expectPhysicalCityPopulated(): Promise<void> {
+    this.logStep("Expect Physical City Populated");
+    await expect(this.cityInput).not.toHaveValue("", { timeout: 15_000 });
+    const value = (await this.cityInput.inputValue()).trim();
+    expect(value.length, "Physical city should be populated").toBeGreaterThan(0);
+  }
+
+  /** USIF-428 — no inline **City is required** on physical (and postal when visible). */
+  async expectNoCityRequiredValidation(): Promise<void> {
+    this.logStep("Expect No City Required Validation");
+    const cityRequired = /^City is required\.?$/i;
+    await expect(this.page.getByText(cityRequired).first()).not.toBeVisible({ timeout: 5_000 });
+
+    if (await this.isPostalAddressSectionVisible(3_000)) {
+      const postalRoot = this.postalAddressCard();
+      await expect(postalRoot.getByText(cityRequired).first()).not.toBeVisible({ timeout: 5_000 });
+    }
+  }
+
   /**
    * Trust Address Details — after **Save** with empty / incomplete sections, assert inline required copy
    * scoped to `app-trust-*` hosts only (does not touch individual / business address assertions).

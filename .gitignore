@@ -40,6 +40,10 @@ screenshots/
 videos/
 traces/
 
+# Jira intake binary assets (intake.md may be committed)
+docs/jira-intake/**/assets/
+docs/jira-intake/**/frames/
+
 # OS files
 Thumbs.db
 

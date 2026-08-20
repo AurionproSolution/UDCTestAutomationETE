@@ -37,6 +37,32 @@ const RUN_META = {
 
 const TESTS = [
   {
+    id: "USIF-463",
+    file: "USIF-463-personalDetailsRibbonAutoSave.test.ts",
+    title: "Personal Details ribbon auto-save on first Address Details navigation",
+    jira: "https://aurionprofintechsolutions.atlassian.net/browse/USIF-463",
+    result: "Pending",
+    verdict: "Bug open — expect fail until ribbon auto-save",
+    duration: "—",
+    screenshotHint: "",
+    observation:
+      "Min first/last name on Personal Details; first ribbon click to Address Details must auto-save party without 'Please save the party to proceed' / 'Please save to move to another tab'.",
+    error: "",
+  },
+  {
+    id: "USIF-403",
+    file: "USIF-403-customerDetailsRibbonWithoutSave.test.ts",
+    title: "Customer Details ribbon navigation without Save from Asset Details",
+    jira: "https://aurionprofintechsolutions.atlassian.net/browse/USIF-403",
+    result: "Pending",
+    verdict: "Regression guard (resolved bug)",
+    duration: "—",
+    screenshotHint: "",
+    observation:
+      "From Asset Details with calculable CSA data (no Save), Customer Details ribbon must navigate to Add Borrowers / Guarantors. Resolved per QAT video comment.",
+    error: "",
+  },
+  {
     id: "USIF-405",
     file: "USIF-405-decimalAmountDeletion.test.ts",
     title: "Decimal amount field deletion / caret at decimal (Home Ownership)",
@@ -87,6 +113,19 @@ const TESTS = [
     observation:
       "Primary borrower physical and postal addresses set to Street Type Road (manual Zephyr/Wellington). After co-borrower Copy primary borrower = Yes, physical Street Type remained Road but postal Street Type became Broadway. Confirms USIF-425.",
     error: 'Expected postal Street Type /^Road$/i — received "Broadway"',
+  },
+  {
+    id: "USIF-428",
+    file: "USIF-428-guarantorCityValidationCopiedAddress.test.ts",
+    title: "City validation error when City field populated (copied guarantor address)",
+    jira: "https://aurionprofintechsolutions.atlassian.net/browse/USIF-428",
+    result: "Pending",
+    verdict: "Regression guard (resolved bug)",
+    duration: "—",
+    screenshotHint: "",
+    observation:
+      "Guarantor with Copy primary borrower = Yes — City field populated but false City is required validation. Resolved in next version; test guards regression.",
+    error: "",
   },
   {
     id: "USIF-431",

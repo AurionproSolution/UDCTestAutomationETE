@@ -60,13 +60,14 @@ When routing or reviewing **DO Standard Quote** / **Customer Details** work, map
 
 Exported from `pages/do-portal/index.ts` (barrel: `pages/`).
 
-## The four specialist subagents (when to use / when not to)
+## The specialist subagents (when to use / when not to)
 
 | Subagent | Use for | Do not use for |
 |----------|---------|----------------|
+| **Jira Bug Intake** | **Jira bug** with attachments/videos → `docs/jira-intake/{KEY}/intake.md` + Playwright test in one flow | Non-bug stories, plan-driven exploration, healing |
 | **Playwright Test Planner** | Discover UI, map flows, produce a **structured test plan** (saved via planner tools) | JIRA-only requirements without browser exploration, or fixing failing tests |
-| **Playwright Test Generator** | Turn a **plan item** into a **concrete Playwright spec** by driving the app with MCP + `generator_*` tools | JIRA-to-test from issue text alone (use Test Case Writer), or bulk healing |
-| **Test Case Writer** | **JIRA issue** → test file following POM and `config/env` (Atlassian MCP) | Full exploratory site mapping (use Planner first) |
+| **Playwright Test Generator** | Turn a **plan item** into a **concrete Playwright spec** by driving the app with MCP + `generator_*` tools | JIRA-to-test from issue text alone (use Jira Bug Intake or Test Case Writer), or bulk healing |
+| **Test Case Writer** | **JIRA issue** (text-only or post-intake) → test file following POM and `config/env` (Atlassian MCP) | Bugs with video repro (use Jira Bug Intake first) |
 | **Playwright Test Healer** | **Failing** or flaky tests: run, debug, fix selectors/assertions | Greenfield test design from requirements |
 
 ## Decision flow
@@ -76,8 +77,10 @@ flowchart TD
   start[UserGoal]
   catalog{Name or document TCC test?}
   jira{Has JIRA issue key?}
+  bugMedia{Bug with attachments or video?}
   fail{Failing or flaky tests?}
   explore{Need UI discovery and plan file?}
+  intake[Jira Bug Intake]
   tcw[Test Case Writer]
   heal[Playwright Test Healer]
   plan[Playwright Test Planner]
@@ -86,17 +89,21 @@ flowchart TD
   start --> catalog
   catalog -->|yes| tccSkill
   catalog -->|no| jira
-  jira -->|yes| tcw
+  jira -->|yes| bugMedia
+  bugMedia -->|yes| intake
+  bugMedia -->|no| tcw
   jira -->|no| fail
   fail -->|yes| heal
   fail -->|no| explore
   explore -->|yes| plan
   explore -->|no| ask[Ask 1 to 2 questions: portal, entry URL, JIRA vs plan]
   plan --> gen
+  intake -->|optional TCC catalog| tccSkill
   tcw -->|optional TCC catalog| tccSkill
 ```
 
-- **JIRA-driven new coverage** → Test Case Writer (supply issue key, portal, optional output path).
+- **Jira bug with attachments/videos** → **Jira Bug Intake** (issue key; writes intake.md + test).
+- **JIRA-driven new coverage (text-only)** → Test Case Writer (supply issue key, portal, optional output path).
 - **Exploratory coverage + documented plan** → Planner first; then Generator per scenario/group from the saved plan.
 - **Broken tests / CI red** → Healer (point at spec path or let it list/run tests).
 - **Name test / document flow / Excel catalog (TCC00x)** → Main agent + project skill [`.cursor/skills/test-case-catalog/SKILL.md`](../skills/test-case-catalog/SKILL.md) (not Planner/Healer).
@@ -106,7 +113,26 @@ flowchart TD
 
 Adjust placeholders (`ISSUE`, paths, suite names) before sending.
 
-### Path A — JIRA → tests (Test Case Writer)
+### Path A — JIRA bug with media (Jira Bug Intake)
+
+**Phase 1 — Hand off to Jira Bug Intake**
+
+```text
+Extract Jira bug requirements and generate a Playwright test.
+
+<context>
+<jira-issue>USIF-428</jira-issue>
+<portal>do</portal>
+</context>
+
+Download attachments, analyze videos/images, write docs/jira-intake/{KEY}/intake.md, run the six-block gate, then write the test under tests/do-portal/doSanityTest/jira tickets/.
+```
+
+**Phase 2 (after file exists)** — Run test with `--workers=1`; if failures remain, hand off to **Playwright Test Healer**.
+
+---
+
+### Path A2 — JIRA → tests (Test Case Writer, text-only)
 
 **Phase 1 — Hand off to Test Case Writer**
 

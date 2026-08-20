@@ -8,7 +8,8 @@ alwaysApply: false
 If the user provides a **Jira issue key** (pattern like `UDP-2631`, `DO-123`) and asks for a **new** or **rewritten** Playwright test tied to that issue:
 
 1. **Follow the same workflow as** [`.cursor/agents/test-case-writer.md`](.cursor/agents/test-case-writer.md) **Step 2 and Step 2.5** before calling `Write` on any `*.test.ts` / `*.spec.ts` file:
-   - Use Atlassian MCP: `getAccessibleAtlassianResources` → `getJiraIssue` with `fields` including **`comment`** (and `description`, `attachment`, `reporter`, etc.) so the gate uses **Description + all returned issue comments** as one corpus (see test-case-writer Step 2.5). Use `responseContentFormat: "markdown"` if helpful.
+   - For **bugs with attachments or videos**, prefer the **Jira Bug Intake** subagent (`.cursor/agents/jira-bug-intake.md`) — it writes `docs/jira-intake/{KEY}/intake.md` with video-derived repro steps, then generates the test.
+   - Use Atlassian MCP: `getAccessibleAtlassianResources` → `getJiraIssue` with `fields` including **`comment`** (and `description`, `attachment`, `reporter`, etc.) so the gate uses **Description + intake.md (if present) + all returned issue comments** as one corpus (see test-case-writer Step 2.5). Use `responseContentFormat: "markdown"` if helpful.
    - Run the **six-block readiness gate** on that **combined** corpus. If anything required is missing, **do not** `Write` the test file.
    - On gate failure: call **`addCommentToJiraIssue`** on that issue (`contentFormat: "markdown"`), addressing the **reporter** first, listing missing blocks and the skeleton + mini-example—same content rules as Step 2.5 in `test-case-writer.md`.
    - If MCP is **unauthorized or fails**: **still do not** invent a full test from assumptions. Output the intended comment body for manual paste and **stop** without `Write`, unless the user **explicitly** overrides in the same message.
