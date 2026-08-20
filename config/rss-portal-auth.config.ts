@@ -149,6 +149,11 @@ export function rssPortalAuthOrigins(): string[] {
   return [base, `${base}/authentication`, `${base}/authentication/login`, `${base}/rss`];
 }
 
+/** Select Application entry (stored-token start). Unlike DO `/dealer/`, RSS UI starts here. */
+export function rssPortalAuthenticationUrl(): string {
+  return `${RSS_BASE_URL().replace(/\/$/, "")}/authentication`;
+}
+
 /** Hostname for the active RSS portal (e.g. udc-test.fiscloudservices.com). */
 export function rssPortalHostname(): string {
   return new URL(rssPortalAuthOrigins()[0]).hostname;

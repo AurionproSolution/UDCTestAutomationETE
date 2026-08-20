@@ -440,14 +440,26 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     root: Locator,
     optionLabel: string,
   ): Promise<void> {
+    const exactName = new RegExp(`^\\s*${this.escapeRx(optionLabel)}\\s*$`, "i");
     const looseName = new RegExp(this.escapeRx(optionLabel), "i");
     await root.waitFor({ state: "visible", timeout: 15_000 });
     await this.waitForProgressSpinnersHidden();
+    await root.scrollIntoViewIfNeeded();
+    await root.evaluate((el) =>
+      el.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }),
+    );
+
     const combobox = root.locator('[role="combobox"]').first();
     const trigger = root
       .locator(".p-dropdown-trigger, [aria-label='dropdown trigger']")
       .first();
-    await combobox.scrollIntoViewIfNeeded();
+
+    const currentAria = (await combobox.getAttribute("aria-label").catch(() => "")) ?? "";
+    const currentText = (await combobox.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+    if (exactName.test(currentAria) || exactName.test(currentText)) {
+      return;
+    }
+
     /** Spinners cleared above; allow a long click timeout for slow QAT overlays. */
     const dropdownClickTimeoutMs = 90_000;
     if (await combobox.isVisible().catch(() => false)) {
@@ -456,20 +468,47 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
       await trigger.waitFor({ state: "visible", timeout: 15_000 });
       await this.clickElement(trigger, dropdownClickTimeoutMs);
     }
+
     const visiblePanel = this.page.locator(".p-dropdown-panel").filter({ visible: true });
     await visiblePanel.last().waitFor({ state: "visible", timeout: 12_000 });
     const panel = visiblePanel.last();
+
+    // Prefer exact option label (e.g. Term "36") so loose matches don't grab the wrong row.
     const row = panel
-      .locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item")
-      .filter({ hasText: looseName })
+      .getByRole("option", { name: optionLabel, exact: true })
+      .or(
+        panel
+          .locator("li.p-dropdown-item, li[role='option'], .p-dropdown-item")
+          .filter({ hasText: exactName }),
+      )
       .first();
-    if (await row.isVisible({ timeout: 4000 }).catch(() => false)) {
-      await row.click();
-    } else {
-      const byRole = this.page.getByRole("option", { name: looseName }).first();
-      await byRole.waitFor({ state: "visible", timeout: 8000 });
-      await byRole.click();
+
+    await row.waitFor({ state: "visible", timeout: 8_000 });
+    await row.scrollIntoViewIfNeeded().catch(() => undefined);
+    await panel
+      .evaluate((el, label) => {
+        const item =
+          el.querySelector(`[role='option'][aria-label='${label}']`) ??
+          Array.from(el.querySelectorAll("li.p-dropdown-item, [role='option']")).find(
+            (node) => (node.textContent ?? "").trim() === label,
+          );
+        (item as HTMLElement | undefined)?.scrollIntoView({
+          block: "nearest",
+          inline: "nearest",
+        });
+      }, optionLabel)
+      .catch(() => undefined);
+
+    try {
+      await row.click({ timeout: 8_000 });
+    } catch {
+      try {
+        await row.click({ force: true, timeout: 8_000 });
+      } catch {
+        await row.evaluate((el: HTMLElement) => el.click());
+      }
     }
+
     await visiblePanel
       .last()
       .waitFor({ state: "hidden", timeout: 5_000 })
@@ -480,7 +519,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
         async () => {
           const aria = (await combobox.getAttribute("aria-label").catch(() => "")) ?? "";
           const text = (await combobox.innerText().catch(() => "")).replace(/\s+/g, " ");
-          return looseName.test(`${aria} ${text}`);
+          return exactName.test(`${aria} ${text}`) || looseName.test(`${aria} ${text}`);
         },
         { timeout: 20_000, intervals: [250, 500, 1_000] },
       )
@@ -591,14 +630,62 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     return `${aria} ${text}`.replace(/\s+/g, " ").trim();
   }
 
+  private usedBeforePleaseCompleteError(): Locator {
+    return this.applyNowRoot()
+      .locator(
+        "xpath=.//label[contains(.,'Select a UDC Dealership you have used before')]/ancestor::*[contains(@class,'col') or self::div][1]",
+      )
+      .getByText(/^Please Complete$/i);
+  }
+
+  private anotherDealershipPleaseCompleteError(): Locator {
+    return this.anotherDealershipBlock().getByText(/^Please Complete$/i);
+  }
+
+  private anotherDealershipBlock(): Locator {
+    return this.applyNowRoot().locator(
+      "xpath=.//label[contains(.,'Select Another UDC Dealership')]/ancestor::*[contains(@class,'col') or self::div][1]",
+    );
+  }
+
+  private anotherDealershipOptions(): Locator {
+    // PrimeNG may render the overlay as `.p-autocomplete-panel` or an inline listbox ("Option List").
+    const panelOptions = this.page
+      .locator(".p-autocomplete-panel, .p-overlay-content")
+      .filter({ visible: true })
+      .locator("[role='option'], .p-autocomplete-item, li.p-dropdown-item, .p-dropdown-item");
+    const listboxOptions = this.page
+      .getByRole("listbox", { name: /Option List/i })
+      .getByRole("option");
+    return panelOptions.or(listboxOptions);
+  }
+
   async isDealershipSelectionValid(): Promise<boolean> {
     const usedBeforeText = await this.readUsedBeforeDealerDisplayValue();
     if (!this.isPlaceholderDealerLabel(usedBeforeText)) {
       return true;
     }
+
     const anotherSearch = this.anotherDealershipSearchInput();
-    const anotherText = (await anotherSearch.inputValue().catch(() => "")).trim();
-    return anotherText.length > 0;
+    const anotherText = (
+      (await anotherSearch.inputValue().catch(() => "")) ||
+      (await anotherSearch.innerText().catch(() => ""))
+    )
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!anotherText || this.isPlaceholderDealerLabel(anotherText) || /^search$/i.test(anotherText)) {
+      return false;
+    }
+
+    // Typed search queries / empty-result state are not a completed selection.
+    if (/^(copp|udc|motor|\d{1,4})$/i.test(anotherText)) {
+      return false;
+    }
+    if (await this.page.getByRole("option", { name: /^No results found$/i }).isVisible().catch(() => false)) {
+      return false;
+    }
+
+    return anotherText.length > 4;
   }
 
   private async waitForUsedBeforeDealerSelected(
@@ -640,7 +727,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     for (let i = 0; i < count; i++) {
       const item = items.nth(i);
       const text = (await item.innerText()).replace(/\s+/g, " ").trim();
-      if (this.isPlaceholderDealerLabel(text)) {
+      if (this.isPlaceholderDealerLabel(text) || /^No results found$/i.test(text)) {
         continue;
       }
       if (labelPattern && !labelPattern.test(text)) {
@@ -668,8 +755,11 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     this.logStep("Get Dealer Used Before Option Labels");
     const root = this.dealershipDropdownRoot();
     const panel = await this.openPrimeNgDropdownPanel(root);
-    const labels = await this.readVisibleDropdownOptionLabels(panel);
+    const labels = (await this.readVisibleDropdownOptionLabels(panel)).filter(
+      (label) => !/^No results found$/i.test(label),
+    );
     await this.page.keyboard.press("Escape").catch(() => undefined);
+    await this.waitForProgressSpinnersHidden();
     return labels;
   }
 
@@ -700,59 +790,151 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
       .first();
   }
 
+  private async clearAnotherDealershipSearch(): Promise<void> {
+    const input = this.anotherDealershipSearchInput();
+    if (!(await input.isVisible().catch(() => false))) {
+      return;
+    }
+    await input.click({ timeout: 10_000 }).catch(() => undefined);
+    await input.fill("").catch(() => undefined);
+    await this.page.keyboard.press("Escape").catch(() => undefined);
+  }
+
   /**
    * When the party has no prior dealerships, pick one via **Select Another UDC Dealership** search.
    */
-  async selectAnotherDealershipBySearch(query: string): Promise<string> {
-    this.logStep(`Select Another Dealership By Search — ${query}`);
+  async selectAnotherDealershipBySearch(
+    query: string,
+    preferredResult?: string,
+  ): Promise<string> {
+    this.logStep(
+      `Select Another Dealership By Search — ${query}${preferredResult ? ` (prefer ${preferredResult})` : ""}`,
+    );
     const input = this.anotherDealershipSearchInput();
     await input.waitFor({ state: "visible", timeout: 20_000 });
     await this.waitForProgressSpinnersHidden();
     await input.scrollIntoViewIfNeeded();
     await input.click({ timeout: 15_000 });
     await input.fill("");
-    await input.pressSequentially(query, { delay: 80 });
-    await this.page.waitForTimeout(600);
+    await input.pressSequentially(query, { delay: 100 });
 
-    const panel = this.page.locator(".p-autocomplete-panel").filter({ visible: true });
-    const row = panel
-      .locator(".p-autocomplete-item, li[role='option'], .p-dropdown-item")
-      .filter({ hasNotText: /^--\s*select/i })
+    const fieldRoot = this.anotherDealershipBlock();
+    const fieldSpinner = fieldRoot
+      .locator(".p-autocomplete-loader, .pi-spinner, [class*='spinner']")
       .first();
-    const byRole = this.page
-      .getByRole("option")
-      .filter({ hasNotText: /^--\s*select/i })
-      .first();
+    await fieldSpinner.waitFor({ state: "hidden", timeout: 60_000 }).catch(() => undefined);
 
-    if (await row.isVisible({ timeout: 30_000 }).catch(() => false)) {
-      const label = (await row.innerText()).replace(/\s+/g, " ").trim();
-      await row.click();
-      await panel.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => undefined);
-      await this.waitForProgressSpinnersHidden();
-      await this.waitForLoadingComplete();
-      return label;
+    const realOptions = this.anotherDealershipOptions().filter({
+      hasNotText: /^No results found$/i,
+    });
+
+    // Wait until either real dealer options appear, or the API reports no matches.
+    await expect
+      .poll(
+        async () => {
+          if (await realOptions.first().isVisible().catch(() => false)) {
+            return "options";
+          }
+          if (
+            await this.page
+              .getByRole("option", { name: /^No results found$/i })
+              .isVisible()
+              .catch(() => false)
+          ) {
+            return "empty";
+          }
+          if (
+            await this.page
+              .locator(".p-autocomplete-panel")
+              .filter({ visible: true })
+              .getByText(/^No results found$/i)
+              .isVisible()
+              .catch(() => false)
+          ) {
+            return "empty";
+          }
+          return "pending";
+        },
+        { timeout: 60_000, intervals: [300, 600, 1_200, 2_000] },
+      )
+      .not.toBe("pending");
+
+    if (!(await realOptions.first().isVisible().catch(() => false))) {
+      await this.page.keyboard.press("Escape").catch(() => undefined);
+      throw new Error(`No dealership results found for search "${query}".`);
     }
 
-    await byRole.waitFor({ state: "visible", timeout: 30_000 });
-    const label = (await byRole.innerText()).replace(/\s+/g, " ").trim();
-    await byRole.click();
+    let option = realOptions.first();
+    if (preferredResult?.trim()) {
+      const preferred = realOptions
+        .filter({ hasText: new RegExp(this.escapeRx(preferredResult.trim()), "i") })
+        .first();
+      if (await preferred.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        option = preferred;
+      }
+    }
+
+    await expect(option).toBeVisible({ timeout: 15_000 });
+    const label = ((await option.innerText()) ?? "").replace(/\s+/g, " ").trim();
+    if (!label || /^No results found$/i.test(label)) {
+      throw new Error(`No selectable dealership option for search "${query}".`);
+    }
+
+    await option.click({ timeout: 15_000 });
+    await this.page.keyboard.press("Escape").catch(() => undefined);
     await this.waitForProgressSpinnersHidden();
     await this.waitForLoadingComplete();
+    // Commit autocomplete selection (some builds keep the query until blur).
+    await input.press("Tab").catch(() => undefined);
+    await this.waitForLoadingComplete();
+
+    await expect
+      .poll(async () => this.isDealershipSelectionValid(), {
+        timeout: 45_000,
+        intervals: [300, 600, 1_200],
+      })
+      .toBe(true);
+
     return label;
   }
 
   /**
    * Picks a dealership for Apply Now: preferred “used before” label when listed, else first history dealer,
-   * else searches **Select Another UDC Dealership** (common for QAT parties with no prior dealer history).
+   * else searches **Select Another UDC Dealership** (e.g. “copp” → Copping Motor Co.).
    */
   async selectDealershipForApplyNow(options?: {
     preferredLabel?: string;
     fallbackSearch?: string;
+    fallbackResult?: string;
   }): Promise<string> {
     this.logStep("Select Dealership For Apply Now");
     const preferred = options?.preferredLabel?.trim();
-    const fallbackSearch = options?.fallbackSearch?.trim() || "10";
-    const usedBeforeLabels = await this.getDealerUsedBeforeOptionLabels();
+    const fallbackSearch = options?.fallbackSearch?.trim() || "copp";
+    const fallbackResult = options?.fallbackResult?.trim() || "Copping Motor Co.";
+
+    // Prefer search first for parties with empty used-before history (avoids opening an empty
+    // history dropdown that leaves “Please Complete” validation noise).
+    const searchTerms = [fallbackSearch, "copp"].filter(
+      (term, index, all) => term && all.indexOf(term) === index,
+    );
+    const searchErrors: string[] = [];
+    for (const term of searchTerms) {
+      try {
+        await this.clearAnotherDealershipSearch();
+        const selected = await this.selectAnotherDealershipBySearch(term, fallbackResult);
+        if (await this.isDealershipSelectionValid()) {
+          return selected;
+        }
+        searchErrors.push(`Search "${term}" did not stick as a selection.`);
+      } catch (error) {
+        searchErrors.push(
+          `Search "${term}" failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        await this.clearAnotherDealershipSearch();
+      }
+    }
+
+    const usedBeforeLabels = await this.getDealerUsedBeforeOptionLabels().catch(() => [] as string[]);
     const candidates: string[] = [];
 
     if (preferred) {
@@ -777,55 +959,30 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
           return selected;
         }
       } catch {
-        // try next candidate / fallback search
-      }
-    }
-
-    try {
-      const selected = await this.pickDealerFromUsedBeforeDropdown();
-      if (await this.isDealershipSelectionValid()) {
-        return selected;
-      }
-    } catch {
-      // fall through to search
-    }
-
-    const searchTerms = [fallbackSearch, "UDC", "motor"].filter(
-      (term, index, all) => term && all.indexOf(term) === index,
-    );
-    for (const term of searchTerms) {
-      try {
-        const selected = await this.selectAnotherDealershipBySearch(term);
-        if (await this.isDealershipSelectionValid()) {
-          return selected;
-        }
-      } catch {
-        // try next search term
+        // try next candidate
       }
     }
 
     throw new Error(
-      "Could not select a dealership via history dropdown or search on Apply Now.",
+      `Could not select a dealership via history dropdown or search on Apply Now. ${searchErrors.join(" | ")}`,
     );
   }
 
   async expectDealershipSelected(): Promise<void> {
     this.logStep("Expect Dealership Selected");
-    const dealershipBlock = this.applyNowRoot().locator(
-      "xpath=.//label[contains(.,'Select a UDC Dealership you have used before')]/ancestor::*[contains(@class,'col') or self::div][1]",
+    await expect
+      .poll(async () => this.isDealershipSelectionValid(), {
+        timeout: 30_000,
+        intervals: [250, 500, 1_000],
+      })
+      .toBe(true);
+    // Either field may show the validation message before selection; both should clear after.
+    await expect(this.usedBeforePleaseCompleteError()).toBeHidden({ timeout: 15_000 }).catch(
+      () => undefined,
     );
-    await expect(dealershipBlock.getByText(/^Please Complete$/i)).toBeHidden({
+    await expect(this.anotherDealershipPleaseCompleteError()).toBeHidden({
       timeout: 15_000,
-    });
-    const usedBefore = this.dealershipDropdownRoot().locator('[role="combobox"]').first();
-    const usedBeforeText = (await usedBefore.innerText()).replace(/\s+/g, " ").trim();
-    const anotherSearch = this.anotherDealershipSearchInput();
-    const anotherText = (await anotherSearch.inputValue().catch(() => "")).trim();
-
-    expect(
-      !this.isPlaceholderDealerLabel(usedBeforeText) || anotherText.length > 0,
-      "A dealership must be selected via history dropdown or search.",
-    ).toBe(true);
+    }).catch(() => undefined);
   }
 
   /**
@@ -1092,12 +1249,34 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     return !(await input.isDisabled().catch(() => false));
   }
 
+  /**
+   * PrimeNG currencymask expects digit keystrokes, not formatted text.
+   * "$100000.00" must become "100000", not "10000000".
+   */
+  private normalizeCurrencyDigitsForMask(value: string): string {
+    const cleaned = value.replace(/[$,\s]/g, "").trim() || "0";
+    const [wholePart = "0", fracPart = ""] = cleaned.split(".");
+    const whole = wholePart.replace(/\D/g, "") || "0";
+    const frac = fracPart.replace(/\D/g, "");
+
+    if (!frac || /^0+$/.test(frac)) {
+      return whole.replace(/^0+/, "") || "0";
+    }
+
+    const cents = frac.padEnd(2, "0").slice(0, 2);
+    const dollars = whole.replace(/^0+/, "") || "0";
+    if (dollars === "0") {
+      return `${dollars}${cents}`;
+    }
+    return `${dollars}${cents}`.replace(/^0+/, "") || cents;
+  }
+
   private currencyDigitsMatch(displayValue: string, wantDigits: string): boolean {
     const got = displayValue.replace(/\D/g, "");
     const want = wantDigits.replace(/\D/g, "");
     if (!want) return true;
     if (!got) return false;
-    if (got === want || got.endsWith(want) || want.endsWith(got)) {
+    if (got === want) {
       return true;
     }
     const gotNum = Number.parseInt(got, 10);
@@ -1105,7 +1284,7 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     if (Number.isNaN(gotNum) || Number.isNaN(wantNum)) {
       return false;
     }
-    // $50,000.00 → "5000000" vs want "50000"
+    // $1,000.00 → "100000" vs want "1000" (mask stores cents)
     return gotNum === wantNum || Math.round(gotNum / 100) === wantNum;
   }
 
@@ -1159,18 +1338,46 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
       .last();
   }
 
+  private async clearCurrencyMaskedInput(input: Locator): Promise<void> {
+    await input.click({ timeout: 30_000 });
+    await input.press("ControlOrMeta+A").catch(() => undefined);
+    await input.press("Delete").catch(() => undefined);
+    await input.press("Backspace").catch(() => undefined);
+
+    for (let i = 0; i < 24; i++) {
+      const digits = ((await input.inputValue().catch(() => "")) ?? "").replace(/\D/g, "");
+      if (!digits || digits === "0") {
+        return;
+      }
+      await input.press("Backspace").catch(() => undefined);
+    }
+
+    await input.evaluate((el: HTMLInputElement) => {
+      el.focus();
+      el.select();
+      el.value = "";
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
   private async typeCurrencyIntoField(input: Locator, value: string): Promise<void> {
-    const digits = (value.replace(/[^0-9]/g, "") || "0").replace(/^0+/, "") || "0";
+    const digits = this.normalizeCurrencyDigitsForMask(value);
     await input.scrollIntoViewIfNeeded();
+    await input.evaluate((el) =>
+      el.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }),
+    );
+
+    const already = (await input.inputValue().catch(() => "")) ?? "";
+    if (this.currencyDigitsMatch(already, digits)) {
+      return;
+    }
 
     for (let attempt = 0; attempt < 4; attempt++) {
-      await input.click({ clickCount: 3, timeout: 30_000 });
-      await input.press("Backspace").catch(() => undefined);
-      await input.press("Control+A").catch(() => undefined);
-      await input.press("Backspace").catch(() => undefined);
-      await input.pressSequentially(digits, { delay: 80 });
+      await this.clearCurrencyMaskedInput(input);
+      await input.pressSequentially(digits, { delay: 50 });
       await input.press("Tab");
-      await this.page.waitForTimeout(500);
+      await this.page.waitForTimeout(400);
 
       const display = (await input.inputValue().catch(() => "")) ?? "";
       if (this.currencyDigitsMatch(display, digits)) {
@@ -1548,18 +1755,31 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     });
   }
 
-  async expectAnotherDealershipSearchSuggestions(minCount = 1): Promise<void> {
-    this.logStep("Expect Another Dealership Search Suggestions");
+  async expectAnotherDealershipSearchSuggestions(
+    minCount = 1,
+    query = "copp",
+  ): Promise<void> {
+    this.logStep(`Expect Another Dealership Search Suggestions — ${query}`);
     const input = this.anotherDealershipSearchInput();
     await input.waitFor({ state: "visible", timeout: 20_000 });
-    await input.click();
-    await input.fill("10");
-    const suggestions = this.page
-      .locator(".p-autocomplete-panel, .p-dropdown-panel")
-      .filter({ visible: true })
-      .last()
-      .locator(".p-autocomplete-item, li[role='option'], .p-dropdown-item");
-    await expect(suggestions.first()).toBeVisible({ timeout: 30_000 });
+    await this.waitForProgressSpinnersHidden();
+    await input.scrollIntoViewIfNeeded();
+    await input.click({ timeout: 15_000 });
+    await input.fill("");
+    await input.pressSequentially(query, { delay: 80 });
+
+    // Wait for autocomplete loading spinner (inside the search field) to finish.
+    const fieldSpinner = input
+      .locator("xpath=ancestor::*[contains(@class,'p-autocomplete') or contains(@class,'p-inputwrapper')][1]")
+      .locator(".p-autocomplete-loader, .pi-spinner, [class*='spinner']")
+      .first();
+    await fieldSpinner.waitFor({ state: "hidden", timeout: 60_000 }).catch(() => undefined);
+
+    const suggestions = this.anotherDealershipOptions().filter({
+      hasNotText: /^No results found$/i,
+    });
+
+    await expect(suggestions.first()).toBeVisible({ timeout: 60_000 });
     expect(await suggestions.count()).toBeGreaterThanOrEqual(minCount);
     await this.page.keyboard.press("Escape").catch(() => undefined);
   }
@@ -1581,12 +1801,36 @@ export class RSSApplyNowDealershipAssetRepaymentPage extends BasePage {
     expect(frequencyOptions.length).toBeGreaterThan(0);
   }
 
+  private calculatedInstallmentAmount(): Locator {
+    return this.repaymentRoot
+      .locator(
+        'xpath=.//*[normalize-space(.)="Yours from only"]/following-sibling::*[contains(., "$")][1]',
+      )
+      .first();
+  }
+
   async readInstallmentAmount(): Promise<string> {
     this.logStep("Read Installment Amount");
-    const installment = this.repaymentRoot
-      .getByText(/\$\s*[\d,]+(?:\.\d{2})?/)
-      .first();
+    const installment = this.calculatedInstallmentAmount();
     await expect(installment).toBeVisible({ timeout: 30_000 });
     return (await installment.innerText()).replace(/\s+/g, " ").trim();
+  }
+
+  async expectInstallmentAmountChanged(
+    previousAmount: string,
+    timeoutMs = 60_000,
+  ): Promise<string> {
+    this.logStep(`Expect Installment Amount Changed — was ${previousAmount}`);
+    let latest = previousAmount;
+    await expect
+      .poll(
+        async () => {
+          latest = await this.readInstallmentAmount();
+          return latest !== previousAmount;
+        },
+        { timeout: timeoutMs, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(true);
+    return latest;
   }
 }

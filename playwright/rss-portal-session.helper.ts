@@ -26,6 +26,7 @@ import {
   getRssPortalAuthMetaFileRel,
   OIDC_USER_KEY_PATTERN,
   rssPortalAuthOrigins,
+  rssPortalAuthenticationUrl,
   rssPortalHostname,
   rssPortalOAuthClientId,
   rssPortalTokenEndpointUrl,
@@ -1571,7 +1572,7 @@ export function installRssPortalAuthRecovery(page: Page): () => void {
 }
 
 export async function ensureLiveRssPortalSession(page: Page): Promise<void> {
-  await page.goto(RSS_BASE_URL());
+  await page.goto(rssPortalAuthenticationUrl());
   const result = await refreshAccessToken(page);
   if (!result.ok && result.message.includes("expiring")) {
     throw new Error(result.message);

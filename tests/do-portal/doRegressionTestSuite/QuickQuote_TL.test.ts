@@ -65,15 +65,21 @@ async function selectTlProductAndProgram(
 ): Promise<void> {
   await quickQuotePage.selectProduct(TL_QQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-    await quickQuotePage.selectProgram(TL_QQ_PROGRAM).catch(async () => {
-      await quickQuotePage.programDropdownTrigger.click();
-      await expect.soft(page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
-      const termLoan = page.getByRole("option").filter({ hasText: /Term Loan/i }).first();
-      await termLoan.click({ timeout: 10_000 });
-      await page.keyboard.press("Escape");
-    });
-  }
+  await quickQuotePage.waitForLoadingComplete();
+  const programDropdown = quickQuotePage.programDropdownTrigger.locator(
+    "xpath=ancestor::p-dropdown[1]",
+  );
+  const programCombobox = programDropdown.getByRole("combobox").first();
+  await expect
+    .poll(
+      async () => {
+        return (
+          ((await programCombobox.getAttribute("aria-label")) ?? (await programCombobox.textContent()))?.trim() ?? ""
+        );
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(TL_QQ_PROGRAM);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
   await quickQuotePage.waitForLoadingComplete();
 }

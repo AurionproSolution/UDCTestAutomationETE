@@ -1,5 +1,5 @@
 /**
- * RSS Sanity — Overview Screen (URP-T46, URP-T76)
+ * RSS Sanity — Overview Screen (URP-T46, URP-T76, URP-T224)
  * Zephyr: /RSS Sanity Suite/Overview Screen
  * Source: RSS Overview Screen Test Cases.xlsx
  *
@@ -45,5 +45,16 @@ test.describe("RSS Portal — Overview Screen @rss @sanity", () => {
     }
 
     await dashboard.expectPromotionalOffersForSelectedParty();
+  });
+
+  test("URP-T224 - Overview - Welcome back card last login date and time @smoke", async ({
+    page,
+  }) => {
+    test.setTimeout(300_000);
+
+    const dashboard = new RSSDashboardPage(page);
+
+    expect(await dashboard.isDashboardLoaded()).toBe(true);
+    await dashboard.expectWelcomeBackCardWithLastLoginVisible();
   });
 });

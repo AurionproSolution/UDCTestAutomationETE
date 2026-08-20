@@ -13,6 +13,7 @@ import {
 import { getRssPortalTestPartyName } from "../../../../testData/rss-portal/rssLoginData";
 import {
   APPLY_NOW_DEALERS_LOAD_TIMEOUT_MS,
+  APPLY_NOW_DEALERSHIP_FALLBACK_RESULT,
   APPLY_NOW_DEALERSHIP_FALLBACK_SEARCH,
   APPLY_NOW_DEALERSHIP_USED_BEFORE,
   APPLY_NOW_REPAYMENT,
@@ -57,6 +58,7 @@ export async function completeDealershipPurchaseFlow(
   options?: {
     preferredDealershipLabel?: string;
     fallbackSearch?: string;
+    fallbackResult?: string;
   },
 ): Promise<void> {
   await howCanWeHelp.selectPurchaseThroughDealership();
@@ -67,6 +69,7 @@ export async function completeDealershipPurchaseFlow(
     preferredLabel:
       options?.preferredDealershipLabel ?? APPLY_NOW_DEALERSHIP_USED_BEFORE,
     fallbackSearch: options?.fallbackSearch ?? APPLY_NOW_DEALERSHIP_FALLBACK_SEARCH,
+    fallbackResult: options?.fallbackResult ?? APPLY_NOW_DEALERSHIP_FALLBACK_RESULT,
   });
   await assetPage.expectDealershipSelected();
 }

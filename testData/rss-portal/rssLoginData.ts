@@ -50,7 +50,7 @@ export function getRssPortalTestPartyName(): string {
 
   const parties: Partial<Record<ReturnType<typeof getCurrentEnv>, string>> = {
     qat: "Anithmore Limited tested",
-    sit: "Rss Test User",
+    sit: "Andrea Joyce Butcher",
   };
   return parties[getCurrentEnv()] ?? "Rss Test User";
 }
