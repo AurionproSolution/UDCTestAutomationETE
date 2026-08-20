@@ -323,92 +323,118 @@ export class DOPersonalDetailsPage extends BasePage {
     await this.selectMarritalStatusOption(maritalStatus);
   }
   async selectNoOfDependents(noOfDependents: string): Promise<void> {
-    await this.noOfDependentsDropdown.click();
+    await this.dependantsDropdownTrigger().click();
   }
   async selectNoOfDependentsOption(noOfDependents: string): Promise<void> {
     await this.page
-      .getByRole("option", { name: noOfDependents, exact: true })
+      .getByRole("option", { name: new RegExp(`^\\s*${this.escapeRx(noOfDependents)}\\s*$`) })
+      .first()
       .click();
   }
   async chooseNoOfDependents(noOfDependents: string): Promise<void> {
-    if (await this.leaveDropdownUnsetIfEmpty("No. of Dependants", noOfDependents, this.noOfDependentsDropdown)) {
+    const trigger = this.dependantsDropdownTrigger();
+    if (await this.leaveDropdownUnsetIfEmpty("No. of Dependants", noOfDependents, trigger)) {
       return;
     }
-    await this.selectNoOfDependents(noOfDependents);
-    await this.selectNoOfDependentsOption(noOfDependents);
-    await this.page
-      .getByRole("listbox")
-      .waitFor({ state: "hidden", timeout: 10000 })
-      .catch(() => {});
-    await this.page.keyboard.press("Escape").catch(() => {});
+    const want = parseInt(noOfDependents, 10);
+    await this.dismissOpenDropdownPanels();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await trigger.scrollIntoViewIfNeeded().catch(() => {});
+      await this.selectNoOfDependents(noOfDependents);
+      await this.selectNoOfDependentsOption(noOfDependents);
+      await this.dismissOpenDropdownPanels();
+      if (!Number.isFinite(want) || (await this.selectedDependantsCount()) === want) {
+        return;
+      }
+    }
   }
 
   /**
-   * After **No. of Dependants** is set, Angular renders age fields (often delayed). Locators tried in order:
-   * `p-inputnumber` inner input, `p-inputnumber-input` class, full PrimeNG class string, then inputs in the
-   * same grid as the dependants dropdown. Values use **keystrokes** + Tab so `p-inputnumber` binds correctly.
+   * After **No. of Dependants** is set, Angular renders age fields (often delayed). Locators tried in order
+   * on the **visible** `app-personal-details` host (hidden stepper clones are ignored): PrimeNG
+   * `p-inputnumber` / `number` spinbuttons, UDC `<text>` age fields, then inputs under a Dependants Age label.
+   * Values use **keystrokes** + Tab so `p-inputnumber` binds correctly.
    */
   async fillDependantsAgesInYears(ages: string[]): Promise<void> {
     if (ages.length === 0) {
       return;
     }
     const need = ages.length;
-    const root = this.personalDetailsRoot;
-    const fromDependantsGrid = this.noOfDependentsDropdown.locator(
-      "xpath=ancestor::div[contains(@class,'grid')][1]",
-    );
-    const fromDepSmallestWithInputNumber = this.noOfDependentsDropdown.locator(
-      "xpath=ancestor::div[.//p-inputnumber][1]",
-    );
-
-    const candidateChains: Locator[] = [
-      fromDepSmallestWithInputNumber.locator(
-        "p-inputnumber input.p-inputtext, p-inputnumber input",
-      ),
-      fromDependantsGrid.locator("p-inputnumber input.p-inputtext, p-inputnumber input"),
-      root.locator("p-inputnumber input.p-inputtext, p-inputnumber input"),
-      root.locator("xpath=.//input[contains(@class,'p-inputnumber-input')]"),
-      root.locator(
-        "input.p-inputtext.p-component.p-element.p-inputnumber-input",
-      ),
-      root.getByRole("spinbutton"),
-    ];
-
-    let inputs: Locator | null = null;
-    const deadline = Date.now() + 20000;
-    while (Date.now() < deadline) {
-      for (const chain of candidateChains) {
-        const c = await chain.count();
-        if (c >= need) {
-          inputs = chain;
-          break;
-        }
-      }
-      if (inputs) {
-        break;
-      }
-      await this.page.waitForTimeout(400);
+    this.logStep(`Fill dependants ages (${need} field(s))`);
+    await this.dismissOpenDropdownPanels();
+    if ((await this.selectedDependantsCount()) < need) {
+      await this.chooseNoOfDependents(String(need));
     }
 
-    if (!inputs) {
-      throw new Error(
-        `Dependants age: after waiting, could not find ${need} field(s). ` +
-          `Tried p-inputnumber inputs, p-inputnumber-input class, and spinbuttons under app-personal-details.`,
-      );
-    }
-
+    const inputs = await this.resolveDependantsAgeInputs(need);
     const count = await inputs.count();
     const start = count > need ? count - need : 0;
     for (let i = 0; i < need; i++) {
       const field = inputs.nth(start + i);
-      await field.waitFor({ state: "visible", timeout: 10000 });
+      await field.waitFor({ state: "visible", timeout: 10_000 });
       await field.scrollIntoViewIfNeeded();
       await field.click();
       await field.press("Control+A");
-      await field.pressSequentially(ages[i], { delay: 35 });
+      if (ages[i] === "") {
+        await field.press("Backspace");
+      } else {
+        await field.pressSequentially(ages[i], { delay: 35 });
+      }
       await field.press("Tab");
       await this.page.waitForTimeout(150);
     }
+  }
+
+  /** Visible Personal Details **No. of Dependants** trigger (ignore hidden stepper clones). */
+  private dependantsDropdownTrigger(): Locator {
+    return this.visiblePersonalDetailsRoot()
+      .locator("label")
+      .filter({ hasText: /No\.?\s*of\s+Dependant/i })
+      .first()
+      .locator(
+        "xpath=following::*[@aria-label='dropdown trigger' or contains(@class,'p-dropdown-trigger')][1]",
+      )
+      .or(this.noOfDependentsDropdown)
+      .first();
+  }
+
+  private dependantsAgeInputChains(): Locator[] {
+    const root = this.visiblePersonalDetailsRoot();
+    const ageSection = root
+      .locator("div, section, .grid, .p-field, .p-formgrid")
+      .filter({ hasText: /Dependant[s']?\s*Age/i })
+      .first();
+    const fromDependantsGrid = this.dependantsDropdownTrigger().locator(
+      "xpath=ancestor::div[contains(@class,'grid') or contains(@class,'row') or contains(@class,'flex')][1]",
+    );
+    return [
+      root.getByRole("spinbutton"),
+      root.locator("p-inputnumber input, number input, input.p-inputnumber-input"),
+      root.locator("text").filter({ hasText: /Dependant[s']?\s*Age|^Age(\s+in\s+Years)?$/i }).locator("input, #text"),
+      ageSection.locator("p-inputnumber input, number input, input.p-inputnumber-input, input[type='number']"),
+      ageSection.getByRole("spinbutton"),
+      fromDependantsGrid.locator("p-inputnumber input, number input, input[type='number']"),
+      root.locator("input[formcontrolname*='age' i], input[name*='age' i], input[formcontrolname*='depend' i]"),
+      root.getByLabel(/Dependant[s']?\s*Age|Age in years/i),
+    ];
+  }
+
+  private async resolveDependantsAgeInputs(need: number): Promise<Locator> {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      for (const chain of this.dependantsAgeInputChains()) {
+        const c = await chain.count().catch(() => 0);
+        if (c >= need) {
+          return chain;
+        }
+      }
+      await this.page.waitForTimeout(400);
+    }
+    const selected = await this.selectedDependantsCount();
+    throw new Error(
+      `Dependants age: after waiting, could not find ${need} field(s) (No. of Dependants=${selected}). ` +
+        `Tried spinbuttons, p-inputnumber/number inputs, <text> age fields, and Dependants Age labels under visible app-personal-details.`,
+    );
   }
 
   async enterMobileNumber(mobileNumber: string): Promise<void> {
@@ -782,26 +808,20 @@ export class DOPersonalDetailsPage extends BasePage {
       .toBe(true);
   }
 
-  /** When dependants > 0, Angular renders age spinbuttons — wait until each has a value. */
+  /** When dependants > 0, wait until each age field has a value. */
   private async waitForDependantsAgesReadyIfPresent(): Promise<void> {
     const need = await this.selectedDependantsCount();
     if (need <= 0) {
       return;
     }
-    const root = this.visiblePersonalDetailsRoot();
-    const spinbuttons = root.getByRole("spinbutton");
-    await expect
-      .poll(async () => spinbuttons.count(), {
-        timeout: 30_000,
-        message: `Expected ${need} dependants age field(s) to render`,
-      })
-      .toBeGreaterThanOrEqual(need);
-    const count = await spinbuttons.count();
+    const inputs = await this.resolveDependantsAgeInputs(need);
+    const count = await inputs.count();
+    const start = count > need ? count - need : 0;
     await expect
       .poll(
         async () => {
-          for (let i = 0; i < count; i++) {
-            const val = (await spinbuttons.nth(i).inputValue().catch(() => "")).trim();
+          for (let i = 0; i < need; i++) {
+            const val = (await inputs.nth(start + i).inputValue().catch(() => "")).trim();
             if (!val) {
               return false;
             }
@@ -817,9 +837,10 @@ export class DOPersonalDetailsPage extends BasePage {
   }
 
   private async selectedDependantsCount(): Promise<number> {
-    const dropdown = this.noOfDependentsDropdown
+    const trigger = this.dependantsDropdownTrigger();
+    const dropdown = trigger
       .locator("xpath=ancestor::p-dropdown[1]")
-      .or(this.noOfDependentsDropdown.locator("xpath=ancestor::div[contains(@class,'p-dropdown')][1]"))
+      .or(trigger.locator("xpath=ancestor::div[contains(@class,'p-dropdown')][1]"))
       .first();
     const label = dropdown.locator(".p-dropdown-label, [class*='p-dropdown-label']").first();
     const text = ((await label.textContent().catch(() => "")) ?? "").trim();
@@ -1288,9 +1309,13 @@ export class DOPersonalDetailsPage extends BasePage {
       new RegExp(snapshot.dateOfBirth.replace(/\//g, "[/\\-]") + "|1980", "i"),
     );
 
-    const spinbuttons = this.visiblePersonalDetailsRoot().getByRole("spinbutton");
-    for (let i = 0; i < snapshot.dependantAges.length; i++) {
-      await expect(spinbuttons.nth(i)).toHaveValue(snapshot.dependantAges[i], { timeout: 10_000 });
+    if (snapshot.dependantAges.length > 0) {
+      const ageInputs = await this.resolveDependantsAgeInputs(snapshot.dependantAges.length);
+      const count = await ageInputs.count();
+      const start = count > snapshot.dependantAges.length ? count - snapshot.dependantAges.length : 0;
+      for (let i = 0; i < snapshot.dependantAges.length; i++) {
+        await expect(ageInputs.nth(start + i)).toHaveValue(snapshot.dependantAges[i], { timeout: 10_000 });
+      }
     }
   }
 

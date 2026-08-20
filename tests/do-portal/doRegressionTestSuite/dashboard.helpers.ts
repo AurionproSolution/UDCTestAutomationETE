@@ -396,9 +396,18 @@ export async function openFinanceLeaseStatement(
       await statement.clickPreviousToDashboard();
       await dashboard.navigateToDealerListingActiveLoans();
       await dashboard.searchQuotesGrid("Finance");
+    }
+  }
+
+  test.skip(
+    true,
+    "No Finance Lease statement exposes a GST column on Lease Schedule (UDP-T4381 seed data).",
+  );
+}
+
 /** Seeded OL loan Rego/VIN/Loan ID, or first **Operating Lease** row in Active Loans. */
 export async function resolveOlActiveLoanReference(dashboard: DODashboardPage): Promise<string> {
-  const seeded = settlementData.dealerListing.olActivatedLoanRegoOrVin?.trim();
+  const seeded = settlementData.dealerListing.activatedLoanRegoOrVin?.trim();
   if (seeded) {
     return seeded;
   }
@@ -427,8 +436,9 @@ export async function resolveOlActiveLoanReference(dashboard: DODashboardPage): 
 
   test.skip(
     true,
-    "No Finance Lease statement exposes a GST column on Lease Schedule (UDP-T4381 seed data).",
+    "No Operating Lease active loan in dealer listing; set dealerListing.activatedLoanRegoOrVin in settlementTestData.json.",
   );
+  return "";
 }
 
 /** Active Loans → search Operating → **View Statement** for an Operating Lease loan. */
@@ -512,7 +522,4 @@ export async function openAfvLoanStatement(page: Page): Promise<DOCustomerStatem
     statement.paymentDetailsRoot().getByRole("radio", { name: /Payment Summary/i }),
   ).toBeVisible({ timeout: 30_000 });
   return statement;
-    "No Operating Lease active loan in dealer listing; set dealerListing.olActivatedLoanRegoOrVin in settlementTestData.json.",
-  );
-  return "";
 }

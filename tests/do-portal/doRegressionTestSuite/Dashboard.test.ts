@@ -32,7 +32,6 @@ import {
   requireLoanId,
   saveDashboardDownload,
   resolveOlActiveLoanReference,
-  TLC_DEALER,
 } from "./dashboard.helpers";
 
 const OUTSTANDING_BALANCE_TOOLTIP =

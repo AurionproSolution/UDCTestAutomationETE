@@ -551,11 +551,11 @@ async function openExistingIndividualOnAddressStep(page: Page): Promise<DOAddres
     throw new Error("Set UDC_EXISTING_CUSTOMER_NUMBER for existing-customer address flows.");
   }
   const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-  await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-  await assetDetailsPage.searchByDropdownClick();
-  await assetDetailsPage.selectUDCSelectOption();
-  await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
-  await assetDetailsPage.clickSearchButton();
+  await customerDetailsPage.clickAddBorrowerorGuarantorButton();
+  await customerDetailsPage.searchByDropdownClick();
+  await customerDetailsPage.selectUDCSelectOption();
+  await customerDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
+  await customerDetailsPage.clickSearchButton();
   await clickAddOnBorrowerSearchResult(page, EXISTING_UDC_CUSTOMER_NUMBER);
   const personal = new DOPersonalDetailsPage(page);
   await expect(personal.personalDetailsRoot).toBeVisible({ timeout: 120_000 });
@@ -1152,7 +1152,7 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3
     async ({ page }) => {
       test.setTimeout(600_000);
       const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+      await customerDetailsPage.clickAddBorrowerorGuarantorButton();
       const dlg = await waitForSearchCustomerDialog(page);
 
       await expectSearchTypeRadioChecked(dlg, "individual");
@@ -1176,9 +1176,9 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3
     async ({ page }) => {
       test.setTimeout(600_000);
       const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+      await customerDetailsPage.clickAddBorrowerorGuarantorButton();
       const dlg = customerSearchDialog(page);
-      await assetDetailsPage.searchByDropdownClick();
+      await customerDetailsPage.searchByDropdownClick();
       const panel = page.locator(".p-dropdown-panel").last();
       const opt = panel.getByRole("option", { name: /Customer Name|First Name/i }).first();
       if (await opt.isVisible({ timeout: 15_000 }).catch(() => false)) {
@@ -1194,8 +1194,8 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3
     async ({ page }) => {
       test.setTimeout(600_000);
       const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
+      await customerDetailsPage.clickAddBorrowerorGuarantorButton();
+      await customerDetailsPage.searchByDropdownClick();
       const panel = page.locator(".p-dropdown-panel").last();
       const opt = panel.getByRole("option", { name: /Driver|Licence/i }).first();
       if (await opt.isVisible({ timeout: 15_000 }).catch(() => false)) {
@@ -1211,11 +1211,11 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3
     async ({ page }) => {
       test.setTimeout(600_000);
       const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
-      await assetDetailsPage.clickSearchButton();
+      await customerDetailsPage.clickAddBorrowerorGuarantorButton();
+      await customerDetailsPage.searchByDropdownClick();
+      await customerDetailsPage.selectUDCSelectOption();
+      await customerDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
+      await customerDetailsPage.clickSearchButton();
       await waitForBorrowerSearchResult(page, EXISTING_UDC_CUSTOMER_NUMBER);
     },
   );
@@ -1244,7 +1244,7 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3
     async ({ page }) => {
       test.setTimeout(600_000);
       const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
+      await customerDetailsPage.clickAddBorrowerorGuarantorButton();
       const trust = searchTypeRadio(page, /Trust/i).first();
       if (await trust.isVisible({ timeout: 10_000 }).catch(() => false)) {
         await trust.check({ force: true });
@@ -1261,13 +1261,13 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3
     async ({ page }) => {
       test.setTimeout(600_000);
       const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber("999999999999");
-      await assetDetailsPage.clickSearchButton();
+      await customerDetailsPage.clickAddBorrowerorGuarantorButton();
+      await customerDetailsPage.searchByDropdownClick();
+      await customerDetailsPage.selectUDCSelectOption();
+      await customerDetailsPage.enterUDCCustomerNumber("999999999999");
+      await customerDetailsPage.clickSearchButton();
       await expect
-        .soft(assetDetailsPage.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
+        .soft(customerDetailsPage.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
         .toBeVisible({ timeout: 90_000 });
     },
   );
@@ -1278,13 +1278,13 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3
     async ({ page }) => {
       test.setTimeout(600_000);
       const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber("420");
-      await assetDetailsPage.clickSearchButton();
+      await customerDetailsPage.clickAddBorrowerorGuarantorButton();
+      await customerDetailsPage.searchByDropdownClick();
+      await customerDetailsPage.selectUDCSelectOption();
+      await customerDetailsPage.enterUDCCustomerNumber("420");
+      await customerDetailsPage.clickSearchButton();
       await expect
-        .soft(assetDetailsPage.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
+        .soft(customerDetailsPage.addNewCustomerButton.or(page.getByRole("button", { name: /Add New Customer/i })).first())
         .toBeVisible({ timeout: 90_000 });
     },
   );
@@ -1298,11 +1298,11 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3
         test.skip(true, "Set UDC_EXISTING_CUSTOMER_NUMBER to a real party for FIS search selection.");
       }
       const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
-      await assetDetailsPage.clickSearchButton();
+      await customerDetailsPage.clickAddBorrowerorGuarantorButton();
+      await customerDetailsPage.searchByDropdownClick();
+      await customerDetailsPage.selectUDCSelectOption();
+      await customerDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
+      await customerDetailsPage.clickSearchButton();
       await clickAddOnBorrowerSearchResult(page, EXISTING_UDC_CUSTOMER_NUMBER);
       await expect.soft(page.locator("app-personal-details").first()).toBeVisible({ timeout: 120_000 });
     },
@@ -1649,11 +1649,11 @@ test.describe("DO Portal â€” Standard Quote Customer Details (Zephyr UDP-T3
         test.skip(true, "Set UDC_EXISTING_CUSTOMER_NUMBER for FIS pre-population check.");
       }
       const customerDetailsPage = await openStandardQuoteOnCustomerDetailsStep(page);
-      await assetDetailsPage.clickAddBorrowerorGuarantorButton();
-      await assetDetailsPage.searchByDropdownClick();
-      await assetDetailsPage.selectUDCSelectOption();
-      await assetDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
-      await assetDetailsPage.clickSearchButton();
+      await customerDetailsPage.clickAddBorrowerorGuarantorButton();
+      await customerDetailsPage.searchByDropdownClick();
+      await customerDetailsPage.selectUDCSelectOption();
+      await customerDetailsPage.enterUDCCustomerNumber(EXISTING_UDC_CUSTOMER_NUMBER);
+      await customerDetailsPage.clickSearchButton();
       await clickAddOnBorrowerSearchResult(page, EXISTING_UDC_CUSTOMER_NUMBER);
       const p = new DOPersonalDetailsPage(page);
       await expect.soft(await p.firstNameInput.inputValue().catch(() => "x")).toMatch(/\S/);

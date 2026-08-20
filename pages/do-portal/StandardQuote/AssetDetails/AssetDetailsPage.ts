@@ -319,12 +319,17 @@ export class DOAssetDetailsPage extends BasePage {
             return true;
           }
 
-          await trigger.scrollIntoViewIfNeeded().catch(() => {});
-          await trigger
-            .evaluate((el: HTMLElement) => {
-              el.click();
-            })
-            .catch(() => trigger.click({ timeout: 5_000 }));
+          const listAlreadyOpen =
+            (await this.page.getByRole("option").first().isVisible().catch(() => false)) ||
+            (await this.page.getByRole("listbox").first().isVisible().catch(() => false));
+          if (!listAlreadyOpen) {
+            await trigger.scrollIntoViewIfNeeded().catch(() => {});
+            await trigger
+              .evaluate((el: HTMLElement) => {
+                el.click();
+              })
+              .catch(() => trigger.click({ timeout: 5_000 }));
+          }
 
           const option = this.page.getByRole("option", { name: optionPattern }).first();
           if (await option.isVisible({ timeout: 2_000 }).catch(() => false)) {
@@ -386,7 +391,8 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async chooseProgram(programName: string): Promise<void> {
     this.logStep(`Chose program: ${this.stepValueDisplay(programName)}`);
-    await this.openProgramDropdown();
+    // Do not open the dropdown here — selectProgram opens it. A second click toggles PrimeNG closed.
+    await this.waitForQuoteLoadersToFinish();
     await this.selectProgram(programName);
     await this.waitForQuoteLoadersToFinish();
     await this.waitForLoanPurposePopulated();
