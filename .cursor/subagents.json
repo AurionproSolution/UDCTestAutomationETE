@@ -3,14 +3,14 @@
     {
       "id": "test-automation-architect",
       "name": "Test Automation Architect",
-      "description": "Use this agent for UDC Test Automation ETE workflow orchestration, framework architecture, and step-by-step guidance on which specialist subagent to run next (JIRA vs plan-driven vs healing vs TCC test catalog). Routes to test-case-catalog skill for naming and Excel documentation.",
+      "description": "Playwright workflow orchestration: which subagent to run next (JIRA vs plan vs heal vs catalog). Reads automation-blueprint.md for repo-specific paths and conventions. See docs/AI-Test-Automation-Agents-Whitepaper.md.",
       "model": "inherit",
       "file": ".cursor/agents/test-automation-architect.md"
     },
     {
       "id": "test-case-writer",
       "name": "Test Case Writer",
-      "description": "Use this agent when you need to create Playwright test scripts from JIRA requirements. Fetches JIRA, runs the six-block requirements gate (posts a comment to the reporter via MCP if anything is missing—no test Write until the gate passes unless you explicitly override), then analyzes project patterns and generates Playwright tests per UDC conventions. Optional Step 8: apply test-case-catalog skill for TCC naming and Excel docs.",
+      "description": "JIRA to Playwright test. Reads automation-blueprint.md, runs six-block requirements gate (posts JIRA comment to reporter if blocked). Optional catalog Step 8 when enabled in blueprint. See docs/AI-Test-Automation-Agents-Whitepaper.md.",
       "model": "inherit",
       "file": ".cursor/agents/test-case-writer.md"
     },
