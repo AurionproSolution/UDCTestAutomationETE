@@ -4,6 +4,7 @@
  */
 
 import { expect, type Locator, type Page } from "@playwright/test";
+import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../../config/env";
 import {
   DOAddOnsAccessoriesPage,
   DOAddressDetailsPage,
@@ -16,7 +17,21 @@ import {
   DOQuickQuotePage,
 } from "../../../../pages";
 import { DOAddAssetPage } from "../../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
-import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../../config/env";
+import { DOBusinessDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/businessDetails";
+import { DOPersonalDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
+import { DOReferenceDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
+import { DOSearchCustomerDialog } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/searchCustomerDialog";
+import { DOSoleTraderDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/soleTraderDetails";
+import { DOTrustDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/trustDetails";
+import { ensureCsaProductAndProgram } from "../../doRegressionTestSuite/assetDetailsAddAsset.helpers";
+import {
+  DOC_T3824_BORROWER,
+  openPostSubmissionUploadStepWithAsset,
+} from "../../doRegressionTestSuite/documentation.helpers";
+import {
+  FL_SQ_PRODUCT,
+  FL_SQ_PROGRAM,
+} from "../../doRegressionTestSuite/fl.helpers";
 import {
   CSA_SQ_PRODUCT,
   CSA_SQ_PROGRAM,
@@ -33,21 +48,6 @@ import {
   prepareCalculableCsaQuote,
   standardQuoteRoot,
 } from "../../doRegressionTestSuite/workflow.helpers";
-import { ensureCsaProductAndProgram } from "../../doRegressionTestSuite/assetDetailsAddAsset.helpers";
-import {
-  FL_SQ_PRODUCT,
-  FL_SQ_PROGRAM,
-} from "../../doRegressionTestSuite/fl.helpers";
-import { DOPersonalDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
-import { DOReferenceDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/referenceDetails";
-import { DOBusinessDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/businessDetails";
-import { DOSearchCustomerDialog } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/searchCustomerDialog";
-import { DOSoleTraderDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/soleTraderDetails";
-import {
-  DOC_T3824_BORROWER,
-  openPostSubmissionUploadStepWithAsset,
-} from "../../doRegressionTestSuite/documentation.helpers";
-import { DOTrustDetailsPage } from "../../../../pages/do-portal/StandardQuote/CustomerDetails/trustDetails";
 
 export const CSA_QQ_PRODUCT = CSA_SQ_PRODUCT;
 /** CSAC Quick Quote program (matches `CSAcAssigned.test.ts` / Quick Quote CSA regression). */
@@ -55,20 +55,10 @@ export const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
 
 export {
   CSA_SQ_PRODUCT,
-  CSA_SQ_PROGRAM,
-  TLC_DEALER,
-  FL_SQ_PRODUCT,
-  FL_SQ_PROGRAM,
-  standardQuoteRoot,
-  openDashboard,
-  openStandardQuoteFromDashboard,
-  openPostSubmissionFromFreshQuote,
-  prepareCalculableCsaQuote,
-  addMinimalUsedAsset,
-  fillValidIndividualPersonalBorrower,
-  fillMinimalAddressContinue,
+  CSA_SQ_PROGRAM, FL_SQ_PRODUCT,
+  FL_SQ_PROGRAM, TLC_DEALER, addMinimalUsedAsset, fillMinimalAddressContinue,
   fillMinimalEmploymentContinue,
-  fillMinimalFinancialContinue,
+  fillMinimalFinancialContinue, fillValidIndividualPersonalBorrower, openDashboard, openPostSubmissionFromFreshQuote, openStandardQuoteFromDashboard, prepareCalculableCsaQuote, standardQuoteRoot
 };
 
 let origRefCounter = 0;
@@ -1177,7 +1167,7 @@ export async function selectIndividualTypeInSearchDialog(page: Page, dlg?: Locat
 }
 
 /** UDC number that should not match — enables **Add New Customer** after Search. */
-export const SANITY_NO_MATCH_UDC = "999999999999";
+export const SANITY_NO_MATCH_UDC = "1190594";
 
 /** Search Customer dialog: select **Business**, search by UDC with no match, then **Add New Customer**. */
 export async function selectBusinessTypeSearchNoMatchUdcAndAddNewCustomer(

@@ -475,6 +475,34 @@ export class DOSearchCustomerDialog extends BasePage {
     await expect.soft(ind).toBeChecked();
   }
 
+  /**
+   * **Borrower Search Results** route (`borrower-search-result`) — populated cards **or** empty state
+   * ("No results were returned" / No Data Found). Use for USIF-491 zoom on search results chrome.
+   */
+  async waitForBorrowerSearchResultsScreen(): Promise<void> {
+    this.logStep("Wait for borrower search results screen");
+    await this.page.waitForURL(/borrower-search-result/i, { timeout: 90_000 });
+
+    const emptyState = this.page
+      .getByText(/no results were returned|no (records?|results?|customers?|matches?|data found)/i)
+      .or(this.page.getByRole("img", { name: /No Data Found/i }))
+      .first();
+    const addNew = this.page.getByRole("button", { name: /Add New Customer/i }).first();
+    const udcLabel = this.page.getByText(/UDC Customer Number/i).first();
+
+    await expect
+      .poll(
+        async () => {
+          if (await emptyState.isVisible().catch(() => false)) return true;
+          if (await addNew.isVisible().catch(() => false)) return true;
+          if (await udcLabel.isVisible().catch(() => false)) return true;
+          return false;
+        },
+        { timeout: 90_000, intervals: [250, 500, 1_000] },
+      )
+      .toBe(true);
+  }
+
   /** UDC search navigates to **Borrower Result** cards (not the search dialog datatable). */
   async waitForBorrowerSearchResult(udcCustomerNumber: string): Promise<void> {
     this.logStep(`Wait for borrower search result (${udcCustomerNumber})`);
@@ -498,7 +526,10 @@ export class DOSearchCustomerDialog extends BasePage {
           ) {
             return true;
           }
-          const noResults = this.page.getByText(/no (record|result|customer|match)/i).first();
+          const noResults = this.page
+            .getByText(/no (records?|results?|customers?|matches?|data found)/i)
+            .or(this.page.getByRole("img", { name: /No Data Found/i }))
+            .first();
           if (await noResults.isVisible({ timeout: 500 }).catch(() => false)) {
             throw new Error(
               `Borrower search returned no results for UDC ${udcCustomerNumber} (confirm Individual search type is selected).`,

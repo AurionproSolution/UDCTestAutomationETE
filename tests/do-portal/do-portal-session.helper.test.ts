@@ -163,12 +163,12 @@ test.describe("do-portal-session.helper", () => {
     expect(result.reason).toContain("proactive silent refresh");
   });
 
-  test("evaluateDoPortalSessionFromState requires MFA when session saved 16 min ago without refresh_token", () => {
+  test("evaluateDoPortalSessionFromState reuses aged session without refresh_token while JWT is valid", () => {
     const nowMs = BASE_NOW_MS;
     const savedAt = new Date(nowMs - 16 * 60_000).toISOString();
     const jwt = makeTestJwt(
       Math.floor((nowMs - 16 * 60_000) / 1000),
-      Math.floor((nowMs + 4 * 60_000) / 1000),
+      Math.floor((nowMs + 10 * 60_000) / 1000),
     );
     const meta: DoPortalAuthMeta = {
       discoveredAt: savedAt,
@@ -180,7 +180,7 @@ test.describe("do-portal-session.helper", () => {
     };
 
     const result = evaluateDoPortalSessionFromState(cookieState(jwt), meta, { nowMs });
-    expect(result.action).toBe("mfa");
+    expect(result.action).toBe("reuse");
     expect(result.reason).toContain("no refresh_token");
   });
 

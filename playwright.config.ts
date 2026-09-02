@@ -240,6 +240,9 @@ export default defineConfig({
     "**/do-portal/doSanityTest/jira tickets/USIF-421-tradeAmountAssetValue.test.ts",
     "**/do-portal/doSanityTest/jira tickets/USIF-431-timeAtEmployment.test.ts",
     "**/do-portal/doSanityTest/jira tickets/USIF-425-copyPrimaryBorrowerStreetType.test.ts",
+    "**/do-portal/doSanityTest/jira tickets/USIF-378-financialPositionXmlPartyIdError.test.ts",
+    "**/do-portal/doSanityTest/jira tickets/USIF-491-customerDetailsSearchResultsBottomBarZoom.test.ts",
+    "**/do-portal/doSanityTest/jira tickets/USIF-492-splitAssetCalculateBadRequest.test.ts",
   ],
 
   fullyParallel: true,

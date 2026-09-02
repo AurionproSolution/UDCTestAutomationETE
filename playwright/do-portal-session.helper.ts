@@ -635,8 +635,8 @@ export function evaluateDoPortalSessionFromState(
   );
   const proactiveRefresh = sessionNeedsProactiveRefresh(meta, tokens, nowMs, filePath);
 
+  const expired = expMs !== undefined && expMs <= nowMs;
   if (jwtExpiringSoon || proactiveRefresh) {
-    const expired = expMs !== undefined && expMs <= nowMs;
     if (tokens.refreshToken) {
       const reason = expired
         ? "JWT expired — silent refresh_token grant required."
@@ -644,6 +644,15 @@ export function evaluateDoPortalSessionFromState(
           ? "JWT expiring soon — silent refresh_token grant required."
           : `Session age ${ageMinutes ?? "?"} min exceeds ${maxAgeMinutes} min — proactive silent refresh.`;
       return { action: "refresh", reason, ageMinutes, expiresAt, tokens };
+    }
+    if (proactiveRefresh && !jwtExpiringSoon && !expired) {
+      return {
+        action: "reuse",
+        reason: `Session age ${ageMinutes ?? "?"} min exceeds ${maxAgeMinutes} min, but no refresh_token is present and JWT is still valid until ${expiresAt ?? "unknown"}.`,
+        ageMinutes,
+        expiresAt,
+        tokens,
+      };
     }
     return {
       action: "mfa",
