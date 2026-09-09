@@ -149,9 +149,7 @@ async function completeCsaQuickQuoteForCarryOver(
   await expect.soft(quickQuotePage.quickQuoteRoot).toBeVisible();
   await quickQuotePage.selectProduct(CSA_SQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-    await quickQuotePage.selectProgram(CSA_QQ_PROGRAM);
-  }
+  await quickQuotePage.selectProgramIfNeeded(CSA_QQ_PROGRAM);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
   await quickQuotePage.selectFrequency("Monthly");
   await quickQuotePage.enterInterestRatePercent("9");

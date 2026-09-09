@@ -70,9 +70,7 @@ test(
     // -------------------------------------------------------------------------
     // PDF: select program; pricing fields appear
     // -------------------------------------------------------------------------
-    if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-      await quickQuotePage.selectProgram(CSA_QQ_PROGRAM);
-    }
+    await quickQuotePage.selectProgramIfNeeded(CSA_QQ_PROGRAM);
 
     // -------------------------------------------------------------------------
     // PDF: mandatory incomplete path — some builds disable Calculate; others validate on click
@@ -514,9 +512,7 @@ test(
     // -------------------------------------------------------------------------
     // PDF: select program; pricing fields appear
     // -------------------------------------------------------------------------
-    if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-      await quickQuotePage.selectProgram(CSA_QQ_PROGRAM);
-    }
+    await quickQuotePage.selectProgramIfNeeded(CSA_QQ_PROGRAM);
     await expect.soft(quickQuotePage.calculateForDropdownTrigger).toBeVisible();
     await expect.soft(quickQuotePage.cashPriceInput).toBeVisible();
     await expect.soft(quickQuotePage.depositPercentInput).toBeVisible();
@@ -701,7 +697,6 @@ test(
     await expect(quickQuotePage.depositPercentInput).not.toBeEditable({ timeout: 15_000 });
     await expect(quickQuotePage.depositDollarInput).not.toBeEditable({ timeout: 15_000 });
     // await quickQuotePage.enterPaymentAmount("500");
-    await quickQuotePage.enterCashPrice("$20,000");
     await quickQuotePage.enterInterestRatePercent("9");
     await quickQuotePage.enterTermsMonths("36");
     await quickQuotePage.selectFrequency("Monthly");

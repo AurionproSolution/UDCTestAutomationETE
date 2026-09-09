@@ -189,9 +189,7 @@ export async function openQuickQuoteStandardQuoteForDealer(
 
   await quickQuote.selectProduct(cfg.quickQuote.product);
   await quickQuote.dismissQuickQuoteDropdownOverlays();
-  if (await quickQuote.programDropdownTrigger.isEnabled()) {
-    await quickQuote.selectProgram(cfg.quickQuote.program);
-  }
+  await quickQuote.selectProgramIfNeeded(cfg.quickQuote.program);
   await quickQuote.dismissQuickQuoteDropdownOverlays();
   await quickQuote.selectFrequency("Monthly");
   await quickQuote.enterInterestRatePercent("4");

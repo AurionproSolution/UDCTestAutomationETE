@@ -138,9 +138,10 @@ export class DOQuickQuotePage extends BasePage {
     this.calculateForDropdownHost = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]",
     );
-    this.calculateForDropdownTrigger = this.calculateForDropdownHost.getByRole("button", {
-      name: /dropdown trigger/i,
-    });
+    this.calculateForDropdownTrigger = this.calculateForDropdownHost
+      .getByRole("combobox")
+      .or(this.calculateForDropdownHost.getByRole("button", { name: /dropdown trigger/i }))
+      .first();
     this.frequencyDropdownTrigger = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Frequency')]/following::p-dropdown[1]"
     ).getByRole("button", { name: /dropdown trigger/i });
@@ -352,11 +353,13 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   calculateForTriggerOnQuote(quoteIndex: number): Locator {
-    return this.quoteForm(quoteIndex)
-      .locator(
-        "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]",
-      )
-      .getByRole("button", { name: /dropdown trigger/i });
+    const host = this.quoteForm(quoteIndex).locator(
+      "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]",
+    );
+    return host
+      .getByRole("combobox")
+      .or(host.getByRole("button", { name: /dropdown trigger/i }))
+      .first();
   }
 
   frequencyTriggerOnQuote(quoteIndex: number): Locator {
@@ -795,6 +798,253 @@ export class DOQuickQuotePage extends BasePage {
   async selectProgram(program: string): Promise<void> {
     this.logStep(`Selected program: ${this.stepValueDisplay(program)}`);
     await this.selectFromDropdown(this.programDropdownTrigger, program);
+  }
+
+  /**
+   * Select Program only when it is not already resolved. When a product has a single program,
+   * the portal auto-populates Program and does not expose an option list — opening the dropdown
+   * and clicking `getByRole('option')` will time out on those builds.
+   */
+  async selectProgramIfNeeded(program: string, quoteIndex = 0): Promise<void> {
+    this.logStep(`Select program if needed: ${this.stepValueDisplay(program)}`);
+    await this.waitForLoadingComplete();
+
+    const host =
+      quoteIndex === 0
+        ? this.quickQuoteForm.locator(
+            "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
+          )
+        : this.programDropdownOnQuote(quoteIndex);
+
+    const readFast = () => this.readSelectedProgramLabel(quoteIndex, { comboboxTimeoutMs: 500 });
+
+    // Single-program dealers: Program is locked immediately after product selection.
+    if (await this.isProgramDropdownLocked(host)) {
+      const lockedLabel = (await readFast()).trim();
+      if (lockedLabel.length > 0 && !this.isPlaceholderDropdownLabel(lockedLabel)) {
+        this.logStep(`Program locked (single program): ${this.stepValueDisplay(lockedLabel)}`);
+        await this.waitForQuickQuoteFinancePanelReady(quoteIndex);
+        return;
+      }
+    }
+
+    // Product change can auto-populate Program asynchronously (single-program dealers).
+    await expect
+      .poll(
+        async () => {
+          const label = (await readFast()).trim();
+          if (!this.isPlaceholderDropdownLabel(label) && label.length > 0) {
+            return true;
+          }
+          const combobox = host.getByRole("combobox").first();
+          const aria = ((await combobox.getAttribute("aria-label").catch(() => "")) ?? "").trim();
+          if (!this.isPlaceholderDropdownLabel(aria) && aria.length > 0) {
+            return true;
+          }
+          return await this.isProgramDropdownLocked(host);
+        },
+        { timeout: 12_000, intervals: [100, 200, 400, 800] },
+      )
+      .toBeTruthy()
+      .catch(() => {});
+
+    const resolved = await this.readResolvedProgramLabel(quoteIndex, host);
+    if (
+      resolved.length > 0 &&
+      !this.isPlaceholderDropdownLabel(resolved) &&
+      this.programLabelMatches(program, resolved)
+    ) {
+      this.logStep(`Program already set: ${this.stepValueDisplay(resolved)}`);
+      await this.waitForQuickQuoteFinancePanelReady(quoteIndex);
+      return;
+    }
+
+    const programLocked = await this.isProgramDropdownLocked(host);
+    if (programLocked && resolved.length > 0 && !this.isPlaceholderDropdownLabel(resolved)) {
+      this.logStep(`Program locked (single program): ${this.stepValueDisplay(resolved)}`);
+      await this.waitForQuickQuoteFinancePanelReady(quoteIndex);
+      return;
+    }
+
+    const trigger =
+      quoteIndex === 0 ? this.programDropdownTrigger : this.programDropdownTriggerOnQuote(quoteIndex);
+    if (!(await trigger.isEnabled().catch(() => false))) {
+      return;
+    }
+
+    if (quoteIndex === 0) {
+      await this.selectProgram(program);
+    } else {
+      await this.selectProgramOnQuote(quoteIndex, program);
+    }
+
+    await this.waitForQuickQuoteFinancePanelReady(quoteIndex);
+  }
+
+  /**
+   * After Product + Program resolve, FIS loads finance fields asynchronously (Calculate For, Cash Price, etc.).
+   */
+  async waitForQuickQuoteFinancePanelReady(quoteIndex = 0, timeoutMs = 90_000): Promise<void> {
+    this.logStep("Wait for Quick Quote finance panel");
+    await this.dismissQuickQuoteDropdownOverlays();
+    await this.waitForLoadingComplete();
+
+    const cashPrice =
+      quoteIndex === 0
+        ? this.cashPriceInput
+        : this.cashPriceInputOnQuote(quoteIndex);
+    const interest =
+      quoteIndex === 0
+        ? this.interestRatePercentInput
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//label[contains(normalize-space(.), 'Interest Rate')]/following::input[@id='percent'][1]",
+          );
+
+    await expect
+      .poll(
+        async () => {
+          const calcForLabel = (await this.readCalculateForOnQuote(quoteIndex)).trim();
+          if (calcForLabel.length > 0 && !/select/i.test(calcForLabel)) {
+            return true;
+          }
+          if (await cashPrice.isVisible({ timeout: 500 }).catch(() => false)) {
+            return true;
+          }
+          if (await interest.isVisible({ timeout: 500 }).catch(() => false)) {
+            return true;
+          }
+          return false;
+        },
+        { timeout: timeoutMs, intervals: [300, 500, 1_000, 2_000] },
+      )
+      .toBe(true);
+  }
+
+  /** UDP-T3621 — finance panel visible after CSA product + program (Calculate For may be read-only). */
+  async expectCsaQuickQuoteDynamicFieldsVisible(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect CSA Quick Quote dynamic finance fields visible");
+    await this.waitForQuickQuoteFinancePanelReady(quoteIndex);
+
+    const form = quoteIndex === 0 ? this.quickQuoteForm : this.quoteForm(quoteIndex);
+    await expect.soft(form.getByText(/Calculate\s+For/i).first()).toBeVisible({ timeout: 15_000 });
+
+    await expect
+      .poll(async () => {
+        const label = (await this.readCalculateForOnQuote(quoteIndex)).trim();
+        return label.length > 0 && !/^--\s*select/i.test(label);
+      }, { timeout: 30_000 })
+      .toBeTruthy();
+
+    const calcForTrigger =
+      quoteIndex === 0 ? this.calculateForDropdownTrigger : this.calculateForTriggerOnQuote(quoteIndex);
+    if (await calcForTrigger.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect.soft(calcForTrigger).toBeVisible();
+    }
+
+    const cashPrice = quoteIndex === 0 ? this.cashPriceInput : this.cashPriceInputOnQuote(quoteIndex);
+    const depositPct =
+      quoteIndex === 0
+        ? this.depositPercentInput
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//label[starts-with(normalize-space(.), 'Deposit')]/following::input[@id='percent'][1]",
+          );
+    const depositUsd =
+      quoteIndex === 0
+        ? this.depositDollarInput
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//label[starts-with(normalize-space(.), 'Deposit')]/following::input[@id='amount'][1]",
+          );
+    const interest =
+      quoteIndex === 0
+        ? this.interestRatePercentInput
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//label[contains(normalize-space(.), 'Interest Rate')]/following::input[@id='percent'][1]",
+          );
+    const freqTrigger =
+      quoteIndex === 0 ? this.frequencyDropdownTrigger : this.frequencyTriggerOnQuote(quoteIndex);
+    const balloonPct =
+      quoteIndex === 0
+        ? this.balloonPercentInput
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//label[starts-with(normalize-space(.), 'Balloon')]/following::input[@id='percent'][1]",
+          );
+    const balloonUsd =
+      quoteIndex === 0
+        ? this.balloonDollarInput
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//label[starts-with(normalize-space(.), 'Balloon')]/following::input[@id='amount'][1]",
+          );
+    const fixed =
+      quoteIndex === 0
+        ? this.fixedCheckbox
+        : form
+            .locator("label")
+            .filter({ hasText: /^\s*Balloon/i })
+            .first()
+            .locator("xpath=following::p-checkbox[.//label[contains(normalize-space(.),'Fixed')]][1]")
+            .first();
+
+    await expect.soft(cashPrice).toBeVisible({ timeout: 30_000 });
+    await expect.soft(depositPct).toBeVisible();
+    await expect.soft(depositUsd).toBeVisible();
+    await expect.soft(interest).toBeVisible();
+
+    const termsDropdown =
+      quoteIndex === 0
+        ? this.termsMonthsDropdownTrigger
+        : this.termsDropdownTriggerOnQuote(quoteIndex);
+    const termsInput =
+      quoteIndex === 0
+        ? this.termsMonthsInput
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//label[contains(normalize-space(.), 'Terms (Months)')]/following::input[@role='spinbutton' and not(@id='percent')][1]",
+          );
+    const termsAsDropdown = await termsDropdown.isVisible({ timeout: 30_000 }).catch(() => false);
+    const termsAsInput =
+      !termsAsDropdown && (await termsInput.isVisible({ timeout: 15_000 }).catch(() => false));
+    await expect.soft(termsAsDropdown || termsAsInput).toBe(true);
+
+    await expect.soft(freqTrigger).toBeVisible();
+    await expect.soft(balloonPct).toBeVisible();
+    await expect.soft(balloonUsd).toBeVisible();
+    await expect.soft(fixed).toBeVisible();
+  }
+
+  private async readResolvedProgramLabel(quoteIndex: number, host?: Locator): Promise<string> {
+    const programHost =
+      host ??
+      (quoteIndex === 0
+        ? this.quickQuoteForm.locator(
+            "xpath=.//label[contains(normalize-space(.), 'Program')]/following::p-dropdown[1]",
+          )
+        : this.programDropdownOnQuote(quoteIndex));
+    const fromLabel = (await this.readSelectedProgramLabel(quoteIndex)).trim();
+    if (fromLabel.length > 0) {
+      return fromLabel;
+    }
+    const combobox = programHost.getByRole("combobox").first();
+    return ((await combobox.getAttribute("aria-label").catch(() => "")) ?? "").trim();
+  }
+
+  private async isProgramDropdownLocked(host: Locator): Promise<boolean> {
+    const hostDisabled = await host
+      .evaluate((el) => el.classList.contains("p-disabled"))
+      .catch(() => false);
+    const comboboxDisabled = await host
+      .getByRole("combobox")
+      .first()
+      .isDisabled()
+      .catch(() => false);
+    return hostDisabled || comboboxDisabled;
+  }
+
+  private programLabelMatches(expected: string, actual: string): boolean {
+    const e = expected.trim();
+    const a = actual.trim();
+    if (!e || !a) {
+      return false;
+    }
+    return a === e || a.includes(e) || e.includes(a);
   }
 
   async selectDealer(dealer: string): Promise<void> {
@@ -2545,7 +2795,11 @@ export class DOQuickQuotePage extends BasePage {
     return ((await this.assetTypeDropdownTrigger.textContent()) ?? "").trim();
   }
 
-  async readSelectedProgramLabel(quoteIndex = 0): Promise<string> {
+  async readSelectedProgramLabel(
+    quoteIndex = 0,
+    opts?: { comboboxTimeoutMs?: number },
+  ): Promise<string> {
+    const comboboxTimeoutMs = opts?.comboboxTimeoutMs ?? 5_000;
     const host =
       quoteIndex === 0
         ? this.quickQuoteForm.locator(
@@ -2553,7 +2807,7 @@ export class DOQuickQuotePage extends BasePage {
           )
         : this.programDropdownOnQuote(quoteIndex);
     const combobox = host.getByRole("combobox").first();
-    if (await combobox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    if (await combobox.isVisible({ timeout: comboboxTimeoutMs }).catch(() => false)) {
       return (
         (await combobox.textContent())?.trim() ??
         (await combobox.getAttribute("aria-label"))?.trim() ??

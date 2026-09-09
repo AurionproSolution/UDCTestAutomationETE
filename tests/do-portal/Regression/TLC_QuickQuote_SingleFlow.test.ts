@@ -73,9 +73,7 @@ test(
     // -------------------------------------------------------------------------
     // PDF: select program; pricing fields appear
     // -------------------------------------------------------------------------
-    if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-      await quickQuotePage.selectProgram(TLC_QQ_PROGRAM);
-    }
+    await quickQuotePage.selectProgramIfNeeded(TLC_QQ_PROGRAM);
     await expect.soft(quickQuotePage.calculateForDropdownTrigger).toBeVisible();
     await expect.soft(quickQuotePage.cashPriceInput).toBeVisible();
     await expect.soft(quickQuotePage.depositPercentInput).toBeVisible();

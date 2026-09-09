@@ -62,23 +62,11 @@ async function selectTlProductAndProgram(assetDetailsPage: DOAssetDetailsPage): 
 }
 
 async function selectTlProductAndProgramOnQuickQuote(
-  page: Page,
   quickQuotePage: DOQuickQuotePage,
 ): Promise<void> {
   await quickQuotePage.selectProduct(TL_SQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-    await quickQuotePage.programDropdownTrigger.click();
-    await expect.soft(page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
-    const exact = page.getByRole("option", { name: TL_SQ_PROGRAM, exact: true });
-    if (await exact.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await exact.click();
-    } else {
-      const termLoan = page.getByRole("option").filter({ hasText: /Term Loan/i }).first();
-      await termLoan.click({ timeout: 10_000 });
-    }
-    await page.keyboard.press("Escape");
-  }
+  await quickQuotePage.selectProgramIfNeeded(TL_SQ_PROGRAM);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
 }
 
@@ -98,7 +86,7 @@ async function openTlStandardQuoteFromQuickQuote(
   await dashboardPage.selectDealer(TLC_DEALER);
   await quickQuotePage.openQuickQuote();
   await expect.soft(quickQuotePage.quickQuoteRoot).toBeVisible();
-  await selectTlProductAndProgramOnQuickQuote(page, quickQuotePage);
+  await selectTlProductAndProgramOnQuickQuote(quickQuotePage);
   await quickQuotePage.enterCashPrice(opts?.cashPrice ?? "$20,000");
   await quickQuotePage.selectFrequency("Monthly");
   await quickQuotePage.enterInterestRatePercent("9");

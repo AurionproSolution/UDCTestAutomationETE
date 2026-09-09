@@ -69,9 +69,7 @@ export async function openFlQuickQuoteFromDashboard(page: Page): Promise<{
 export async function selectFlProductAndProgram(quickQuotePage: DOQuickQuotePage): Promise<void> {
   await quickQuotePage.selectProduct(FL_SQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  if (await quickQuotePage.programDropdownTrigger.isEnabled().catch(() => false)) {
-    await quickQuotePage.selectProgram(FL_SQ_PROGRAM);
-  }
+  await quickQuotePage.selectProgramIfNeeded(FL_SQ_PROGRAM);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
 }
 

@@ -70,14 +70,12 @@ async function openQuickQuoteFromDashboard(page: Page): Promise<{
 }
 
 async function selectCsaProductAndProgram(
-  page: Page,
+  _page: Page,
   quickQuotePage: DOQuickQuotePage,
 ): Promise<void> {
   await quickQuotePage.selectProduct(CSA_QQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-    await quickQuotePage.selectProgram(CSA_QQ_PROGRAM);
-  }
+  await quickQuotePage.selectProgramIfNeeded(CSA_QQ_PROGRAM);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
 }
 
@@ -196,23 +194,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       await selectCsaProductAndProgram(page, quickQuotePage);
-
-      await expect.soft(quickQuotePage.calculateForDropdownTrigger).toBeVisible();
-      await expect.soft(quickQuotePage.cashPriceInput).toBeVisible();
-      await expect.soft(quickQuotePage.depositPercentInput).toBeVisible();
-      await expect.soft(quickQuotePage.depositDollarInput).toBeVisible();
-      await expect.soft(quickQuotePage.interestRatePercentInput).toBeVisible();
-      const termsAsDropdown = await quickQuotePage.termsMonthsDropdownTrigger
-        .isVisible({ timeout: 30_000 })
-        .catch(() => false);
-      const termsAsInput =
-        !termsAsDropdown &&
-        (await quickQuotePage.termsMonthsInput.isVisible({ timeout: 15_000 }).catch(() => false));
-      await expect.soft(termsAsDropdown || termsAsInput).toBe(true);
-      await expect.soft(quickQuotePage.frequencyDropdownTrigger).toBeVisible();
-      await expect.soft(quickQuotePage.balloonPercentInput).toBeVisible();
-      await expect.soft(quickQuotePage.balloonDollarInput).toBeVisible();
-      await expect.soft(quickQuotePage.fixedCheckbox).toBeVisible();
+      await quickQuotePage.expectCsaQuickQuoteDynamicFieldsVisible();
     },
   );
 
@@ -373,7 +355,6 @@ test.describe("Quick Quote - CSA @do @regression", () => {
       await quickQuotePage.selectCalculateFor("Deposit");
       await quickQuotePage.dismissQuickQuoteDropdownOverlays();
       await expect.soft(quickQuotePage.depositPercentInput).not.toBeEditable({ timeout: 15_000 });
-      await quickQuotePage.enterCashPrice("$20,000");
       await quickQuotePage.enterInterestRatePercent("9");
       await quickQuotePage.enterTermsMonths("36");
       await quickQuotePage.selectFrequency("Monthly");

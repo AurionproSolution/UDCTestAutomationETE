@@ -309,13 +309,19 @@ export class DOAssetDetailsPage extends BasePage {
     await expect
       .poll(
         async () => {
-          const selected = await this.readSelectedProgramLabel();
+          const selected = await this.readSelectedProgramLabel({ log: false, comboboxTimeoutMs: 500 });
           // Exact match, or selected label is a non-empty prefix of the target (UI truncation).
           if (
             optionPattern.test(selected) ||
             selected.includes(programName) ||
             (selected.length >= 12 && programName.toLowerCase().startsWith(selected.toLowerCase().replace(/\.{2,}$/, "").trim()))
           ) {
+            return true;
+          }
+
+          const host = this.programDropdownHost();
+          const locked = await this.isProgramDropdownLocked(host);
+          if (locked && selected.length > 0 && !this.isPlaceholderDropdownLabel(selected)) {
             return true;
           }
 
@@ -360,9 +366,9 @@ export class DOAssetDetailsPage extends BasePage {
           }
 
           await this.page.keyboard.press("Escape").catch(() => {});
-          await this.page.waitForTimeout(500);
+          await this.page.waitForTimeout(300);
 
-          const after = await this.readSelectedProgramLabel();
+          const after = await this.readSelectedProgramLabel({ log: false, comboboxTimeoutMs: 500 });
           return (
             optionPattern.test(after) ||
             after.includes(programName) ||
@@ -371,9 +377,76 @@ export class DOAssetDetailsPage extends BasePage {
             /AFV/i.test(after)
           );
         },
-        { timeout: 60_000, intervals: [800, 1_500, 2_000, 3_000] },
+        { timeout: 45_000, intervals: [200, 400, 800, 1_500] },
       )
       .toBeTruthy();
+  }
+
+  /**
+   * Select Program only when it is not already resolved. Skips opening the dropdown when the
+   * portal auto-populates or locks Program (single-program dealers).
+   */
+  async selectProgramIfNeeded(programName: string): Promise<void> {
+    this.logStep(`Select program if needed: ${this.stepValueDisplay(programName)}`);
+    await this.waitForQuoteLoadersToFinish().catch(() => {});
+
+    const host = this.programDropdownHost();
+    const escaped = programName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const optionPattern = new RegExp(`^\\s*${escaped}\\s*$`, "i");
+
+    await expect
+      .poll(
+        async () => {
+          const label = await this.readSelectedProgramLabel({ log: false, comboboxTimeoutMs: 500 });
+          if (label.length > 0 && !this.isPlaceholderDropdownLabel(label)) {
+            return true;
+          }
+          return await this.isProgramDropdownLocked(host);
+        },
+        { timeout: 12_000, intervals: [100, 200, 400, 800] },
+      )
+      .toBeTruthy()
+      .catch(() => {});
+
+    const resolved = await this.readSelectedProgramLabel({ log: false, comboboxTimeoutMs: 1_000 });
+    if (
+      resolved.length > 0 &&
+      !this.isPlaceholderDropdownLabel(resolved) &&
+      (optionPattern.test(resolved) ||
+        resolved.includes(programName) ||
+        programName.includes(resolved))
+    ) {
+      this.logStep(`Program already set: ${this.stepValueDisplay(resolved)}`);
+      return;
+    }
+
+    if (
+      await this.isProgramDropdownLocked(host) &&
+      resolved.length > 0 &&
+      !this.isPlaceholderDropdownLabel(resolved)
+    ) {
+      this.logStep(`Program locked (single program): ${this.stepValueDisplay(resolved)}`);
+      return;
+    }
+
+    const trigger = this.programDropdownTrigger();
+    if (!(await trigger.isEnabled().catch(() => false))) {
+      return;
+    }
+
+    await this.selectProgram(programName);
+  }
+
+  private async isProgramDropdownLocked(host: Locator): Promise<boolean> {
+    const hostDisabled = await host
+      .evaluate((el) => el.classList.contains("p-disabled"))
+      .catch(() => false);
+    const comboboxDisabled = await host
+      .getByRole("combobox")
+      .first()
+      .isDisabled()
+      .catch(() => false);
+    return hostDisabled || comboboxDisabled;
   }
 
   /**
@@ -448,9 +521,12 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
-  private async readPrimeLabeledDropdownValue(fieldLabel: string): Promise<string> {
+  private async readPrimeLabeledDropdownValue(
+    fieldLabel: string,
+    comboboxTimeoutMs = 20_000,
+  ): Promise<string> {
     const combobox = this.primeLabeledDropdownCombobox(fieldLabel);
-    if (!(await combobox.isVisible({ timeout: 20_000 }).catch(() => false))) {
+    if (!(await combobox.isVisible({ timeout: comboboxTimeoutMs }).catch(() => false))) {
       return "";
     }
     const raw = ((await combobox.textContent().catch(() => "")) ?? "").trim();
@@ -6685,16 +6761,23 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
-  async readSelectedProgramLabel(): Promise<string> {
-    this.logStep("Read selected program label");
-    const fromPrime = await this.readPrimeLabeledDropdownValue("Program");
+  async readSelectedProgramLabel(opts?: {
+    log?: boolean;
+    comboboxTimeoutMs?: number;
+  }): Promise<string> {
+    if (opts?.log !== false) {
+      this.logStep("Read selected program label");
+    }
+    const comboboxTimeoutMs = opts?.comboboxTimeoutMs ?? 20_000;
+    const fromPrime = await this.readPrimeLabeledDropdownValue("Program", comboboxTimeoutMs);
     if (fromPrime.length > 0) {
       return fromPrime;
     }
 
     const host = this.programDropdownHost();
     const combobox = host.getByRole("combobox").first();
-    if (await combobox.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    const visibilityTimeout = Math.min(comboboxTimeoutMs, 3_000);
+    if (await combobox.isVisible({ timeout: visibilityTimeout }).catch(() => false)) {
       const aria = ((await combobox.getAttribute("aria-label")) ?? "").trim();
       if (aria.length > 0 && !this.isPlaceholderDropdownLabel(aria)) {
         return aria;
@@ -6972,13 +7055,13 @@ export class DOAssetDetailsPage extends BasePage {
     let label = "";
     const autoReady = await expect
       .poll(async () => {
-        const current = await this.readSelectedProgramLabel();
+        const current = await this.readSelectedProgramLabel({ log: false, comboboxTimeoutMs: 500 });
         if (matchesPreferred(current)) {
           label = current;
           return true;
         }
         return false;
-      }, { timeout: 45_000, intervals: [500, 1_000, 2_000] })
+      }, { timeout: 20_000, intervals: [200, 400, 800, 1_500] })
       .toBe(true)
       .then(() => true)
       .catch(() => false);

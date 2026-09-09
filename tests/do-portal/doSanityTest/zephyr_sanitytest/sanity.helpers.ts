@@ -146,9 +146,7 @@ export async function openSanityQuickQuote(page: Page): Promise<{
 export async function selectCsaQuickQuoteProductAndProgram(quickQuote: DOQuickQuotePage): Promise<void> {
   await quickQuote.selectProduct(CSA_QQ_PRODUCT);
   await quickQuote.dismissQuickQuoteDropdownOverlays();
-  if (await quickQuote.programDropdownTrigger.isEnabled().catch(() => false)) {
-    await quickQuote.selectProgram(CSA_QQ_PROGRAM);
-  }
+  await quickQuote.selectProgramIfNeeded(CSA_QQ_PROGRAM);
   await quickQuote.dismissQuickQuoteDropdownOverlays();
 }
 

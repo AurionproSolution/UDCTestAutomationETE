@@ -51,40 +51,27 @@ export async function openQuickQuoteFromDashboard(page: Page): Promise<{
 }
 
 export async function selectCsaBProductAndProgram(
-  page: Page,
+  _page: Page,
   quickQuotePage: DOQuickQuotePage,
 ): Promise<void> {
   await quickQuotePage.selectProduct(CSA_B_QQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
 
-  if (await quickQuotePage.programDropdownTrigger.isEnabled().catch(() => false)) {
-    const preferred = [
-      process.env.CSA_B_QQ_PROGRAM?.trim() ?? "",
-      CSA_B_QQ_PROGRAM,
-      CSA_B_QQ_PROGRAM_ALT,
-      CSA_B_QQ_PROGRAM_FALLBACK,
-    ].filter(Boolean);
-    let selected = false;
-    for (const program of preferred) {
-      try {
-        await quickQuotePage.selectProgram(program);
-        selected = true;
-        break;
-      } catch {
-        /* try next */
-      }
-    }
-    if (!selected) {
-      await quickQuotePage.programDropdownTrigger.click();
-      await expect.soft(page.getByRole("option").first()).toBeVisible({ timeout: 15_000 });
-      const csaBOption = page
-        .getByRole("option")
-        .filter({ hasText: /CSA-B|MYUDC-B|Business|Assigned|MV/i })
-        .first();
-      await csaBOption.click({ timeout: 10_000 });
-      await page.keyboard.press("Escape");
+  const preferred = [
+    process.env.CSA_B_QQ_PROGRAM?.trim() ?? "",
+    CSA_B_QQ_PROGRAM,
+    CSA_B_QQ_PROGRAM_ALT,
+    CSA_B_QQ_PROGRAM_FALLBACK,
+  ].filter(Boolean);
+
+  for (const program of preferred) {
+    await quickQuotePage.selectProgramIfNeeded(program);
+    const current = (await quickQuotePage.readSelectedProgramLabel()).trim();
+    if (current.length > 0 && !quickQuotePage.isPlaceholderDropdownLabel(current)) {
+      break;
     }
   }
+
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
   await quickQuotePage.waitForLoadingComplete();
 }

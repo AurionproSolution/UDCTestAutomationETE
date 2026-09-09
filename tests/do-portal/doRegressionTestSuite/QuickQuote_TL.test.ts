@@ -59,27 +59,10 @@ async function openQuickQuoteFromDashboard(page: Page): Promise<{
   return { dashboardPage, quickQuotePage };
 }
 
-async function selectTlProductAndProgram(
-  page: Page,
-  quickQuotePage: DOQuickQuotePage,
-): Promise<void> {
+async function selectTlProductAndProgram(quickQuotePage: DOQuickQuotePage): Promise<void> {
   await quickQuotePage.selectProduct(TL_QQ_PRODUCT);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  await quickQuotePage.waitForLoadingComplete();
-  const programDropdown = quickQuotePage.programDropdownTrigger.locator(
-    "xpath=ancestor::p-dropdown[1]",
-  );
-  const programCombobox = programDropdown.getByRole("combobox").first();
-  await expect
-    .poll(
-      async () => {
-        return (
-          ((await programCombobox.getAttribute("aria-label")) ?? (await programCombobox.textContent()))?.trim() ?? ""
-        );
-      },
-      { timeout: 30_000 },
-    )
-    .toBe(TL_QQ_PROGRAM);
+  await quickQuotePage.selectProgramIfNeeded(TL_QQ_PROGRAM);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
   await quickQuotePage.waitForLoadingComplete();
 }
@@ -115,7 +98,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
       await quickQuotePage.expectTlQuickQuoteInitialFieldLayout();
     },
   );
@@ -126,7 +109,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
 
       const calculateForLabel = await quickQuotePage.readCalculateForOnQuote(0);
       expect.soft(calculateForLabel).toMatch(/Payment/i);
@@ -152,7 +135,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
 
       await quickQuotePage.expectCashPriceDefaultsBlank();
       await quickQuotePage.ensureCashPriceLeftBlank();
@@ -172,7 +155,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
       await quickQuotePage.enterCashPrice("$20,000");
       await quickQuotePage.enterDepositPercent("10%");
       await expect
@@ -193,7 +176,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
       await quickQuotePage.enterCashPrice("$20,000");
       await quickQuotePage.enterBalloonPercent("20%");
       await expect
@@ -214,7 +197,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
 
       const rate = (await quickQuotePage.interestRatePercentInput.inputValue().catch(() => "")).trim();
       expect.soft(rate.length).toBeGreaterThan(0);
@@ -229,7 +212,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
 
       const term = await readSelectedTermMonths(quickQuotePage);
       if (term.length > 0) {
@@ -257,7 +240,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
 
       await quickQuotePage.expectFrequencyDefaultsFromProgram();
 
@@ -277,7 +260,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
       await quickQuotePage.enterCashPrice("$20,000");
       await quickQuotePage.enterDepositDollars("$2,000");
       await quickQuotePage.selectFrequency("Monthly");
@@ -303,7 +286,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(600_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
       const cashBefore = (await quickQuotePage.cashPriceInput.inputValue().catch(() => "")).trim();
 
       await calculateTlQuickQuote(quickQuotePage);
@@ -358,7 +341,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
 
       await fillAllTlQuickQuoteFields(quickQuotePage);
       await quickQuotePage.clickCalculate();
@@ -380,7 +363,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(600_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
       await calculateTlQuickQuote(quickQuotePage);
 
       await quickQuotePage.clickCreateQuote();
@@ -412,7 +395,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectTlProductAndProgram(page, quickQuotePage);
+      await selectTlProductAndProgram(quickQuotePage);
       await calculateTlQuickQuote(quickQuotePage);
 
       await expect.soft(quickQuotePage.printButton).toBeVisible();

@@ -166,9 +166,7 @@ test(
     // PDF: select program; pricing fields appear
     // FL: Initial Lease, Lease Payment display, Residual % / $; deposit/balloon may be hidden.
     // -------------------------------------------------------------------------
-    if (await quickQuotePage.programDropdownTrigger.isEnabled()) {
-      await quickQuotePage.selectProgram(FL_QQ_PROGRAM);
-    }
+    await quickQuotePage.selectProgramIfNeeded(FL_QQ_PROGRAM);
     if ((await quickQuotePage.calculateForDropdownTrigger.count()) > 0) {
       await expect(quickQuotePage.calculateForDropdownTrigger).toBeVisible();
       const calculateForHost = quickQuotePage.quickQuoteForm.locator(

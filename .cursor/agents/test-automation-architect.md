@@ -189,6 +189,105 @@ If catalog is not enabled, tell the user catalog is not configured in `automatio
 
 ---
 
+### Path E — Create a new Playwright framework from a UI URL
+
+Use this when the user wants to scaffold a brand-new Playwright TypeScript framework from the target application URL. Provide the following copy-paste block for the main chat; replace `[PASTE_UI_URL_HERE]` with the real URL.
+
+```text
+You are a Playwright Test Automation Architect. Create a new, production-ready Playwright TypeScript automation framework for the web application at the URL provided below.
+
+Target URL: [PASTE_UI_URL_HERE]
+
+Requirements:
+1. Create a new folder under the current workspace named after the application (e.g., `{app-name}-playwright-e2e`).
+2. Initialize the project with:
+   - `package.json` with dependencies: `@playwright/test`, `typescript`, `ortoni-report`, `dotenv`, `@types/node`
+   - `tsconfig.json` for Node/Playwright
+   - `playwright.config.ts` configured with:
+     * The provided URL as the `baseURL`
+     * Chromium as the default project
+     * `ortoni-report` as the primary reporter (plus `list` and `html` as secondary)
+     * Screenshots, videos, and traces retained on failure
+     * `headless: false` for local runs
+3. Use this folder structure:
+   ```
+   {folder-name}/
+   ├── .cursor/
+   │   ├── agents/
+   │   │   ├── test-automation-architect.md
+   │   │   └── test-case-writer.md
+   │   ├── project/
+   │   │   └── automation-blueprint.md
+   │   └── rules/
+   │       └── jira-issue-test-gate.mdc
+   ├── src/
+   │   ├── pages/
+   │   │   ├── common/
+   │   │   │   ├── BasePage.ts
+   │   │   │   └── selectors.ts
+   │   │   └── login/
+   │   │       └── LoginPage.ts
+   │   ├── fixtures/
+   │   │   └── test.ts
+   │   ├── utils/
+   │   │   └── locatorBuilders.ts
+   │   └── config/
+   │       └── env.ts
+   ├── tests/
+   │   ├── login/
+   │   │   └── login.test.ts
+   │   └── smoke/
+   │       └── smoke.test.ts
+   ├── docs/
+   │   └── framework-conventions.md
+   ├── playwright.config.ts
+   ├── package.json
+   ├── tsconfig.json
+   └── .env.example
+   ```
+4. Create `src/pages/common/BasePage.ts` with:
+   - Constructor accepting `Page` and optional `baseURL`
+   - Common methods: `goto(path?)`, `waitForAppReady()`, `waitUntilNoLoader()`, `clickWhenReady()`, `fillWhenReady()`, `getToastMessage()`
+   - Common locators: loader overlay, spinner, toast, generic table rows
+5. Create `src/utils/locatorBuilders.ts` with label-based helpers: `byLabel`, `dropdownByLabel`, `inputByLabel`, `buttonByLabel`, `comboboxByLabel`, `dialogByTitle`, `optionByLabel`, `toastByText`.
+6. Create `src/pages/common/selectors.ts` with a shared selector registry for:
+   - App shells (e.g., `APP_SHELL`, `LOGIN_SHELL`)
+   - Common buttons (`NEXT_BUTTON`, `SAVE_BUTTON`, `SUBMIT_BUTTON`)
+   - PrimeNG/generic component selectors (`DROPDOWN`, `DROPDOWN_PANEL`, `LISTBOX`, `OPTION`, `CALENDAR`, `DATA_TABLE`)
+   - Loader/spinner selectors (`LOADER_OVERLAY`, `LOADER_SPINNER`)
+7. Create `src/fixtures/test.ts` extending Playwright's `test` fixture with:
+   - `loginPage` fixture
+   - A `basePage` fixture
+   - Optional `storageState` support via env
+8. Create `src/config/env.ts` that reads `BASE_URL`, `USERNAME`, `PASSWORD`, `TEST_ENV` from environment variables and exports typed config.
+9. Create `tests/login/login.test.ts` as a sample spec using POM fixtures and label-based locators.
+10. Create `tests/smoke/smoke.test.ts` as a simple smoke test that navigates to the base URL and verifies the page title or a visible heading.
+11. Create `docs/framework-conventions.md` with:
+    - Framework layer responsibilities
+    - Selector strategy (prefer `getByRole`, `getByLabel`, `data-testid`; avoid brittle XPath)
+    - POM conventions
+    - Fixture usage
+    - Test tags (`@smoke`, `@regression`, `@sanity`)
+    - How to add new modules/page objects
+12. Create `.cursor/project/automation-blueprint.md` with:
+    - Project name, module table (at least `login` and `smoke`), paths, conventions, URL helpers, and reference tests
+    - JIRA six-block template
+13. Create `package.json` scripts:
+    - `test`: `playwright test`
+    - `test:headed`: `playwright test --headed`
+    - `test:debug`: `playwright test --debug`
+    - `report`: `npx playwright show-report my-report`
+    - `clean`: `rimraf test-results my-report ortoni-report`
+14. Install dependencies with `npm install` and run `npx playwright install chromium`.
+15. After installation, run `npx playwright test --list` to verify the framework parses and lists tests without TypeScript errors.
+
+Do NOT write brittle XPath or index-based selectors unless there is no semantic alternative. Use the provided URL to infer the app/module name for folder naming.
+```
+
+**After the framework is created**, hand off to **Path B** (Planner → Generator) or **Path A** (Test Case Writer) for the first real tests.
+
+---
+
 ## How you respond in chat
 
 1. **Bootstrap** — confirm blueprint was read (or stop with setup instructions).

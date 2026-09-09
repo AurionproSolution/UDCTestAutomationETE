@@ -255,18 +255,20 @@ async function readQuoteProductLabelFromShell(page: Page): Promise<string> {
 async function waitForQuoteProgramLabel(
   page: Page,
   assetDetailsPage: DOAssetDetailsPage,
-  timeoutMs = 60_000,
+  timeoutMs = 20_000,
 ): Promise<string> {
   let resolved = "";
   await expect
     .poll(
       async () => {
         resolved =
-          (await assetDetailsPage.readSelectedProgramLabel().catch(() => "")).trim() ||
+          (await assetDetailsPage
+            .readSelectedProgramLabel({ log: false, comboboxTimeoutMs: 500 })
+            .catch(() => "")).trim() ||
           (await readQuoteProgramLabelFromShell(page)).trim();
         return resolved.length > 0 ? resolved : null;
       },
-      { timeout: timeoutMs, intervals: [300, 500, 1_000, 2_000] },
+      { timeout: timeoutMs, intervals: [100, 200, 400, 800] },
     )
     .not.toBeNull()
     .catch(() => {});
@@ -323,8 +325,8 @@ export async function ensureCsaProductAndProgram(
 
     for (const program of candidates) {
       try {
-        await assetDetailsPage.chooseProgram(program);
-        programLabel = await waitForQuoteProgramLabel(page, assetDetailsPage, 20_000);
+        await assetDetailsPage.selectProgramIfNeeded(program);
+        programLabel = await waitForQuoteProgramLabel(page, assetDetailsPage, 15_000);
         if (isCsaProgramLabel(programLabel)) {
           break;
         }
@@ -337,7 +339,7 @@ export async function ensureCsaProductAndProgram(
       const options = await assetDetailsPage.listProgramDropdownOptions().catch(() => []);
       const csaOption = options.find((o) => isCsaProgramLabel(o));
       if (csaOption) {
-        await assetDetailsPage.chooseProgram(csaOption);
+        await assetDetailsPage.selectProgramIfNeeded(csaOption);
         programLabel = csaOption;
       }
     }

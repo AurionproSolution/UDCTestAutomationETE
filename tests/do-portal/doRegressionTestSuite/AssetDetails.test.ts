@@ -12,11 +12,12 @@ import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDeta
 import {
   addAssetAssetTypeSelectLink,
   addAssetHost,
+  standardQuoteRoot as addAssetStandardQuoteRoot,
   addAssetTypeFromHierarchicalPopup,
-  closeAddAssetEditorAndReturnToQuote,
   clearAddAssetAssetType,
   clickPrintDocumentsOnAddAsset,
-  expectAddAssetFieldVisible,
+  closeAddAssetEditorAndReturnToQuote,
+  enablePrivateSaleOnAddAsset,
   expectAddAssetAssetTypeSearchResults,
   expectAddAssetCategoryLayout,
   expectAddAssetValidationMessage,
@@ -28,8 +29,6 @@ import {
   fillMinimalOtherAsset,
   fillMinimalPlantAsset,
   fillMinimalVehicleAsset,
-  submitAddAssetForValidation,
-  enablePrivateSaleOnAddAsset,
   openAddAssetEditor,
   openAddAssetEditorViaSearchDialog,
   openAddAssetForCategory,
@@ -44,7 +43,7 @@ import {
   selectAssetTypeHierarchicalLevels,
   selectCsaProductAndProgram as selectCsaProductProgram,
   selectTlProductAndProgram,
-  standardQuoteRoot as addAssetStandardQuoteRoot,
+  submitAddAssetForValidation,
 } from "./assetDetailsAddAsset.helpers";
 
 /** SIT (Armstrong Prestige Wellington): Webform program is not offered; use dealer CSA MV. */
@@ -97,14 +96,22 @@ async function waitForProductProgramSpinnerThenAssetTypePopulated(
     ".app-loader-overlay, .p-progress-spinner, .p-progressspinner, .p-blockui, [class*='p-progress']",
   );
 
-  await loaders.first().waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
+  await loaders
+    .first()
+    .waitFor({ state: "visible", timeout: 20_000 })
+    .catch(() => {});
 
   await expect
     .poll(
       async () => {
         const count = await loaders.count();
         for (let i = 0; i < count; i++) {
-          if (await loaders.nth(i).isVisible().catch(() => false)) {
+          if (
+            await loaders
+              .nth(i)
+              .isVisible()
+              .catch(() => false)
+          ) {
             return false;
           }
         }
@@ -148,7 +155,9 @@ async function readAssetTypeValue(page: Page): Promise<string> {
     .filter({ hasText: /^Asset Type/i })
     .first();
   if (await labelRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    const row = labelRow.locator("xpath=ancestor::div[contains(@class,'col-') or contains(@class,'grid')][1]");
+    const row = labelRow.locator(
+      "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'grid')][1]",
+    );
     return ((await row.textContent()) ?? "").replace(/Asset Type\s*\*?/i, "").trim();
   }
   return "";
@@ -195,7 +204,11 @@ async function clickSearchAndAddAssetFromInsuranceSummary(page: Page): Promise<v
   const trigger = summaryDlg
     .getByRole("link", { name: /Search\s*&\s*Add\s+Asset/i })
     .or(summaryDlg.getByRole("button", { name: /Search\s*&\s*Add\s+Asset/i }))
-    .or(summaryDlg.locator("a, button, [role='button']").filter({ hasText: /Search\s*&\s*Add\s+Asset/i }))
+    .or(
+      summaryDlg
+        .locator("a, button, [role='button']")
+        .filter({ hasText: /Search\s*&\s*Add\s+Asset/i }),
+    )
     .first();
   await trigger.scrollIntoViewIfNeeded();
   await expect(trigger).toBeVisible({ timeout: 20_000 });
@@ -237,7 +250,14 @@ async function clickSearchInSearchAddAssetDialog(page: Page): Promise<void> {
 async function addMinimalUsedAsset(
   assetDetailsPage: DOAssetDetailsPage,
   addAssetPage: DOAddAssetPage,
-  opts?: { make?: string; model?: string; variant?: string; year?: string; rego?: string; vin?: string },
+  opts?: {
+    make?: string;
+    model?: string;
+    variant?: string;
+    year?: string;
+    rego?: string;
+    vin?: string;
+  },
 ): Promise<void> {
   await assetDetailsPage.enterAsset("Car and Light Commercial /");
   await assetDetailsPage.selectCondition("Used");
@@ -433,7 +453,10 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
         .first();
       if (await searchByCombo.isVisible({ timeout: 10_000 }).catch(() => false)) {
         await searchByCombo.click();
-        await page.getByRole("option", { name: /Rego Number/i }).first().click({ timeout: 10_000 });
+        await page
+          .getByRole("option", { name: /Rego Number/i })
+          .first()
+          .click({ timeout: 10_000 });
         await page.keyboard.press("Escape").catch(() => {});
       }
 
@@ -451,7 +474,11 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
       await tradeDlg.getByRole("button", { name: /^Search$/i }).click({ timeout: 15_000 });
 
       await expect
-        .soft(tradeDlg.getByText(/Motocheck Successfully|Motochek Successfully|Successfully Executed/i).first())
+        .soft(
+          tradeDlg
+            .getByText(/Motocheck Successfully|Motochek Successfully|Successfully Executed/i)
+            .first(),
+        )
         .toBeVisible({ timeout: 90_000 });
 
       // Assert result **fields** are present with **some** populated data (do not assert exact Motochek values).
@@ -507,7 +534,7 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
         .or(page.getByRole("option", { name: /^VIN$/i }))
         .first()
         .click({ timeout: 10_000 });
-      await page.keyboard.press("Escape").catch(() => {});
+      //await page.keyboard.press("Escape").catch(() => {});
 
       /** PrimeNG `input#text` for **Enter Number** (same as UDP-T3698). */
       const enterNumber = tradeDlg
@@ -531,7 +558,12 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
             const n = await dialogs.count();
             const parts: string[] = [];
             for (let i = 0; i < n; i++) {
-              if (await dialogs.nth(i).isVisible().catch(() => false)) {
+              if (
+                await dialogs
+                  .nth(i)
+                  .isVisible()
+                  .catch(() => false)
+              ) {
                 parts.push((await dialogs.nth(i).innerText()) ?? "");
               }
             }
@@ -572,7 +604,10 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
         .getByRole("radio", { name: /Dealer Inventory/i })
         .check({ force: true })
         .catch(async () => {
-          await dlg.locator("label.p-radiobutton-label").filter({ hasText: /^Dealer Inventory$/i }).click();
+          await dlg
+            .locator("label.p-radiobutton-label")
+            .filter({ hasText: /^Dealer Inventory$/i })
+            .click();
         });
 
       await dlg.getByRole("button", { name: /^Search$/i }).click({ timeout: 15_000 });
@@ -649,11 +684,18 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
         .getByRole("radio", { name: /Dealer Inventory/i })
         .check({ force: true })
         .catch(async () => {
-          await dlg.locator("label.p-radiobutton-label").filter({ hasText: /^Dealer Inventory$/i }).click();
+          await dlg
+            .locator("label.p-radiobutton-label")
+            .filter({ hasText: /^Dealer Inventory$/i })
+            .click();
         });
 
       /** PrimeNG float-label grid: one `text` host per field; **Model** → `#text` input (unique vs `.or()` union). */
-      const modelInput = dlg.locator("text").filter({ hasText: /^Model$/i }).locator("#text").first();
+      const modelInput = dlg
+        .locator("text")
+        .filter({ hasText: /^Model$/i })
+        .locator("#text")
+        .first();
       await modelInput.waitFor({ state: "visible", timeout: 15_000 });
       await modelInput.fill("Toyota");
 
@@ -767,7 +809,9 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
       await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
 
       /** Copy = Font Awesome **fa-clone** on the summary row (not `fa-copy`). */
-      const copyIcon = summaryDlg.locator("i.fa-clone.cursor-pointer, i.fa-clone, i.fa-regular.fa-clone").first();
+      const copyIcon = summaryDlg
+        .locator("i.fa-clone.cursor-pointer, i.fa-clone, i.fa-regular.fa-clone")
+        .first();
       await expect.soft(copyIcon).toBeVisible({ timeout: 20_000 });
       await copyIcon.click({ timeout: 15_000 });
 
@@ -775,17 +819,30 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
       await addAssetPage.makeInputField.first().waitFor({ state: "visible", timeout: 45_000 });
       await expect.soft(page.getByText(/Add Asset/i).first()).toBeVisible({ timeout: 15_000 });
 
-      await expect.soft(addAssetPage.makeInputField.first()).toHaveValue(/Toyota/i, { timeout: 15_000 });
+      await expect
+        .soft(addAssetPage.makeInputField.first())
+        .toHaveValue(/Toyota/i, { timeout: 15_000 });
       await expect.soft(addAssetPage.modelInputField.first()).toHaveValue(/Hilux|Hillux/i);
       await expect.soft(addAssetPage.variantInputField.first()).toHaveValue(/Top/i);
       await expect.soft(addAssetPage.yearInputField.first()).toHaveValue("2025");
 
-      const assetVal = ((await addAssetPage.assetValueInputField.inputValue()) ?? "").replace(/[$,\s]/g, "");
+      const assetVal = ((await addAssetPage.assetValueInputField.inputValue()) ?? "").replace(
+        /[$,\s]/g,
+        "",
+      );
       expect.soft(assetVal.length).toBeGreaterThan(0);
       expect.soft(/1000|10000|630/i.test(assetVal)).toBeTruthy();
 
-      const regoVal = (await addAssetPage.regoNOInputField.first().inputValue().catch(() => "")) ?? "";
-      const vinVal = (await addAssetPage.vinInputField.first().inputValue().catch(() => "")) ?? "";
+      const regoVal =
+        (await addAssetPage.regoNOInputField
+          .first()
+          .inputValue()
+          .catch(() => "")) ?? "";
+      const vinVal =
+        (await addAssetPage.vinInputField
+          .first()
+          .inputValue()
+          .catch(() => "")) ?? "";
       /** Copy screen may **truncate** rego (e.g. `TG08BP` vs full `TG08BP5123`). */
       if (regoVal.trim().length > 0) {
         expect.soft(regoVal).toMatch(/TG08BP5123|TG08BP/i);
@@ -825,7 +882,9 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
         await searchBtn.click({ timeout: 15_000 });
       }
 
-      const populated = tradeDlg.getByText(/Make|Model|Year|Trade/i).or(tradeDlg.locator("input[value]"));
+      const populated = tradeDlg
+        .getByText(/Make|Model|Year|Trade/i)
+        .or(tradeDlg.locator("input[value]"));
       await expect.soft(populated.first()).toBeVisible({ timeout: 60_000 });
 
       await assetDetailsPage.closeSearchTradeInAssetDialog();
@@ -871,11 +930,21 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
       await expect.soft(page.getByText(/Cost\s+Of\s+Asset\s+is\s+required/i).first()).toBeVisible({
         timeout: 25_000,
       });
-      await expect.soft(page.getByText(/Year\s+is\s+required/i).first()).toBeVisible({ timeout: 15_000 });
-      await expect.soft(page.getByText(/Make\s+is\s+required/i).first()).toBeVisible({ timeout: 15_000 });
-      await expect.soft(page.getByText(/Model\s+is\s+required/i).first()).toBeVisible({ timeout: 15_000 });
+      await expect
+        .soft(page.getByText(/Year\s+is\s+required/i).first())
+        .toBeVisible({ timeout: 15_000 });
+      await expect
+        .soft(page.getByText(/Make\s+is\s+required/i).first())
+        .toBeVisible({ timeout: 15_000 });
+      await expect
+        .soft(page.getByText(/Model\s+is\s+required/i).first())
+        .toBeVisible({ timeout: 15_000 });
 
-      await page.getByRole("button", { name: /^Cancel$/i }).first().click({ timeout: 15_000 }).catch(() => {});
+      await page
+        .getByRole("button", { name: /^Cancel$/i })
+        .first()
+        .click({ timeout: 15_000 })
+        .catch(() => {});
       await assetDetailsPage.closeSearchTradeInAssetDialog().catch(() => {});
       await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
     },
@@ -937,7 +1006,10 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
 
       const dlg = await searchAddAssetDialog(page);
       const addAssetRadio = dlg.getByRole("radio", { name: /^Add Asset$/i }).first();
-      const addAssetLabel = dlg.locator("label, span").filter({ hasText: /^Add Asset$/i }).first();
+      const addAssetLabel = dlg
+        .locator("label, span")
+        .filter({ hasText: /^Add Asset$/i })
+        .first();
 
       if (await addAssetRadio.isVisible({ timeout: 8_000 }).catch(() => false)) {
         await expect.soft(addAssetRadio).toBeDisabled();
@@ -953,7 +1025,8 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
       } else {
         test.info().annotations.push({
           type: "note",
-          description: "Add Asset option not rendered as a separate radio on this AFV build — verify manually.",
+          description:
+            "Add Asset option not rendered as a separate radio on this AFV build — verify manually.",
         });
       }
 
@@ -980,10 +1053,10 @@ test.describe("Asset Details - Asset Summary @do @regression", () => {
 
       /** Asset Type often shows a **short** label (e.g. **GLX MANUAL**), not full make/model. */
       await expect
-        .poll(
-          async () => (await readAssetTypeValue(page)).trim(),
-          { timeout: 90_000, intervals: [400, 800, 1200] },
-        )
+        .poll(async () => (await readAssetTypeValue(page)).trim(), {
+          timeout: 90_000,
+          intervals: [400, 800, 1200],
+        })
         .toMatch(/GLX|MANUAL|IGNIS|Suzuki|SUZUKI|2024/i);
     },
   );
@@ -1019,7 +1092,10 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       const addAssetPage = await openAddAssetEditorViaSearchDialog(page, assetDetailsPage);
       await clearAddAssetAssetType(page);
       await addAssetPage.clickSummitButton();
-      await expectValidationMessage(page, /Asset Type.*required|Asset Type is required|select the asset type/i);
+      await expectValidationMessage(
+        page,
+        /Asset Type.*required|Asset Type is required|select the asset type/i,
+      );
       await addAssetPage.clickCrossButton().catch(() => {});
     },
   );
@@ -1118,7 +1194,9 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
         .first();
       if (await resetBtn.isVisible({ timeout: 8_000 }).catch(() => false)) {
         await resetBtn.click({ timeout: 15_000 });
-        await expect.soft(dlg.getByText(/All Asset Types/i).first()).toBeVisible({ timeout: 15_000 });
+        await expect
+          .soft(dlg.getByText(/All Asset Types/i).first())
+          .toBeVisible({ timeout: 15_000 });
       }
       await page.keyboard.press("Escape").catch(() => {});
     },
@@ -1213,12 +1291,16 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
 
       await addAssetPage.selectYear(currentYear);
       await page.waitForTimeout(800);
-      const afterCurrent = ((await addAssetPage.conditionDropdown.textContent().catch(() => "")) ?? "").trim();
+      const afterCurrent = (
+        (await addAssetPage.conditionDropdown.textContent().catch(() => "")) ?? ""
+      ).trim();
       expect.soft(/New/i.test(afterCurrent)).toBeTruthy();
 
       await addAssetPage.selectYear(previousYear);
       await page.waitForTimeout(800);
-      const afterPrevious = ((await addAssetPage.conditionDropdown.textContent().catch(() => "")) ?? "").trim();
+      const afterPrevious = (
+        (await addAssetPage.conditionDropdown.textContent().catch(() => "")) ?? ""
+      ).trim();
       expect.soft(/Used/i.test(afterPrevious)).toBeTruthy();
 
       await addAssetPage.clickCrossButton().catch(() => {});
@@ -1291,7 +1373,10 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
       await addAssetPage.enterVariant("!!!@@@");
       await addAssetPage.clickSummitButton();
-      await expectPageOrDialogText(page, /Variant.*incorrect format|Variant.*invalid|incorrect format/i);
+      await expectPageOrDialogText(
+        page,
+        /Variant.*incorrect format|Variant.*invalid|incorrect format/i,
+      );
       await addAssetPage.clickCrossButton().catch(() => {});
       await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
     },
@@ -1355,8 +1440,15 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
       await selectCsaProductProgram(page, assetDetailsPage);
-      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "marine");
-      test.skip(skipped, "Marine asset type not available for selected program on this environment.");
+      const { addAssetPage, skipped } = await openAddAssetForCategory(
+        page,
+        assetDetailsPage,
+        "marine",
+      );
+      test.skip(
+        skipped,
+        "Marine asset type not available for selected program on this environment.",
+      );
       await expectAddAssetCategoryLayout(page, addAssetPage, "marine");
       await fillMinimalMarineAsset(addAssetPage);
       await addAssetPage.enterHIN("!!!!");
@@ -1385,8 +1477,15 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
       await selectCsaProductProgram(page, assetDetailsPage);
-      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "plant");
-      test.skip(skipped, "Plant asset type not available for selected program on this environment.");
+      const { addAssetPage, skipped } = await openAddAssetForCategory(
+        page,
+        assetDetailsPage,
+        "plant",
+      );
+      test.skip(
+        skipped,
+        "Plant asset type not available for selected program on this environment.",
+      );
       await expectAddAssetCategoryLayout(page, addAssetPage, "plant");
       await fillMinimalPlantAsset(addAssetPage);
       await addAssetPage.enterSerialNO("!!!!");
@@ -1436,7 +1535,9 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       await selectTlProductAndProgram(page, assetDetailsPage);
       await prepareQuoteWithVehicleAssetType(page, assetDetailsPage, { product: "tl" });
       const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
-      if (await addAssetPage.assetLocationDropdown.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      if (
+        await addAssetPage.assetLocationDropdown.isVisible({ timeout: 8_000 }).catch(() => false)
+      ) {
         await fillMinimalVehicleAsset(addAssetPage, {
           rego: "TG08BP5123",
           vin: "1HGCM82633A004352",
@@ -1499,7 +1600,9 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       await selectTlProductAndProgram(page, assetDetailsPage);
       await prepareQuoteWithVehicleAssetType(page, assetDetailsPage, { product: "tl" });
       const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
-      const leaseLabel = addAssetHost(page).getByText(/Will the asset be leased/i).first();
+      const leaseLabel = addAssetHost(page)
+        .getByText(/Will the asset be leased/i)
+        .first();
       if (await leaseLabel.isVisible({ timeout: 10_000 }).catch(() => false)) {
         const row = leaseLabel.locator(
           "xpath=ancestor::*[contains(@class,'field') or contains(@class,'grid')][1]",
@@ -1508,7 +1611,8 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       } else {
         test.info().annotations.push({
           type: "note",
-          description: "Lease toggle not rendered on this build — verify manually for Business Loan.",
+          description:
+            "Lease toggle not rendered on this build — verify manually for Business Loan.",
         });
       }
       await addAssetPage.clickCrossButton().catch(() => {});
@@ -1532,7 +1636,10 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       await addAssetPage.enterSumInsured("");
       await addAssetPage.enterPolicyNumber("");
       await addAssetPage.clickSummitButton();
-      await expectPageOrDialogText(page, /Sum Insured|Policy Number|Insurance|required|Settlement/i);
+      await expectPageOrDialogText(
+        page,
+        /Sum Insured|Policy Number|Insurance|required|Settlement/i,
+      );
       await addAssetPage.clickCrossButton().catch(() => {});
       await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
     },
@@ -1546,21 +1653,37 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
       await prepareQuoteWithVehicleAssetType(page, assetDetailsPage);
       const addAssetPage = await openAddAssetEditor(page, assetDetailsPage);
-      const variantBefore = (await addAssetPage.variantInputField.first().inputValue().catch(() => "")).trim();
+      const variantBefore = (
+        await addAssetPage.variantInputField
+          .first()
+          .inputValue()
+          .catch(() => "")
+      ).trim();
       const dlg = await runMotochekFromAddAssetEditor(page, addAssetPage);
       await expect
-        .soft(dlg.getByText(/Motocheck Successfully|Motochek Successfully|Successfully Executed/i).first())
+        .soft(
+          dlg
+            .getByText(/Motocheck Successfully|Motochek Successfully|Successfully Executed/i)
+            .first(),
+        )
         .toBeVisible({ timeout: 90_000 });
       const body = ((await dlg.innerText()) ?? "").replace(/\u00a0/g, " ");
       expect.soft(/Make\s*[:\n]?\s*\S+/i.test(body)).toBeTruthy();
       expect.soft(/Model\s*[:\n]?\s*\S+/i.test(body)).toBeTruthy();
       if (variantBefore) {
-        const variantAfter = (await addAssetPage.variantInputField.first().inputValue().catch(() => "")).trim();
+        const variantAfter = (
+          await addAssetPage.variantInputField
+            .first()
+            .inputValue()
+            .catch(() => "")
+        ).trim();
         expect.soft(variantAfter.length).toBeGreaterThan(0);
       }
-      await dlg.getByRole("button", { name: /^Cancel$|^Close$/i }).first().click({ timeout: 10_000 }).catch(() =>
-        page.keyboard.press("Escape"),
-      );
+      await dlg
+        .getByRole("button", { name: /^Cancel$|^Close$/i })
+        .first()
+        .click({ timeout: 10_000 })
+        .catch(() => page.keyboard.press("Escape"));
       await addAssetPage.clickCrossButton().catch(() => {});
       await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
     },
@@ -1573,8 +1696,15 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
       await selectCsaProductProgram(page, assetDetailsPage);
-      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "other");
-      test.skip(skipped, "Other asset type not available for selected program on this environment.");
+      const { addAssetPage, skipped } = await openAddAssetForCategory(
+        page,
+        assetDetailsPage,
+        "other",
+      );
+      test.skip(
+        skipped,
+        "Other asset type not available for selected program on this environment.",
+      );
       await fillMinimalOtherAsset(addAssetPage);
       await addAssetPage.clickSummitButton();
       await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
@@ -1614,7 +1744,10 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
         .last();
       await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
       await expect.soft(summaryDlg).toContainText(/\$20,000|20,000/i);
-      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ");
+      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(
+        /\s+/g,
+        " ",
+      );
       if (/Toyota|Hilux|2025/i.test(summaryText)) {
         await expect.soft(summaryDlg).toContainText(/Toyota|Hilux|2025/i);
       } else if (/ABC123|1HGCM82633A004352/i.test(summaryText)) {
@@ -1631,8 +1764,15 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
       await selectCsaProductProgram(page, assetDetailsPage);
-      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "marine");
-      test.skip(skipped, "Marine asset type not available for selected program on this environment.");
+      const { addAssetPage, skipped } = await openAddAssetForCategory(
+        page,
+        assetDetailsPage,
+        "marine",
+      );
+      test.skip(
+        skipped,
+        "Marine asset type not available for selected program on this environment.",
+      );
       await fillMinimalMarineAsset(addAssetPage);
       await addAssetPage.clickSummitButton();
       await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
@@ -1645,7 +1785,10 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
         .last();
       await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
       await expect.soft(summaryDlg).toContainText(/\$45,000|45,000/i);
-      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ");
+      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(
+        /\s+/g,
+        " ",
+      );
       if (/Beneteau|Oceanis|2022/i.test(summaryText)) {
         await expect.soft(summaryDlg).toContainText(/Beneteau|Oceanis|2022/i);
       }
@@ -1660,8 +1803,15 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
       test.setTimeout(600_000);
       const { assetDetailsPage } = await openCsaQuoteFromDashboard(page);
       await selectCsaProductProgram(page, assetDetailsPage);
-      const { addAssetPage, skipped } = await openAddAssetForCategory(page, assetDetailsPage, "plant");
-      test.skip(skipped, "Plant asset type not available for selected program on this environment.");
+      const { addAssetPage, skipped } = await openAddAssetForCategory(
+        page,
+        assetDetailsPage,
+        "plant",
+      );
+      test.skip(
+        skipped,
+        "Plant asset type not available for selected program on this environment.",
+      );
       await fillMinimalPlantAsset(addAssetPage);
       await addAssetPage.clickSummitButton();
       await closeAddAssetEditorAndReturnToQuote(page, addAssetPage, assetDetailsPage);
@@ -1674,7 +1824,10 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
         .last();
       await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
       await expect.soft(summaryDlg).toContainText(/\$35,000|35,000/i);
-      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ");
+      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(
+        /\s+/g,
+        " ",
+      );
       if (/Caterpillar|320|2024/i.test(summaryText)) {
         await expect.soft(summaryDlg).toContainText(/Caterpillar|320|2024/i);
       }
@@ -1694,7 +1847,10 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
         assetDetailsPage,
         "ev",
       );
-      test.skip(skipped, "No asset type available for EV/Clean Tech or vehicle fallback on this environment.");
+      test.skip(
+        skipped,
+        "No asset type available for EV/Clean Tech or vehicle fallback on this environment.",
+      );
       if (evVehicleFallback) {
         test.info().annotations.push({
           type: "note",
@@ -1714,7 +1870,10 @@ test.describe("Asset Details - Add Asset Editor @do @regression", () => {
         .last();
       await expect.soft(summaryDlg).toBeVisible({ timeout: 30_000 });
       await expect.soft(summaryDlg).toContainText(/\$55,000|55,000/i);
-      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(/\s+/g, " ");
+      const summaryText = ((await summaryDlg.innerText().catch(() => "")) ?? "").replace(
+        /\s+/g,
+        " ",
+      );
       if (/Tesla|Model 3|5YJ3E1EA1KF123456/i.test(summaryText)) {
         await expect.soft(summaryDlg).toContainText(/Tesla|Model 3|5YJ3E1EA1KF123456/i);
       }
