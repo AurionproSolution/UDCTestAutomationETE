@@ -521,11 +521,19 @@ export class DOAddAssetPage extends BasePage {
   async clickSummitButton(opts?: { waitForNavigation?: boolean }): Promise<void> {
     this.logStep("Clicked Submit on Add Asset");
     const waitForNavigation = opts?.waitForNavigation !== false;
-    await this.summitButton.waitFor({ state: "attached", timeout: 30_000 });
+    await this.summitButton.waitFor({ state: "visible", timeout: 30_000 });
     await this.summitButton.scrollIntoViewIfNeeded().catch(() => {});
-    await this.summitButton.click({ timeout: 15_000, force: true }).catch(async () => {
-      await this.summitButton.click({ timeout: 15_000, force: true });
-    });
+    await expect
+      .poll(async () => this.summitButton.isEnabled().catch(() => false), {
+        timeout: 45_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBe(true);
+    try {
+      await this.summitButton.click({ timeout: 15_000 });
+    } catch {
+      await this.summitButton.evaluate((el: HTMLElement) => el.click());
+    }
     await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     if (waitForNavigation) {
       await this.waitForAddAssetPostSubmitState();

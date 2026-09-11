@@ -230,17 +230,42 @@ export class DODashboardPage extends BasePage {
     }
 
     this.log(`Selecting dealer: ${dealerName}`);
-    await this.dealerDropdownLabel.click();
-    await expect(this.page.getByRole("listbox")).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(
+        async () => {
+          const current =
+            (await this.dealerDropdownLabel.getAttribute("aria-label")) ??
+            (await this.dealerDropdownLabel.textContent()) ??
+            "";
+          if (current.trim() === dealerName) {
+            return true;
+          }
 
-    const dealerOption = this.page
-      .getByRole("option", { name: dealerName, exact: true })
-      .first();
-    await dealerOption.click();
-    await expect(this.dealerDropdownLabel).toHaveAttribute("aria-label", dealerName, {
-      timeout: 30_000,
-    });
-    await this.waitForAppLoaderOverlayGone(120_000);
+          await this.dealerDropdownLabel.click({ timeout: 15_000 }).catch(() => {});
+          const listbox = this.page.getByRole("listbox");
+          if (!(await listbox.isVisible({ timeout: 5_000 }).catch(() => false))) {
+            return false;
+          }
+
+          const dealerOption = this.page
+            .getByRole("option", { name: dealerName, exact: true })
+            .first();
+          if (!(await dealerOption.isVisible({ timeout: 5_000 }).catch(() => false))) {
+            return false;
+          }
+
+          await dealerOption.click({ timeout: 15_000 }).catch(() => {});
+          await this.waitForAppLoaderOverlayGone(120_000);
+
+          const selected =
+            (await this.dealerDropdownLabel.getAttribute("aria-label")) ??
+            (await this.dealerDropdownLabel.textContent()) ??
+            "";
+          return selected.trim() === dealerName;
+        },
+        { timeout: 120_000, intervals: [500, 1_000, 2_000] },
+      )
+      .toBe(true);
     this.log(`Verified dealer selected: ${dealerName}`);
   }
 

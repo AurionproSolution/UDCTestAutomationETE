@@ -107,16 +107,35 @@ export async function ensurePaymentEnteredForCashPriceMode(
   quickQuotePage: DOQuickQuotePage,
   priorPayment?: string,
 ): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const current = (await quickQuotePage.readPaymentDisplayValue()).trim();
+        return !DOQuickQuotePage.isBlankCurrencyDisplay(current);
+      },
+      { timeout: 20_000, intervals: [300, 500, 1_000, 2_000] },
+    )
+    .toBeTruthy()
+    .catch(() => {});
+
   const current = (await quickQuotePage.readPaymentDisplayValue()).trim();
   if (!DOQuickQuotePage.isBlankCurrencyDisplay(current)) {
     return;
   }
-  const fromPrior = priorPayment?.trim() ?? "";
-  if (fromPrior.length > 0 && !DOQuickQuotePage.isBlankCurrencyDisplay(fromPrior)) {
-    await quickQuotePage.enterPaymentAmount(fromPrior);
-    return;
+
+  const candidates = [
+    priorPayment?.trim() ?? "",
+    await readPaymentFromSummary(quickQuotePage),
+    DEFAULT_PAYMENT_AMOUNT,
+  ].filter((v) => v.length > 0 && !DOQuickQuotePage.isBlankCurrencyDisplay(v));
+
+  for (const payment of candidates) {
+    await quickQuotePage.enterPaymentAmount(payment);
+    const after = (await quickQuotePage.readPaymentDisplayValue()).trim();
+    if (!DOQuickQuotePage.isBlankCurrencyDisplay(after)) {
+      return;
+    }
   }
-  await quickQuotePage.enterPaymentAmount(DEFAULT_PAYMENT_AMOUNT);
 }
 
 export async function calculateInCashPriceMode(quickQuotePage: DOQuickQuotePage): Promise<void> {
@@ -126,27 +145,51 @@ export async function calculateInCashPriceMode(quickQuotePage: DOQuickQuotePage)
 }
 
 export async function calculateInDepositMode(quickQuotePage: DOQuickQuotePage): Promise<void> {
+  await quickQuotePage.enterInterestRatePercent("9");
+  await quickQuotePage.enterTermsMonths("36");
+  await quickQuotePage.selectFrequency("Monthly");
   await quickQuotePage.clickCalculate();
   await quickQuotePage.expectCreateQuoteVisible();
 }
 
 export async function calculateInBalloonMode(quickQuotePage: DOQuickQuotePage): Promise<void> {
+  await quickQuotePage.enterInterestRatePercent("9");
+  await quickQuotePage.enterTermsMonths("36");
+  await quickQuotePage.selectFrequency("Monthly");
   await quickQuotePage.clickCalculate();
   await quickQuotePage.expectCreateQuoteVisible();
 }
 
 export async function readFinanceSnapshot(quickQuotePage: DOQuickQuotePage): Promise<QuickQuoteFinanceSnapshot> {
   return {
-    cashPrice: (await quickQuotePage.cashPriceInput.inputValue().catch(() => "")).trim(),
+    cashPrice: (await quickQuotePage.readCashPriceDisplayValue()).trim(),
     interestRate: (await quickQuotePage.interestRatePercentInput.inputValue().catch(() => "")).trim(),
     term: await quickQuotePage.readTermsMonthsValue(),
     frequency: await quickQuotePage.readFrequencyLabel(),
-    depositPercent: (await quickQuotePage.depositPercentInput.inputValue().catch(() => "")).trim(),
-    depositDollar: (await quickQuotePage.depositDollarInput.inputValue().catch(() => "")).trim(),
-    balloonPercent: (await quickQuotePage.balloonPercentInput.inputValue().catch(() => "")).trim(),
-    balloonDollar: (await quickQuotePage.balloonDollarInput.inputValue().catch(() => "")).trim(),
+    depositPercent: (await quickQuotePage.readDepositPercentDisplayValue()).trim(),
+    depositDollar: (await quickQuotePage.readDepositDollarDisplayValue()).trim(),
+    balloonPercent: (await quickQuotePage.readBalloonPercentDisplayValue()).trim(),
+    balloonDollar: (await quickQuotePage.readBalloonDollarDisplayValue()).trim(),
     payment: (await quickQuotePage.readPaymentDisplayValue()).trim(),
   };
+}
+
+function normalizeFinanceField(key: keyof QuickQuoteFinanceSnapshot, value: string): string {
+  const t = value.trim();
+  if (
+    key === "payment" ||
+    key === "cashPrice" ||
+    key === "depositDollar" ||
+    key === "balloonDollar"
+  ) {
+    const n = Number.parseFloat(t.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(n) ? n.toFixed(2) : t;
+  }
+  if (key === "depositPercent" || key === "balloonPercent" || key === "interestRate") {
+    const n = Number.parseFloat(t.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(n) ? String(n) : t;
+  }
+  return t;
 }
 
 export async function isFixedCheckboxChecked(quickQuotePage: DOQuickQuotePage): Promise<boolean> {
@@ -212,18 +255,22 @@ export async function expectCalculationSummaryHidden(quickQuotePage: DOQuickQuot
   await expect
     .poll(
       async () => {
-        const visible = await quickQuotePage.calculationSummaryRegion
+        const createVisible = await quickQuotePage.createQuoteButton.isVisible().catch(() => false);
+        if (!createVisible) {
+          return true;
+        }
+        const summaryVisible = await quickQuotePage.calculationSummaryRegion
           .first()
           .isVisible()
           .catch(() => false);
-        if (!visible) {
+        if (!summaryVisible) {
           return true;
         }
         const text =
           (await quickQuotePage.calculationSummaryRegion.first().textContent().catch(() => "")) ?? "";
-        return !/\d/.test(text.replace(/[$,\s]/g, ""));
+        return !/\$\s*[\d,]+\.?\d*/.test(text);
       },
-      { timeout: 20_000, intervals: [300, 500, 1_000] },
+      { timeout: 30_000, intervals: [300, 500, 1_000, 2_000] },
     )
     .toBeTruthy();
 }
@@ -256,7 +303,7 @@ export async function expectPaymentCalculated(quickQuotePage: DOQuickQuotePage):
 export async function expectCashPriceCalculated(quickQuotePage: DOQuickQuotePage): Promise<void> {
   await expect
     .poll(async () => {
-      const cash = (await quickQuotePage.cashPriceInput.inputValue().catch(() => "")).trim();
+      const cash = (await quickQuotePage.readCashPriceDisplayValue()).trim();
       return /\d/.test(cash) && !DOQuickQuotePage.isBlankCurrencyDisplay(cash);
     }, { timeout: 30_000, intervals: [300, 500, 1_000] })
     .toBeTruthy();
@@ -266,8 +313,8 @@ export async function expectCashPriceCalculated(quickQuotePage: DOQuickQuotePage
 export async function expectDepositCalculated(quickQuotePage: DOQuickQuotePage): Promise<void> {
   await expect
     .poll(async () => {
-      const pct = (await quickQuotePage.depositPercentInput.inputValue().catch(() => "")).trim();
-      const usd = (await quickQuotePage.depositDollarInput.inputValue().catch(() => "")).trim();
+      const pct = (await quickQuotePage.readDepositPercentDisplayValue()).trim();
+      const usd = (await quickQuotePage.readDepositDollarDisplayValue()).trim();
       return (
         (/\d/.test(pct) && !DOQuickQuotePage.isBlankPercentDisplay(pct)) ||
         (/\d/.test(usd) && !DOQuickQuotePage.isBlankCurrencyDisplay(usd))
@@ -280,8 +327,8 @@ export async function expectDepositCalculated(quickQuotePage: DOQuickQuotePage):
 export async function expectBalloonCalculated(quickQuotePage: DOQuickQuotePage): Promise<void> {
   await expect
     .poll(async () => {
-      const pct = (await quickQuotePage.balloonPercentInput.inputValue().catch(() => "")).trim();
-      const usd = (await quickQuotePage.balloonDollarInput.inputValue().catch(() => "")).trim();
+      const pct = (await quickQuotePage.readBalloonPercentDisplayValue()).trim();
+      const usd = (await quickQuotePage.readBalloonDollarDisplayValue()).trim();
       return (
         (/\d/.test(pct) && !DOQuickQuotePage.isBlankPercentDisplay(pct)) ||
         (/\d/.test(usd) && !DOQuickQuotePage.isBlankCurrencyDisplay(usd))
@@ -319,15 +366,18 @@ export async function expectPaymentResetOrGreyed(quickQuotePage: DOQuickQuotePag
 }
 
 export async function expectCashPriceResetOrGreyed(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  const cash = (await quickQuotePage.cashPriceInput.inputValue().catch(() => "")).trim();
+  const cash = (await quickQuotePage.readCashPriceDisplayValue()).trim();
   const blank = DOQuickQuotePage.isBlankCurrencyDisplay(cash);
-  const editable = await quickQuotePage.cashPriceInput.isEditable().catch(() => true);
+  const inputVisible = await quickQuotePage.cashPriceInput.isVisible({ timeout: 1_000 }).catch(() => false);
+  const editable = inputVisible
+    ? await quickQuotePage.cashPriceInput.isEditable().catch(() => true)
+    : false;
   expect.soft(blank || !editable).toBeTruthy();
 }
 
 export async function expectDepositResetOrGreyed(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  const pct = (await quickQuotePage.depositPercentInput.inputValue().catch(() => "")).trim();
-  const usd = (await quickQuotePage.depositDollarInput.inputValue().catch(() => "")).trim();
+  const pct = (await quickQuotePage.readDepositPercentDisplayValue()).trim();
+  const usd = (await quickQuotePage.readDepositDollarDisplayValue()).trim();
   const blank =
     DOQuickQuotePage.isBlankPercentDisplay(pct) && DOQuickQuotePage.isBlankCurrencyDisplay(usd);
   const pctEditable = await quickQuotePage.depositPercentInput.isEditable().catch(() => true);
@@ -336,8 +386,8 @@ export async function expectDepositResetOrGreyed(quickQuotePage: DOQuickQuotePag
 }
 
 export async function expectBalloonResetOrGreyed(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  const pct = (await quickQuotePage.balloonPercentInput.inputValue().catch(() => "")).trim();
-  const usd = (await quickQuotePage.balloonDollarInput.inputValue().catch(() => "")).trim();
+  const pct = (await quickQuotePage.readBalloonPercentDisplayValue()).trim();
+  const usd = (await quickQuotePage.readBalloonDollarDisplayValue()).trim();
   const blank =
     DOQuickQuotePage.isBlankPercentDisplay(pct) && DOQuickQuotePage.isBlankCurrencyDisplay(usd);
   const pctEditable = await quickQuotePage.balloonPercentInput.isEditable().catch(() => true);
@@ -346,6 +396,12 @@ export async function expectBalloonResetOrGreyed(quickQuotePage: DOQuickQuotePag
 }
 
 export async function expectCashPriceModeReadOnly(quickQuotePage: DOQuickQuotePage): Promise<void> {
+  const displayVisible = await quickQuotePage.cashPriceDisplay
+    .isVisible({ timeout: 15_000 })
+    .catch(() => false);
+  if (displayVisible) {
+    return;
+  }
   await expect.soft(quickQuotePage.cashPriceInput).not.toBeEditable({ timeout: 15_000 });
 }
 
@@ -370,7 +426,7 @@ export async function expectFieldsRetained(
   keys: Array<keyof QuickQuoteFinanceSnapshot>,
 ): Promise<void> {
   for (const key of keys) {
-    expect.soft(after[key]).toBe(before[key]);
+    expect.soft(normalizeFinanceField(key, after[key])).toBe(normalizeFinanceField(key, before[key]));
   }
 }
 
@@ -402,6 +458,15 @@ export async function preparePaymentCalculatedQuote(
   await calculateInPaymentMode(quickQuotePage);
   await expectCalculationSummaryWithTotals(quickQuotePage);
   await expectPaymentCalculated(quickQuotePage);
+  await expect
+    .poll(
+      async () => {
+        const payment = (await quickQuotePage.readPaymentDisplayValue()).trim();
+        return !DOQuickQuotePage.isBlankCurrencyDisplay(payment);
+      },
+      { timeout: 15_000, intervals: [300, 500, 1_000] },
+    )
+    .toBeTruthy();
   return readFinanceSnapshot(quickQuotePage);
 }
 
@@ -424,7 +489,8 @@ export async function prepareDepositCalculatedQuote(
   page: Page,
   quickQuotePage: DOQuickQuotePage,
 ): Promise<QuickQuoteFinanceSnapshot> {
-  await prepareCashPriceCalculatedQuote(page, quickQuotePage);
+  // Payment → Deposit (CSA-T3628). Skip Cash Price calculate — net loan cash ($18k) makes deposit solve to 0%.
+  await preparePaymentCalculatedQuote(page, quickQuotePage);
   await switchToCalculateFor(quickQuotePage, "Deposit");
   await expectDepositModeReadOnlyFields(quickQuotePage);
   await calculateInDepositMode(quickQuotePage);

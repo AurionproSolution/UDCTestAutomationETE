@@ -71,6 +71,7 @@ export class DOQuickQuotePage extends BasePage {
 
   // Quick quote fields - STANDARD
   readonly cashPriceInput: Locator;
+  readonly cashPriceDisplay: Locator;
   readonly initialLeaseAmountInput: Locator;
   readonly depositPercentInput: Locator;
   readonly interestRatePercentInput: Locator;
@@ -95,6 +96,10 @@ export class DOQuickQuotePage extends BasePage {
   readonly paymentDisplay: Locator;
   /** Payment amount entry/display (CSA); may be readonly until first calculation. */
   readonly paymentAmountInput: Locator;
+  readonly depositPercentDisplay: Locator;
+  readonly depositDollarDisplay: Locator;
+  readonly balloonPercentDisplay: Locator;
+  readonly balloonDollarDisplay: Locator;
   readonly fixedCheckbox: Locator;
   readonly checkDisableCheckbox: Locator;
 
@@ -185,6 +190,9 @@ export class DOQuickQuotePage extends BasePage {
           "xpath=.//label[contains(normalize-space(.), 'Cash Price')]/following::input[1]",
         ),
       );
+    this.cashPriceDisplay = this.quickQuoteForm.locator(
+      "xpath=.//*[starts-with(normalize-space(.), 'Cash Price') and not(contains(., 'Calculate'))]/following-sibling::*[1]",
+    );
     this.initialLeaseAmountInput = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Initial Lease Amount')]/following::input[1]",
     );
@@ -281,13 +289,25 @@ export class DOQuickQuotePage extends BasePage {
       );
     this.paymentAmountInput = this.quickQuoteForm
       .locator(
-        "xpath=.//*[normalize-space(.)='Payment' or starts-with(normalize-space(.), 'Payment')][not(contains(., 'Lease'))][not(contains(., 'Calculate'))]/following-sibling::input[not(@currencymask)][1]",
+        "xpath=.//*[normalize-space(.)='Payment' or starts-with(normalize-space(.), 'Payment')][not(contains(., 'Lease'))][not(contains(., 'Calculate'))]/following-sibling::input[1]",
       )
       .or(
         this.quickQuoteForm.locator(
-          "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::input[not(@currencymask)][1]",
+          "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::input[1]",
         ),
       );
+    this.depositPercentDisplay = this.quickQuoteForm.locator(
+      "xpath=.//label[starts-with(normalize-space(.), 'Deposit')]/following-sibling::*[1][not(self::input)]",
+    );
+    this.depositDollarDisplay = this.depositDollarInput.locator(
+      "xpath=following-sibling::*[1][not(self::input)]",
+    );
+    this.balloonPercentDisplay = this.quickQuoteForm.locator(
+      "xpath=.//label[starts-with(normalize-space(.), 'Balloon')]/following-sibling::*[1][not(self::input)]",
+    );
+    this.balloonDollarDisplay = this.balloonDollarInput.locator(
+      "xpath=following-sibling::*[1][not(self::input)]",
+    );
     this.checkDisableCheckbox = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'checkDisable')]/preceding::p-checkbox[1]"
     );
@@ -528,6 +548,25 @@ export class DOQuickQuotePage extends BasePage {
     await loc.press("Delete");
   }
 
+  /** Internal wait loop — avoids expect.poll step noise in HTML reports during mask retries. */
+  private async pollUntil(
+    predicate: () => Promise<boolean>,
+    timeoutMs: number,
+    intervals: number[] = [200, 400, 800, 1_000],
+  ): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    let attempt = 0;
+    while (Date.now() < deadline) {
+      if (await predicate()) {
+        return true;
+      }
+      const delay = intervals[Math.min(attempt, intervals.length - 1)] ?? 1_000;
+      attempt += 1;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+    return false;
+  }
+
   /**
    * Deposit / Balloon %: focus, clear masked value, then type or paste (caret-only entry corrupts when field is non-empty).
    */
@@ -653,6 +692,10 @@ export class DOQuickQuotePage extends BasePage {
       return false;
     };
 
+    if (await valueMatchesCommit()) {
+      return;
+    }
+
     const grouped =
       Number.isInteger(want) && Math.abs(want) >= 1000
         ? want.toLocaleString("en-US", { useGrouping: true, maximumFractionDigits: 0 })
@@ -710,13 +753,13 @@ export class DOQuickQuotePage extends BasePage {
       await input.blur();
     });
 
-    for (const strat of strategies) {
-      await strat();
-      try {
-        await expect.poll(valueMatchesCommit, { timeout: 25_000 }).toBe(true);
+    for (let i = 0; i < strategies.length; i++) {
+      if (i > 0) {
+        await this.clearMaskedCurrencyInput(input);
+      }
+      await strategies[i]();
+      if (await this.pollUntil(valueMatchesCommit, 25_000, [200, 400, 800, 1_000])) {
         return;
-      } catch {
-        /* next strategy */
       }
     }
 
@@ -2140,16 +2183,286 @@ export class DOQuickQuotePage extends BasePage {
     return /^--\s*select\s*--$/i.test(t) || /^select$/i.test(t) || /^choose/i.test(t);
   }
 
-  async readPaymentDisplayValue(): Promise<string> {
-    const displayVisible = await this.paymentDisplay.isVisible({ timeout: 1_000 }).catch(() => false);
-    if (displayVisible) {
-      return (await this.paymentDisplay.innerText().catch(() => "")).trim();
+  async readCashPriceDisplayValue(): Promise<string> {
+    const inputVisible = await this.cashPriceInput.isVisible({ timeout: 1_000 }).catch(() => false);
+    const inputEditable = inputVisible
+      ? await this.cashPriceInput.isEditable().catch(() => true)
+      : false;
+
+    if (!inputEditable) {
+      const displayVisible = await this.cashPriceDisplay.isVisible({ timeout: 1_000 }).catch(() => false);
+      if (displayVisible) {
+        const fromDisplay = (await this.cashPriceDisplay.innerText().catch(() => "")).trim();
+        if (!DOQuickQuotePage.isBlankCurrencyDisplay(fromDisplay)) {
+          return fromDisplay;
+        }
+      }
     }
-    const inputVisible = await this.paymentAmountInput.isVisible({ timeout: 1_000 }).catch(() => false);
+
     if (inputVisible) {
-      return (await this.paymentAmountInput.inputValue().catch(() => "")).trim();
+      const fromInput = (await this.cashPriceInput.inputValue().catch(() => "")).trim();
+      if (inputEditable && !DOQuickQuotePage.isBlankCurrencyDisplay(fromInput)) {
+        return fromInput;
+      }
+    }
+
+    const summary =
+      (await this.calculationSummaryRegion.first().textContent().catch(() => "")) ?? "";
+    const loanMatch = summary.match(/Loan Amount[^\d$]*(\$[\d,]+\.?\d*)/i);
+    if (loanMatch?.[1] && !DOQuickQuotePage.isBlankCurrencyDisplay(loanMatch[1])) {
+      return loanMatch[1].trim();
+    }
+
+    return "";
+  }
+
+  private normalizePositivePercent(raw: string): string {
+    const t = raw.trim();
+    if (DOQuickQuotePage.isBlankPercentDisplay(t)) {
+      return "";
+    }
+    if (/%/.test(t)) {
+      return t;
+    }
+    const n = Number.parseFloat(t.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(n) && n !== 0 ? `${n}%` : "";
+  }
+
+  private normalizePositiveCurrency(raw: string): string {
+    const t = raw.trim();
+    if (/%/.test(t) || DOQuickQuotePage.isBlankCurrencyDisplay(t)) {
+      return "";
+    }
+    return t;
+  }
+
+  private async readPercentFromLabeledSection(labelPrefix: string): Promise<string> {
+    const label = this.quickQuoteForm
+      .locator(`xpath=.//label[starts-with(normalize-space(.), '${labelPrefix}')][1]`)
+      .first();
+    if (!(await label.isVisible({ timeout: 500 }).catch(() => false))) {
+      return "";
+    }
+
+    const row = label.locator(
+      "xpath=ancestor::*[contains(@class,'grid') or contains(@class,'field') or contains(@class,'col')][1]",
+    );
+    const text = (await row.innerText().catch(() => "")).replace(/\s+/g, " ");
+    const matches = text.match(/([\d.]+)\s*%/g) ?? [];
+    for (const match of matches) {
+      const normalized = this.normalizePositivePercent(match);
+      if (normalized) {
+        return normalized;
+      }
     }
     return "";
+  }
+
+  private async readCurrencyFromLabeledSection(labelPrefix: string): Promise<string> {
+    const label = this.quickQuoteForm
+      .locator(`xpath=.//label[starts-with(normalize-space(.), '${labelPrefix}')][1]`)
+      .first();
+    if (!(await label.isVisible({ timeout: 500 }).catch(() => false))) {
+      return "";
+    }
+
+    const row = label.locator(
+      "xpath=ancestor::*[contains(@class,'grid') or contains(@class,'field') or contains(@class,'col')][1]",
+    );
+    const text = (await row.innerText().catch(() => "")).replace(/\s+/g, " ");
+    const matches = text.match(/\$[\d,]+\.?\d*/g) ?? [];
+    for (const match of matches) {
+      const normalized = this.normalizePositiveCurrency(match);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return "";
+  }
+
+  async readPaymentDisplayValue(): Promise<string> {
+    const isPaymentAmount = (raw: string): boolean => {
+      const t = raw.trim();
+      if (t.length === 0 || /%/.test(t)) {
+        return false;
+      }
+      return !DOQuickQuotePage.isBlankCurrencyDisplay(t);
+    };
+
+    const displayVisible = await this.paymentDisplay.isVisible({ timeout: 1_000 }).catch(() => false);
+    if (displayVisible) {
+      const fromDisplay = (await this.paymentDisplay.innerText().catch(() => "")).trim();
+      if (isPaymentAmount(fromDisplay)) {
+        return fromDisplay;
+      }
+    }
+
+    const paymentRegion = this.quickQuoteForm.locator(
+      'xpath=.//*[normalize-space(.)="Payment" or starts-with(normalize-space(.), "Payment")][not(contains(.,"Lease"))][not(contains(.,"Calculate"))]/following-sibling::*[contains(.,"$")][1]',
+    );
+    if (await paymentRegion.isVisible({ timeout: 500 }).catch(() => false)) {
+      const fromRegion = (await paymentRegion.innerText().catch(() => "")).trim();
+      if (isPaymentAmount(fromRegion)) {
+        return fromRegion;
+      }
+    }
+
+    const inputVisible = await this.paymentAmountInput.isVisible({ timeout: 1_000 }).catch(() => false);
+    if (inputVisible) {
+      const fromInput = (await this.paymentAmountInput.inputValue().catch(() => "")).trim();
+      if (isPaymentAmount(fromInput)) {
+        return fromInput;
+      }
+
+      const fromInputText = (await this.paymentAmountInput.textContent().catch(() => "")).trim();
+      if (isPaymentAmount(fromInputText)) {
+        return fromInputText;
+      }
+
+      const host = this.paymentAmountInput.locator(
+        "xpath=ancestor::*[contains(@class,'p-inputnumber') or contains(@class,'field')][1]",
+      );
+      if ((await host.count()) > 0) {
+        const hostText = (await host.innerText().catch(() => "")).trim();
+        const match = hostText.match(/\$[\d,]+\.?\d*/);
+        if (match?.[0] && isPaymentAmount(match[0])) {
+          return match[0];
+        }
+      }
+    }
+
+    const summary =
+      (await this.calculationSummaryRegion.first().textContent().catch(() => "")) ?? "";
+    const paymentMatch = summary.match(/Payment[^\d$]*(\$[\d,]+\.?\d*)/i);
+    if (paymentMatch?.[1] && isPaymentAmount(paymentMatch[1])) {
+      return paymentMatch[1].trim();
+    }
+
+    return "";
+  }
+
+  private async readPercentFieldDisplay(
+    input: Locator,
+    display: Locator,
+    sectionLabelPrefix?: string,
+  ): Promise<string> {
+    const editable = await input.isEditable().catch(() => true);
+
+    const ariaValueText = this.normalizePositivePercent(
+      (await input.getAttribute("aria-valuetext").catch(() => "")) ?? "",
+    );
+    if (ariaValueText) {
+      return ariaValueText;
+    }
+
+    const ariaNow = this.normalizePositivePercent(
+      (await input.getAttribute("aria-valuenow").catch(() => "")) ?? "",
+    );
+    if (ariaNow) {
+      return ariaNow;
+    }
+
+    if (!editable && sectionLabelPrefix) {
+      const fromSection = await this.readPercentFromLabeledSection(sectionLabelPrefix);
+      if (fromSection) {
+        return fromSection;
+      }
+    }
+
+    const fromInput = this.normalizePositivePercent((await input.inputValue().catch(() => "")).trim());
+    if (fromInput) {
+      return fromInput;
+    }
+
+    if (await display.isVisible({ timeout: 500 }).catch(() => false)) {
+      const fromDisplay = this.normalizePositivePercent(
+        (await display.innerText().catch(() => "")).trim(),
+      );
+      if (fromDisplay) {
+        return fromDisplay;
+      }
+    }
+
+    const host = input.locator("xpath=ancestor::*[contains(@class,'p-inputnumber')][1]");
+    if ((await host.count()) > 0) {
+      const text = (await host.innerText().catch(() => "")).trim();
+      const match = text.match(/([\d.]+)\s*%/);
+      if (match) {
+        const normalized = this.normalizePositivePercent(match[1]);
+        if (normalized) {
+          return normalized;
+        }
+      }
+    }
+
+    if (sectionLabelPrefix) {
+      return this.readPercentFromLabeledSection(sectionLabelPrefix);
+    }
+
+    return (await input.inputValue().catch(() => "")).trim();
+  }
+
+  private async readCurrencyFieldDisplay(
+    input: Locator,
+    display: Locator,
+    sectionLabelPrefix?: string,
+  ): Promise<string> {
+    const editable = await input.isEditable().catch(() => true);
+
+    if (!editable && sectionLabelPrefix) {
+      const fromSection = await this.readCurrencyFromLabeledSection(sectionLabelPrefix);
+      if (fromSection) {
+        return fromSection;
+      }
+    }
+
+    const fromInput = this.normalizePositiveCurrency((await input.inputValue().catch(() => "")).trim());
+    if (fromInput) {
+      return fromInput;
+    }
+
+    if (await display.isVisible({ timeout: 500 }).catch(() => false)) {
+      const fromDisplay = this.normalizePositiveCurrency(
+        (await display.innerText().catch(() => "")).trim(),
+      );
+      if (fromDisplay) {
+        return fromDisplay;
+      }
+    }
+
+    const host = input.locator("xpath=ancestor::*[contains(@class,'p-inputnumber')][1]");
+    if ((await host.count()) > 0) {
+      const text = (await host.innerText().catch(() => "")).trim();
+      const match = text.match(/\$[\d,]+\.?\d*/);
+      if (match?.[0]) {
+        const normalized = this.normalizePositiveCurrency(match[0]);
+        if (normalized) {
+          return normalized;
+        }
+      }
+    }
+
+    if (sectionLabelPrefix) {
+      return this.readCurrencyFromLabeledSection(sectionLabelPrefix);
+    }
+
+    return (await input.inputValue().catch(() => "")).trim();
+  }
+
+  async readDepositPercentDisplayValue(): Promise<string> {
+    return this.readPercentFieldDisplay(this.depositPercentInput, this.depositPercentDisplay, "Deposit");
+  }
+
+  async readDepositDollarDisplayValue(): Promise<string> {
+    return this.readCurrencyFieldDisplay(this.depositDollarInput, this.depositDollarDisplay, "Deposit");
+  }
+
+  async readBalloonPercentDisplayValue(): Promise<string> {
+    return this.readPercentFieldDisplay(this.balloonPercentInput, this.balloonPercentDisplay, "Balloon");
+  }
+
+  async readBalloonDollarDisplayValue(): Promise<string> {
+    return this.readCurrencyFieldDisplay(this.balloonDollarInput, this.balloonDollarDisplay, "Balloon");
   }
 
   /** After Reset, program-default rate / term / frequency are restored (not user overrides). */

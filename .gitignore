@@ -39,6 +39,10 @@ npm-debug.log*
 screenshots/
 videos/
 traces/
+tmp-report-extract/
+tmp-trace-extract/
+tmp-report.zip
+tmp-*/
 
 # OS files
 Thumbs.db

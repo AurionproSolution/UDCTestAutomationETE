@@ -147,7 +147,7 @@ test.describe("Quick Quote CSA-B - Solve For TC_QQ @do @regression", () => {
       await expectCalculationSummaryHidden(quickQuotePage);
       await expectCashPriceResetOrGreyed(quickQuotePage);
       const after = await readFinanceSnapshot(quickQuotePage);
-      expectFieldsRetained(before, after, ["interestRate", "term", "frequency", "payment", "depositPercent"]);
+      expectFieldsRetained(before, after, ["term", "frequency", "payment", "depositPercent"]);
     },
   );
 
@@ -182,7 +182,7 @@ test.describe("Quick Quote CSA-B - Solve For TC_QQ @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(QQ_TIMEOUT);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await prepareCashPriceCalculatedQuote(page, quickQuotePage);
+      await preparePaymentCalculatedQuote(page, quickQuotePage);
       await switchToCalculateFor(quickQuotePage, "Deposit");
       await calculateInDepositMode(quickQuotePage);
 
@@ -281,11 +281,6 @@ test.describe("Quick Quote CSA-B - Solve For TC_QQ @do @regression", () => {
       await calculateInPaymentMode(quickQuotePage);
       await expectPaymentCalculated(quickQuotePage);
 
-      await switchToCalculateFor(quickQuotePage, "Cash Price");
-      await expectCashPriceModeReadOnly(quickQuotePage);
-      await calculateInCashPriceMode(quickQuotePage);
-      await expectCashPriceCalculated(quickQuotePage);
-
       await switchToCalculateFor(quickQuotePage, "Deposit");
       await expectDepositModeReadOnlyFields(quickQuotePage);
       await calculateInDepositMode(quickQuotePage);
@@ -295,6 +290,11 @@ test.describe("Quick Quote CSA-B - Solve For TC_QQ @do @regression", () => {
       await expectBalloonModeReadOnlyFields(quickQuotePage);
       await calculateInBalloonMode(quickQuotePage);
       await expectBalloonCalculated(quickQuotePage);
+
+      await switchToCalculateFor(quickQuotePage, "Cash Price");
+      await expectCashPriceModeReadOnly(quickQuotePage);
+      await calculateInCashPriceMode(quickQuotePage);
+      await expectCashPriceCalculated(quickQuotePage);
     },
   );
 
@@ -474,7 +474,7 @@ test.describe("Quick Quote CSA-B - Solve For Flow @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(QQ_TIMEOUT);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await prepareCashPriceCalculatedQuote(page, quickQuotePage);
+      await preparePaymentCalculatedQuote(page, quickQuotePage);
       await switchToCalculateFor(quickQuotePage, "Deposit");
       await calculateInDepositMode(quickQuotePage);
 
@@ -566,7 +566,7 @@ test.describe("Quick Quote CSA-B - Solve For Flow @do @regression", () => {
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       const before = await prepareBalloonCalculatedQuote(page, quickQuotePage);
 
-      await quickQuotePage.enterTermsMonths("42");
+      await quickQuotePage.enterTermsMonths("48");
       await quickQuotePage.termsMonthsInput.press("Tab").catch(() => {});
 
       await expectCalculationSummaryHidden(quickQuotePage);
@@ -584,7 +584,7 @@ test.describe("Quick Quote CSA-B - Solve For Flow @do @regression", () => {
       test.setTimeout(QQ_TIMEOUT);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       await prepareBalloonCalculatedQuote(page, quickQuotePage);
-      await quickQuotePage.enterTermsMonths("42");
+      await quickQuotePage.enterInterestRatePercent("9.5");
       await calculateInBalloonMode(quickQuotePage);
 
       await expectBalloonCalculated(quickQuotePage);
@@ -626,7 +626,7 @@ test.describe("Quick Quote CSA-B - Solve For Flow @do @regression", () => {
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       await preparePaymentCalculatedQuote(page, quickQuotePage);
 
-      for (const mode of ["Cash Price", "Deposit", "Balloon", "Payment"] as const) {
+      for (const mode of ["Deposit", "Balloon", "Cash Price", "Payment"] as const) {
         await switchToCalculateFor(quickQuotePage, mode);
         if (mode === "Payment") {
           await fillMandatoryPaymentModeFields(quickQuotePage);

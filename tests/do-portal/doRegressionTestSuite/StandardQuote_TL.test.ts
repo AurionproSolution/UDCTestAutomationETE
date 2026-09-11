@@ -58,7 +58,8 @@ async function openStandardQuoteFromDashboard(page: Page): Promise<{
 
 async function selectTlProductAndProgram(assetDetailsPage: DOAssetDetailsPage): Promise<void> {
   await assetDetailsPage.chooseProduct(TL_SQ_PRODUCT);
-  await assetDetailsPage.chooseProgram(TL_SQ_PROGRAM);
+  await assetDetailsPage.selectProgramIfNeeded(TL_SQ_PROGRAM);
+  await assetDetailsPage.waitForQuoteLoadersToFinish().catch(() => {});
 }
 
 async function selectTlProductAndProgramOnQuickQuote(
@@ -159,16 +160,18 @@ async function prepareTlQuoteForSettlementTrigger(
   addAssetPage: DOAddAssetPage,
 ): Promise<void> {
   await prepareCalculableTlQuote(assetDetailsPage, addAssetPage, { origRef: "SQ-Settlement-Ref-01" });
+  await assetDetailsPage.scrollLessDepositIntoView();
   await assetDetailsPage.enterTradeAmount("$5,000");
   await assetDetailsPage.clickCalculateButton();
   await assetDetailsPage.waitForQuoteLoadersToFinish();
   await assetDetailsPage.expectTotalAmountBorrowedGreaterThanZero({ timeoutMs: 90_000 });
   await assetDetailsPage.enterOriginationReference("SQ-Settlement-Ref-01");
+  await assetDetailsPage.scrollLessDepositIntoView();
   await expect
     .poll(
       async () =>
         (await assetDetailsPage.netTradeAmountDisplayed.inputValue()).replace(/[$,]/g, ""),
-      { timeout: 45_000 },
+      { timeout: 90_000, intervals: [500, 1_000, 2_000] },
     )
     .toMatch(/5000/);
 }
@@ -335,8 +338,8 @@ async function prepareUdpT4221AssetDetailsForAddOns(
   await selectTlProductAndProgram(assetDetailsPage);
   await addMinimalUsedAsset(assetDetailsPage, addAssetPage);
   await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
-  await assetDetailsPage.cashPriceOfAsset("$20,000");
   await assetDetailsPage.waitForAssetDetailsStepReady();
+  await assetDetailsPage.ensureAfVCashPriceReady("$20,000");
   await assetDetailsPage.waitForQuoteLoadersToFinish();
 }
 
@@ -737,8 +740,12 @@ test.describe("Standard Quote - TL @do @regression", () => {
     { tag: ["@do", "@regression", "@UDP-T4218"] },
     async ({ page }) => {
       test.setTimeout(300_000);
+      const addAssetPage = new DOAddAssetPage(page);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectTlProductAndProgram(assetDetailsPage);
+      await addMinimalUsedAsset(assetDetailsPage, addAssetPage);
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
       await assetDetailsPage.expectUdcEstablishmentFeePrePopulatedFromProgram();
     },
   );
@@ -791,7 +798,12 @@ test.describe("Standard Quote - TL @do @regression", () => {
       await prepareUdpT4221AssetDetailsForAddOns(assetDetailsPage, addAssetPage);
 
       await test.step("Open Add Ons and Accessories", async () => {
-        await assetDetailsPage.clickAddonsAndAccessoriesAndExpectScreen();
+        const root = standardQuoteRoot(page);
+        try {
+          await assetDetailsPage.clickAddonsAndAccessoriesAndExpectScreen();
+        } catch {
+          await openAddOnAccessoriesPageFromStandardQuote(page, root, assetDetailsPage);
+        }
       });
 
       await test.step("Add Registration $400, Insurance $200, Accessories $150", async () => {
@@ -1024,7 +1036,14 @@ test.describe("Standard Quote - TL @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectTlProductAndProgram(assetDetailsPage);
+      await assetDetailsPage.scrollLessDepositIntoView();
       await assetDetailsPage.enterTradeAmount("$5,000");
+      await expect
+        .poll(
+          async () => (await assetDetailsPage.netTradeAmountDisplayed.inputValue()).replace(/[$,]/g, ""),
+          { timeout: 45_000, intervals: [300, 500, 1_000] },
+        )
+        .toMatch(/5000/);
       await assetDetailsPage.enterSettlementAmount("$2,000");
       await assetDetailsPage.expectNetTradeAmountPattern(/\$?\s*3[, ]?000|3000/);
     },
@@ -1062,12 +1081,13 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      await prepareCalculableTlQuote(assetDetailsPage, addAssetPage, { term: "9999" });
-      await assetDetailsPage.clickCalculateButton();
-      await assetDetailsPage.expectTermExceedsProgramMaxOnCalculateThenRestore({
-        overMaxTerm: "9999",
-        restoreTerm: "36",
-      });
+      await prepareCalculableTlQuote(assetDetailsPage, addAssetPage, { term: "36" });
+      await assetDetailsPage.termsOfFinance("9999");
+      await assetDetailsPage.expectTermExceedsProgramMaxValidation();
+      await assetDetailsPage.clickCalculateButton({ fast: true });
+      await assetDetailsPage.expectTermExceedsProgramMaxValidation();
+      await assetDetailsPage.termsOfFinance("36");
+      await assetDetailsPage.clickCalculateButton({ fast: true });
     },
   );
 
@@ -1210,12 +1230,12 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const addAssetPage = new DOAddAssetPage(page);
       await selectTlProductAndProgram(assetDetailsPage);
       await prepareCalculableTlQuote(assetDetailsPage, addAssetPage, {
-        balloonPercent: "20",
-        balloonFixed: false,
+        balloon: "$4,000",
+        balloonFixed: true,
       });
       await assetDetailsPage.clickCalculateButton();
-      const irregular = standardQuoteRoot(page).getByText(/Irregular/i).first();
-      await expect.soft(irregular).toBeVisible({ timeout: 45_000 });
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
+      await assetDetailsPage.expectPaymentAmountShowsIrregular();
     },
   );
 
@@ -1518,8 +1538,8 @@ test.describe("Standard Quote - TL @do @regression", () => {
 
       await test.step("Click Settlement button", async () => {
         await assetDetailsPage.scrollLessDepositIntoView();
-        await settlementPage.expectSettlementTriggerVisible();
-        await assetDetailsPage.openSettlementDialog();
+        await settlementPage.waitForSettlementTriggerEnabled(90_000);
+        await settlementPage.openSettlementFromQuote();
       });
 
       await test.step("Observe settlement loan-search pop-up", async () => {
@@ -1569,12 +1589,22 @@ test.describe("Standard Quote - TL @do @regression", () => {
     "UDP-T4258 - TC_INT_004 Addons and Accessories Hyperlink",
     { tag: ["@do", "@regression", "@UDP-T4258"] },
     async ({ page }) => {
-      test.setTimeout(300_000);
+      test.setTimeout(600_000);
+      const addAssetPage = new DOAddAssetPage(page);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectTlProductAndProgram(assetDetailsPage);
+      await addMinimalUsedAsset(assetDetailsPage, addAssetPage);
+      await assetDetailsPage.closeAssetInsuranceSummaryDialog().catch(() => {});
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
 
       await test.step("Click + Addons & Accessories", async () => {
-        await assetDetailsPage.clickAddonsAndAccessoriesAndExpectScreen();
+        await assetDetailsPage.ensureAfVCashPriceReady("$20,000");
+        const root = standardQuoteRoot(page);
+        try {
+          await assetDetailsPage.clickAddonsAndAccessoriesAndExpectScreen();
+        } catch {
+          await openAddOnAccessoriesPageFromStandardQuote(page, root, assetDetailsPage);
+        }
       });
 
       await test.step("Observe Add Ons and Accessories screen", async () => {

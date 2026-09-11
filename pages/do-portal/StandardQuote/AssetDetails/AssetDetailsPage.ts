@@ -1010,26 +1010,50 @@ export class DOAssetDetailsPage extends BasePage {
     ).toBeVisible({ timeout: 15_000 });
   }
 
+  private async commitLessDepositCurrencyField(input: Locator): Promise<void> {
+    await this.scrollLessDepositIntoView().catch(() => {});
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await input.blur().catch(() => {});
+    await this.page
+      .locator("app-less-deposit")
+      .first()
+      .getByText(/Net Trade Amount/i)
+      .first()
+      .click({ timeout: 5_000 })
+      .catch(() => this.netTradeAmountDisplayed.click({ force: true }).catch(() => {}));
+    await input.evaluate((el: HTMLInputElement) => {
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new Event("blur", { bubbles: true }));
+    }).catch(() => {});
+    await this.waitForQuoteLoadersToFinish().catch(() => {});
+  }
+
   async enterTradeAmount(amount: string): Promise<void> {
     this.logStep(`Entered trade amount as ${this.stepValueDisplay(amount)}`);
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
-    await this.tradeAmountInput.scrollIntoViewIfNeeded();
-    await this.tradeAmountInput.click({ force: true });
-    await this.tradeAmountInput.press("ControlOrMeta+a");
-    await this.page.keyboard.press("Backspace");
-    await this.tradeAmountInput.fill(amount, { force: true });
-    await this.tradeAmountInput.press("Tab").catch(() => {});
+    await this.scrollLessDepositIntoView().catch(() => {});
+    await this.fillCurrencyMaskAmount(this.tradeAmountInput, amount, "Trade Amount");
+    await this.commitLessDepositCurrencyField(this.tradeAmountInput);
   }
 
   async enterSettlementAmount(amount: string): Promise<void> {
     this.logStep(`Entered settlement amount as ${this.stepValueDisplay(amount)}`);
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
-    await this.settlementAmountInput.scrollIntoViewIfNeeded();
-    await this.settlementAmountInput.click({ force: true });
-    await this.settlementAmountInput.press("ControlOrMeta+a");
-    await this.page.keyboard.press("Backspace");
-    await this.settlementAmountInput.fill(amount, { force: true });
+    await this.scrollLessDepositIntoView().catch(() => {});
+    await expect
+      .poll(async () => this.settlementAmountInput.isEnabled().catch(() => false), {
+        timeout: 30_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBeTruthy();
+    await this.fillCurrencyMaskAmount(this.settlementAmountInput, amount, "Settlement Amount");
+    await this.commitLessDepositCurrencyField(this.settlementAmountInput);
+    await this.settlementAmountInput.click({ timeout: 5_000 }).catch(() => {});
     await this.settlementAmountInput.press("Tab").catch(() => {});
+    await this.tradeAmountInput.click({ timeout: 5_000 }).catch(() => {});
+    await this.commitLessDepositCurrencyField(this.settlementAmountInput);
+    await this.netTradeAmountDisplayed.scrollIntoViewIfNeeded().catch(() => {});
+    await this.waitForQuoteLoadersToFinish().catch(() => {});
   }
 
   /** Net Trade Amount (often read-only); assert displayed text matches `pattern` (product rules vary — may mirror Trade until Settlement is applied). */
@@ -1037,9 +1061,11 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Expect Net Trade Amount Pattern");
     await expect(this.netTradeAmountDisplayed).toBeVisible({ timeout: 15_000 });
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    await this.scrollLessDepositIntoView().catch(() => {});
     await expect
       .poll(async () => (await this.netTradeAmountDisplayed.inputValue()).trim(), {
-        timeout: 30_000,
+        timeout: 45_000,
+        intervals: [300, 500, 1_000, 2_000],
       })
       .toMatch(pattern);
   }
@@ -1049,11 +1075,23 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep("Expect Udc Establishment Fee Pre Populated From Program");
     const fee = this.udcEstablishmentFeeInputField;
     await expect(fee).toBeVisible({ timeout: 20_000 });
-    const raw = (await fee.inputValue()).trim();
-    expect(raw.length).toBeGreaterThan(0);
-    const n = parseFloat(raw.replace(/[^0-9.]/g, ""));
-    expect(Number.isNaN(n)).toBeFalsy();
-    expect(n).toBeGreaterThan(0);
+    await fee.scrollIntoViewIfNeeded().catch(() => {});
+    await this.waitForQuoteLoadersToFinish().catch(() => {});
+    await fee.blur().catch(() => {});
+
+    await expect
+      .poll(
+        async () => {
+          const raw = (await fee.inputValue()).trim();
+          if (raw.length === 0) return Number.NaN;
+          const parsed = parseFloat(raw.replace(/[^0-9.]/g, ""));
+          return Number.isFinite(parsed) ? parsed : Number.NaN;
+        },
+        { timeout: 45_000, intervals: [300, 500, 1_000, 2_000] },
+      )
+      .toBeGreaterThan(0);
+    const feeAmount = await this.readUdcEstablishmentFee();
+    expect(feeAmount).toBeGreaterThan(0);
     if (await fee.isEditable().catch(() => false)) {
       await expect(fee).toBeEditable();
     }
@@ -3245,27 +3283,50 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async enterAsset(asset: string): Promise<void> {
     this.logStep(`Entered asset search/selection as ${this.stepValueDisplay(asset)}`);
+    await this.waitForQuoteLoadersToFinish().catch(() => {});
     await this.assetInputField.click();
-    await this.assetSearchField.fill(asset);
+    const searchTerms = [
+      asset.trim(),
+      asset.replace(/\s*\/\s*$/, "").trim(),
+      asset.split(/\s+/).slice(0, 3).join(" "),
+      "Car and Light Commercial",
+    ].filter((t, i, arr) => t.length > 0 && arr.indexOf(t) === i);
+
+    const pickAssetOption = async (): Promise<boolean> => {
+      const carOption = this.page.getByRole("option", { name: /Car and Light Commercial/i }).first();
+      if (await carOption.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await carOption.click({ timeout: 15_000 });
+        return true;
+      }
+      const listbox = this.page.getByRole("listbox");
+      if (await listbox.isVisible({ timeout: 1_500 }).catch(() => false)) {
+        const first = listbox.getByRole("option").first();
+        if (await first.isVisible({ timeout: 1_500 }).catch(() => false)) {
+          const text = ((await first.textContent()) ?? "").trim();
+          if (text.length > 0 && !/no results found/i.test(text)) {
+            await first.click({ timeout: 15_000 });
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    for (const term of searchTerms) {
+      await this.assetSearchField.fill("");
+      await this.assetSearchField.fill(term);
+      if (await pickAssetOption()) {
+        await this.confirmAssetTypeDialogIfOpen();
+        return;
+      }
+      await this.page.waitForTimeout(400);
+    }
 
     const escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const optionPattern = new RegExp(escaped.replace(/\s*\/\s*$/, "(\\s*/)?"), "i");
     const option = this.page.getByRole("option", { name: optionPattern }).first();
-    const noResults = this.page.getByRole("option", { name: /No results found/i });
-
-    if (await option.isVisible({ timeout: 8_000 }).catch(() => false)) {
-      await option.click({ timeout: 15_000 });
-    } else if (await noResults.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      const keyword = asset.split(/\s+/).slice(0, 2).join(" ");
-      await this.assetSearchField.fill(keyword);
-      const fallback = this.page.getByRole("option", { name: /Car and Light Commercial/i }).first();
-      await expect(fallback).toBeVisible({ timeout: 30_000 });
-      await fallback.click({ timeout: 15_000 });
-    } else {
-      await expect(option).toBeVisible({ timeout: 180_000 });
-      await option.click({ timeout: 15_000 });
-    }
-
+    await expect(option).toBeVisible({ timeout: 30_000 });
+    await option.click({ timeout: 15_000 });
     await this.confirmAssetTypeDialogIfOpen();
   }
 
@@ -5671,11 +5732,14 @@ export class DOAssetDetailsPage extends BasePage {
   }
   async cashPriceOfAsset(cashprice: string): Promise<void> {
     this.logStep(`Entered cash price of asset as ${this.stepValueDisplay(cashprice)}`);
-    await this.fillCurrencyMaskAmount(
-      this.cashPriceOfAssetInputField,
-      cashprice,
-      "Cash Price of Asset",
-    );
+    const input = this.cashPriceOfAssetInputField;
+    const target = Math.round(this.parseDisplayedCurrency(cashprice) * 100) / 100;
+    const current = await this.readCurrencyInput(input).catch(() => Number.NaN);
+    if (Number.isFinite(current) && Math.abs(current - target) < 1) {
+      this.logStep(`Cash price already ${this.stepValueDisplay(cashprice)} — skip re-entry`);
+      return;
+    }
+    await this.fillCurrencyMaskAmount(input, cashprice, "Cash Price of Asset");
   }
   async ppsrCount(count: string): Promise<void> {
     this.logStep(`Entered PPSR count as ${this.stepValueDisplay(count)}`);
@@ -5692,6 +5756,26 @@ export class DOAssetDetailsPage extends BasePage {
     return Math.abs(got - want) < 0.01;
   }
 
+  private async clearCurrencyMaskInput(input: Locator): Promise<void> {
+    await input.waitFor({ state: "visible", timeout: 20_000 });
+    await input.scrollIntoViewIfNeeded().catch(() => {});
+    await input.click({ timeout: 15_000 });
+    await input.evaluate((el: HTMLInputElement) => {
+      el.focus();
+      el.select();
+      el.value = "";
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    if (process.platform === "darwin") {
+      await input.press("Meta+A").catch(() => {});
+    } else {
+      await input.press("Control+A").catch(() => {});
+    }
+    await input.press("Backspace").catch(() => {});
+    await input.blur().catch(() => {});
+  }
+
   private async fillCurrencyMaskAmount(
     input: Locator,
     amount: string,
@@ -5702,10 +5786,14 @@ export class DOAssetDetailsPage extends BasePage {
     await input.waitFor({ state: "visible", timeout: 20_000 });
     await input.scrollIntoViewIfNeeded();
 
+    const current = await this.readCurrencyInput(input).catch(() => Number.NaN);
+    if (Number.isFinite(current) && Math.abs(current - target) < 0.01) {
+      return;
+    }
+
     const typeDigits = async (text: string): Promise<void> => {
+      await this.clearCurrencyMaskInput(input);
       await input.click({ timeout: 15_000 });
-      await this.page.keyboard.press("Control+A");
-      await this.page.keyboard.press("Backspace").catch(() => {});
       await this.page.keyboard.type(text, { delay: 45 });
       await input.press("Tab").catch(() => {});
       await this.waitForQuoteLoadersToFinish().catch(() => {});
@@ -8071,7 +8159,17 @@ export class DOAssetDetailsPage extends BasePage {
 
     await lessDeposit.scrollIntoViewIfNeeded();
     await expect(btn).toBeVisible({ timeout: 30_000 });
-    await btn.click({ timeout: 15_000 });
+    await expect
+      .poll(async () => btn.isEnabled().catch(() => false), {
+        timeout: 90_000,
+        intervals: [500, 1_000, 2_000],
+      })
+      .toBeTruthy();
+    try {
+      await btn.click({ timeout: 15_000 });
+    } catch {
+      await btn.click({ force: true, timeout: 15_000 });
+    }
 
     await this.page
       .getByRole("dialog")
@@ -8081,15 +8179,24 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   private addonsAccessoriesLabelRx(): RegExp {
-    return /\+?\s*Add\s*Ons?\s*(?:&|and)\s*Accessories|\+?\s*Addons?\s*&\s*Accessories/i;
+    return /\+?\s*Add\s*Ons?(?:\s*(?:&|and)\s*Accessories)?|\+?\s*Addons?\s*&\s*Accessories/i;
+  }
+
+  private addonsAccessoriesShortLabelRx(): RegExp {
+    return /^\+?\s*Add\s*Ons?$/i;
   }
 
   private addonsAccessoriesTrigger(scope: Locator): Locator {
     const label = this.addonsAccessoriesLabelRx();
-    return scope
-      .getByRole("link", { name: label })
+    const shortLabel = this.addonsAccessoriesShortLabelRx();
+    const chargesSection = scope.filter({ has: scope.getByText(/Additional\s+Charges/i) });
+    return chargesSection
+      .getByRole("button", { name: shortLabel })
+      .or(scope.getByRole("button", { name: shortLabel }))
+      .or(scope.getByRole("link", { name: label }))
       .or(scope.getByRole("button", { name: label }))
       .or(scope.locator("a, button, [role='button']").filter({ hasText: label }))
+      .or(scope.locator("gen-button, p-button").filter({ hasText: shortLabel }).locator("button"))
       .first();
   }
 
@@ -8146,22 +8253,97 @@ export class DOAssetDetailsPage extends BasePage {
     const root = this.standardQuoteRoot();
     await this.scrollAddonsAccessoriesEntryIntoView(root);
 
-    const trigger = this.addonsAccessoriesTrigger(root);
-    await expect(trigger).toBeVisible({ timeout: 30_000 });
-    await trigger.scrollIntoViewIfNeeded();
-    try {
-      await trigger.click({ timeout: 15_000 });
-    } catch {
-      await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
-      await trigger.click({ force: true, timeout: 15_000 });
+    const labelRx = this.addonsAccessoriesLabelRx();
+    const shortLabelRx = /^\+?\s*Add\s*Ons?$/i;
+    const chargesSection = root.filter({ has: root.getByText(/Additional\s+Charges/i) });
+
+    const tryOpen = async (loc: Locator): Promise<boolean> => {
+      const el = loc.first();
+      if (!(await el.isVisible({ timeout: 6_000 }).catch(() => false))) return false;
+      await el.scrollIntoViewIfNeeded();
+      try {
+        await el.click({ timeout: 20_000 });
+      } catch {
+        await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+        await el.click({ force: true, timeout: 20_000 });
+      }
+      await this.page.waitForLoadState("domcontentloaded").catch(() => {});
+      await this.page
+        .waitForURL(/add-on-accessories|addon-accessories|addOnAccessories|add_on_accessories/i, {
+          timeout: 12_000,
+        })
+        .catch(() => {});
+      return await this.page.locator("app-service-plan").isVisible({ timeout: 18_000 }).catch(() => false);
+    };
+
+    const candidates: Locator[] = [
+      this.addonsAccessoriesTrigger(root),
+      root.getByRole("link", { name: labelRx }),
+      root.getByRole("button", { name: labelRx }),
+      this.page.getByRole("link", { name: labelRx }),
+      this.page.getByRole("button", { name: labelRx }),
+      root.locator("a").filter({ hasText: labelRx }),
+      this.page.locator("a").filter({ hasText: labelRx }),
+      root.locator("button, [role='button']").filter({ hasText: labelRx }),
+      root.locator("a, button, [role='link']").filter({ hasText: labelRx }),
+      root.locator('[class*="cursor-pointer"], [class*="pointer"]').filter({ hasText: labelRx }),
+      chargesSection.getByRole("button", { name: shortLabelRx }),
+      chargesSection.locator("gen-button, p-button").filter({ hasText: shortLabelRx }).locator("button"),
+      root.getByRole("button", { name: shortLabelRx }),
+      root.locator("gen-button, p-button").filter({ hasText: shortLabelRx }).locator("button"),
+      this.page.getByRole("button", { name: shortLabelRx }),
+    ];
+
+    for (const c of candidates) {
+      if (await tryOpen(c)) {
+        await this.expectAddOnsAccessoriesScreenVisible();
+        return;
+      }
     }
-    await this.page.waitForLoadState("domcontentloaded").catch(() => {});
-    await this.page
-      .waitForURL(/add-on-accessories|addon-accessories|addOnAccessories|add_on_accessories/i, {
-        timeout: 12_000,
-      })
-      .catch(() => {});
-    await this.expectAddOnsAccessoriesScreenVisible();
+
+    const textHit = root.getByText(labelRx).first();
+    if (await textHit.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await textHit.scrollIntoViewIfNeeded();
+      const asLink = textHit.locator("xpath=ancestor::a[1]");
+      if (await asLink.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        if (await tryOpen(asLink)) {
+          await this.expectAddOnsAccessoriesScreenVisible();
+          return;
+        }
+      }
+      const asBtn = textHit.locator("xpath=ancestor::button[1]");
+      if (await asBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        if (await tryOpen(asBtn)) {
+          await this.expectAddOnsAccessoriesScreenVisible();
+          return;
+        }
+      }
+      await textHit.click({ force: true, timeout: 15_000 }).catch(() => {});
+      if (await this.page.locator("app-service-plan").isVisible({ timeout: 18_000 }).catch(() => false)) {
+        await this.expectAddOnsAccessoriesScreenVisible();
+        return;
+      }
+    }
+
+    const shortTextHit = root.getByText(shortLabelRx).first();
+    if (await shortTextHit.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const asBtn = shortTextHit.locator("xpath=ancestor::button[1]");
+      if (await asBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        if (await tryOpen(asBtn)) {
+          await this.expectAddOnsAccessoriesScreenVisible();
+          return;
+        }
+      }
+      if (await tryOpen(shortTextHit)) {
+        await this.expectAddOnsAccessoriesScreenVisible();
+        return;
+      }
+    }
+
+    throw new Error(
+      "Add Ons & Accessories: could not open the add-ons screen (app-service-plan never became visible). " +
+        "Scroll/copy may differ, or this dealer/product does not expose the entry.",
+    );
   }
 
   async openAddonsAccessoriesFromQuote(): Promise<void> {
