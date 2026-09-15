@@ -1,0 +1,15 @@
+---
+description: Quick Quote regression specs must use shared helpers instead of local duplicates.
+globs:
+  - tests/do-portal/doRegressionTestSuite/QuickQuote*.test.ts
+---
+
+# Quick Quote test helpers
+
+When authoring or editing Quick Quote regression specs under `tests/do-portal/doRegressionTestSuite/`:
+
+- Import entry/setup/calculate flows from `quickQuote.helpers.ts` (`openQuickQuoteFromDashboard`, `fillMandatoryPaymentModeFields`, `calculatePaymentModeQuote`, product setup helpers).
+- Import Solve For flows and prepare* helpers from `quickQuoteSolveFor.helpers.ts`.
+- Do **not** define local copies of `openQuickQuoteFromDashboard`, payment calculate helpers, or term/program DOM readers — use `DOQuickQuotePage.readTermsMonthsValue()` / `readSelectedProgramLabel()` instead.
+- Do **not** add inline calculation-summary regex assertions; use `DOQuickQuotePage.expectCalculationSummaryWithTotals()` or the thin helper re-export.
+- Reference pattern: `QuickQuote_SolveFor.test.ts` (thin spec) + `quickQuote.helpers.ts` + `DOQuickQuotePage`.

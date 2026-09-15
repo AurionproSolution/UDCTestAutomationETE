@@ -5,94 +5,34 @@
  */
 
 import { expect, test } from "@fixtures/doPortalTest";
-import type { Page } from "@playwright/test";
-import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
-  DODashboardPage,
-  DOQuickQuotePage,
 } from "../../../pages";
+import {
+  calculateStandardPaymentQuote,
+  CSA_C_QQ_PRODUCT,
+  CSA_C_QQ_PROGRAM,
+  fillMandatoryPaymentFieldsCore,
+  openQuickQuoteFromDashboard,
+  selectCsaCProductAndProgram,
+} from "./quickQuote.helpers";
+import {
+  calculateInBalloonMode,
+  calculateInCashPriceMode,
+  calculateInDepositMode,
+  expectBalloonCalculated,
+  expectBalloonModeReadOnlyFields,
+  expectCalculateForEnabled,
+  expectCalculationSummaryWithTotals,
+  expectCashPriceCalculated,
+  expectCashPriceModeReadOnly,
+  expectDepositCalculated,
+  expectDepositModeReadOnlyFields,
+  switchToCalculateFor,
+} from "./quickQuoteSolveFor.helpers";
 
-const CSA_QQ_PRODUCT = "CSA-C-Assigned";
-const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
-const TLC_DEALER = "Armstrong Prestige Wellington";
-
-async function readSelectedProgramLabel(
-  quickQuotePage: DOQuickQuotePage,
-  quoteIndex = 0,
-): Promise<string> {
-  const host = quickQuotePage.programDropdownOnQuote(quoteIndex);
-  const combobox = host.getByRole("combobox").first();
-  if (await combobox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    return (
-      (await combobox.textContent())?.trim() ??
-      (await combobox.getAttribute("aria-label"))?.trim() ??
-      ""
-    );
-  }
-  return (await host.locator(".p-dropdown-label").first().textContent())?.trim() ?? "";
-}
-
-async function readSelectedTermMonths(quickQuotePage: DOQuickQuotePage): Promise<string> {
-  const dropdownVisible = await quickQuotePage.termsMonthsDropdownTrigger
-    .isVisible({ timeout: 5_000 })
-    .catch(() => false);
-  if (dropdownVisible) {
-    const combobox = quickQuotePage.termsMonthsDropdownHost.getByRole("combobox").first();
-    return (
-      (await combobox.textContent())?.trim() ??
-      (await combobox.getAttribute("aria-label"))?.trim() ??
-      ""
-    );
-  }
-  const inputVisible = await quickQuotePage.termsMonthsInput
-    .isVisible({ timeout: 5_000 })
-    .catch(() => false);
-  if (inputVisible) {
-    return (await quickQuotePage.termsMonthsInput.inputValue()).trim();
-  }
-  return "";
-}
-
-async function openQuickQuoteFromDashboard(page: Page): Promise<{
-  dashboardPage: DODashboardPage;
-  quickQuotePage: DOQuickQuotePage;
-}> {
-  const dashboardPage = new DODashboardPage(page);
-  const quickQuotePage = new DOQuickQuotePage(page);
-  await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
-  await dashboardPage.waitForAuthenticatedDashboard();
-  await dashboardPage.selectDealer(TLC_DEALER);
-  await quickQuotePage.openQuickQuote();
-  await expect.soft(quickQuotePage.quickQuoteRoot).toBeVisible();
-  await expect.soft(quickQuotePage.quickQuoteForm).toBeVisible();
-  return { dashboardPage, quickQuotePage };
-}
-
-async function selectCsaProductAndProgram(
-  _page: Page,
-  quickQuotePage: DOQuickQuotePage,
-): Promise<void> {
-  await quickQuotePage.selectProduct(CSA_QQ_PRODUCT);
-  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  await quickQuotePage.selectProgramIfNeeded(CSA_QQ_PROGRAM);
-  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-}
-
-async function fillMandatoryPaymentFields(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await quickQuotePage.selectFrequency("Monthly");
-  await quickQuotePage.enterInterestRatePercent("9");
-  await quickQuotePage.enterTermsMonths("36");
-  await quickQuotePage.enterCashPrice("$20,000");
-}
-
-async function calculateStandardPaymentQuote(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await fillMandatoryPaymentFields(quickQuotePage);
-  await quickQuotePage.enterDepositPercent("10%");
-  await quickQuotePage.enterBalloonPercent("0");
-  await quickQuotePage.clickCalculate();
-  await quickQuotePage.expectCreateQuoteVisible();
-}
+const CSA_QQ_PRODUCT = CSA_C_QQ_PRODUCT;
+const CSA_QQ_PROGRAM = CSA_C_QQ_PROGRAM;
 
 test.describe("Quick Quote - CSA @do @regression", () => {
   test(
@@ -173,7 +113,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
 
       if (programs.length === 1) {
         await quickQuotePage.expectProgramDropdownDisabled(0);
-        const programLabel = await readSelectedProgramLabel(quickQuotePage);
+        const programLabel = await quickQuotePage.readSelectedProgramLabel();
         expect.soft(programLabel.length).toBeGreaterThan(0);
       } else {
         test.info().annotations.push({
@@ -181,7 +121,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
           description: `Dealer has ${programs.length} CSA programs — single-program auto-default not applicable in this environment.`,
         });
         await quickQuotePage.selectProgram(CSA_QQ_PROGRAM);
-        const programLabel = await readSelectedProgramLabel(quickQuotePage);
+        const programLabel = await quickQuotePage.readSelectedProgramLabel();
         expect.soft(programLabel.length).toBeGreaterThan(0);
       }
     },
@@ -193,7 +133,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await quickQuotePage.expectCsaQuickQuoteDynamicFieldsVisible();
     },
   );
@@ -270,7 +210,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
 
       const calculateForLabel = await quickQuotePage.readCalculateForOnQuote(0);
       expect.soft(calculateForLabel).toMatch(/Payment/i);
@@ -289,13 +229,10 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
-      const hostCls =
-        (await quickQuotePage.calculateForDropdownHost.getAttribute("class")) ?? "";
-      await expect.soft(hostCls).not.toContain("p-disabled");
-      await expect.soft(quickQuotePage.calculateForDropdownTrigger).toBeEnabled();
+      await expectCalculateForEnabled(quickQuotePage);
     },
   );
 
@@ -305,17 +242,12 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
-      await fillMandatoryPaymentFields(quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
+      await fillMandatoryPaymentFieldsCore(quickQuotePage);
       await quickQuotePage.clickCalculate();
       await quickQuotePage.expectCreateQuoteVisible();
 
-      const summary = quickQuotePage.calculationSummaryRegion.first();
-      await expect.soft(summary).toBeVisible({ timeout: 30_000 });
-      await expect.soft(summary).toContainText(/Loan Amount/i);
-      await expect
-        .soft(summary)
-        .toContainText(/Total (Amount )?Payable|Total Payable|Amount Payable|Total Interest|Total Fees/i);
+      await expectCalculationSummaryWithTotals(quickQuotePage);
     },
   );
 
@@ -325,21 +257,14 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
-      await quickQuotePage.selectCalculateFor("Cash Price");
-      await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-      await expect.soft(quickQuotePage.cashPriceInput).not.toBeEditable({ timeout: 15_000 });
-      await quickQuotePage.enterInterestRatePercent("9");
-      await quickQuotePage.enterTermsMonths("36");
-      await quickQuotePage.selectFrequency("Monthly");
-      await quickQuotePage.clickCalculate();
-      await quickQuotePage.expectCreateQuoteVisible();
-
-      const cashPriceAfter = (await quickQuotePage.cashPriceInput.inputValue().catch(() => "")).trim();
-      expect.soft(cashPriceAfter.length).toBeGreaterThan(0);
-      expect.soft(/\d/.test(cashPriceAfter)).toBeTruthy();
+      await switchToCalculateFor(quickQuotePage, "Cash Price");
+      await expectCashPriceModeReadOnly(quickQuotePage);
+      await calculateInCashPriceMode(quickQuotePage);
+      await expectCalculationSummaryWithTotals(quickQuotePage);
+      await expectCashPriceCalculated(quickQuotePage);
     },
   );
 
@@ -349,21 +274,14 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
-      await quickQuotePage.selectCalculateFor("Deposit");
-      await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-      await expect.soft(quickQuotePage.depositPercentInput).not.toBeEditable({ timeout: 15_000 });
-      await quickQuotePage.enterInterestRatePercent("9");
-      await quickQuotePage.enterTermsMonths("36");
-      await quickQuotePage.selectFrequency("Monthly");
-      await quickQuotePage.clickCalculate();
-      await quickQuotePage.expectCreateQuoteVisible();
-
-      const depositPct = (await quickQuotePage.depositPercentInput.inputValue().catch(() => "")).trim();
-      const depositUsd = (await quickQuotePage.depositDollarInput.inputValue().catch(() => "")).trim();
-      expect.soft(/\d/.test(depositPct) || /\d/.test(depositUsd)).toBeTruthy();
+      await switchToCalculateFor(quickQuotePage, "Deposit");
+      await expectDepositModeReadOnlyFields(quickQuotePage);
+      await calculateInDepositMode(quickQuotePage);
+      await expectCalculationSummaryWithTotals(quickQuotePage);
+      await expectDepositCalculated(quickQuotePage);
     },
   );
 
@@ -373,22 +291,17 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
-      await quickQuotePage.selectCalculateFor("Balloon");
-      await quickQuotePage.dismissQuickQuoteDropdownOverlays();
+      await switchToCalculateFor(quickQuotePage, "Balloon");
       await quickQuotePage.clearCashPriceField();
       await quickQuotePage.enterCashPrice("$25,000");
       await quickQuotePage.enterDepositPercent("8%");
-      await quickQuotePage.enterInterestRatePercent("9");
-      await expect.soft(quickQuotePage.balloonPercentInput).not.toBeEditable({ timeout: 15_000 });
-      await quickQuotePage.clickCalculate();
-      await quickQuotePage.expectCreateQuoteVisible();
-
-      const balloonPct = (await quickQuotePage.balloonPercentInput.inputValue().catch(() => "")).trim();
-      const balloonUsd = (await quickQuotePage.balloonDollarInput.inputValue().catch(() => "")).trim();
-      expect.soft(/\d/.test(balloonPct) || /\d/.test(balloonUsd)).toBeTruthy();
+      await expectBalloonModeReadOnlyFields(quickQuotePage);
+      await calculateInBalloonMode(quickQuotePage);
+      await expectCalculationSummaryWithTotals(quickQuotePage);
+      await expectBalloonCalculated(quickQuotePage);
     },
   );
 
@@ -398,12 +311,10 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await quickQuotePage.enterCashPrice("$20,000");
       await quickQuotePage.enterDepositPercent("10%");
-      await expect
-        .soft(quickQuotePage.depositDollarInput)
-        .toHaveValue(/2[, ]?000|2000/, { timeout: 25_000 });
+      await quickQuotePage.expectDepositPercentPopulatesDollar("10%", /2[, ]?000|2000/);
     },
   );
 
@@ -413,7 +324,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await quickQuotePage.enterCashPrice("$20,000");
       await quickQuotePage.clearDepositDollarField();
       await quickQuotePage.enterDepositDollars("$4,000.00");
@@ -429,12 +340,9 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
 
-      const rate = (await quickQuotePage.interestRatePercentInput.inputValue().catch(() => "")).trim();
-      expect.soft(rate.length).toBeGreaterThan(0);
-      expect.soft(/\d/.test(rate)).toBeTruthy();
-      await expect.soft(quickQuotePage.interestRatePercentInput).toBeVisible();
+      await quickQuotePage.expectInterestRateDefaultPopulated();
     },
   );
 
@@ -444,9 +352,9 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
 
-      const term = await readSelectedTermMonths(quickQuotePage);
+      const term = await quickQuotePage.readTermsMonthsValue();
       if (term.length > 0) {
         expect.soft(/\d+/.test(term)).toBeTruthy();
       } else {
@@ -480,8 +388,8 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
-      await fillMandatoryPaymentFields(quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
+      await fillMandatoryPaymentFieldsCore(quickQuotePage);
       await quickQuotePage.enterTermsMonths("9999");
       if (await quickQuotePage.calculateButton.isEnabled().catch(() => false)) {
         await quickQuotePage.clickCalculate();
@@ -496,7 +404,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
 
       const frequencyLabel = await quickQuotePage.readFrequencyLabel();
       if (!DOQuickQuotePage.isBlankFrequencyLabel(frequencyLabel)) {
@@ -519,7 +427,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await quickQuotePage.enterCashPrice("$20,000");
       await quickQuotePage.enterBalloonPercent("20%");
       await expect
@@ -534,7 +442,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await quickQuotePage.enterCashPrice("$20,000");
       await quickQuotePage.clearBalloonDollarField();
       await quickQuotePage.enterBalloonDollars("$5,000.00");
@@ -550,8 +458,8 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
-      await fillMandatoryPaymentFields(quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
+      await fillMandatoryPaymentFieldsCore(quickQuotePage);
       await expect.soft(quickQuotePage.calculateButton).toBeEnabled();
     },
   );
@@ -562,7 +470,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
       await quickQuotePage.clickReset();
       await quickQuotePage.expectQuickQuoteResetToDefaultState({
@@ -577,12 +485,11 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(600_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
       await quickQuotePage.clickCreateQuote();
-      const standardRoot = page.locator("app-quote-details, app-standard-quote").first();
-      await expect.soft(standardRoot).toBeVisible({ timeout: 120_000 });
+      await quickQuotePage.waitForStandardQuoteShell();
       await expect.soft(page.getByText(/CSA|Credit Sale/i).first()).toBeVisible();
     },
   );
@@ -593,7 +500,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
       await expect.soft(quickQuotePage.printButton).toBeVisible();
@@ -607,7 +514,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
       await expect.soft(quickQuotePage.downloadButton).toBeVisible();
@@ -621,7 +528,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
       await expect.soft(quickQuotePage.addComparison2Button).toBeEnabled();
@@ -637,7 +544,7 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
       await quickQuotePage.selectCalculateFor("Balloon");
@@ -674,12 +581,11 @@ test.describe("Quick Quote - CSA @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(600_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-      await selectCsaProductAndProgram(page, quickQuotePage);
+      await selectCsaCProductAndProgram(page, quickQuotePage);
       await calculateStandardPaymentQuote(quickQuotePage);
 
       await quickQuotePage.clickCreateQuote();
-      const standardRoot = page.locator("app-quote-details, app-standard-quote").first();
-      await expect.soft(standardRoot).toBeVisible({ timeout: 120_000 });
+      await quickQuotePage.waitForStandardQuoteShell();
 
       const assetDetailsPage = new DOAssetDetailsPage(page);
       await assetDetailsPage.waitForAssetDetailsStepReady();

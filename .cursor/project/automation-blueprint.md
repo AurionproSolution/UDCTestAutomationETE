@@ -65,6 +65,8 @@ Use these section titles when evaluating the requirements gate (Description + al
 
 Read 2–3 of these before generating new specs:
 
+- `tests/do-portal/doRegressionTestSuite/QuickQuote_SolveFor.test.ts` — thin Quick Quote spec; imports flows from `quickQuoteSolveFor.helpers.ts`
+- `tests/do-portal/doRegressionTestSuite/quickQuote.helpers.ts` — shared QQ entry, product setup, payment calculate (`openQuickQuoteFromDashboard`, `calculatePaymentModeQuote`)
 - `tests/do-portal/doRegressionTestSuite/CustomerDetails.test.ts` — Standard Quote wizard, Customer Details step, helper `openStandardQuoteOnCustomerDetailsStep`
 - `tests/do-portal/Regression/CSA-C-Assigned_Regression.test.ts` — TCC catalog regression pack (TCC001–TCC003)
 - `tests/rss-portal/rssSanityTest/RSS_Sanity.Individual.test.ts` — RSS portal patterns

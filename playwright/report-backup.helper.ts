@@ -5,11 +5,14 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import {
+  LIVE_ORTONI,
+  resolveOrtoniIndexPath,
+  syncOrtoniReportEntryPoint,
+} from "./ortoni-report.helper";
 
 const RESULTS_ROOT = "results";
-const LIVE_ORTONI = "ortoni-report";
 const LIVE_PLAYWRIGHT_HTML = "my-report";
-const ORTONI_INDEX = path.join(LIVE_ORTONI, "index.html");
 
 function getPlaywrightVersion(): string | undefined {
   try {
@@ -71,15 +74,18 @@ export interface ArchiveReportsResult {
   backupDir: string;
   backedUpOrtoni: boolean;
   backedUpPlaywrightHtml: boolean;
+  ortoniIndexRelativePath?: string;
 }
 
 export function archiveReports(
   options: ArchiveReportsOptions = {},
 ): ArchiveReportsResult | null {
   const cwd = process.cwd();
-  const ortoniIndexPath = path.join(cwd, ORTONI_INDEX);
 
-  if (!fs.existsSync(ortoniIndexPath)) {
+  syncOrtoniReportEntryPoint(cwd);
+  const ortoniIndexPath = resolveOrtoniIndexPath(cwd);
+
+  if (!ortoniIndexPath) {
     return null;
   }
 
@@ -96,6 +102,10 @@ export function archiveReports(
     path.join(backupDir, LIVE_PLAYWRIGHT_HTML),
   );
 
+  const ortoniIndexRelativePath = path
+    .relative(cwd, ortoniIndexPath)
+    .replace(/\\/g, "/");
+
   const runInfo = {
     archivedAt: new Date().toISOString(),
     backupFolder: path.relative(cwd, backupDir).replace(/\\/g, "/"),
@@ -106,8 +116,9 @@ export function archiveReports(
     overallStatus: options.overallStatus ?? "unknown",
     backedUpOrtoni,
     backedUpPlaywrightHtml,
+    ortoniIndexRelativePath,
     note:
-      "Full recursive copy of live report folders. Ortoni backup includes index.html, ortoni-data/ (screenshots, videos, traces), trace/ viewer assets, and ortoni-data-history.sqlite when present.",
+      "Full recursive copy of live report folders. Ortoni backup includes index.html (flat or under run-*/), ortoni-data/, trace/, and ortoni-data-history.sqlite when present.",
   };
 
   fs.writeFileSync(
@@ -116,5 +127,7 @@ export function archiveReports(
     "utf-8",
   );
 
-  return { backupDir, backedUpOrtoni, backedUpPlaywrightHtml };
+  return { backupDir, backedUpOrtoni, backedUpPlaywrightHtml, ortoniIndexRelativePath };
 }
+
+export { resolveOrtoniIndexPath, syncOrtoniReportEntryPoint } from "./ortoni-report.helper";

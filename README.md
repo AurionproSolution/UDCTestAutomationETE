@@ -194,8 +194,21 @@ npm run report:ortoni
 
 | Folder | Purpose |
 |--------|---------|
-| `ortoni-report/` | Live Ortoni report (`index.html`, screenshots, videos, traces, steps, logs) |
+| `ortoni-report/` | Live Ortoni report. CLI runs write under `ortoni-report/run-{timestamp}-{pid}/` (Windows-safe); the backup step also syncs assets to `ortoni-report/index.html` at the root. |
 | `my-report/` | Live Playwright HTML report |
+
+### Full reports (terminal / CI)
+
+**For Ortoni + automatic `results/` backup, run from a terminal** — do not set `PLAYWRIGHT_SKIP_ORTONI=1`:
+
+```bash
+npm run test:do
+npm run report:ortoni
+```
+
+Cursor / VS Code Test Explorer sets `PLAYWRIGHT_SKIP_ORTONI=1` and `PLAYWRIGHT_IDE=1` by default ([`.vscode/settings.json`](.vscode/settings.json)) so the Playwright extension can discover tests without loading Ortoni. IDE runs still produce `my-report/` when the full config runs, but **Ortoni and timestamped backup are CLI/CI only** unless you unset those variables.
+
+`npm run report:ortoni` opens the newest Ortoni folder (flat `index.html` or latest `run-*` subfolder).
 
 ### Automatic backups (`results/`)
 
@@ -231,7 +244,7 @@ Get-ChildItem results -Directory | Sort-Object Name
 |----------|----------|--------|
 | `PLAYWRIGHT_SKIP_REPORT_BACKUP=1` | Manual / CI | No backup to `results/` |
 | `PLAYWRIGHT_IDE=1` | VS Code / Cursor Test Explorer | No backup (avoids flooding `results/` on debug runs) |
-| `PLAYWRIGHT_SKIP_ORTONI=1` | IDE (default in `.vscode/settings.json`) | Ortoni not generated; backup skipped if no `ortoni-report/index.html` |
+| `PLAYWRIGHT_SKIP_ORTONI=1` | IDE default (`.vscode/settings.json`); optional locally | Ortoni not generated; no Ortoni backup (Playwright HTML still written) |
 
 ## 🏷️ Test Tags
 

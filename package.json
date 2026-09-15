@@ -27,7 +27,7 @@
     "test:env:uat": "cross-env TEST_ENV=uat npx playwright test",
     "test:env:prod": "cross-env TEST_ENV=prod npx playwright test",
     "report": "npx playwright show-report my-report",
-    "report:ortoni": "npx playwright show-report ortoni-report",
+    "report:ortoni": "node playwright/show-ortoni-report.mjs",
     "lint": "tsc --noEmit && eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

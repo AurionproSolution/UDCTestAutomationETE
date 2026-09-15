@@ -11,14 +11,29 @@
 
 import { expect } from "@fixtures/doPortalTest";
 import type { Page } from "@playwright/test";
-import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
-import { DODashboardPage, DOQuickQuotePage } from "../../../pages";
+import { DOQuickQuotePage } from "../../../pages";
+import {
+  calculatePaymentModeQuote,
+  calculateStandardPaymentQuote,
+  fillMandatoryPaymentFields,
+  fillMandatoryPaymentModeFields,
+  openQuickQuoteFromDashboard,
+  TLC_DEALER,
+} from "./quickQuote.helpers";
+
+export {
+  calculatePaymentModeQuote,
+  calculateStandardPaymentQuote,
+  fillMandatoryPaymentFields,
+  fillMandatoryPaymentModeFields,
+  openQuickQuoteFromDashboard,
+  TLC_DEALER,
+} from "./quickQuote.helpers";
 
 export const CSA_B_QQ_PRODUCT = "CSA-B-Assigned";
 export const CSA_B_QQ_PROGRAM = "MYUDC-B-CSA-Assigned MV";
 export const CSA_B_QQ_PROGRAM_ALT = "CSA Business - MV Dealer";
 export const CSA_B_QQ_PROGRAM_FALLBACK = "MYUDC-C-CSA- Assigned MV";
-export const TLC_DEALER = "Armstrong Prestige Wellington";
 const DEFAULT_PAYMENT_AMOUNT = "$650";
 
 export type SolveForMode = "Payment" | "Cash Price" | "Deposit" | "Balloon";
@@ -34,21 +49,6 @@ export type QuickQuoteFinanceSnapshot = {
   balloonDollar: string;
   payment: string;
 };
-
-export async function openQuickQuoteFromDashboard(page: Page): Promise<{
-  dashboardPage: DODashboardPage;
-  quickQuotePage: DOQuickQuotePage;
-}> {
-  const dashboardPage = new DODashboardPage(page);
-  const quickQuotePage = new DOQuickQuotePage(page);
-  await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
-  await dashboardPage.waitForAuthenticatedDashboard();
-  await dashboardPage.selectDealer(TLC_DEALER);
-  await quickQuotePage.openQuickQuote();
-  await expect.soft(quickQuotePage.quickQuoteRoot).toBeVisible();
-  await expect.soft(quickQuotePage.quickQuoteForm).toBeVisible();
-  return { dashboardPage, quickQuotePage };
-}
 
 export async function selectCsaBProductAndProgram(
   _page: Page,
@@ -76,30 +76,9 @@ export async function selectCsaBProductAndProgram(
   await quickQuotePage.waitForLoadingComplete();
 }
 
-/** Payment Solve For — user enters cash price, deposit, balloon; payment is calculated. */
-export async function fillMandatoryPaymentModeFields(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await quickQuotePage.selectFrequency("Monthly");
-  await quickQuotePage.enterInterestRatePercent("9");
-  await quickQuotePage.enterTermsMonths("36");
-  await quickQuotePage.enterCashPrice("$20,000");
-  await quickQuotePage.enterDepositPercent("10%");
-  await quickQuotePage.enterBalloonPercent("0");
-}
-
-/** @deprecated Use {@link fillMandatoryPaymentModeFields}. */
-export async function fillMandatoryPaymentFields(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await fillMandatoryPaymentModeFields(quickQuotePage);
-}
-
+/** Payment-mode calculate (CSA-B Solve For). */
 export async function calculateInPaymentMode(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await fillMandatoryPaymentModeFields(quickQuotePage);
-  await quickQuotePage.clickCalculate();
-  await quickQuotePage.expectCreateQuoteVisible();
-}
-
-/** @deprecated Use {@link calculateInPaymentMode}. */
-export async function calculateStandardPaymentQuote(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await calculateInPaymentMode(quickQuotePage);
+  await calculatePaymentModeQuote(quickQuotePage);
 }
 
 /** Cash Price Solve For — payment is an input; cash price is calculated. */
@@ -242,37 +221,11 @@ export async function expectDefaultPaymentSolveForState(quickQuotePage: DOQuickQ
 }
 
 export async function expectCalculationSummaryWithTotals(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  const summary = quickQuotePage.calculationSummaryRegion.first();
-  await expect.soft(summary).toBeVisible({ timeout: 30_000 });
-  const text = ((await summary.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
-  expect.soft(/Loan Amount/i.test(text)).toBeTruthy();
-  expect
-    .soft(/Total (Amount )?Payable|Total Payable|Amount Payable|Total Interest|Total Fees/i.test(text))
-    .toBeTruthy();
+  await quickQuotePage.expectCalculationSummaryWithTotals();
 }
 
 export async function expectCalculationSummaryHidden(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        const createVisible = await quickQuotePage.createQuoteButton.isVisible().catch(() => false);
-        if (!createVisible) {
-          return true;
-        }
-        const summaryVisible = await quickQuotePage.calculationSummaryRegion
-          .first()
-          .isVisible()
-          .catch(() => false);
-        if (!summaryVisible) {
-          return true;
-        }
-        const text =
-          (await quickQuotePage.calculationSummaryRegion.first().textContent().catch(() => "")) ?? "";
-        return !/\$\s*[\d,]+\.?\d*/.test(text);
-      },
-      { timeout: 30_000, intervals: [300, 500, 1_000, 2_000] },
-    )
-    .toBeTruthy();
+  await quickQuotePage.expectCalculationSummaryHidden();
 }
 
 async function readPaymentFromSummary(quickQuotePage: DOQuickQuotePage): Promise<string> {
@@ -396,23 +349,15 @@ export async function expectBalloonResetOrGreyed(quickQuotePage: DOQuickQuotePag
 }
 
 export async function expectCashPriceModeReadOnly(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  const displayVisible = await quickQuotePage.cashPriceDisplay
-    .isVisible({ timeout: 15_000 })
-    .catch(() => false);
-  if (displayVisible) {
-    return;
-  }
-  await expect.soft(quickQuotePage.cashPriceInput).not.toBeEditable({ timeout: 15_000 });
+  await quickQuotePage.expectCashPriceModeReadOnly();
 }
 
 export async function expectDepositModeReadOnlyFields(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await expect.soft(quickQuotePage.depositPercentInput).not.toBeEditable({ timeout: 15_000 });
-  await expect.soft(quickQuotePage.depositDollarInput).not.toBeEditable({ timeout: 15_000 });
+  await quickQuotePage.expectDepositModeReadOnlyFields();
 }
 
 export async function expectBalloonModeReadOnlyFields(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await expect.soft(quickQuotePage.balloonPercentInput).not.toBeEditable({ timeout: 15_000 });
-  await expect.soft(quickQuotePage.balloonDollarInput).not.toBeEditable({ timeout: 15_000 });
+  await quickQuotePage.expectBalloonModeReadOnlyFields();
 }
 
 /** @deprecated Use {@link expectCashPriceModeReadOnly}. */
@@ -431,13 +376,7 @@ export async function expectFieldsRetained(
 }
 
 export async function expectCalculateForEnabled(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  const hostCls =
-    (await quickQuotePage.calculateForDropdownHost.getAttribute("class").catch(() => "")) ?? "";
-  if (hostCls.includes("p-disabled")) {
-    await expect.soft(quickQuotePage.calculateForDropdownTrigger).toBeDisabled();
-    return;
-  }
-  await expect.soft(quickQuotePage.calculateForDropdownTrigger).toBeEnabled();
+  await quickQuotePage.expectCalculateForEnabled();
 }
 
 export async function switchToCalculateFor(

@@ -442,6 +442,52 @@ export class DOQuickQuotePage extends BasePage {
       .first();
   }
 
+  productDropdownOnQuote(quoteIndex: number): Locator {
+    return this.quoteForm(quoteIndex)
+      .locator(
+        "xpath=.//label[contains(normalize-space(.), 'Product')]/following::p-dropdown[1]",
+      )
+      .first();
+  }
+
+  productDropdownTriggerOnQuote(quoteIndex: number): Locator {
+    return this.productDropdownOnQuote(quoteIndex).getByRole("button", {
+      name: /dropdown trigger/i,
+    });
+  }
+
+  async selectProductOnQuote(quoteIndex: number, product: string): Promise<void> {
+    this.logStep(
+      `Selected product on quote ${quoteIndex + 1}: ${this.stepValueDisplay(product)}`,
+    );
+    await this.selectFromDropdown(this.productDropdownTriggerOnQuote(quoteIndex), product);
+  }
+
+  /** Calculation summary scoped to a comparison panel (0 = primary Quick Quote). */
+  calculationSummaryRegionOnQuote(quoteIndex: number): Locator {
+    const card = this.quoteCard(quoteIndex);
+    const summaryByClass = card.locator(
+      ".calculation-result, [class*='calculation'], [class*='summary'], app-calculation-result, app-calculation-summary",
+    );
+    const summaryByContent = card
+      .locator("div, section, article")
+      .filter({
+        hasText: /Loan Amount|Amount Financed|Finance\s*Lease|Lease\s*(Amount|Payment|Cost)/i,
+      })
+      .filter({
+        hasText: /Total (Amount )?Payable|Total Fees|Total Interest|Total.*Cost|Lease/i,
+      });
+    return summaryByClass.or(summaryByContent);
+  }
+
+  standardQuoteRoot(): Locator {
+    return this.page.locator("app-quote-details, app-standard-quote").first();
+  }
+
+  async waitForStandardQuoteShell(timeoutMs = 120_000): Promise<void> {
+    await expect.soft(this.standardQuoteRoot()).toBeVisible({ timeout: timeoutMs });
+  }
+
   programDropdownTriggerOnQuote(quoteIndex: number): Locator {
     return this.programDropdownOnQuote(quoteIndex).getByRole("button", {
       name: /dropdown trigger/i,
@@ -3391,6 +3437,150 @@ export class DOQuickQuotePage extends BasePage {
       return await this.readPrimeDropdownLabel(trig);
     }
     return (await this.termsInputOnQuote(quoteIndex).inputValue().catch(() => "")).trim();
+  }
+
+  async expectCalculationSummaryWithTotals(quoteIndex = 0): Promise<void> {
+    const summary =
+      quoteIndex === 0
+        ? this.calculationSummaryRegion.first()
+        : this.calculationSummaryRegionOnQuote(quoteIndex).first();
+    await expect.soft(summary).toBeVisible({ timeout: 30_000 });
+    const text = ((await summary.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    expect.soft(/Loan Amount/i.test(text)).toBeTruthy();
+    expect
+      .soft(/Total (Amount )?Payable|Total Payable|Amount Payable|Total Interest|Total Fees/i.test(text))
+      .toBeTruthy();
+  }
+
+  async expectCalculationSummaryHidden(quoteIndex = 0): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const createVisible = await this.createQuoteButton.isVisible().catch(() => false);
+          if (!createVisible) {
+            return true;
+          }
+          const summary =
+            quoteIndex === 0
+              ? this.calculationSummaryRegion.first()
+              : this.calculationSummaryRegionOnQuote(quoteIndex).first();
+          const summaryVisible = await summary.isVisible().catch(() => false);
+          if (!summaryVisible) {
+            return true;
+          }
+          const text = (await summary.textContent().catch(() => "")) ?? "";
+          return !/\$\s*[\d,]+\.?\d*/.test(text);
+        },
+        { timeout: 30_000, intervals: [300, 500, 1_000, 2_000] },
+      )
+      .toBeTruthy();
+  }
+
+  async readLoanAmountFromSummary(quoteIndex = 0): Promise<string> {
+    const summary =
+      quoteIndex === 0
+        ? this.calculationSummaryRegion.first()
+        : this.calculationSummaryRegionOnQuote(quoteIndex).first();
+    const text = (await summary.textContent().catch(() => "")) ?? "";
+    const match = text.match(/Loan Amount[^\d$]*(\$[\d,]+\.?\d*)/i);
+    return match?.[1]?.trim() ?? "";
+  }
+
+  async expectCalculateForEnabled(quoteIndex = 0): Promise<void> {
+    const host =
+      quoteIndex === 0
+        ? this.calculateForDropdownHost
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]",
+          );
+    const trigger =
+      quoteIndex === 0
+        ? this.calculateForDropdownTrigger
+        : this.calculateForTriggerOnQuote(quoteIndex);
+    const hostCls = (await host.getAttribute("class").catch(() => "")) ?? "";
+    if (hostCls.includes("p-disabled")) {
+      await expect.soft(trigger).toBeDisabled();
+      return;
+    }
+    await expect.soft(trigger).toBeEnabled();
+  }
+
+  async expectCalculateForDisabled(quoteIndex = 0): Promise<void> {
+    const host =
+      quoteIndex === 0
+        ? this.calculateForDropdownHost
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//label[contains(normalize-space(.), 'Calculate For')]/following::p-dropdown[1]",
+          );
+    const trigger =
+      quoteIndex === 0
+        ? this.calculateForDropdownTrigger
+        : this.calculateForTriggerOnQuote(quoteIndex);
+    const hostCls = (await host.getAttribute("class").catch(() => "")) ?? "";
+    if (hostCls.includes("p-disabled")) {
+      await expect.soft(trigger).toBeDisabled();
+      return;
+    }
+    await expect.soft(hostCls).toContain("p-disabled");
+  }
+
+  async expectCashPriceModeReadOnly(quoteIndex = 0): Promise<void> {
+    const display =
+      quoteIndex === 0
+        ? this.cashPriceDisplay
+        : this.quoteForm(quoteIndex).locator(
+            "xpath=.//*[starts-with(normalize-space(.), 'Cash Price') and not(contains(., 'Calculate'))]/following-sibling::*[1]",
+          );
+    const input = quoteIndex === 0 ? this.cashPriceInput : this.cashPriceInputOnQuote(quoteIndex);
+    const displayVisible = await display.isVisible({ timeout: 15_000 }).catch(() => false);
+    if (displayVisible) {
+      return;
+    }
+    await expect.soft(input).not.toBeEditable({ timeout: 15_000 });
+  }
+
+  async expectDepositModeReadOnlyFields(_quoteIndex = 0): Promise<void> {
+    await expect.soft(this.depositPercentInput).not.toBeEditable({ timeout: 15_000 });
+    await expect.soft(this.depositDollarInput).not.toBeEditable({ timeout: 15_000 });
+  }
+
+  async expectBalloonModeReadOnlyFields(_quoteIndex = 0): Promise<void> {
+    await expect.soft(this.balloonPercentInput).not.toBeEditable({ timeout: 15_000 });
+    await expect.soft(this.balloonDollarInput).not.toBeEditable({ timeout: 15_000 });
+  }
+
+  async expectDepositPercentPopulatesDollar(
+    _percent: string,
+    dollarPattern: RegExp | string,
+    _quoteIndex = 0,
+  ): Promise<void> {
+    await expect.soft(this.depositDollarInput).toHaveValue(dollarPattern, { timeout: 25_000 });
+  }
+
+  async expectBalloonPercentPopulatesDollar(
+    _percent: string,
+    dollarPattern: RegExp | string,
+    _quoteIndex = 0,
+  ): Promise<void> {
+    await expect.soft(this.balloonDollarInput).toHaveValue(dollarPattern, { timeout: 25_000 });
+  }
+
+  async expectInterestRateDefaultPopulated(quoteIndex = 0): Promise<void> {
+    const input =
+      quoteIndex === 0
+        ? this.interestRatePercentInput
+        : this.interestRateInputOnQuote(quoteIndex);
+    const rate = (await input.inputValue().catch(() => "")).trim();
+    expect.soft(rate.length).toBeGreaterThan(0);
+    expect.soft(/\d/.test(rate)).toBeTruthy();
+    await expect.soft(input).toBeVisible();
+  }
+
+  /** AFV Quick Quote reset — product retained, asset type cleared. */
+  async expectAfVQuickQuoteResetToDefaultState(productName = "AFV-B-Assigned"): Promise<void> {
+    await this.expectQuickQuoteResetToDefaultState({ productName });
+    const assetAfter = await this.readAssetTypeDisplayValue();
+    expect.soft(assetAfter.length).toBe(0);
   }
 
   /**

@@ -197,7 +197,7 @@ const ciProjects = [
   {
     name: "do-portal-unit",
     testDir: "./tests/do-portal",
-    testMatch: "**/do-portal-session.helper.test.ts",
+    testMatch: ["**/*session.helper.test.ts", "**/ortoni-report.helper.test.ts"],
     use: maximizedChrome,
   },
 

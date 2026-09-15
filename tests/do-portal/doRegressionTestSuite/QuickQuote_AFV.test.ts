@@ -6,30 +6,22 @@
 
 import { expect, test } from "@fixtures/doPortalTest";
 import type { Locator, Page } from "@playwright/test";
-import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
-  DODashboardPage,
-  DOQuickQuotePage,
 } from "../../../pages";
-
-const AFV_QQ_PRODUCT = "AFV-B-Assigned";
-/** AFV FIS program auto-populates on authorised dealer (see screenshot / lmf-config). */
-const AFV_QQ_PROGRAM = "AFV - B-Distributor";
-const AFV_QQ_DEALER = process.env.AFV_QQ_DEALER ?? "Armstrong Prestige - Audi";
-
-/** Vehicle used for AFV Quick Quote asset-type modal (matches AFV_Single_Flow / dealer catalog). */
-const AFV_QQ_VEHICLE = {
-  make: "SUZUKI",
-  model: "IGNIS",
-  variant: "GLX MANUAL 1.2P/ 5MT",
-  year: "2024",
-};
-
-function parseCurrency(value: string): number {
-  const n = Number.parseFloat(value.replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-}
+import {
+  AFV_QQ_PRODUCT,
+  AFV_QQ_PROGRAM,
+  AFV_QQ_VEHICLE,
+  calculateAfVQuickQuote,
+  fillAfVQuickQuotePanelAndCalculate,
+  openQuickQuoteFromDashboard,
+  parseCurrency,
+  selectAfVAssetTypeAndWait,
+  selectAfVProduct,
+  setupAfVQuoteWithAsset,
+} from "./quickQuote.helpers";
+import { expectCalculationSummaryWithTotals } from "./quickQuoteSolveFor.helpers";
 
 function findKmOption(options: string[], km: number): string | undefined {
   const digits = String(km);
@@ -42,78 +34,6 @@ function findKmOption(options: string[], km: number): string | undefined {
 function parseKmValue(label: string): number {
   const m = label.match(/(\d[\d,]*)/);
   return m ? Number.parseInt(m[1].replace(/,/g, ""), 10) : Number.MAX_SAFE_INTEGER;
-}
-
-async function openQuickQuoteFromDashboard(page: Page): Promise<{
-  dashboardPage: DODashboardPage;
-  quickQuotePage: DOQuickQuotePage;
-}> {
-  const dashboardPage = new DODashboardPage(page);
-  const quickQuotePage = new DOQuickQuotePage(page);
-  await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
-  await dashboardPage.waitForAuthenticatedDashboard();
-  await dashboardPage.selectDealer(AFV_QQ_DEALER);
-  await quickQuotePage.openQuickQuote();
-  await expect.soft(quickQuotePage.quickQuoteRoot).toBeVisible();
-  await expect.soft(quickQuotePage.quickQuoteForm).toBeVisible();
-  return { dashboardPage, quickQuotePage };
-}
-
-async function selectAfVProduct(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await quickQuotePage.selectProduct(AFV_QQ_PRODUCT);
-  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-}
-
-async function selectAfVAssetTypeAndWait(
-  quickQuotePage: DOQuickQuotePage,
-  vehicle = AFV_QQ_VEHICLE,
-): Promise<void> {
-  await quickQuotePage.selectAfvVehicleFromAssetTypeModal(vehicle, 0);
-  await quickQuotePage.ensureAfVProgramForQuote(0, AFV_QQ_PROGRAM);
-}
-
-async function setupAfVQuoteWithAsset(
-  page: Page,
-  vehicle = AFV_QQ_VEHICLE,
-): Promise<DOQuickQuotePage> {
-  const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
-  await selectAfVProduct(quickQuotePage);
-  await selectAfVAssetTypeAndWait(quickQuotePage, vehicle);
-  return quickQuotePage;
-}
-
-async function calculateAfVQuickQuote(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await quickQuotePage.ensureMandatoryAfVFieldsForCalculate();
-  await quickQuotePage.clickCalculate();
-  await quickQuotePage.expectCreateQuoteVisible();
-}
-
-/** AFV flow: product → asset modal → mandatory fields → Calculate (per comparison panel). */
-async function fillAfVQuickQuotePanelAndCalculate(
-  page: Page,
-  quickQuotePage: DOQuickQuotePage,
-  quoteIndex: number,
-): Promise<void> {
-  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  if (quoteIndex === 0) {
-    await quickQuotePage.selectProduct(AFV_QQ_PRODUCT);
-  } else {
-    await quickQuotePage.selectProductOnQuote(quoteIndex, AFV_QQ_PRODUCT);
-  }
-  await quickQuotePage.selectAfvVehicleFromAssetTypeModal(AFV_QQ_VEHICLE, quoteIndex);
-  await page.waitForLoadState("networkidle", { timeout: 35_000 }).catch(() => {});
-  await quickQuotePage.waitForAfVFieldsAfterAssetSelection();
-  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  await quickQuotePage.ensureMandatoryAfVFieldsForCalculate();
-  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  await expect(
-    quickQuotePage.quoteForm(quoteIndex).getByRole("button", { name: /^Calculate$/i }),
-  ).toBeEnabled({ timeout: 45_000 });
-  await quickQuotePage.clickCalculateOnQuote(quoteIndex);
-  await quickQuotePage.expectCreateQuoteVisible(quoteIndex);
-  await expect(quickQuotePage.calculationSummaryRegionOnQuote(quoteIndex).first()).toBeVisible({
-    timeout: 30_000,
-  });
 }
 
 async function pickModalDropdownOption(page: Page, dlg: Locator, index: number, optionText: string): Promise<void> {
@@ -717,9 +637,8 @@ test.describe("Quick Quote - AFV @do @regression", () => {
       await quickQuotePage.enterDepositDollars("$5,000");
       await calculateAfVQuickQuote(quickQuotePage);
 
+      await expectCalculationSummaryWithTotals(quickQuotePage);
       const summary = quickQuotePage.calculationSummaryRegion.first();
-      await expect.soft(summary).toBeVisible({ timeout: 30_000 });
-      await expect.soft(summary).toContainText(/Loan Amount/i);
       await expect.soft(summary).toContainText(/20[, ]?000|20000/);
     },
   );
@@ -732,11 +651,7 @@ test.describe("Quick Quote - AFV @do @regression", () => {
       const quickQuotePage = await setupAfVQuoteWithAsset(page);
       await calculateAfVQuickQuote(quickQuotePage);
 
-      const summary = quickQuotePage.calculationSummaryRegion.first();
-      await expect.soft(summary).toBeVisible({ timeout: 30_000 });
-      await expect
-        .soft(summary)
-        .toContainText(/Total (Amount )?Payable|Total Payable|Amount Payable|Total Interest|Total Fees/i);
+      await expectCalculationSummaryWithTotals(quickQuotePage);
     },
   );
 
@@ -784,9 +699,7 @@ test.describe("Quick Quote - AFV @do @regression", () => {
       expect.soft(assetBefore.length).toBeGreaterThan(0);
 
       await quickQuotePage.clickReset();
-      await expect.soft(quickQuotePage.productDropdownTrigger).toBeVisible();
-      const assetAfter = await quickQuotePage.readAssetTypeDisplayValue();
-      expect.soft(assetAfter.length).toBe(0);
+      await quickQuotePage.expectAfVQuickQuoteResetToDefaultState(AFV_QQ_PRODUCT);
     },
   );
 
@@ -805,8 +718,8 @@ test.describe("Quick Quote - AFV @do @regression", () => {
       await calculateAfVQuickQuote(quickQuotePage);
       await quickQuotePage.clickCreateQuote();
 
-      const standardRoot = page.locator("app-quote-details, app-standard-quote").first();
-      await expect.soft(standardRoot).toBeVisible({ timeout: 120_000 });
+      await quickQuotePage.waitForStandardQuoteShell();
+      const standardRoot = quickQuotePage.standardQuoteRoot();
       await expect.soft(page.getByText(/AFV|Assured Future Value/i).first()).toBeVisible();
 
       const assetDetailsPage = new DOAssetDetailsPage(page);

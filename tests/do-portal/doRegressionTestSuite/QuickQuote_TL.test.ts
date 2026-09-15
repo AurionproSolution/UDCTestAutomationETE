@@ -5,91 +5,20 @@
  */
 
 import { expect, test } from "@fixtures/doPortalTest";
-import type { Page } from "@playwright/test";
-import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import {
   DOAssetDetailsPage,
-  DODashboardPage,
-  DOQuickQuotePage,
 } from "../../../pages";
-
-const TL_QQ_PRODUCT = "TL-B-Assigned";
-/** Inferred for TL-B-Assigned (TL-C uses Term Loan Personal - MV Dealer in TLC_QuickQuote_SingleFlow). */
-const TL_QQ_PROGRAM = "Term Loan Business - MV Dealer";
-const TLC_DEALER = "Armstrong Prestige Wellington";
-
-function parseCurrency(value: string): number {
-  const n = Number.parseFloat(value.replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-}
-
-async function readSelectedTermMonths(quickQuotePage: DOQuickQuotePage): Promise<string> {
-  const dropdownVisible = await quickQuotePage.termsMonthsDropdownTrigger
-    .isVisible({ timeout: 5_000 })
-    .catch(() => false);
-  if (dropdownVisible) {
-    const combobox = quickQuotePage.termsMonthsDropdownHost.getByRole("combobox").first();
-    return (
-      (await combobox.textContent())?.trim() ??
-      (await combobox.getAttribute("aria-label"))?.trim() ??
-      ""
-    );
-  }
-  const inputVisible = await quickQuotePage.termsMonthsInput
-    .isVisible({ timeout: 5_000 })
-    .catch(() => false);
-  if (inputVisible) {
-    return (await quickQuotePage.termsMonthsInput.inputValue()).trim();
-  }
-  return "";
-}
-
-async function openQuickQuoteFromDashboard(page: Page): Promise<{
-  dashboardPage: DODashboardPage;
-  quickQuotePage: DOQuickQuotePage;
-}> {
-  const dashboardPage = new DODashboardPage(page);
-  const quickQuotePage = new DOQuickQuotePage(page);
-  await page.goto(DO_DEALER_STANDARD_QUOTE_URL());
-  await dashboardPage.waitForAuthenticatedDashboard();
-  await dashboardPage.selectDealer(TLC_DEALER);
-  await quickQuotePage.openQuickQuote();
-  await expect.soft(quickQuotePage.quickQuoteRoot).toBeVisible();
-  await expect.soft(quickQuotePage.quickQuoteForm).toBeVisible();
-  return { dashboardPage, quickQuotePage };
-}
-
-async function selectTlProductAndProgram(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await quickQuotePage.selectProduct(TL_QQ_PRODUCT);
-  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  await quickQuotePage.selectProgramIfNeeded(TL_QQ_PROGRAM);
-  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
-  await quickQuotePage.waitForLoadingComplete();
-}
-
-async function fillMandatoryPaymentFields(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await quickQuotePage.selectFrequency("Monthly");
-  await quickQuotePage.enterInterestRatePercent("9");
-  await quickQuotePage.enterTermsMonths("36");
-  await quickQuotePage.enterCashPrice("$20,000");
-}
-
-async function fillAllTlQuickQuoteFields(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await quickQuotePage.enterCashPrice("$25,000");
-  await quickQuotePage.enterDepositPercent("15%");
-  await quickQuotePage.enterBalloonPercent("10%");
-  await quickQuotePage.selectFrequency("Monthly");
-  await quickQuotePage.enterInterestRatePercent("11.5");
-  await quickQuotePage.enterTermsMonths("48");
-}
-
-async function calculateTlQuickQuote(quickQuotePage: DOQuickQuotePage): Promise<void> {
-  await fillMandatoryPaymentFields(quickQuotePage);
-  await quickQuotePage.enterDepositPercent("10%");
-  await quickQuotePage.enterBalloonPercent("0");
-  await quickQuotePage.clickCalculate();
-  await quickQuotePage.expectCreateQuoteVisible();
-}
+import {
+  calculateTlQuickQuote,
+  fillAllTlQuickQuoteFields,
+  fillMandatoryPaymentFieldsCore,
+  openQuickQuoteFromDashboard,
+  parseCurrency,
+  selectTlProductAndProgram,
+  TL_QQ_PRODUCT,
+  TL_QQ_PROGRAM,
+} from "./quickQuote.helpers";
+import { expectCalculationSummaryWithTotals } from "./quickQuoteSolveFor.helpers";
 
 test.describe("Quick Quote - TL @do @regression", () => {
   test(
@@ -214,12 +143,12 @@ test.describe("Quick Quote - TL @do @regression", () => {
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       await selectTlProductAndProgram(quickQuotePage);
 
-      const term = await readSelectedTermMonths(quickQuotePage);
+      const term = await quickQuotePage.readTermsMonthsValue();
       if (term.length > 0) {
         expect.soft(/\d+/.test(term)).toBeTruthy();
       }
 
-      await fillMandatoryPaymentFields(quickQuotePage);
+      await fillMandatoryPaymentFieldsCore(quickQuotePage);
       await quickQuotePage.clearTermsMonths(0);
       if (await quickQuotePage.calculateButton.isEnabled().catch(() => false)) {
         await quickQuotePage.clickCalculate();
@@ -270,13 +199,9 @@ test.describe("Quick Quote - TL @do @regression", () => {
       await quickQuotePage.clickCalculate();
       await quickQuotePage.expectCreateQuoteVisible();
 
+      await expectCalculationSummaryWithTotals(quickQuotePage);
       const summary = quickQuotePage.calculationSummaryRegion.first();
-      await expect.soft(summary).toBeVisible({ timeout: 30_000 });
-      await expect.soft(summary).toContainText(/Loan Amount/i);
       await expect.soft(summary).toContainText(/18[, ]?000|18000/);
-      await expect
-        .soft(summary)
-        .toContainText(/Total (Amount )?Payable|Total Payable|Amount Payable|Total Interest|Total Fees/i);
     },
   );
 
@@ -367,8 +292,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
       await calculateTlQuickQuote(quickQuotePage);
 
       await quickQuotePage.clickCreateQuote();
-      const standardRoot = page.locator("app-quote-details, app-standard-quote").first();
-      await expect.soft(standardRoot).toBeVisible({ timeout: 120_000 });
+      await quickQuotePage.waitForStandardQuoteShell();
       await expect.soft(page.getByText(/Term Loan|TL-B/i).first()).toBeVisible();
 
       const assetDetailsPage = new DOAssetDetailsPage(page);

@@ -88,7 +88,9 @@ The main [`playwright.config.ts`](../playwright.config.ts) now **only adds `stor
 
 ### 4. Ortoni reporter and the IDE
 
-If config evaluation fails on the **`ortoni-report`** reporter in the extension host, discovery can break. Workspace settings set **`PLAYWRIGHT_SKIP_ORTONI=1`** for VS Code so the config skips that reporter in the IDE. CLI / CI still load Ortoni unless you export that variable.
+If config evaluation fails on the **`ortoni-report`** reporter in the extension host, discovery can break. Workspace settings set **`PLAYWRIGHT_SKIP_ORTONI=1`** for VS Code / Cursor so the config skips that reporter in the IDE. **CLI and CI still load Ortoni** unless you export that variable.
+
+For full Ortoni HTML + automatic backup under `results/`, run tests from a terminal (`npm run test:do`, etc.) without `PLAYWRIGHT_SKIP_ORTONI`. Use **`npm run report:ortoni`** to open the latest report (including nested `ortoni-report/run-*` folders).
 
 
 ### 2. Documentation

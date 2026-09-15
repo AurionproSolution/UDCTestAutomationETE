@@ -21,13 +21,16 @@ class ReportBackupReporter implements Reporter {
     const archived = archiveReports({ overallStatus: result.status });
     if (!archived) {
       console.log(
-        "Report backup: skipped (ortoni-report/index.html not found — no Ortoni report to archive).",
+        "Report backup: skipped (no Ortoni report under ortoni-report/ — run CLI tests without PLAYWRIGHT_SKIP_ORTONI=1).",
       );
       return;
     }
 
     const relative = archived.backupDir.replace(/\\/g, "/");
-    console.log(`Report backup: saved to ${relative}/`);
+    const indexNote = archived.ortoniIndexRelativePath
+      ? ` (Ortoni index: ${archived.ortoniIndexRelativePath})`
+      : "";
+    console.log(`Report backup: saved to ${relative}/${indexNote}`);
   }
 }
 
