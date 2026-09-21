@@ -12,6 +12,7 @@ import {
   DOQuickQuotePage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { PRODUCT_TL_B, PRODUCT_TL_C } from "./standardQuoteProducts";
 
 interface LmfConfig {
   authorisedDealer: string;
@@ -39,11 +40,11 @@ export function loadTlLmfPrograms(): {
   const tl = cfg.tlLmf;
   return {
     withLmf: {
-      product: process.env.TL_LMF_PRODUCT?.trim() || tl?.withLmf?.product || "TL-C-Assigned",
+      product: process.env.TL_LMF_PRODUCT?.trim() || tl?.withLmf?.product || PRODUCT_TL_C,
       program: process.env.TL_LMF_PROGRAM?.trim() || tl?.withLmf?.program || "Term Loan Personal - MV Dealer",
     },
     withoutLmf: {
-      product: process.env.TL_NO_LMF_PRODUCT?.trim() || tl?.withoutLmf?.product || "TL-B-Assigned",
+      product: process.env.TL_NO_LMF_PRODUCT?.trim() || tl?.withoutLmf?.product || PRODUCT_TL_B,
       program:
         process.env.TL_NO_LMF_PROGRAM?.trim() ||
         tl?.withoutLmf?.program ||
@@ -64,12 +65,9 @@ export function standardQuoteRoot(page: Page) {
   return page.locator("app-quote-details, app-standard-quote").first();
 }
 
-export type StandardQuoteProductDialog = "csa" | "financeLease";
-
 export async function openStandardQuoteForDealer(
   page: Page,
   dealerName: string,
-  opts?: { productDialog?: StandardQuoteProductDialog },
 ): Promise<{ dashboard: DODashboardPage; asset: DOAssetDetailsPage }> {
   const dashboard = new DODashboardPage(page);
   const asset = new DOAssetDetailsPage(page);
@@ -77,11 +75,6 @@ export async function openStandardQuoteForDealer(
   await dashboard.waitForAuthenticatedDashboard();
   await dashboard.selectDealer(dealerName);
   await dashboard.clickCreateStandardQuote();
-  if (opts?.productDialog === "financeLease") {
-    await dashboard.selectFinanceLeaseProduct();
-  } else {
-    await dashboard.selectCSAproduct();
-  }
   await expect(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   return { dashboard, asset };
 }

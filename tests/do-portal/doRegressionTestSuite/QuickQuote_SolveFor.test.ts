@@ -1,7 +1,7 @@
 /**
  * DO Portal — Quick Quote CSA-B Solve For regression (UDP-T4526–T4540, UDP-T4779–T4796).
  * Scenario source: Quick Quote Test cases.xlsx (Zephyr / Regression — Quick Quote).
- * Product: **CSA-B-Assigned** / **MYUDC-B-CSA-Assigned MV**.
+ * Product: **Credit Sale Agreement - Business-Dealer Introduced** / **MYUDC-B-CSA-Assigned MV**.
  * Auth: shared DO `storageState` via `@fixtures/doPortalTest`.
  */
 

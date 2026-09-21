@@ -19,8 +19,9 @@ import {
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import settlementData from "../../../testData/do-portal/settlementTestData.json";
+import { CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 
-export const CSA_SQ_PRODUCT = "CSA-C-Assigned";
+export { CSA_SQ_PRODUCT };
 export const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 export const TLC_DEALER =
   process.env.TLC_DEALER?.trim() ||
@@ -106,7 +107,6 @@ export async function openDashboard(page: Page): Promise<DODashboardPage> {
 export async function openStandardQuoteFromDashboard(page: Page): Promise<DOAssetDetailsPage> {
   const dashboard = await openDashboard(page);
   await dashboard.clickCreateStandardQuote();
-  await dashboard.selectCSAproduct();
   await expect(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   return new DOAssetDetailsPage(page);
 }

@@ -20,9 +20,10 @@ import type { SavedPhysicalAddressSnapshot } from "../../../pages/do-portal/Stan
 import type { SavedEmploymentSnapshot } from "../../../pages/do-portal/StandardQuote/CustomerDetails/employmentDetails";
 import type { IndividualPersonalDetailsSnapshot } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
+import { CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 import { standardQuoteRoot } from "./workflow.helpers";
 
-export const DOC_CSA_SQ_PRODUCT = "CSA-C-Assigned";
+export const DOC_CSA_SQ_PRODUCT = CSA_SQ_PRODUCT;
 export const DOC_CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 export const DOC_TLC_DEALER = "Armstrong Prestige Wellington";
 export const DOC_T3824_BORROWER_NAME = /Liza Marie Doe/i;
@@ -92,7 +93,6 @@ export async function openDocumentationStandardQuoteFromDashboard(
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(DOC_TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectCSAproduct();
   await expect(page.locator("app-quote-details, app-standard-quote").first()).toBeVisible({
     timeout: 120_000,
   });

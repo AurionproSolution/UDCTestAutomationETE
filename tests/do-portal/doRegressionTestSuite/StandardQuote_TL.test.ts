@@ -17,8 +17,7 @@ import {
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import { loadTlLmfPrograms } from "./lmf.helpers";
-
-const TL_SQ_PRODUCT = "TL-B-Assigned";
+import { TL_SQ_PRODUCT } from "./standardQuoteProducts";
 const TL_SQ_PROGRAM = "Term Loan Business - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 
@@ -50,7 +49,6 @@ async function openStandardQuoteFromDashboard(page: Page): Promise<{
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectTermLoanProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return { dashboardPage, assetDetailsPage };

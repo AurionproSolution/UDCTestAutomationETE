@@ -16,7 +16,7 @@ import { DOBusinessDetailsPage } from "./businessDetails";
 import { DOCustomerDetailsPage } from "./customerDetailsPage";
 import { DOFinancialPositionPage } from "./financialPosition";
 
-const FL_SQ_PRODUCT = "Finance Lease - Business Asg";
+const FL_SQ_PRODUCT = "Finance Lease Business - Assigned";
 const FL_SQ_PROGRAM = "Finance Lease Business - MV Dealer";
 const FL_CUSTOMER_DETAILS_ORIG_REF = "SQ-FL-CD-3783-Ref";
 const TLC_DEALER = "Armstrong Prestige Wellington";
@@ -58,7 +58,6 @@ export async function openFinanceLeaseBusinessAsgToAddBorrowerStep(
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectFinanceLeaseProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.chooseProduct(FL_SQ_PRODUCT);
   await assetDetailsPage.chooseProgram(FL_SQ_PROGRAM);

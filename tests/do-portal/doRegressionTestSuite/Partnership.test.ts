@@ -66,7 +66,7 @@ import {
   runMotochekSearch,
 } from "./afvMotochek.helpers";
 
-const AFV_SQ_PRODUCT = "AFV-B-Assigned";
+import { AFV_SQ_PRODUCT } from "./standardQuoteProducts";
 const AFV_SQ_PROGRAM = "AFV - B-Distributor";
 const AFV_SQ_DEALER =
   process.env.AFV_SQ_DEALER ?? process.env.AFV_QQ_DEALER ?? "Armstrong Prestige - Audi";
@@ -81,7 +81,6 @@ async function openAfVAssetDetailsStep(page: Page): Promise<DOAssetDetailsPage> 
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(AFV_SQ_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectAssuredFutureValueProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   await assetDetailsPage.chooseProduct(AFV_SQ_PRODUCT);

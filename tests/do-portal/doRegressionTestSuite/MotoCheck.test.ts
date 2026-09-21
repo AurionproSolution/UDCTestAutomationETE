@@ -9,11 +9,11 @@ import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DODashboardPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { AFV_SQ_PRODUCT, CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 
-const CSA_SQ_PRODUCT = "CSA-C-Assigned";
 const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
-const AFV_PRODUCT = "AFV-B-Assigned";
+const AFV_PRODUCT = AFV_SQ_PRODUCT;
 const AFV_PROGRAM = process.env.MOTOCHEK_AFV_PROGRAM?.trim() || "AFV - B-Distributor";
 const AFV_SQ_VEHICLE = {
   make: "SUZUKI",
@@ -58,7 +58,6 @@ async function openStandardQuoteFromDashboard(page: Page): Promise<{
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectCSAproduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return { dashboardPage, assetDetailsPage };
@@ -71,7 +70,6 @@ async function openAfVStandardQuoteFromDashboard(page: Page): Promise<DOAssetDet
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectAssuredFutureValueProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return assetDetailsPage;

@@ -18,7 +18,6 @@ async function openSettlementSearch(page: Page): Promise<DOSettlementPage> {
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(settlementData.dealer);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectTermLoanProduct();
   await assetDetailsPage.enterAsset("Car and Light Commercial /");
   await assetDetailsPage.selectCondition("Used");
   await assetDetailsPage.openAssetInsuranceTradeInSummary();

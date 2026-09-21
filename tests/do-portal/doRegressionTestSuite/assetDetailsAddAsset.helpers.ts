@@ -8,8 +8,9 @@ import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DODashboardPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { CSA_SQ_PRODUCT, TL_SQ_PRODUCT } from "./standardQuoteProducts";
 
-export const CSA_SQ_PRODUCT = "CSA-C-Assigned";
+export { CSA_SQ_PRODUCT, TL_SQ_PRODUCT };
 /** SIT (Armstrong Prestige Wellington): Webform program is not offered. */
 export const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 export const CSA_SQ_ALT_PROGRAM = "MYUDC-C-CSA- Assigned MV";
@@ -17,7 +18,6 @@ export const CSA_SQ_WEBFORM_PROGRAM = "Webform - CSA Personal - MV Dealer";
 /** QAT dealer default for Armstrong Prestige Wellington (CSA-C). */
 export const CSA_SQ_DEALER_PROGRAM = "MYUDC-C-CSA- Assigned MV";
 export const CSA_SQ_DEALER_PROGRAM_ALT = "MYUDC-B-CSA-Assigned MV";
-export const TL_SQ_PRODUCT = "TL-B-Assigned";
 export const TL_SQ_PROGRAM =
   process.env.TL_SQ_PROGRAM?.trim() || "Term Loan Business - MV Dealer";
 export const TLC_DEALER = "Armstrong Prestige Wellington";
@@ -172,7 +172,8 @@ function isCsaProgramLabel(programLabel: string): boolean {
 }
 
 function isCsaProductLabel(productLabel: string): boolean {
-  return /CSA-C-Assigned/i.test(productLabel.trim());
+  const t = productLabel.trim();
+  return /Consumer-Dealer Introduced/i.test(t) || /CSA-C-Assigned/i.test(t);
 }
 
 function isTlProgramLabel(programLabel: string): boolean {
@@ -182,7 +183,12 @@ function isTlProgramLabel(programLabel: string): boolean {
 }
 
 function isTlProductLabel(productLabel: string): boolean {
-  return /TL-B-Assigned|TL-C-Assigned/i.test(productLabel.trim());
+  const t = productLabel.trim();
+  return (
+    /Term Loan.*Dealer Introduced/i.test(t) ||
+    /Term Loan.*Consumer.*Assigned/i.test(t) ||
+    /TL-B-Assigned|TL-C-Assigned/i.test(t)
+  );
 }
 
 /** Read **Program** from the quote shell when POM `readSelectedProgramLabel()` is still empty. */
@@ -496,7 +502,6 @@ export async function openStandardQuoteFromDashboard(page: Page): Promise<{
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectCSAproduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return { dashboardPage, assetDetailsPage };
@@ -509,7 +514,6 @@ export async function openTlBusinessStandardQuoteFromDashboard(page: Page): Prom
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectTermLoanProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return assetDetailsPage;

@@ -50,16 +50,6 @@ async function openStandardQuoteForProduct(
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-
-  if (productKey === "csa") await dashboardPage.selectCSAproduct();
-  else if (productKey === "tl") await dashboardPage.selectTermLoanProduct();
-  else if (productKey === "afv") await dashboardPage.selectAssuredFutureValueProduct();
-  else if (productKey === "fl") await dashboardPage.selectFinanceLeaseProduct();
-  else if (productKey === "ol") {
-    const dlg = page.getByRole("dialog");
-    await dlg.getByText(/Operating\s*Lease/i).first().click();
-  }
-
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   await assetDetailsPage.chooseProduct(cfg.product);

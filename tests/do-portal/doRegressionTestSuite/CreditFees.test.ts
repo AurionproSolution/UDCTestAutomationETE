@@ -8,8 +8,7 @@ import { expect, test } from "@fixtures/doPortalTest";
 import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DODashboardPage } from "../../../pages";
-
-const CSA_SQ_PRODUCT = "CSA-C-Assigned";
+import { CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 
@@ -27,7 +26,6 @@ async function openStandardQuoteFromDashboard(page: Page): Promise<{
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectCSAproduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   return { dashboardPage, assetDetailsPage };
 }

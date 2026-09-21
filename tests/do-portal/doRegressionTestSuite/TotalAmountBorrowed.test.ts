@@ -1,7 +1,7 @@
 /**
  * DO Portal — Total Amount Borrowed regression (UDP-T3818–UDP-T3822).
  * Scenario source: Total amt Borrowed.xlsx (Zephyr / Regression 25.0).
- * Product: CSA-C-Assigned / Program: CSA Personal - MV Dealer.
+ * Product: Credit Sale Agreement - Consumer-Dealer Introduced / Program: CSA Personal - MV Dealer.
  * Auth: shared DO `storageState` via `@fixtures/doPortalTest`.
  */
 
@@ -15,7 +15,7 @@ import {
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 
-const CSA_SQ_PRODUCT = "CSA-C-Assigned";
+import { CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
@@ -55,7 +55,6 @@ async function openCsaStandardQuoteFromDashboard(page: Page): Promise<{
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectCSAproduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return { dashboardPage, assetDetailsPage };
@@ -208,7 +207,6 @@ test.describe("Total Amount Borrowed", () => {
       await dashboardPage.waitForAuthenticatedDashboard();
       await dashboardPage.selectDealer(TLC_DEALER);
       await dashboardPage.clickCreateStandardQuote();
-      await dashboardPage.selectCSAproduct();
       await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
       await assetDetailsPage.waitForAssetDetailsStepReady();
       await assetDetailsPage.waitForQuoteLoadersToFinish();

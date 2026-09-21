@@ -8,16 +8,17 @@ import type { Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DODashboardPage, DOQuickQuotePage } from "../../../pages";
 import { TLC_DEALER } from "./dashboard.helpers";
+import { AFV_SQ_PRODUCT, CSA_SQ_PRODUCT, PRODUCT_TL_B } from "./standardQuoteProducts";
 
 export { TLC_DEALER };
 
-export const CSA_C_QQ_PRODUCT = "CSA-C-Assigned";
+export const CSA_C_QQ_PRODUCT = CSA_SQ_PRODUCT;
 export const CSA_C_QQ_PROGRAM = "CSA Personal - MV Dealer";
 
-export const TL_QQ_PRODUCT = "TL-B-Assigned";
+export const TL_QQ_PRODUCT = PRODUCT_TL_B;
 export const TL_QQ_PROGRAM = "Term Loan Business - MV Dealer";
 
-export const AFV_QQ_PRODUCT = "AFV-B-Assigned";
+export const AFV_QQ_PRODUCT = AFV_SQ_PRODUCT;
 export const AFV_QQ_PROGRAM = "AFV - B-Distributor";
 export const AFV_QQ_DEALER = process.env.AFV_QQ_DEALER ?? "Armstrong Prestige - Audi";
 

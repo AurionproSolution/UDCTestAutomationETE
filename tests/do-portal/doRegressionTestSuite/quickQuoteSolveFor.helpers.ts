@@ -1,6 +1,6 @@
 /**
  * Shared helpers for Quick Quote Solve For / Calculate For regression (UDP-T4526–T4540, UDP-T4779–T4796).
- * Product scope: **CSA-B-Assigned** (Credit Sale Agreement — business).
+ * Product scope: **Credit Sale Agreement - Business-Dealer Introduced** (CSA business).
  *
  * Each Solve For mode validates only its own calculated output:
  * - Payment → payment
@@ -29,8 +29,9 @@ export {
   openQuickQuoteFromDashboard,
   TLC_DEALER,
 } from "./quickQuote.helpers";
+import { CSA_B_SQ_PRODUCT } from "./standardQuoteProducts";
 
-export const CSA_B_QQ_PRODUCT = "CSA-B-Assigned";
+export const CSA_B_QQ_PRODUCT = CSA_B_SQ_PRODUCT;
 export const CSA_B_QQ_PROGRAM = "MYUDC-B-CSA-Assigned MV";
 export const CSA_B_QQ_PROGRAM_ALT = "CSA Business - MV Dealer";
 export const CSA_B_QQ_PROGRAM_FALLBACK = "MYUDC-C-CSA- Assigned MV";

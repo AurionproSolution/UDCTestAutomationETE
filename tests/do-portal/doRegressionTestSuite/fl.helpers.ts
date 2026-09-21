@@ -8,8 +8,9 @@ import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAddOnsAccessoriesPage, DOAssetDetailsPage, DODashboardPage, DOQuickQuotePage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { FL_SQ_PRODUCT } from "./standardQuoteProducts";
 
-export const FL_SQ_PRODUCT = "Finance Lease - Business Asg";
+export { FL_SQ_PRODUCT };
 export const FL_SQ_PROGRAM = "Finance Lease Business - MV Dealer";
 export const FL_SQ_DEALER =
   process.env.FL_SQ_DEALER ?? process.env.FL_QQ_DEALER ?? "Armstrong Prestige - Audi";
@@ -163,7 +164,6 @@ export async function openFlStandardQuoteForDealer(
   await dashboardPage.selectDealer(dealer);
   const assetDetailsPage = new DOAssetDetailsPage(page);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectFinanceLeaseProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await expect.soft(page.getByText(/Lease\s*Details/i).first()).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();

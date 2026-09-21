@@ -81,9 +81,7 @@ test.describe("LMF @do @regression", () => {
       const cfg = loadLmfConfig();
       const zeroProduct = process.env.LMF_ZERO_PRODUCT?.trim() || cfg.lmfZeroConfigured.product;
       const zeroProgram = process.env.LMF_ZERO_PROGRAM?.trim() || cfg.lmfZeroConfigured.program;
-      const { asset } = await openStandardQuoteForDealer(page, authorisedDealer(), {
-        productDialog: "financeLease",
-      });
+      const { asset } = await openStandardQuoteForDealer(page, authorisedDealer());
       await prepareCalculableLmfQuote(page, asset, {
         product: zeroProduct,
         program: zeroProgram,

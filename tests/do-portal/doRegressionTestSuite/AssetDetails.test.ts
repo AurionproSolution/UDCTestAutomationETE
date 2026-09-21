@@ -45,13 +45,14 @@ import {
   selectTlProductAndProgram,
   submitAddAssetForValidation,
 } from "./assetDetailsAddAsset.helpers";
+import { AFV_SQ_PRODUCT } from "./standardQuoteProducts";
 
 /** SIT (Armstrong Prestige Wellington): Webform program is not offered; use dealer CSA MV. */
 const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const CSA_SQ_ALT_PROGRAM = "MYUDC-C-CSA- Assigned MV";
 const CSA_SQ_ALT_PROGRAM_FALLBACK = "Webform - CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
-const AFV_PRODUCT = "AFV-B-Assigned";
+const AFV_PRODUCT = AFV_SQ_PRODUCT;
 const MOTOCHEK_REGO = "bagged";
 
 function standardQuoteRoot(page: Page): Locator {
@@ -68,7 +69,6 @@ async function openStandardQuoteFromDashboard(page: Page): Promise<{
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectCSAproduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return { dashboardPage, assetDetailsPage };
@@ -81,7 +81,6 @@ async function openAfVStandardQuoteFromDashboard(page: Page): Promise<DOAssetDet
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectAssuredFutureValueProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return assetDetailsPage;

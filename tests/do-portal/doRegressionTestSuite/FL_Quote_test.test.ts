@@ -10,8 +10,7 @@ import { DOAssetDetailsPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
 import * as fl from "./fl.helpers";
 import { openStandardQuoteFromDashboard } from "./workflow.helpers";
-
-const CSA_SQ_PRODUCT = "CSA-C-Assigned";
+import { CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 
 async function openSelectedFlQuickQuote(page: Page) {

@@ -1,10 +1,10 @@
 {
   "dealer": "Armstrong Prestige Wellington",
   "products": {
-    "csa": { "product": "CSA-C-Assigned", "program": "Webform - CSA Personal - MV Dealer" },
-    "tl": { "product": "TL-B-Assigned", "program": "Term Loan Business - MV Dealer" },
-    "afv": { "product": "AFV-B-Assigned" },
-    "fl": { "product": "Finance Lease - Business Asg", "program": "Finance Lease Business - MV Dealer" },
+    "csa": { "product": "Credit Sale Agreement - Consumer-Dealer Introduced", "program": "Webform - CSA Personal - MV Dealer" },
+    "tl": { "product": "Term Loan - Business - Dealer Introduced", "program": "Term Loan Business - MV Dealer" },
+    "afv": { "product": "Assured Future Value - Business -Dealer Introduced" },
+    "fl": { "product": "Finance Lease Business - Assigned", "program": "Finance Lease Business - MV Dealer" },
     "ol": { "product": "Operating Lease - Business Asg", "program": "Operating Lease Business - MV Dealer" }
   },
   "loanLookup": {

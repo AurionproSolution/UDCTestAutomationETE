@@ -9,8 +9,7 @@ import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DOCustomerDetailsPage, DODashboardPage } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
-
-const CSA_SQ_PRODUCT = "CSA-C-Assigned";
+import { CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 const EBBETT_DEALER = "Ebbett Volkswagen - Hamilton";
@@ -32,7 +31,6 @@ async function openStandardQuoteFromDashboard(
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(dealer);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectCSAproduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   return { dashboardPage, assetDetailsPage };
 }

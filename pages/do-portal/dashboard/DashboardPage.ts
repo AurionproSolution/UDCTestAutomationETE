@@ -305,6 +305,16 @@ export class DODashboardPage extends BasePage {
         await this.page.waitForTimeout(500);
       }
     }
+    // After click the app either opens the product-selection dialog or navigates
+    // straight to the Standard Quote shell. Wait for either so the follow-up
+    // select*Product() step does not race the dialog render.
+    await Promise.race([
+      this.productSelectionDialog().waitFor({ state: "visible", timeout: 60_000 }),
+      this.page
+        .locator("app-quote-details, app-standard-quote")
+        .first()
+        .waitFor({ state: "visible", timeout: 60_000 }),
+    ]).catch(() => {});
     await this.waitForLoadingComplete(30_000);
     this.log("Create Standard Quote navigation completed.");
   }
@@ -318,60 +328,83 @@ export class DODashboardPage extends BasePage {
   }
 
   /**
+   * Product-selection dialog opened by "Create Standard Quote".
+   * PrimeNG renders it as `p-dynamicdialog` / `.p-dialog`; the `role="dialog"`
+   * mapping is not always present, so accept either host. Scoped by product
+   * copy so unrelated dialogs (toast filters, column filters) never match.
+   */
+  private productSelectionDialog(): Locator {
+    const byRole = this.page
+      .getByRole("dialog")
+      .filter({
+        hasText: /Credit Sale Agreement|Finance Lease|Operating Lease|Term Loan|Assured Future Value/i,
+      })
+      .first();
+    const byCss = this.page
+      .locator("p-dynamicdialog .p-dialog, p-dialog .p-dialog, .p-dialog")
+      .filter({
+        hasText: /Credit Sale Agreement|Finance Lease|Operating Lease|Term Loan|Assured Future Value/i,
+      })
+      .first();
+    return byRole.or(byCss).first();
+  }
+
+  /** Shared product pick: no-op when already past the dialog (direct navigation). */
+  private async selectProductFromDialog(product: RegExp, label: string): Promise<void> {
+    this.logStep(`Select ${label} product`);
+    // Already on the Standard Quote shell (see failure screenshot: Asset Details
+    // visible, no dialog) — nothing to pick.
+    if (
+      await this.page
+        .locator("app-quote-details, app-standard-quote")
+        .first()
+        .isVisible({ timeout: 5_000 })
+        .catch(() => false)
+    ) {
+      this.log(`Product dialog already dismissed — on Standard Quote shell, skipping ${label} pick.`);
+      return;
+    }
+    const dialog = this.productSelectionDialog();
+    // Explicit short timeout: global expect timeout is 180s, which burns the
+    // whole test budget waiting for a dialog that will never appear.
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    const option = dialog
+      .getByRole("link", { name: product })
+      .or(dialog.getByRole("button", { name: product }))
+      .or(dialog.getByText(product))
+      .first();
+    await expect(option).toBeVisible({ timeout: 30_000 });
+    await option.scrollIntoViewIfNeeded().catch(() => {});
+    await option.click({ timeout: 30_000 });
+    await expect(dialog).toBeHidden({ timeout: 60_000 }).catch(() => {});
+    await this.waitForAppLoaderOverlayGone(60_000);
+  }
+
+  /**
    * Select the Credit Sale Agreement (CSA) product from dialog box
    */
   async selectCSAproduct(): Promise<void> {
-    this.logStep("Select CSA product");
-    // wait for the dialog to be visible
-    const dialog = this.page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-
-    // locate and click the CSA option
-    const option = dialog.locator("text= Credit Sale Agreement ");
-    await option.waitFor({ state: "attached" });
-    await option.click({ force: false });
+    await this.selectProductFromDialog(/Credit Sale Agreement/i, "CSA");
   }
 
   /** Select the Finance Lease product from the product dialog. */
   async selectFinanceLeaseProduct(): Promise<void> {
-    this.logStep("Select Finance Lease product");
-    const dialog = this.page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-    const option = dialog.locator("text= Finance Lease ");
-    await option.waitFor({ state: "attached" });
-    await option.click({ force: false });
+    await this.selectProductFromDialog(/Finance Lease/i, "Finance Lease");
   }
 
   /** Select Assured Future Value from the Create Standard Quote product dialog. */
   async selectAssuredFutureValueProduct(): Promise<void> {
-    this.logStep("Select Assured Future Value product");
-    const dialog = this.page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-    const option = dialog.getByText(/Assured\s*Future\s*Value/i).first();
-    await option.waitFor({ state: "attached" });
-    await option.click({ force: false });
+    await this.selectProductFromDialog(/Assured\s*Future\s*Value/i, "Assured Future Value");
   }
 
   /** Select Term Loan from the Create Standard Quote product dialog (TL-B / TL-C Standard Quote). */
   async selectTermLoanProduct(): Promise<void> {
-    this.logStep("Select Term Loan product");
-    const dialog = this.page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-    const option = dialog.getByText(/Term\s*Loan/i).first();
-    await option.waitFor({ state: "attached" });
-    await option.click({ force: false });
-    await expect(dialog).toBeHidden({ timeout: 60_000 });
-    await this.waitForAppLoaderOverlayGone(120_000);
+    await this.selectProductFromDialog(/Term\s*Loan/i, "Term Loan");
   }
 
   /** Select Operating Lease from the Create Standard Quote product dialog. */
   async selectOperatingLeaseProduct(): Promise<void> {
-    this.logStep("Select Operating Lease product");
-    const dialog = this.page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-    const option = dialog.getByText(/Operating\s*Lease/i).first();
-    await option.waitFor({ state: "attached" });
-    await option.click({ force: false });
+    await this.selectProductFromDialog(/Operating\s*Lease/i, "Operating Lease");
   }
 
   /**

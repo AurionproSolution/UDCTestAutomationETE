@@ -8,8 +8,7 @@ import { expect, test } from "@fixtures/doPortalTest";
 import type { Locator, Page } from "@playwright/test";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../config/env";
 import { DOAssetDetailsPage, DOCustomerDetailsPage, DODashboardPage, DOQuickQuotePage } from "../../../pages";
-
-const AFV_SQ_PRODUCT = "AFV-B-Assigned";
+import { AFV_SQ_PRODUCT } from "./standardQuoteProducts";
 /** AFV FIS program auto-populates on authorised dealer (differs from CSA/TL program pickers). */
 const AFV_SQ_PROGRAM = "AFV - B-Distributor";
 const AFV_SQ_DEALER =
@@ -64,7 +63,6 @@ async function openAfVStandardQuoteFromDashboard(page: Page): Promise<{
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(AFV_SQ_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectAssuredFutureValueProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return { dashboardPage, assetDetailsPage };

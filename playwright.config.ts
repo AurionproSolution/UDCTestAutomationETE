@@ -9,19 +9,19 @@
  * @see https://playwright.dev/docs/test-configuration
  */
 
-import { config as loadDotenv } from "dotenv";
 import { defineConfig, devices } from "@playwright/test";
+import { config as loadDotenv } from "dotenv";
 import * as fs from "fs";
-
-loadDotenv();
 import type { OrtoniReportConfig } from "ortoni-report";
 import * as os from "os";
 import path from "path";
+import { RSS_PORTAL_LOGIN_EVERY_RUN } from "./config/rss-portal-auth.config";
 import { getDoPortalAuthFile } from "./playwright/do-portal-auth.helper";
 import { hasUsableDoPortalAuthFile } from "./playwright/do-portal-session.helper";
 import { getRssPortalAuthFile } from "./playwright/rss-portal-auth.helper";
 import { hasUsableRssPortalAuthFile } from "./playwright/rss-portal-session.helper";
-import { RSS_PORTAL_LOGIN_EVERY_RUN } from "./config/rss-portal-auth.config";
+
+loadDotenv();
 
 /** VS Code / Cursor Test Explorer: one project is always enabled (see docs/test-explorer.md). */
 const ideMode = process.env.PLAYWRIGHT_IDE === "1";
@@ -243,7 +243,7 @@ export default defineConfig({
 
   retries: process.env.CI ? 2 : 0,
 
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI ? 1 : 2,
 
   outputDir: "test-results",
 

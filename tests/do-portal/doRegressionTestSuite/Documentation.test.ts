@@ -28,8 +28,7 @@ import {
   openDocumentationCsaQuoteThroughPersonalDetails as openCsaQuoteThroughPersonalDetails,
   openPostSubmissionUploadStep,
 } from "./documentation.helpers";
-
-const CSA_SQ_PRODUCT = "CSA-C-Assigned";
+import { CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 /** Existing open Standard Quote on QAT (Settlement regression seed — UDP-T3860 Scenario 2). */
@@ -109,7 +108,6 @@ async function openStandardQuoteFromDashboard(page: Page): Promise<DOAssetDetail
   await dashboardPage.waitForAuthenticatedDashboard();
   await dashboardPage.selectDealer(TLC_DEALER);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectCSAproduct();
   await expect(page.locator("app-quote-details, app-standard-quote").first()).toBeVisible({
     timeout: 120_000,
   });

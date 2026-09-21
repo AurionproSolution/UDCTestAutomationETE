@@ -14,6 +14,8 @@ import {
   DOQuickQuotePage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
+import { FL_SQ_PRODUCT, FL_SQ_PROGRAM } from "./fl.helpers";
+import { CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 
 const OL_SQ_PRODUCT = "Operating Lease - Business Asg";
 const OL_SQ_PROGRAM = "Operating Lease Business - MV Dealer";
@@ -73,7 +75,6 @@ async function openOlStandardQuoteFromDashboard(page: Page): Promise<{
   const dashboardPage = await openAuthenticatedDashboard(page);
   const assetDetailsPage = new DOAssetDetailsPage(page);
   await dashboardPage.clickCreateStandardQuote();
-  await dashboardPage.selectOperatingLeaseProduct();
   await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
   await assetDetailsPage.waitForAssetDetailsStepReady();
   return { dashboardPage, assetDetailsPage };
@@ -1463,11 +1464,13 @@ test.describe("Standard Quote - OL @do @regression", () => {
 
       const dashboardPage = await openAuthenticatedDashboard(page);
       await dashboardPage.clickCreateStandardQuote();
-      await dashboardPage.selectFinanceLeaseProduct();
       await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
 
       const flAssetDetails = new DOAssetDetailsPage(page);
       await flAssetDetails.waitForAssetDetailsStepReady();
+      await flAssetDetails.chooseProduct(FL_SQ_PRODUCT);
+      await flAssetDetails.chooseProgram(FL_SQ_PROGRAM);
+      await flAssetDetails.waitForQuoteLoadersToFinish().catch(() => {});
       await expect.soft(flAssetDetails.includeGstCheckboxHost()).toBeHidden({ timeout: 5_000 });
     },
   );
@@ -1486,11 +1489,12 @@ test.describe("Standard Quote - OL @do @regression", () => {
 
       const dashboardPage = await openAuthenticatedDashboard(page);
       await dashboardPage.clickCreateStandardQuote();
-      await dashboardPage.selectCSAproduct();
       await expect.soft(standardQuoteRoot(page)).toBeVisible({ timeout: 120_000 });
 
       const csaAssetDetails = new DOAssetDetailsPage(page);
       await csaAssetDetails.waitForAssetDetailsStepReady();
+      await csaAssetDetails.chooseProduct(CSA_SQ_PRODUCT);
+      await csaAssetDetails.waitForQuoteLoadersToFinish().catch(() => {});
       await expect.soft(csaAssetDetails.standardQuoteRoot().getByText(/^Useful\s*Life$/i).first()).toBeHidden({
         timeout: 5_000,
       });
@@ -1512,9 +1516,10 @@ test.describe("Standard Quote - OL @do @regression", () => {
 
       const dashboardPage = await openAuthenticatedDashboard(page);
       await dashboardPage.clickCreateStandardQuote();
-      await dashboardPage.selectCSAproduct();
       const csaAssetDetails = new DOAssetDetailsPage(page);
       await csaAssetDetails.waitForAssetDetailsStepReady();
+      await csaAssetDetails.chooseProduct(CSA_SQ_PRODUCT);
+      await csaAssetDetails.waitForQuoteLoadersToFinish().catch(() => {});
       await expect.soft(csaAssetDetails.maintenanceCostInputField()).toBeHidden({ timeout: 5_000 });
     },
   );
@@ -1532,9 +1537,11 @@ test.describe("Standard Quote - OL @do @regression", () => {
 
       const dashboardPage = await openAuthenticatedDashboard(page);
       await dashboardPage.clickCreateStandardQuote();
-      await dashboardPage.selectFinanceLeaseProduct();
       const flAssetDetails = new DOAssetDetailsPage(page);
       await flAssetDetails.waitForAssetDetailsStepReady();
+      await flAssetDetails.chooseProduct(FL_SQ_PRODUCT);
+      await flAssetDetails.chooseProgram(FL_SQ_PROGRAM);
+      await flAssetDetails.waitForQuoteLoadersToFinish().catch(() => {});
       await expect.soft(flAssetDetails.excessAllowanceSectionHeader()).toBeHidden({ timeout: 5_000 });
     },
   );
