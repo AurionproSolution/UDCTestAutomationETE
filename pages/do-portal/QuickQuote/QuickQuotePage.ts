@@ -5,6 +5,7 @@
  */
 
 import { Locator, Page, expect } from "@playwright/test";
+import { DO_PORTAL_PRODUCT } from "../../../config/do-portal-products";
 import { BasePage } from "../../common/BasePage";
 
 export type DOQuickQuoteResetExpectation = {
@@ -3577,7 +3578,9 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   /** AFV Quick Quote reset — product retained, asset type cleared. */
-  async expectAfVQuickQuoteResetToDefaultState(productName = "AFV-B-Assigned"): Promise<void> {
+  async expectAfVQuickQuoteResetToDefaultState(
+    productName = DO_PORTAL_PRODUCT.AFV_B,
+  ): Promise<void> {
     await this.expectQuickQuoteResetToDefaultState({ productName });
     const assetAfter = await this.readAssetTypeDisplayValue();
     expect.soft(assetAfter.length).toBe(0);

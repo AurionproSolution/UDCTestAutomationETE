@@ -20,8 +20,9 @@ import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/Cus
 import { DOEmploymentDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/employmentDetails";
 import { DOFinancialPositionPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/financialPosition";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
+import { CSA_C_QQ_PRODUCT } from "../doRegressionTestSuite/quickQuote.helpers";
 
-const CSA_QQ_PRODUCT = "CSA-C-Assigned";
+const CSA_QQ_PRODUCT = CSA_C_QQ_PRODUCT;
 const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 
@@ -853,7 +854,7 @@ test(
     await dashboardPage.waitForAuthenticatedDashboard();
     await dashboardPage.clickCreateStandardQuote();
     await dashboardPage.selectCSAproduct();
-    await assetDetailsPage.chooseProduct("CSA-C-Assigned");
+    await assetDetailsPage.chooseProduct(CSA_QQ_PRODUCT);
     await assetDetailsPage.chooseProgram("CSA Personal - MV Dealer");
     await assetDetailsPage.enterOriginationReference("Test Orig Ref 123");
     await assetDetailsPage.enterAsset("Car and Light Commercial /");

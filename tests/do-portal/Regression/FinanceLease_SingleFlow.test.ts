@@ -19,8 +19,8 @@ import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDeta
 import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/addressDetails";
 import { DOCustomerQuotePostSubmitPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/customerQuotePostSubmit";
 import { DOFinancialPositionPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/financialPosition";
+import { FL_SQ_PRODUCT as FL_QQ_PRODUCT } from "../doRegressionTestSuite/fl.helpers";
 
-const FL_QQ_PRODUCT = "Finance Lease - Business Asg";
 const FL_QQ_PROGRAM = "Finance Lease Business - MV Dealer";
 
 /**

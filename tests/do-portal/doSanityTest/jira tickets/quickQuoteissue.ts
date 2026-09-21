@@ -11,6 +11,7 @@
 
 import { expect, test } from "@fixtures/doPortalTest";
 import { DO_DEALER_STANDARD_QUOTE_URL } from "../../../../config/env";
+import { FL_SQ_PRODUCT } from "../../doRegressionTestSuite/fl.helpers";
 import { DODashboardPage, DOQuickQuotePage } from "../../../../pages";
 
 test.describe("DO Portal - UDP-2631 Quick Quote Add Comparison 3 - Sanity @do @sanity", () => {
@@ -27,7 +28,7 @@ test.describe("DO Portal - UDP-2631 Quick Quote Add Comparison 3 - Sanity @do @s
   test("UDP-2631 - Add Comparison 3 disabled until Quick Quote 2 is calculated", async () => {
     test.setTimeout(240000);
     await quickQuotePage.openQuickQuote();
-    await quickQuotePage.selectProduct("Finance Lease - Business Asg");
+    await quickQuotePage.selectProduct(FL_SQ_PRODUCT);
     await quickQuotePage.selectProgram("Finance Lease Business - MV Dealer");
     await quickQuotePage.enterCashPrice("100000");
     await quickQuotePage.enterInterestRatePercent("4");

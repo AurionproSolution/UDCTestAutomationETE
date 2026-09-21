@@ -293,7 +293,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
 
       await quickQuotePage.clickCreateQuote();
       await quickQuotePage.waitForStandardQuoteShell();
-      await expect.soft(page.getByText(/Term Loan|TL-B/i).first()).toBeVisible();
+      await expect.soft(page.getByText(/Term Loan/i).first()).toBeVisible();
 
       const assetDetailsPage = new DOAssetDetailsPage(page);
       await assetDetailsPage.waitForAssetDetailsStepReady();

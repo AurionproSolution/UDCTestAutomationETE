@@ -69,7 +69,14 @@ test.describe("Quick Quote - CSA @do @regression", () => {
 
       expect.soft(products.length).toBeGreaterThan(0);
       expect.soft(products.some((t) => /CSA|Credit Sale|Assigned/i.test(t))).toBeTruthy();
-      expect.soft(products.every((t) => /^(CSA|TL|Finance|OL|AFV|FL)/i.test(t.trim()) || t.length > 0)).toBeTruthy();
+      expect.soft(
+        products.every(
+          (t) =>
+            /^(Assured Future Value|Credit Sale Agreement|Finance Lease|Term Loan|Operating Lease|CSA|TL|Finance|OL|AFV|FL)/i.test(
+              t.trim(),
+            ) || t.length > 0,
+        ),
+      ).toBeTruthy();
     },
   );
 

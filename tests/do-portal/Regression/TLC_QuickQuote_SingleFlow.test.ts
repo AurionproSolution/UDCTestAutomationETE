@@ -12,8 +12,7 @@ import { DOAddressDetailsPage } from "../../../pages/do-portal/StandardQuote/Cus
 import { DOEmploymentDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/employmentDetails";
 import { DOFinancialPositionPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/financialPosition";
 import { DOPersonalDetailsPage } from "../../../pages/do-portal/StandardQuote/CustomerDetails/personalDetails";
-
-const TLC_QQ_PRODUCT = "TL-C-Assigned";
+import { TL_C_SQ_PRODUCT as TLC_QQ_PRODUCT } from "../doRegressionTestSuite/standardQuoteProducts";
 const TLC_QQ_PROGRAM = "Term Loan Personal - MV Dealer";
 const TLC_DEALER = "Armstrong Prestige Wellington";
 

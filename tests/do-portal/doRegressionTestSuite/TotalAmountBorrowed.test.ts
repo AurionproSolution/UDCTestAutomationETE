@@ -14,7 +14,6 @@ import {
   DOQuickQuotePage,
 } from "../../../pages";
 import { DOAddAssetPage } from "../../../pages/do-portal/StandardQuote/AssetDetails/AddAssetPage";
-
 import { CSA_SQ_PRODUCT } from "./standardQuoteProducts";
 const CSA_SQ_PROGRAM = "CSA Personal - MV Dealer";
 const CSA_QQ_PROGRAM = "CSA Personal - MV Dealer";

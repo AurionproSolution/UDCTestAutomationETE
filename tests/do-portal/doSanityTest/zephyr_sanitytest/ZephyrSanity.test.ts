@@ -130,7 +130,9 @@ test.describe("DO Portal — Zephyr Sanity @do @smoke @sanity", () => {
       await quickQuote.clickCalculate();
       await quickQuote.clickCreateQuote();
       await expect(standardQuoteRoot(quickQuote.page)).toBeVisible({ timeout: 120_000 });
-      await expect(quickQuote.page.getByText(/CSA-C-Assigned|CSA Personal/i).first()).toBeVisible();
+      await expect(
+        quickQuote.page.getByText(/Credit Sale Agreement.*Consumer|CSA Personal/i).first(),
+      ).toBeVisible();
     });
 
     test("UDP-T4682 - Calculate functionality @UDP-T4682", async () => {
