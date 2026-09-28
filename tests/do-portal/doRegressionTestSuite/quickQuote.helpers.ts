@@ -65,6 +65,7 @@ export async function selectCsaCProductAndProgram(
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
   await quickQuotePage.selectProgramIfNeeded(CSA_C_QQ_PROGRAM);
   await quickQuotePage.dismissQuickQuoteDropdownOverlays();
+  await quickQuotePage.waitForLoadingComplete();
 }
 
 export async function selectTlProductAndProgram(quickQuotePage: DOQuickQuotePage): Promise<void> {

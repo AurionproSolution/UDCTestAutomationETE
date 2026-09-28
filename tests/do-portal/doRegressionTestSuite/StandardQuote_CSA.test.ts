@@ -628,11 +628,7 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       await assetDetailsPage.waitForQuoteLoadersToFinish();
 
       await test.step("Navigate to Fees section", async () => {
-        await assetDetailsPage.udcEstablishmentFeeInputField.scrollIntoViewIfNeeded();
-        await assetDetailsPage.dealerOriginationFeeInputField.scrollIntoViewIfNeeded();
-        await expect(assetDetailsPage.udcEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
-        await expect(assetDetailsPage.dealerOriginationFeeInputField).toBeVisible({ timeout: 20_000 });
-        await expect(assetDetailsPage.totalEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+        await assetDetailsPage.ensureLoanDetailsEstablishmentFeesVisible();
       });
 
       await test.step("Enter valid fee values when blank", async () => {
@@ -660,19 +656,14 @@ test.describe("Standard Quote - CSA @do @regression", () => {
         await expect
           .poll(
             async () => {
-              const raw = (await assetDetailsPage.totalEstablishmentFeeInputField.inputValue()).trim();
-              const actual = Math.round(assetDetailsPage.parseDisplayedCurrency(raw) * 100) / 100;
+              const actual = Math.round((await assetDetailsPage.readTotalEstablishmentFee()) * 100) / 100;
               return Math.abs(actual - expectedTotal) <= 0.01;
             },
             { timeout: 30_000, intervals: [300, 500, 1_000] },
           )
           .toBe(true);
 
-        const displayedTotal = Math.round(
-          assetDetailsPage.parseDisplayedCurrency(
-            (await assetDetailsPage.totalEstablishmentFeeInputField.inputValue()).trim(),
-          ) * 100,
-        ) / 100;
+        const displayedTotal = Math.round((await assetDetailsPage.readTotalEstablishmentFee()) * 100) / 100;
         expect(Math.abs(displayedTotal - expectedTotal)).toBeLessThanOrEqual(0.01);
 
         if (udc === 0 && dealer === 0) {
@@ -726,6 +717,7 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectCsaProductAndProgram(assetDetailsPage);
+      await assetDetailsPage.scrollLessDepositIntoView();
       await assetDetailsPage.enterTradeAmount("$5,000");
       await assetDetailsPage.enterSettlementAmount("$2,000");
       await assetDetailsPage.expectNetTradeAmountPattern(/\$?\s*3[, ]?000|3000/);
@@ -753,23 +745,11 @@ test.describe("Standard Quote - CSA @do @regression", () => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectCsaProductAndProgram(assetDetailsPage);
-      const freqLabel = await assetDetailsPage.frequencyOfPayment.textContent().catch(() => "");
-      if (freqLabel?.trim()) {
-        expect.soft(/Monthly|Weekly|Fortnightly/i.test(freqLabel)).toBeTruthy();
-      }
-      const freqTrigger = standardQuoteRoot(page)
-        .locator("p-dropdown")
-        .filter({ hasText: /Frequency/i })
-        .getByRole("button", { name: /dropdown trigger/i })
-        .first();
-      if (await freqTrigger.isEnabled().catch(() => false)) {
-        await freqTrigger.click();
-        const weekly = page.getByRole("option", { name: /Weekly/i }).first();
-        if (await weekly.isVisible({ timeout: 5_000 }).catch(() => false)) {
-          await weekly.click();
-        }
-        await page.keyboard.press("Escape");
-      }
+      await assetDetailsPage.expectFrequencyDefaultsFromProgram();
+      const current = await assetDetailsPage.readSelectedFrequencyLabel();
+      const target = /Monthly/i.test(current) ? "Weekly" : "Monthly";
+      await assetDetailsPage.selectStandardQuoteFrequency(target);
+      await assetDetailsPage.expectPaymentStructureClearedAfterFrequencyChange();
     },
   );
 

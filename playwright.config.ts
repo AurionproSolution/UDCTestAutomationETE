@@ -15,6 +15,7 @@ import * as fs from "fs";
 import type { OrtoniReportConfig } from "ortoni-report";
 import * as os from "os";
 import path from "path";
+import { DO_PORTAL_LOGIN_EVERY_RUN } from "./config/do-portal-auth.config";
 import { RSS_PORTAL_LOGIN_EVERY_RUN } from "./config/rss-portal-auth.config";
 import { getDoPortalAuthFile } from "./playwright/do-portal-auth.helper";
 import { hasUsableDoPortalAuthFile } from "./playwright/do-portal-session.helper";
@@ -74,16 +75,14 @@ const maximizedChrome = {
  * - Local / non-CI: always use global DO storage (single login per run).
  * - CI: set PLAYWRIGHT_USE_DO_GLOBAL_AUTH=1 when you have unattended storage or a self-hosted runner.
  */
-const useGlobalDoAuth =
-  !process.env.CI || process.env.PLAYWRIGHT_USE_DO_GLOBAL_AUTH === "1";
+const useGlobalDoAuth = !process.env.CI || process.env.PLAYWRIGHT_USE_DO_GLOBAL_AUTH === "1";
 
 /**
  * OTP during rss-portal-auth.setup cannot run unattended on GitHub-hosted runners.
  * - Local / non-CI: always use global RSS storage (single login per run).
  * - CI: set PLAYWRIGHT_USE_RSS_GLOBAL_AUTH=1 when you have unattended storage or a self-hosted runner.
  */
-const useGlobalRssAuth =
-  !process.env.CI || process.env.PLAYWRIGHT_USE_RSS_GLOBAL_AUTH === "1";
+const useGlobalRssAuth = !process.env.CI || process.env.PLAYWRIGHT_USE_RSS_GLOBAL_AUTH === "1";
 
 /**
  * Only attach storageState after do-portal-auth.setup has created the file.
@@ -275,6 +274,8 @@ export default defineConfig({
   globalSetup: (() => {
     const files: string[] = [];
     if (ideMode && useGlobalDoAuth) {
+      files.push(path.join(__dirname, "playwright", "do-portal-global-setup.ts"));
+    } else if (useGlobalDoAuth && DO_PORTAL_LOGIN_EVERY_RUN) {
       files.push(path.join(__dirname, "playwright", "do-portal-global-setup.ts"));
     }
     if (ideMode && useGlobalRssAuth) {

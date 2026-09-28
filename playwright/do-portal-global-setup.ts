@@ -5,9 +5,11 @@
  */
 
 import type { FullConfig } from "@playwright/test";
+import { DO_PORTAL_LOGIN_EVERY_RUN } from "../config/do-portal-auth.config";
 import { getDoPortalAuthFile } from "./do-portal-auth.helper";
 import { logTestStep } from "../utils/testStepLog";
 import {
+  clearSavedDoPortalAuthFiles,
   getDoPortalMfaLockPath,
   releaseStaleMfaLockIfNeeded,
   trySilentRefreshSession,
@@ -20,6 +22,14 @@ async function globalSetup(_config: FullConfig): Promise<void> {
 
   const lockPath = getDoPortalMfaLockPath(getDoPortalAuthFile());
   releaseStaleMfaLockIfNeeded(lockPath);
+
+  if (DO_PORTAL_LOGIN_EVERY_RUN) {
+    clearSavedDoPortalAuthFiles();
+    logTestStep(
+      "DO auth (globalSetup): cleared saved session — coordinated MFA login will run in the test browser.",
+    );
+    return;
+  }
 
   let evaluation = await trySilentRefreshSession();
 

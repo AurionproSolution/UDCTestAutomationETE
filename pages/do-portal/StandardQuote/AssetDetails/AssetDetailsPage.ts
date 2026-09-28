@@ -114,18 +114,15 @@ export class DOAssetDetailsPage extends BasePage {
       )
       .first();
     this.PPSRCount = page.locator("app-quote-details").getByRole("spinbutton");
-    this.udcEstablishmentFeeInputField = page
-      .locator("amount")
-      .filter({ hasText: "UDC Establishment Fee" })
-      .locator("#amount");
-    this.dealerOriginationFeeInputField = page
-      .locator("amount")
-      .filter({ hasText: "Dealer Origination Fee" })
-      .locator("#amount");
-    this.totalEstablishmentFeeInputField = page
-      .locator("amount")
-      .filter({ hasText: /Total\s+Establishment\s+Fee/i })
-      .locator("#amount");
+    this.udcEstablishmentFeeInputField = this.establishmentFeeAmountField(
+      quoteHost,
+      /UDC Establishment Fee/i,
+    );
+    this.dealerOriginationFeeInputField = this.establishmentFeeAmountField(
+      quoteHost,
+      /Dealer Origination Fee/i,
+    );
+    this.totalEstablishmentFeeInputField = this.totalEstablishmentFeeVisibleDisplay();
     this.termsOfFinanceInputField = page
       .locator("number")
       .filter({ hasText: "Term" })
@@ -215,9 +212,25 @@ export class DOAssetDetailsPage extends BasePage {
       .locator("#amount")
       .first();
     this.netTradeAmountDisplayed = lessDeposit
-      .locator("amount")
-      .filter({ hasText: /Net Trade Amount/i })
-      .locator("#amount")
+      .getByText(/Net Trade Amount/i)
+      .first()
+      .locator("xpath=following-sibling::label[contains(., '$')][1]")
+      .first()
+      .or(
+        lessDeposit
+          .locator("amount")
+          .filter({ hasText: /Net Trade Amount/i })
+          .locator("label")
+          .filter({ hasText: /\$/ })
+          .first(),
+      )
+      .or(
+        lessDeposit
+          .locator("amount")
+          .filter({ hasText: /Net Trade Amount/i })
+          .locator("#amount")
+          .first(),
+      )
       .first();
 
     const paymentSummary = page.locator("app-payment-summary").first();
@@ -264,9 +277,10 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async openProductDropdown(): Promise<void> {
     this.logStep("Opened product dropdown");
-    const productDropdown = this.page.locator(
-      `//span//label[contains(text(), 'Product')]/following-sibling::div//span`,
-    );
+    await this.waitForQuoteLoadersToFinish();
+    const productDropdown = this.primeLabeledDropdownCombobox("Product");
+    await productDropdown.scrollIntoViewIfNeeded().catch(() => {});
+    await expect(productDropdown).toBeVisible({ timeout: 15_000 });
     await productDropdown.click({ timeout: 15_000 });
     await expect(this.page.getByRole("option").first())
       .toBeVisible({ timeout: 15_000 })
@@ -616,7 +630,7 @@ export class DOAssetDetailsPage extends BasePage {
     opts?: { waitLoanPurpose?: boolean; timeoutMs?: number },
   ): Promise<void> {
     this.logStep("Wait for product selection settled");
-    await this.waitForQuoteLoadersToFinish(opts?.timeoutMs);
+    await this.waitForStandardQuoteReady(opts?.timeoutMs);
     await this.waitForSelectedProductLabel(expectedProduct, opts);
     if (opts?.waitLoanPurpose !== false) {
       await this.waitForLoanPurposePopulated(opts);
@@ -1025,7 +1039,7 @@ export class DOAssetDetailsPage extends BasePage {
       el.dispatchEvent(new Event("change", { bubbles: true }));
       el.dispatchEvent(new Event("blur", { bubbles: true }));
     }).catch(() => {});
-    await this.waitForQuoteLoadersToFinish().catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
   }
 
   async enterTradeAmount(amount: string): Promise<void> {
@@ -1053,17 +1067,80 @@ export class DOAssetDetailsPage extends BasePage {
     await this.tradeAmountInput.click({ timeout: 5_000 }).catch(() => {});
     await this.commitLessDepositCurrencyField(this.settlementAmountInput);
     await this.netTradeAmountDisplayed.scrollIntoViewIfNeeded().catch(() => {});
-    await this.waitForQuoteLoadersToFinish().catch(() => {});
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+  }
+
+  /** Net Trade `#amount` when present (editable/read-only input). */
+  netTradeAmountInputField(): Locator {
+    return this.lessDepositRoot()
+      .locator("amount")
+      .filter({ hasText: /Net Trade Amount/i })
+      .locator('input#amount[currencymask], input#amount[type="text"], #amount')
+      .first();
+  }
+
+  /** Display-only Net Trade (`$` label) when no input is shown. */
+  private netTradeAmountLabelDisplay(): Locator {
+    const lessDeposit = this.lessDepositRoot();
+    return lessDeposit
+      .getByText(/Net Trade Amount/i)
+      .first()
+      .locator("xpath=following-sibling::label[contains(., '$')][1]")
+      .first()
+      .or(
+        lessDeposit
+          .locator("amount")
+          .filter({ hasText: /Net Trade Amount/i })
+          .locator("label")
+          .filter({ hasText: /\$/ })
+          .first(),
+      );
+  }
+
+  /** Digits-only Net Trade for polls (input first, then label / row text). */
+  async readNetTradeAmountNormalized(): Promise<string> {
+    await this.scrollLessDepositIntoView().catch(() => {});
+    const input = this.netTradeAmountInputField();
+    if (await input.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      const fromInput = (await input.inputValue().catch(() => "")).trim();
+      if (fromInput.length > 0) {
+        return fromInput.replace(/[$,\s]/g, "");
+      }
+      const n = await this.readCurrencyInput(input).catch(() => Number.NaN);
+      if (!Number.isNaN(n)) {
+        return String(n).replace(/\.0+$/, "").replace(/\./g, "");
+      }
+    }
+    const label = this.netTradeAmountLabelDisplay();
+    if (await label.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      const text = ((await label.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+      if (text.length > 0) {
+        return text.replace(/[$,\s]/g, "");
+      }
+    }
+    const row = this.lessDepositRoot().locator("amount").filter({ hasText: /Net Trade Amount/i });
+    const rowText = ((await row.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+    return rowText.replace(/[$,\s]/g, "");
   }
 
   /** Net Trade Amount (often read-only); assert displayed text matches `pattern` (product rules vary — may mirror Trade until Settlement is applied). */
   async expectNetTradeAmountPattern(pattern: RegExp): Promise<void> {
     this.logStep("Expect Net Trade Amount Pattern");
-    await expect(this.netTradeAmountDisplayed).toBeVisible({ timeout: 15_000 });
-    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     await this.scrollLessDepositIntoView().catch(() => {});
+    await expect(this.netTradeAmountDisplayed).toBeVisible({ timeout: 20_000 });
+    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+    const readNetTrade = async (): Promise<string> => {
+      const normalized = await this.readNetTradeAmountNormalized();
+      if (normalized.length > 0) {
+        return normalized;
+      }
+      const row = this.lessDepositRoot().locator("amount").filter({
+        hasText: /Net Trade Amount/i,
+      });
+      return ((await row.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+    };
     await expect
-      .poll(async () => (await this.netTradeAmountDisplayed.inputValue()).trim(), {
+      .poll(readNetTrade, {
         timeout: 45_000,
         intervals: [300, 500, 1_000, 2_000],
       })
@@ -1196,6 +1273,7 @@ export class DOAssetDetailsPage extends BasePage {
   async expectRecommendedRetailPriceVisibleAfterNewCondition(): Promise<void> {
     this.logStep("Expect Recommended Retail Price Visible After New Condition");
     await this.waitForQuoteLoadersToFinish();
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000).catch(() => {});
     await this.scrollRecommendedRetailPriceIntoView();
     await expect
       .poll(
@@ -1204,7 +1282,7 @@ export class DOAssetDetailsPage extends BasePage {
           if (n === 0) return false;
           return await this.recommendedRetailPriceInput.first().isVisible().catch(() => false);
         },
-        { timeout: 20_000, intervals: [500, 1_000, 2_000] },
+        { timeout: 45_000, intervals: [500, 1_000, 2_000, 3_000] },
       )
       .toBe(true);
   }
@@ -1328,14 +1406,14 @@ export class DOAssetDetailsPage extends BasePage {
   /** **Total Establishment Fee** (read-only): parsed numeric equals UDC + Dealer (waits for recalculation). */
   async expectTotalEstablishmentFeeSumDollars(expectedTotal: number): Promise<void> {
     this.logStep(`Expect total establishment fee sum: ${this.stepValueDisplay(String(expectedTotal))}`);
-    const f = this.totalEstablishmentFeeInputField;
-    await expect(f).toBeVisible({ timeout: 20_000 });
+    await expect(this.totalEstablishmentFeeVisibleDisplay()).toBeVisible({ timeout: 20_000 });
+    const f = this.totalEstablishmentFeeHiddenInput();
     const want = Math.round(expectedTotal * 100) / 100;
     await expect
       .poll(
         async () => {
-          const raw = (await f.inputValue()).trim();
-          const n = parseFloat(raw.replace(/[^0-9.-]/g, ""));
+          const raw = await f.evaluate((el) => ((el as HTMLInputElement).value ?? "").trim()).catch(() => "");
+          const n = parseFloat(String(raw).replace(/[^0-9.-]/g, ""));
           return Number.isNaN(n) ? Number.NaN : Math.round(n * 100) / 100;
         },
         { timeout: 15_000 },
@@ -1639,6 +1717,74 @@ export class DOAssetDetailsPage extends BasePage {
       .locator("#amount")
       .first();
     return displayValue.or(amountInput).first();
+  }
+
+  /** Loan Details fee row: `amount` component or grid `input#amount` (avoid `$` label — strict mode with input). */
+  private establishmentFeeAmountField(scope: Locator, labelRx: RegExp): Locator {
+    return scope
+      .locator("amount")
+      .filter({ hasText: labelRx })
+      .locator("input#amount, input[currencymask], input.p-inputtext")
+      .first()
+      .or(
+        scope
+          .getByText(labelRx)
+          .first()
+          .locator(
+            "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'grid') or contains(@class,'field')][1]//input[@id='amount' or @currencymask]",
+          )
+          .first(),
+      )
+      .or(
+        scope
+          .getByText(labelRx)
+          .first()
+          .locator("xpath=following::input[@id='amount' or @currencymask][1]")
+          .first(),
+      )
+      .first();
+  }
+
+  /** Hidden/disabled `#amount` used for Total Establishment Fee recalc (not always visible). */
+  private totalEstablishmentFeeHiddenInput(): Locator {
+    return this.establishmentFeeAmountField(
+      this.standardQuoteRoot(),
+      /Total\s+Establishment\s+Fee/i,
+    );
+  }
+
+  /** Visible currency label for **Total Establishment Fee** (read-only display). */
+  private totalEstablishmentFeeVisibleDisplay(): Locator {
+    const scope = this.standardQuoteRoot();
+    return scope
+      .locator("amount")
+      .filter({ hasText: /Total\s+Establishment\s+Fee/i })
+      .locator("label")
+      .filter({ hasText: /\$/ })
+      .first()
+      .or(
+        scope
+          .getByText(/Total\s+Establishment\s+Fee/i)
+          .first()
+          .locator("xpath=following-sibling::label[contains(., '$')][1]"),
+      )
+      .first();
+  }
+
+  /** Scroll to Loan Details fee rows; expand section when Total is display-only. */
+  async ensureLoanDetailsEstablishmentFeesVisible(): Promise<void> {
+    this.logStep("Ensure Loan Details establishment fees visible");
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
+    await this.udcEstablishmentFeeInputField.scrollIntoViewIfNeeded().catch(() => {});
+    if (!(await this.udcEstablishmentFeeInputField.isVisible({ timeout: 5_000 }).catch(() => false))) {
+      const loanDetails = this.standardQuoteRoot().getByText(/^Loan Details$/i).first();
+      await loanDetails.scrollIntoViewIfNeeded().catch(() => {});
+      await loanDetails.click({ timeout: 10_000 }).catch(() => {});
+    }
+    await expect(this.udcEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+    await expect(this.dealerOriginationFeeInputField).toBeVisible({ timeout: 20_000 });
+    await this.totalEstablishmentFeeVisibleDisplay().scrollIntoViewIfNeeded().catch(() => {});
+    await expect(this.totalEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
   }
 
   /** **Loan Maintenance Fee** (totals block or `amount` row). */
@@ -3943,12 +4089,22 @@ export class DOAssetDetailsPage extends BasePage {
    */
   async openKeyInformationDisclosureDialog(): Promise<void> {
     this.logStep("Open Key Information Disclosure Dialog");
+    await this.waitForQuoteLoadersToFinish();
+    await this.waitUntilNoVisibleAppLoaderOverlays(60_000);
     const trigger = this.standardQuoteRoot()
       .locator(':text-is("Key Information Disclosure >")')
       .or(this.page.locator(':text-is("Key Information Disclosure >")'))
       .first();
     await trigger.scrollIntoViewIfNeeded();
     await expect(trigger).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => this.page.locator(".app-loader-overlay").filter({ visible: true }).count(), {
+        timeout: 30_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBe(0)
+      .catch(() => {});
+    await trigger.click({ timeout: 15_000, trial: true }).catch(() => {});
     await trigger.click({ timeout: 15_000 });
     const dlg = this.page
       .getByRole("dialog")
@@ -4250,15 +4406,17 @@ export class DOAssetDetailsPage extends BasePage {
     const title = this.paymentScheduleSectionTitle();
     await title.scrollIntoViewIfNeeded().catch(() => {});
 
-    const barsRadio = this.leasePaymentScheduleBarsViewRadio();
-    await expect(barsRadio).toBeVisible({ timeout: 15_000 });
-    await barsRadio.scrollIntoViewIfNeeded();
-    await barsRadio.click({ timeout: 12_000 });
-    await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
-
-    if (!(await this.isLeasePaymentListViewActive())) {
-      await barsRadio.click({ timeout: 12_000, force: true });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const barsRadio = this.leasePaymentScheduleBarsViewRadio();
+      await expect(barsRadio).toBeVisible({ timeout: 15_000 });
+      await barsRadio.scrollIntoViewIfNeeded().catch(() => {});
+      await barsRadio.click({ timeout: 12_000, force: attempt > 0 }).catch(() => {});
       await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
+
+      if (await this.isLeasePaymentListViewActive()) {
+        break;
+      }
+      await this.page.waitForTimeout(500);
     }
 
     await expect
@@ -4520,9 +4678,19 @@ export class DOAssetDetailsPage extends BasePage {
       .first();
   }
 
-  /** Segment editor table inside **Edit Payment Schedule** (first table in the dialog). */
+  /** Segment editor table inside **Edit Payment Schedule** (Type / Number columns — not instalment grid). */
   private editPaymentScheduleSegmentTable(): Locator {
-    return this.editPaymentScheduleDialog().locator("table").first();
+    const dialog = this.editPaymentScheduleDialog();
+    return dialog
+      .locator("table")
+      .filter({
+        has: dialog.locator("th").filter({ hasText: /^Type$/i }),
+      })
+      .filter({
+        has: dialog.locator("th").filter({ hasText: /Number/i }),
+      })
+      .first()
+      .or(dialog.locator("table").first());
   }
 
   private editPaymentScheduleSegmentRowAt(rowIndex: number): Locator {
@@ -5043,14 +5211,41 @@ export class DOAssetDetailsPage extends BasePage {
   /** **Calculate** inside **Edit Payment Schedule** (FIS fetch for segment amounts). */
   async clickEditPaymentScheduleCalculate(opts?: { waitForApply?: boolean }): Promise<void> {
     this.logStep("Click Edit Payment Schedule Calculate");
+    await expect(this.editPaymentScheduleDialog()).toBeVisible({ timeout: 15_000 });
+    await this.waitForEditPaymentScheduleSegmentEditorReady();
     const calcBtn = this.editPaymentScheduleCalculateButton();
-    await expect(calcBtn).toBeVisible({ timeout: 10_000 });
-    await expect(calcBtn).toBeEnabled({ timeout: 10_000 });
-    await calcBtn.click({ timeout: 10_000 });
+    await expect(calcBtn).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(async () => calcBtn.isEnabled().catch(() => false), {
+        timeout: 30_000,
+        intervals: [300, 500, 1_000],
+      })
+      .toBeTruthy();
+    await calcBtn.click({ timeout: 15_000 });
     await this.waitForLoadingComplete();
     if (opts?.waitForApply !== false) {
-      // Apply enables only after FIS calculation completes — wait for UI state, not spinner alone.
-      await expect(this.editPaymentScheduleApplyButton()).toBeEnabled({ timeout: 60_000 });
+      const dialog = this.editPaymentScheduleDialog();
+      // FIS may refresh the summary while **Apply** stays disabled until segments differ from default.
+      await expect
+        .poll(
+          async () => {
+            if (await this.editPaymentScheduleApplyButton().isEnabled().catch(() => false)) {
+              return "apply";
+            }
+            if (
+              await dialog
+                .getByText(/Number of Payments/i)
+                .first()
+                .isVisible()
+                .catch(() => false)
+            ) {
+              return "summary";
+            }
+            return "";
+          },
+          { timeout: 60_000, intervals: [500, 1_000, 2_000] },
+        )
+        .not.toBe("");
     } else {
       await this.waitForQuoteLoadersToFinish().catch(() => {});
     }
@@ -5169,14 +5364,17 @@ export class DOAssetDetailsPage extends BasePage {
   async applySplitInterestOnlyEditPaymentSchedule(interestOnlyPayments = "12"): Promise<void> {
     this.logStep(`Apply split Interest Only Edit Payment Schedule (${interestOnlyPayments} IO)`);
     await this.openEditPaymentScheduleDialog();
+    await this.waitForEditPaymentScheduleSegmentEditorReady();
+    const paymentsTotal = await this.getEditPaymentScheduleNumberOfPayments();
+    const requested = Number(interestOnlyPayments) || 12;
+    const chunk = Math.max(1, Math.min(requested, paymentsTotal - 1));
     await this.modifyEditPaymentScheduleSegmentFields({
-      number: interestOnlyPayments,
+      number: String(chunk),
       type: "Interest Only",
     });
     await this.waitForEditPaymentScheduleAddSegmentEnabled();
     await this.clickEditPaymentScheduleAddSegment();
-    const paymentsTotal = await this.getEditPaymentScheduleNumberOfPayments();
-    const remaining = String(Math.max(1, paymentsTotal - Number(interestOnlyPayments)));
+    const remaining = String(Math.max(1, paymentsTotal - chunk));
     await this.enterEditPaymentScheduleSegmentNumberOnRow(1, remaining);
     await this.selectEditPaymentScheduleSegmentTypeOnRow(1, "Normal");
     await this.clickEditPaymentScheduleCalculate();
@@ -5272,6 +5470,7 @@ export class DOAssetDetailsPage extends BasePage {
         .click({ timeout: 5_000 })
         .catch(() => {});
     }
+    await this.waitForEditPaymentScheduleSegmentEditorReady().catch(() => {});
   }
 
   /**
@@ -5380,6 +5579,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Snapshot of all segment rows in **Edit Payment Schedule**. */
   async getEditPaymentScheduleSegmentRowsSnapshot(): Promise<DOEditPaymentScheduleSegmentSnapshot[]> {
+    await this.waitForEditPaymentScheduleSegmentEditorReady();
     const rowCount = await this.countEditPaymentScheduleSegmentRows();
     const snapshots: DOEditPaymentScheduleSegmentSnapshot[] = [];
     for (let index = 0; index < rowCount; index++) {
@@ -5464,10 +5664,14 @@ export class DOAssetDetailsPage extends BasePage {
   private editPaymentScheduleAddSegmentButton(): Locator {
     const dialog = this.editPaymentScheduleDialog();
     return dialog
-      .locator("button, a, [role='button']")
-      .filter({ has: dialog.locator(':text-is("Add Segment")') })
+      .getByRole("button", { name: /Add Segment/i })
       .first()
-      .or(dialog.getByRole("button", { name: /\+\s*Add Segment|Add Segment/i }).first());
+      .or(
+        dialog
+          .locator("button, a, [role='button']")
+          .filter({ hasText: /\+\s*Add Segment|Add Segment/i })
+          .first(),
+      );
   }
 
   /** Row count in the **Edit Payment Schedule** segment table. */
@@ -5479,8 +5683,8 @@ export class DOAssetDetailsPage extends BasePage {
   async waitForEditPaymentScheduleAddSegmentEnabled(): Promise<void> {
     this.logStep("Wait For Edit Payment Schedule Add Segment Enabled");
     const addBtn = this.editPaymentScheduleAddSegmentButton();
-    await expect(addBtn).toBeVisible({ timeout: 15_000 });
-    await expect(addBtn).toBeEnabled({ timeout: 30_000 });
+    await expect(addBtn).toBeVisible({ timeout: 30_000 });
+    await expect(addBtn).toBeEnabled({ timeout: 45_000 });
   }
 
   private editPaymentScheduleSegmentDeleteButton(rowIndex: number): Locator {
@@ -6940,7 +7144,7 @@ export class DOAssetDetailsPage extends BasePage {
       .first()
       .click({ timeout: 15_000 });
     await this.page.keyboard.press("Escape").catch(() => {});
-    await this.waitForQuoteLoadersToFinish();
+    await this.waitUntilNoVisibleAppLoaderOverlays(45_000);
   }
 
   /** After frequency change resets structured schedule, **Payment Amount** is no longer **Irregular**. */
@@ -8790,8 +8994,8 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async readTotalEstablishmentFee(): Promise<number> {
-    await expect(this.totalEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
-    return this.readCurrencyInput(this.totalEstablishmentFeeInputField);
+    await expect(this.totalEstablishmentFeeVisibleDisplay()).toBeVisible({ timeout: 20_000 });
+    return this.readCurrencyInput(this.totalEstablishmentFeeHiddenInput());
   }
 
   /** Log UDC / Dealer / Total establishment fee values (diagnostics for program pre-population). */
@@ -8847,8 +9051,8 @@ export class DOAssetDetailsPage extends BasePage {
 
   async expectTotalEstablishmentFeeDisplayOnly(): Promise<void> {
     this.logStep("Expect Total Establishment Fee display-only");
-    await expect(this.totalEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
-    await expect(this.totalEstablishmentFeeInputField).not.toBeEditable();
+    await expect(this.totalEstablishmentFeeVisibleDisplay()).toBeVisible({ timeout: 20_000 });
+    await expect(this.totalEstablishmentFeeHiddenInput()).not.toBeEditable();
   }
 
   async expectPpsrCountEditable(): Promise<void> {

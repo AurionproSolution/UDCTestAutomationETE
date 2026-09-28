@@ -166,11 +166,10 @@ async function prepareTlQuoteForSettlementTrigger(
   await assetDetailsPage.enterOriginationReference("SQ-Settlement-Ref-01");
   await assetDetailsPage.scrollLessDepositIntoView();
   await expect
-    .poll(
-      async () =>
-        (await assetDetailsPage.netTradeAmountDisplayed.inputValue()).replace(/[$,]/g, ""),
-      { timeout: 90_000, intervals: [500, 1_000, 2_000] },
-    )
+    .poll(async () => assetDetailsPage.readNetTradeAmountNormalized(), {
+      timeout: 90_000,
+      intervals: [500, 1_000, 2_000],
+    })
     .toMatch(/5000/);
 }
 
@@ -487,13 +486,30 @@ async function expectQuoteIdBlankBeforeFirstSave(page: Page): Promise<void> {
   expect.soft(text).not.toMatch(/\d{3,}/);
 }
 
-/** UDP-T4220 — currency input inside the labeled `amount` component (Loan Details fees). */
+/** UDP-T4220 — currency input inside the labeled fee row (Loan Details). */
 function udpT4220EstablishmentFeeInput(page: Page, labelRx: RegExp): Locator {
   const root = standardQuoteRoot(page);
   return root
     .locator("amount")
     .filter({ hasText: labelRx })
-    .locator("#amount");
+    .locator("input#amount, input[currencymask], input.p-inputtext, #amount")
+    .first()
+    .or(
+      root
+        .getByText(labelRx)
+        .first()
+        .locator(
+          "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'grid') or contains(@class,'field')][1]//input[@id='amount' or @currencymask]",
+        )
+        .first(),
+    )
+    .or(
+      root
+        .getByText(labelRx)
+        .first()
+        .locator("xpath=following::input[@id='amount' or @currencymask][1]")
+        .first(),
+    );
 }
 
 /** Enter a fee and wait until async recalc stops flickering (UDP-T4220 only). */
@@ -705,6 +721,8 @@ test.describe("Standard Quote - TL @do @regression", () => {
     async ({ page }) => {
       test.setTimeout(300_000);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
+      await selectTlProductAndProgram(assetDetailsPage);
+      await assetDetailsPage.waitForStandardQuoteReady();
 
       await assetDetailsPage.selectConditionInStandardQuote("New");
       await assetDetailsPage.expectRecommendedRetailPriceVisibleAfterNewCondition();
@@ -1037,10 +1055,10 @@ test.describe("Standard Quote - TL @do @regression", () => {
       await assetDetailsPage.scrollLessDepositIntoView();
       await assetDetailsPage.enterTradeAmount("$5,000");
       await expect
-        .poll(
-          async () => (await assetDetailsPage.netTradeAmountDisplayed.inputValue()).replace(/[$,]/g, ""),
-          { timeout: 45_000, intervals: [300, 500, 1_000] },
-        )
+        .poll(async () => assetDetailsPage.readNetTradeAmountNormalized(), {
+          timeout: 45_000,
+          intervals: [300, 500, 1_000],
+        })
         .toMatch(/5000/);
       await assetDetailsPage.enterSettlementAmount("$2,000");
       await assetDetailsPage.expectNetTradeAmountPattern(/\$?\s*3[, ]?000|3000/);

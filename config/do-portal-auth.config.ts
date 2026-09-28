@@ -151,6 +151,27 @@ export function doPortalAuthOrigins(): string[] {
   return [base, `${base}/dealer`, `${base}/dealer/`];
 }
 
+/**
+ * When `1`, globalSetup clears saved DO auth so the next run performs full FIS MFA login
+ * (even if access_token is still valid). Default: reuse silent refresh / saved session.
+ */
+export const DO_PORTAL_LOGIN_EVERY_RUN = process.env.DO_PORTAL_LOGIN_EVERY_RUN === "1";
+
+/** True when a tab URL is the configured DO portal (any path under {@link DO_BASE_URL}). */
+export function matchesDoPortalUrl(url: string): boolean {
+  if (!url || url === "about:blank") return false;
+  try {
+    const base = new URL(DO_BASE_URL());
+    const current = new URL(url);
+    if (current.hostname !== base.hostname) return false;
+    const basePath = base.pathname.replace(/\/$/, "") || "/";
+    const currentPath = current.pathname.replace(/\/$/, "") || "/";
+    return currentPath === basePath || currentPath.startsWith(`${basePath}/`);
+  } catch {
+    return false;
+  }
+}
+
 export interface DoPortalAuthMeta {
   discoveredAt: string;
   /** TEST_ENV value when this session was saved (e.g. sit, qat). */

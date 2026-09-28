@@ -7,7 +7,11 @@
 import { chromium, type BrowserContext, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
-import { doPortalTotpSecret, DO_PORTAL_MFA_LOCK_WAIT_MS } from "../config/do-portal-auth.config";
+import {
+  doPortalTotpSecret,
+  DO_PORTAL_MFA_LOCK_WAIT_MS,
+  matchesDoPortalUrl,
+} from "../config/do-portal-auth.config";
 import { DO_BASE_URL, DO_DEALER_STANDARD_QUOTE_URL, getCurrentEnv } from "../config/env";
 import { DOLoginPage, DODashboardPage } from "../pages";
 import { getDoPortalLoginData } from "../testData/do-portal/doLoginData";
@@ -48,9 +52,8 @@ function attachTokenDiscoveryListeners(page: Page): void {
 }
 
 function findPortalPageInContext(context: BrowserContext): Page | undefined {
-  const portalPattern = /fiscloudservices\.com\/SITDOPortal/i;
   for (const pg of context.pages()) {
-    if (!pg.isClosed() && portalPattern.test(pg.url())) {
+    if (!pg.isClosed() && matchesDoPortalUrl(pg.url())) {
       return pg;
     }
   }

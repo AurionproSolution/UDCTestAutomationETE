@@ -700,6 +700,19 @@ export function hasUsableDoPortalAuthFile(filePath = getDoPortalAuthFile()): boo
   return discoverTokensFromStorageState(state, readAuthMeta()) !== undefined;
 }
 
+/** Remove saved DO storageState, auth meta, and MFA lock (fresh MFA on next ensure). */
+export function clearSavedDoPortalAuthFiles(): void {
+  const authFile = getDoPortalAuthFile();
+  const metaPath = path.join(process.cwd(), getDoPortalAuthMetaFileRel());
+  for (const filePath of [authFile, metaPath, getDoPortalMfaLockPath(authFile)]) {
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch {
+      // Best-effort cleanup before coordinated MFA.
+    }
+  }
+}
+
 export async function getTokensFromPage(page: Page): Promise<DiscoveredTokens | undefined> {
   const meta = readAuthMeta();
   const origins = doPortalAuthOrigins();

@@ -127,11 +127,7 @@ test.describe("Quick Quote - TL @do @regression", () => {
       test.setTimeout(300_000);
       const { quickQuotePage } = await openQuickQuoteFromDashboard(page);
       await selectTlProductAndProgram(quickQuotePage);
-
-      const rate = (await quickQuotePage.interestRatePercentInput.inputValue().catch(() => "")).trim();
-      expect.soft(rate.length).toBeGreaterThan(0);
-      expect.soft(/\d/.test(rate)).toBeTruthy();
-      await expect.soft(quickQuotePage.interestRatePercentInput).toBeVisible();
+      await quickQuotePage.expectInterestRateDefaultPopulated();
     },
   );
 
@@ -149,15 +145,20 @@ test.describe("Quick Quote - TL @do @regression", () => {
       }
 
       await fillMandatoryPaymentFieldsCore(quickQuotePage);
+      await quickQuotePage.dismissQuickQuoteDropdownOverlays();
       await quickQuotePage.clearTermsMonths(0);
+      await quickQuotePage.dismissQuickQuoteDropdownOverlays();
       if (await quickQuotePage.calculateButton.isEnabled().catch(() => false)) {
         await quickQuotePage.clickCalculate();
+        await quickQuotePage.waitForLoadingComplete().catch(() => {});
       }
       await quickQuotePage.expectBlankTermsValidation(0);
 
       await quickQuotePage.enterTermsMonths("9999");
+      await quickQuotePage.dismissQuickQuoteDropdownOverlays();
       if (await quickQuotePage.calculateButton.isEnabled().catch(() => false)) {
         await quickQuotePage.clickCalculate();
+        await quickQuotePage.waitForLoadingComplete().catch(() => {});
       }
       await quickQuotePage.expectTermExceedsMaxMessage(0);
     },

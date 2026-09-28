@@ -84,11 +84,7 @@ async function prepareCalculableTlQuoteForSettlement(
   await assetDetailsPage.clickCalculateButton();
   await assetDetailsPage.expectTotalAmountBorrowedGreaterThanZero({ timeoutMs: 90_000 });
   await expect
-    .poll(
-      async () =>
-        (await assetDetailsPage.netTradeAmountDisplayed.inputValue()).replace(/[$,]/g, ""),
-      { timeout: 45_000 },
-    )
+    .poll(async () => assetDetailsPage.readNetTradeAmountNormalized(), { timeout: 45_000 })
     .toMatch(/5000/);
 }
 

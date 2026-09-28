@@ -5,6 +5,7 @@
  
 import { expect, Locator, Page } from "@playwright/test";
 import speakeasy from "speakeasy";
+import { matchesDoPortalUrl } from "../../../config/do-portal-auth.config";
 import { DO_BASE_URL } from "../../../config/env";
 import { CommonUtils } from "../../../utils/commonUtils";
 import { BasePage } from "../../common/BasePage";
@@ -226,10 +227,20 @@ export class DOLoginPage extends BasePage {
    * Post-SSO **Select Application** launcher (no Login with FIS on screen).
    */
   async isAppLauncherVisible(): Promise<boolean> {
-    const selectApp = this.page.getByText(/Select Application/i).first();
+    return this.isAppLauncherVisibleOn(this.page);
+  }
+
+  private async isAppLauncherVisibleOn(
+    page: Page,
+    options?: { quick?: boolean },
+  ): Promise<boolean> {
+    const selectTimeout = options?.quick ? 400 : 3_000;
+    const cardTimeout = options?.quick ? 400 : 2_000;
+    const selectApp = page.getByText(/Select Application/i).first();
+    const quoteAndApp = page.getByRole("link", { name: /Quotes & Applications/i });
     const onLauncher =
-      (await selectApp.isVisible({ timeout: 3_000 }).catch(() => false)) &&
-      (await this.quoteAndAppButton.isVisible({ timeout: 2_000 }).catch(() => false));
+      (await selectApp.isVisible({ timeout: selectTimeout }).catch(() => false)) &&
+      (await quoteAndApp.isVisible({ timeout: cardTimeout }).catch(() => false));
     return onLauncher;
   }
 
@@ -242,7 +253,10 @@ export class DOLoginPage extends BasePage {
       for (const pg of this.page.context().pages()) {
         if (pg.isClosed()) continue;
         const url = pg.url();
-        if (/udc-test\.fiscloudservices\.com\/SITDOPortal/i.test(url)) {
+        if (
+          matchesDoPortalUrl(url) ||
+          (await this.isAppLauncherVisibleOn(pg, { quick: true }))
+        ) {
           await pg.bringToFront().catch(() => {});
           return pg;
         }
@@ -250,7 +264,7 @@ export class DOLoginPage extends BasePage {
       await this.page.waitForTimeout(300);
     }
     throw new Error(
-      "Expected DO Portal URL after FIS sign-in on an open browser tab (check popup blocker / SSO redirect).",
+      `Expected DO Portal URL (${DO_BASE_URL()}) after FIS sign-in on an open browser tab (check popup blocker / SSO redirect).`,
     );
   }
 
@@ -371,7 +385,54 @@ export class DOLoginPage extends BasePage {
     if (onLauncher) {
       this.log("Clicking Quotes & Applications from app launcher");
       await this.enterDealerFromAppLauncherOn(portalPage);
+    } else {
+      await this.completePortalEntryAfterFisSignIn(portalPage);
     }
+  }
+
+  /**
+   * FIS IdP can return to the UDC marketing shell (`Login with FIS`) even after a successful MFA sign-in.
+   * A second **Login with FIS** click usually completes silent SSO → Select Application → dealer.
+   */
+  async completePortalEntryAfterFisSignIn(page: Page): Promise<void> {
+    const deadline = Date.now() + 120_000;
+    const loginFis = page
+      .getByRole("button", { name: /login\s*(with)?\s*fis/i })
+      .or(page.getByRole("link", { name: /login\s*(with)?\s*fis/i }))
+      .first();
+
+    while (Date.now() < deadline) {
+      await page.bringToFront().catch(() => {});
+
+      if (await this.isAppLauncherVisibleOn(page)) {
+        this.log("Post sign-in: app launcher — opening Quotes & Applications");
+        await this.enterDealerFromAppLauncherOn(page);
+        return;
+      }
+
+      if (/\/dealer(\/|$)/i.test(page.url())) {
+        this.log("Post sign-in: dealer shell URL detected");
+        return;
+      }
+
+      if (await loginFis.isVisible({ timeout: 1_500 }).catch(() => false)) {
+        this.log("Post sign-in: Login with FIS shown — clicking to activate SSO session");
+        await loginFis.click({ timeout: 30_000 });
+        await page.waitForLoadState("load").catch(() => {});
+        await page
+          .locator(".app-loader-overlay, .p-progressspinner")
+          .first()
+          .waitFor({ state: "hidden", timeout: 45_000 })
+          .catch(() => {});
+        continue;
+      }
+
+      await page.waitForTimeout(400);
+    }
+
+    throw new Error(
+      "Timed out entering DO dealer app after FIS sign-in (launcher or /dealer/ never appeared).",
+    );
   }
 
   /** From `/landing` — same step as after successful FIS sign-in. */

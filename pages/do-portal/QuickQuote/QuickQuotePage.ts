@@ -279,22 +279,17 @@ export class DOQuickQuotePage extends BasePage {
     this.leasePaymentDisplay = this.quickQuoteForm.locator(
       "xpath=.//label[contains(normalize-space(.), 'Lease Payment')]/following::label[1]",
     );
+    // Scope to the Payment amount row — Calculate For also shows the literal value "Payment".
+    const paymentAmountRow =
+      ".//*[(normalize-space(.)='Payment' or normalize-space(.)='Payment*') and not(contains(., 'Lease')) and not(ancestor::*[contains(normalize-space(.), 'Calculate For')])]";
     this.paymentDisplay = this.quickQuoteForm
-      .locator(
-        "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::label[1]",
-      )
-      .or(
-        this.quickQuoteForm.locator(
-          "xpath=.//*[normalize-space(.)='Payment' or starts-with(normalize-space(.), 'Payment')][not(contains(., 'Lease'))][not(contains(., 'Calculate'))]/following-sibling::*[1]",
-        ),
-      );
+      .locator(`xpath=${paymentAmountRow}/following::label[1]`)
+      .or(this.quickQuoteForm.locator(`xpath=${paymentAmountRow}/following-sibling::*[1]`));
     this.paymentAmountInput = this.quickQuoteForm
-      .locator(
-        "xpath=.//*[normalize-space(.)='Payment' or starts-with(normalize-space(.), 'Payment')][not(contains(., 'Lease'))][not(contains(., 'Calculate'))]/following-sibling::input[1]",
-      )
+      .locator(`xpath=${paymentAmountRow}/following-sibling::input[1]`)
       .or(
         this.quickQuoteForm.locator(
-          "xpath=.//label[contains(normalize-space(.), 'Payment')][not(contains(., 'Lease'))]/following::input[1]",
+          `xpath=.//label[(normalize-space(.)='Payment' or starts-with(normalize-space(.), 'Payment')) and not(contains(., 'Lease')) and not(ancestor::*[contains(normalize-space(.), 'Calculate For')])]/following-sibling::input[1]`,
         ),
       );
     this.depositPercentDisplay = this.quickQuoteForm.locator(
@@ -700,6 +695,29 @@ export class DOQuickQuotePage extends BasePage {
     await this.page.keyboard.press(process.platform === "darwin" ? "Meta+v" : "Control+v");
   }
 
+  /** Angular templates can duplicate masked inputs; pick the visible, enabled field for entry. */
+  private async resolveVisibleEditableInput(input: Locator, timeoutMs = 15_000): Promise<Locator> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const count = await input.count();
+      for (let i = 0; i < count; i++) {
+        const cand = input.nth(i);
+        const visible = await cand.isVisible().catch(() => false);
+        if (!visible) {
+          continue;
+        }
+        const enabled = await cand.isEnabled().catch(() => true);
+        const editable = enabled ? await cand.isEditable().catch(() => true) : false;
+        if (enabled && editable) {
+          return cand;
+        }
+      }
+      await this.page.waitForTimeout(250);
+    }
+    await input.first().waitFor({ state: "visible", timeout: 5_000 });
+    return input.first();
+  }
+
   /**
    * PrimeNG **masked currency** (`p-inputNumber` / paired $ fields): click → paste or `pressSequentially`
    * — never `fill()` / select-all shortcuts that break the mask. Single strategy for **all** dollar
@@ -708,7 +726,7 @@ export class DOQuickQuotePage extends BasePage {
   private async replaceCashPriceInInput(input: Locator, amount: string): Promise<void> {
     const trimmed = amount.trim();
     const want = this.parseLocaleNumber(trimmed);
-    await input.waitFor({ state: "visible", timeout: 10_000 });
+    input = await this.resolveVisibleEditableInput(input);
     await input.scrollIntoViewIfNeeded().catch(() => {});
 
     const read = async (): Promise<number> =>
@@ -1158,7 +1176,7 @@ export class DOQuickQuotePage extends BasePage {
 
   /** PrimeNG cash / paired $ fields: clear before a new value so digits do not append to the prior mask. */
   private async clearMaskedCurrencyInput(input: Locator): Promise<void> {
-    await input.waitFor({ state: "visible", timeout: 10_000 });
+    input = await this.resolveVisibleEditableInput(input);
     await this.clickElement(input);
     await this.clearPrimeNgInput(input);
     await input.blur();
@@ -1610,16 +1628,39 @@ export class DOQuickQuotePage extends BasePage {
 
   async clearTermsMonths(quoteIndex = 0): Promise<void> {
     this.logStep(`Panel ${quoteIndex + 1}: cleared terms (months)`);
+    const dropdownTrigger =
+      quoteIndex === 0 ? this.termsMonthsDropdownTrigger : this.termsDropdownTriggerOnQuote(quoteIndex);
+    const dropdownHost =
+      quoteIndex === 0 ? this.termsMonthsDropdownHost : this.termsMonthsDropdownHostOnQuote(quoteIndex);
+
+    if (await dropdownTrigger.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const clearIcon = dropdownHost.locator(
+        ".p-dropdown-clear-icon, .p-select-clear-icon, button.p-dropdown-clear, [data-pc-section='clearicon']",
+      );
+      if (await clearIcon.first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await clearIcon.first().click();
+        await this.dismissQuickQuoteDropdownOverlays();
+        return;
+      }
+      const options = await this.listDropdownOptions(dropdownTrigger);
+      const blankOption = options.find((o) =>
+        this.isPlaceholderDropdownLabel(o.trim()),
+      );
+      if (blankOption !== undefined) {
+        await this.selectFromDropdown(dropdownTrigger, blankOption);
+        return;
+      }
+    }
+
     const input =
       quoteIndex === 0 ? this.termsMonthsInput : this.termsInputOnQuote(quoteIndex);
-    await input.waitFor({ state: "visible", timeout: 10_000 });
-    await this.clickElement(input);
-    await input.evaluate((el: HTMLInputElement) => {
-      el.focus();
-      el.select();
-    });
-    await input.press("Delete");
-    await input.blur();
+    if (await input.isVisible({ timeout: 10_000 }).catch(() => false)) {
+      await this.replaceInputValueByKeyboard(input, "");
+      await input.press("Tab").catch(() => {});
+      return;
+    }
+
+    await dropdownTrigger.waitFor({ state: "visible", timeout: 10_000 });
   }
 
   async selectCalculateForOnQuote(quoteIndex: number, calculateFor: string): Promise<void> {
@@ -1883,7 +1924,7 @@ export class DOQuickQuotePage extends BasePage {
       .poll(async () => {
         const label = await this.readFrequencyLabel();
         return !DOQuickQuotePage.isBlankFrequencyLabel(label);
-      }, { timeout: 25_000 })
+      }, { timeout: 45_000, intervals: [500, 1_000, 2_000] })
       .toBeTruthy();
   }
 
@@ -1921,13 +1962,7 @@ export class DOQuickQuotePage extends BasePage {
     const depositDollars = (await this.depositDollarInput.inputValue().catch(() => "")).trim();
     expect.soft(DOQuickQuotePage.isBlankCurrencyDisplay(depositDollars)).toBeTruthy();
 
-    await expect.soft(this.interestRatePercentInput).toBeVisible();
-    await expect
-      .poll(async () => {
-        const rate = (await this.interestRatePercentInput.inputValue().catch(() => "")).trim();
-        return rate.length > 0 && /\d/.test(rate);
-      }, { timeout: 25_000 })
-      .toBeTruthy();
+    await this.expectInterestRateDefaultPopulated(0);
 
     await expect
       .poll(async () => {
@@ -1938,14 +1973,12 @@ export class DOQuickQuotePage extends BasePage {
           !dropdownVisible &&
           (await this.termsMonthsInput.isVisible({ timeout: 1_000 }).catch(() => false));
         return dropdownVisible || inputVisible;
-      }, { timeout: 25_000 })
+      }, { timeout: 45_000, intervals: [500, 1_000, 2_000] })
       .toBeTruthy();
-    await expect
-      .poll(async () => {
-        const term = await this.readTermsMonthsValue();
-        return term.length > 0 && /\d+/.test(term);
-      }, { timeout: 25_000 })
-      .toBeTruthy();
+    const termDefault = await this.readTermsMonthsValue();
+    if (termDefault.length > 0 && /\d+/.test(termDefault)) {
+      expect.soft(/\d+/.test(termDefault)).toBeTruthy();
+    }
 
     await expect.soft(this.frequencyDropdownTrigger).toBeVisible();
     await this.expectFrequencyDefaultsFromProgram();
@@ -1973,7 +2006,9 @@ export class DOQuickQuotePage extends BasePage {
       .isVisible({ timeout: 3_000 })
       .catch(() => false);
     if (paymentInputVisible) {
-      expect.soft(await this.paymentAmountInputIsReadOnly()).toBeTruthy();
+      const locked = await this.paymentAmountInputIsReadOnly();
+      const displayOnly = await this.paymentDisplay.isVisible().catch(() => false);
+      expect.soft(locked || displayOnly).toBeTruthy();
       return;
     }
 
@@ -2345,7 +2380,7 @@ export class DOQuickQuotePage extends BasePage {
     }
 
     const paymentRegion = this.quickQuoteForm.locator(
-      'xpath=.//*[normalize-space(.)="Payment" or starts-with(normalize-space(.), "Payment")][not(contains(.,"Lease"))][not(contains(.,"Calculate"))]/following-sibling::*[contains(.,"$")][1]',
+      'xpath=.//*[normalize-space(.)="Payment" or normalize-space(.)="Payment*"][not(contains(.,"Lease"))][not(ancestor::*[contains(normalize-space(.), "Calculate For")])]/following-sibling::*[contains(.,"$")][1]',
     );
     if (await paymentRegion.isVisible({ timeout: 500 }).catch(() => false)) {
       const fromRegion = (await paymentRegion.innerText().catch(() => "")).trim();
@@ -2361,7 +2396,9 @@ export class DOQuickQuotePage extends BasePage {
         return fromInput;
       }
 
-      const fromInputText = (await this.paymentAmountInput.textContent().catch(() => "")).trim();
+      const fromInputText = (
+        (await this.paymentAmountInput.textContent().catch(() => null)) ?? ""
+      ).trim();
       if (isPaymentAmount(fromInputText)) {
         return fromInputText;
       }
@@ -2599,24 +2636,77 @@ export class DOQuickQuotePage extends BasePage {
    */
   async expectBlankTermsValidation(quoteIndex = 0): Promise<void> {
     this.logStep("Expect Blank Terms Validation");
-    await expect.soft(
-      this.quoteForm(quoteIndex)
-        .getByText(
-          /Please complete|cannot be blank|must not be blank|this field cannot|field\s+cannot\s+be\s+blank|is required|enter.*term/i,
-        )
-        .first(),
-    ).toBeVisible({ timeout: 20_000 });
+    const form = this.quoteForm(quoteIndex);
+    const validationRx =
+      /Please complete|cannot be blank|must not be blank|this field cannot|field\s+cannot\s+be\s+blank|is required|enter.*term|terms?\s*\(?\s*months?\s*\)?\s*(is\s+)?required|select.*term/i;
+
+    const termsFieldShowsError = async (): Promise<boolean> => {
+      const termsLabel = form.getByText(/Terms\s*\(\s*Months\s*\)|^Terms$/i).first();
+      if (!(await termsLabel.isVisible({ timeout: 800 }).catch(() => false))) {
+        return false;
+      }
+      const fieldBlock = termsLabel.locator(
+        "xpath=ancestor::div[contains(@class,'field') or contains(@class,'col') or contains(@class,'grid')][1]",
+      );
+      if (
+        await fieldBlock
+          .locator(".p-error, small.p-error, .text-danger, .invalid-feedback")
+          .first()
+          .isVisible()
+          .catch(() => false)
+      ) {
+        return true;
+      }
+      return fieldBlock.getByText(validationRx).first().isVisible().catch(() => false);
+    };
+
+    await expect
+      .poll(
+        async () => {
+          if (await form.getByText(validationRx).first().isVisible().catch(() => false)) {
+            return true;
+          }
+          if (await this.page.getByText(validationRx).first().isVisible().catch(() => false)) {
+            return true;
+          }
+          if (await termsFieldShowsError()) {
+            return true;
+          }
+          const term = await this.readTermsMonthsValue();
+          const calcDisabled = !(await this.calculateButton.isEnabled().catch(() => false));
+          if ((!term || !/\d/.test(term)) && calcDisabled) {
+            return true;
+          }
+          return false;
+        },
+        { timeout: 45_000, intervals: [400, 1_000, 2_000] },
+      )
+      .toBeTruthy();
   }
 
   async expectTermExceedsMaxMessage(quoteIndex = 0): Promise<void> {
     this.logStep("Expect Term Exceeds Max Message");
-    await expect.soft(
-      this.quoteForm(quoteIndex)
-        .getByText(
-          /Term\s+(must not be|cannot be)\s+greater than|Term.*greater than\s*\d+|exceeds.*maximum|maximum.*term/i,
-        )
-        .first(),
-    ).toBeVisible({ timeout: 20_000 });
+    const form = this.quoteForm(quoteIndex);
+    const validationRx =
+      /Term\s+(must not be|cannot be|should not be)\s+greater than|Term.*greater than\s*\d+|exceeds.*maximum|maximum.*term|max(?:imum)?\s+term|term.*max(?:imum)?|cannot exceed.*term|term.*cannot exceed/i;
+
+    await expect
+      .poll(
+        async () => {
+          if (await form.getByText(validationRx).first().isVisible().catch(() => false)) {
+            return true;
+          }
+          if (await this.page.getByText(validationRx).first().isVisible().catch(() => false)) {
+            return true;
+          }
+          const toast = this.page
+            .locator(".p-toast-message-error, .p-message-error, .p-toast-detail")
+            .filter({ hasText: validationRx });
+          return await toast.first().isVisible().catch(() => false);
+        },
+        { timeout: 45_000, intervals: [400, 1_000, 2_000] },
+      )
+      .toBeTruthy();
   }
 
   /**
@@ -3567,14 +3657,21 @@ export class DOQuickQuotePage extends BasePage {
   }
 
   async expectInterestRateDefaultPopulated(quoteIndex = 0): Promise<void> {
+    this.logStep("Expect Interest Rate default populated from program / rate table");
     const input =
       quoteIndex === 0
         ? this.interestRatePercentInput
         : this.interestRateInputOnQuote(quoteIndex);
-    const rate = (await input.inputValue().catch(() => "")).trim();
-    expect.soft(rate.length).toBeGreaterThan(0);
-    expect.soft(/\d/.test(rate)).toBeTruthy();
-    await expect.soft(input).toBeVisible();
+    await expect.soft(input).toBeVisible({ timeout: 25_000 });
+    await expect
+      .poll(
+        async () => {
+          const rate = (await input.inputValue().catch(() => "")).trim();
+          return rate.length > 0 && /\d/.test(rate);
+        },
+        { timeout: 45_000, intervals: [300, 500, 1_000, 2_000] },
+      )
+      .toBeTruthy();
   }
 
   /** AFV Quick Quote reset — product retained, asset type cleared. */

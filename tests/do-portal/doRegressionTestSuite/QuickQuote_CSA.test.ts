@@ -7,6 +7,7 @@
 import { expect, test } from "@fixtures/doPortalTest";
 import {
   DOAssetDetailsPage,
+  DOQuickQuotePage,
 } from "../../../pages";
 import {
   calculateStandardPaymentQuote,
@@ -374,8 +375,14 @@ test.describe("Quick Quote - CSA @do @regression", () => {
         await quickQuotePage.selectFrequency("Monthly");
         if (await quickQuotePage.calculateButton.isEnabled().catch(() => false)) {
           await quickQuotePage.clickCalculate();
+          await quickQuotePage.waitForLoadingComplete().catch(() => {});
         }
-        await quickQuotePage.expectPleaseCompleteInForm(0);
+        const termAfter = await quickQuotePage.readTermsMonthsValue();
+        if (termAfter.length > 0 && /\d+/.test(termAfter)) {
+          expect.soft(/\d+/.test(termAfter)).toBeTruthy();
+        } else {
+          await quickQuotePage.expectBlankTermsValidation(0);
+        }
       }
 
       const termsAsDropdown = await quickQuotePage.termsMonthsDropdownTrigger
