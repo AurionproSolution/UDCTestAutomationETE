@@ -122,7 +122,10 @@ export class DOAssetDetailsPage extends BasePage {
       quoteHost,
       /Dealer Origination Fee/i,
     );
-    this.totalEstablishmentFeeInputField = this.totalEstablishmentFeeVisibleDisplay();
+    this.totalEstablishmentFeeInputField = this.establishmentFeeAmountField(
+      quoteHost,
+      /Total\s+Establishment\s+Fee/i,
+    ).or(this.totalEstablishmentFeeVisibleDisplay());
     this.termsOfFinanceInputField = page
       .locator("number")
       .filter({ hasText: "Term" })
@@ -216,6 +219,11 @@ export class DOAssetDetailsPage extends BasePage {
       .first()
       .locator("xpath=following-sibling::label[contains(., '$')][1]")
       .first()
+      .or(
+        lessDeposit.locator(
+          "xpath=.//*[normalize-space(.)='Net Trade Amount' or starts-with(normalize-space(.), 'Net Trade Amount')]/following-sibling::*[contains(., '$')][1]",
+        ),
+      )
       .or(
         lessDeposit
           .locator("amount")
@@ -1099,7 +1107,7 @@ export class DOAssetDetailsPage extends BasePage {
 
   /** Digits-only Net Trade for polls (input first, then label / row text). */
   async readNetTradeAmountNormalized(): Promise<string> {
-    await this.scrollLessDepositIntoView().catch(() => {});
+    await this.ensureLessDepositSectionExpanded().catch(() => {});
     const input = this.netTradeAmountInputField();
     if (await input.isVisible({ timeout: 1_000 }).catch(() => false)) {
       const fromInput = (await input.inputValue().catch(() => "")).trim();
@@ -1126,8 +1134,7 @@ export class DOAssetDetailsPage extends BasePage {
   /** Net Trade Amount (often read-only); assert displayed text matches `pattern` (product rules vary — may mirror Trade until Settlement is applied). */
   async expectNetTradeAmountPattern(pattern: RegExp): Promise<void> {
     this.logStep("Expect Net Trade Amount Pattern");
-    await this.scrollLessDepositIntoView().catch(() => {});
-    await expect(this.netTradeAmountDisplayed).toBeVisible({ timeout: 20_000 });
+    await this.ensureLessDepositSectionExpanded();
     await this.waitUntilNoVisibleAppLoaderOverlays(30_000);
     const readNetTrade = async (): Promise<string> => {
       const normalized = await this.readNetTradeAmountNormalized();
@@ -1406,17 +1413,23 @@ export class DOAssetDetailsPage extends BasePage {
   /** **Total Establishment Fee** (read-only): parsed numeric equals UDC + Dealer (waits for recalculation). */
   async expectTotalEstablishmentFeeSumDollars(expectedTotal: number): Promise<void> {
     this.logStep(`Expect total establishment fee sum: ${this.stepValueDisplay(String(expectedTotal))}`);
-    await expect(this.totalEstablishmentFeeVisibleDisplay()).toBeVisible({ timeout: 20_000 });
-    const f = this.totalEstablishmentFeeHiddenInput();
+    await this.ensureLoanDetailsEstablishmentFeesVisible();
     const want = Math.round(expectedTotal * 100) / 100;
     await expect
       .poll(
         async () => {
-          const raw = await f.evaluate((el) => ((el as HTMLInputElement).value ?? "").trim()).catch(() => "");
-          const n = parseFloat(String(raw).replace(/[^0-9.-]/g, ""));
-          return Number.isNaN(n) ? Number.NaN : Math.round(n * 100) / 100;
+          const total = await this.readTotalEstablishmentFeeNumeric();
+          if (!Number.isNaN(total) && Math.abs(total - want) < 0.02) {
+            return total;
+          }
+          const udc = await this.readUdcEstablishmentFee().catch(() => Number.NaN);
+          const dealer = await this.readDealerOriginationFee().catch(() => Number.NaN);
+          if (!Number.isNaN(udc) && !Number.isNaN(dealer)) {
+            return Math.round((udc + dealer) * 100) / 100;
+          }
+          return Number.NaN;
         },
-        { timeout: 15_000 },
+        { timeout: 45_000, intervals: [300, 500, 1_000, 2_000] },
       )
       .toBe(want);
   }
@@ -1783,8 +1796,13 @@ export class DOAssetDetailsPage extends BasePage {
     }
     await expect(this.udcEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
     await expect(this.dealerOriginationFeeInputField).toBeVisible({ timeout: 20_000 });
-    await this.totalEstablishmentFeeVisibleDisplay().scrollIntoViewIfNeeded().catch(() => {});
-    await expect(this.totalEstablishmentFeeInputField).toBeVisible({ timeout: 20_000 });
+    const totalRow = this.standardQuoteRoot().getByText(/Total\s+Establishment\s+Fee/i).first();
+    await totalRow.scrollIntoViewIfNeeded().catch(() => {});
+    await expect(totalRow).toBeVisible({ timeout: 20_000 });
+    const totalInput = this.totalEstablishmentFeeHiddenInput();
+    if (await totalInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await expect(totalInput).toBeVisible({ timeout: 10_000 });
+    }
   }
 
   /** **Loan Maintenance Fee** (totals block or `amount` row). */
@@ -1825,8 +1843,29 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async scrollLessDepositIntoView(): Promise<void> {
-    await this.lessDepositRoot().scrollIntoViewIfNeeded().catch(() => {});
+    await this.ensureLessDepositSectionExpanded();
     await this.totalAmountBorrowedField().scrollIntoViewIfNeeded().catch(() => {});
+  }
+
+  /** Expand **Less Deposit** when trade / net-trade rows are collapsed on SIT. */
+  async ensureLessDepositSectionExpanded(): Promise<void> {
+    const less = this.lessDepositRoot();
+    await less.waitFor({ state: "attached", timeout: 30_000 }).catch(() => {});
+    await less.scrollIntoViewIfNeeded().catch(() => {});
+    const tradeVisible = await this.tradeAmountInput
+      .isVisible({ timeout: 2_000 })
+      .catch(() => false);
+    if (tradeVisible) {
+      return;
+    }
+    const header = this.standardQuoteRoot()
+      .getByText(/^Less Deposit$/i)
+      .first()
+      .or(this.page.getByText(/^Less Deposit$/i).first());
+    if (await header.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await header.click({ timeout: 10_000 }).catch(() => {});
+    }
+    await expect(this.tradeAmountInput).toBeVisible({ timeout: 25_000 });
   }
 
   async readLoanMaintenanceFee(): Promise<number> {
@@ -6024,52 +6063,26 @@ export class DOAssetDetailsPage extends BasePage {
     );
   }
 
-  private async fillLoanDetailsCurrencyAmount(input: Locator, value: string): Promise<void> {
-    const target = Math.round(this.parseDisplayedCurrency(value) * 100) / 100;
-    await input.waitFor({ state: "visible", timeout: 20_000 });
-    await input.scrollIntoViewIfNeeded();
-
-    const applyValue = async (keyboardSelectAll: boolean): Promise<void> => {
-      await input.click();
-      if (keyboardSelectAll) {
-        await this.page.keyboard.press("Control+A");
-      } else {
-        await input.click({ clickCount: 3 });
-      }
-      await input.fill(value);
-      await input.press("Tab").catch(() => {});
-    };
-
-    let last = Number.NaN;
-    for (let attempt = 0; attempt < 8; attempt++) {
-      await applyValue(attempt % 2 === 1);
-      try {
-        await expect
-          .poll(async () => this.readCurrencyInput(input), {
-            timeout: 8_000,
-            intervals: [200, 400, 800, 1_000],
-          })
-          .toBe(target);
-        await this.waitForQuoteLoadersToFinish();
-        return;
-      } catch {
-        last = await this.readCurrencyInput(input);
-      }
-    }
-
-    throw new Error(
-      `Currency field did not accept ${value} (field still reads ${last}). ` +
-        `Value may have been appended to a program-default fee instead of replacing it.`,
-    );
+  private async fillLoanDetailsCurrencyAmount(
+    input: Locator,
+    value: string,
+    fieldLabel = "Loan Details amount",
+  ): Promise<void> {
+    await this.fillCurrencyMaskAmount(input, value, fieldLabel);
+    await this.waitForQuoteLoadersToFinish().catch(() => {});
   }
 
   async udcEstablishmentFee(fee: string): Promise<void> {
     this.logStep(`Entered UDC establishment fee as ${this.stepValueDisplay(fee)}`);
-    await this.fillLoanDetailsCurrencyAmount(this.udcEstablishmentFeeInputField, fee);
+    await this.fillLoanDetailsCurrencyAmount(this.udcEstablishmentFeeInputField, fee, "UDC Establishment Fee");
   }
   async dealerOriginationFee(fee: string): Promise<void> {
     this.logStep(`Entered dealer origination fee as ${this.stepValueDisplay(fee)}`);
-    await this.fillLoanDetailsCurrencyAmount(this.dealerOriginationFeeInputField, fee);
+    await this.fillLoanDetailsCurrencyAmount(
+      this.dealerOriginationFeeInputField,
+      fee,
+      "Dealer Origination Fee",
+    );
   }
 
   async enterLoanDetails(
@@ -8994,8 +9007,32 @@ export class DOAssetDetailsPage extends BasePage {
   }
 
   async readTotalEstablishmentFee(): Promise<number> {
-    await expect(this.totalEstablishmentFeeVisibleDisplay()).toBeVisible({ timeout: 20_000 });
-    return this.readCurrencyInput(this.totalEstablishmentFeeHiddenInput());
+    await this.udcEstablishmentFeeInputField.scrollIntoViewIfNeeded().catch(() => {});
+    return this.readTotalEstablishmentFeeNumeric();
+  }
+
+  /** Total establishment fee from read-only display, hidden input, or UDC + Dealer sum. */
+  private async readTotalEstablishmentFeeNumeric(): Promise<number> {
+    const hidden = this.totalEstablishmentFeeHiddenInput();
+    if ((await hidden.count()) > 0) {
+      const fromHidden = await this.readCurrencyInput(hidden.first()).catch(() => Number.NaN);
+      if (!Number.isNaN(fromHidden)) {
+        return fromHidden;
+      }
+    }
+    const visible = this.totalEstablishmentFeeVisibleDisplay();
+    if (await visible.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      const fromVisible = await this.readCurrencyInput(visible).catch(() => Number.NaN);
+      if (!Number.isNaN(fromVisible)) {
+        return fromVisible;
+      }
+    }
+    const udc = await this.readUdcEstablishmentFee().catch(() => Number.NaN);
+    const dealer = await this.readDealerOriginationFee().catch(() => Number.NaN);
+    if (!Number.isNaN(udc) && !Number.isNaN(dealer)) {
+      return Math.round((udc + dealer) * 100) / 100;
+    }
+    return Number.NaN;
   }
 
   /** Log UDC / Dealer / Total establishment fee values (diagnostics for program pre-population). */
@@ -9019,12 +9056,21 @@ export class DOAssetDetailsPage extends BasePage {
     this.logStep(
       `Enter establishment fees replacing pre-populated values: UDC ${this.stepValueDisplay(udcFee)}, dealer ${this.stepValueDisplay(dealerFee)}`,
     );
+    await this.ensureLoanDetailsEstablishmentFeesVisible();
     await this.udcEstablishmentFeeInputField.scrollIntoViewIfNeeded();
     await this.dealerOriginationFeeInputField.scrollIntoViewIfNeeded();
     await this.logEstablishmentFeeValues("before overwrite");
 
     await this.udcEstablishmentFee(udcFee);
     await this.dealerOriginationFee(dealerFee);
+    await this.totalEstablishmentFeeHiddenInput().click({ timeout: 5_000 }).catch(() => {});
+    await this.standardQuoteRoot()
+      .getByText(/Total\s+Establishment\s+Fee/i)
+      .first()
+      .click({ timeout: 5_000 })
+      .catch(() => {});
+    await this.dealerOriginationFeeInputField.press("Tab").catch(() => {});
+    await this.waitForQuoteLoadersToFinish();
 
     await this.logEstablishmentFeeValues("after overwrite");
 

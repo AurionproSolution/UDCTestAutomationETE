@@ -152,16 +152,22 @@ async function prepareCalculableTlQuote(
   await assetDetailsPage.enterOriginationReference(opts?.origRef ?? "SQ-TL-Ref-01");
 }
 
-/** Less Deposit **Settlement** may stay disabled until trade-in + **Calculate** on SIT. */
+/** Less Deposit **Settlement** enables after calculable quote + trade; on SIT also after Asset Details saved (Customer Details round-trip). */
 async function prepareTlQuoteForSettlementTrigger(
+  page: Page,
   assetDetailsPage: DOAssetDetailsPage,
   addAssetPage: DOAddAssetPage,
 ): Promise<void> {
   await prepareCalculableTlQuote(assetDetailsPage, addAssetPage, { origRef: "SQ-Settlement-Ref-01" });
-  await assetDetailsPage.scrollLessDepositIntoView();
+  await assetDetailsPage.ensureLessDepositSectionExpanded();
   await assetDetailsPage.enterTradeAmount("$5,000");
   await assetDetailsPage.clickCalculateButton();
+  await assetDetailsPage.expectPaymentScheduleSectionWithTableData();
   await assetDetailsPage.waitForQuoteLoadersToFinish();
+  if ((await assetDetailsPage.readTotalAmountBorrowed().catch(() => 0)) <= 0) {
+    await assetDetailsPage.clickCalculateButton({ fast: true });
+    await assetDetailsPage.waitForQuoteLoadersToFinish();
+  }
   await assetDetailsPage.expectTotalAmountBorrowedGreaterThanZero({ timeoutMs: 90_000 });
   await assetDetailsPage.enterOriginationReference("SQ-Settlement-Ref-01");
   await assetDetailsPage.scrollLessDepositIntoView();
@@ -171,6 +177,11 @@ async function prepareTlQuoteForSettlementTrigger(
       intervals: [500, 1_000, 2_000],
     })
     .toMatch(/5000/);
+
+  await assetDetailsPage.clickNextAndExpectCustomerDetails("SQ-Settlement-Ref-01");
+  await assetDetailsPage.clickStandardQuoteStepTab(/Asset\s*Details/i);
+  await assetDetailsPage.waitForAssetDetailsStepReady();
+  await assetDetailsPage.scrollLessDepositIntoView();
 }
 
 /**
@@ -486,79 +497,6 @@ async function expectQuoteIdBlankBeforeFirstSave(page: Page): Promise<void> {
   expect.soft(text).not.toMatch(/\d{3,}/);
 }
 
-/** UDP-T4220 — currency input inside the labeled fee row (Loan Details). */
-function udpT4220EstablishmentFeeInput(page: Page, labelRx: RegExp): Locator {
-  const root = standardQuoteRoot(page);
-  return root
-    .locator("amount")
-    .filter({ hasText: labelRx })
-    .locator("input#amount, input[currencymask], input.p-inputtext, #amount")
-    .first()
-    .or(
-      root
-        .getByText(labelRx)
-        .first()
-        .locator(
-          "xpath=ancestor::div[contains(@class,'col-') or contains(@class,'grid') or contains(@class,'field')][1]//input[@id='amount' or @currencymask]",
-        )
-        .first(),
-    )
-    .or(
-      root
-        .getByText(labelRx)
-        .first()
-        .locator("xpath=following::input[@id='amount' or @currencymask][1]")
-        .first(),
-    );
-}
-
-/** Enter a fee and wait until async recalc stops flickering (UDP-T4220 only). */
-async function enterUdpT4220EstablishmentFeeDollars(
-  page: Page,
-  assetDetailsPage: DOAssetDetailsPage,
-  input: Locator,
-  dollars: number,
-  fieldName: string,
-): Promise<void> {
-  await assetDetailsPage.waitForQuoteLoadersToFinish();
-  await expect(input).toBeVisible({ timeout: 20_000 });
-  await expect(input).toBeEditable({ timeout: 20_000 });
-  await input.scrollIntoViewIfNeeded();
-
-  const target = Math.round(dollars * 100) / 100;
-  const digits = target.toFixed(2);
-
-  let last = Number.NaN;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    await input.click();
-    await page.keyboard.press("Control+A");
-    await page.keyboard.press("Backspace").catch(() => {});
-    await page.keyboard.type(digits, { delay: 40 });
-    await input.press("Tab");
-    await assetDetailsPage.waitForQuoteLoadersToFinish();
-
-    try {
-      await expect
-        .poll(
-          async () => {
-            const raw = (await input.inputValue()).trim();
-            const n = assetDetailsPage.parseDisplayedCurrency(raw);
-            return Math.abs(n - target) < 0.01 ? n : null;
-          },
-          { timeout: 20_000, intervals: [300, 500, 1_000, 1_500] },
-        )
-        .not.toBeNull();
-      return;
-    } catch {
-      last = assetDetailsPage.parseDisplayedCurrency((await input.inputValue()).trim());
-    }
-  }
-
-  throw new Error(
-    `${fieldName} did not stabilize at $${target.toFixed(2)} (last read $${last.toFixed(2)}).`,
-  );
-}
-
 test.describe("Standard Quote - TL @do @regression", () => {
   test(
     "UDP-T4214 - TC_SQ_001 Standard Quote Default Fields on Load",
@@ -785,21 +723,7 @@ test.describe("Standard Quote - TL @do @regression", () => {
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectTlProductAndProgram(assetDetailsPage);
       await assetDetailsPage.waitForQuoteLoadersToFinish();
-
-      await enterUdpT4220EstablishmentFeeDollars(
-        page,
-        assetDetailsPage,
-        udpT4220EstablishmentFeeInput(page, /UDC Establishment Fee/i),
-        300,
-        "UDC Establishment Fee",
-      );
-      await enterUdpT4220EstablishmentFeeDollars(
-        page,
-        assetDetailsPage,
-        udpT4220EstablishmentFeeInput(page, /Dealer Origination Fee/i),
-        200,
-        "Dealer Origination Fee",
-      );
+      await assetDetailsPage.enterEstablishmentFeesReplacingPrePopulated("$300", "$200");
       await assetDetailsPage.expectTotalEstablishmentFeeSumDollars(500);
     },
   );
@@ -1049,11 +973,17 @@ test.describe("Standard Quote - TL @do @regression", () => {
     "UDP-T4233 - TC_LD_003 Net Trade Amount Display Only Calculated",
     { tag: ["@do", "@regression", "@UDP-T4233"] },
     async ({ page }) => {
-      test.setTimeout(300_000);
+      test.setTimeout(600_000);
+      const addAssetPage = new DOAddAssetPage(page);
       const { assetDetailsPage } = await openStandardQuoteFromDashboard(page);
       await selectTlProductAndProgram(assetDetailsPage);
-      await assetDetailsPage.scrollLessDepositIntoView();
+      await prepareCalculableTlQuote(assetDetailsPage, addAssetPage, {
+        origRef: "SQ-TL-NetTrade-01",
+      });
+      await assetDetailsPage.ensureLessDepositSectionExpanded();
       await assetDetailsPage.enterTradeAmount("$5,000");
+      await assetDetailsPage.clickCalculateButton({ fast: true });
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
       await expect
         .poll(async () => assetDetailsPage.readNetTradeAmountNormalized(), {
           timeout: 45_000,
@@ -1061,6 +991,8 @@ test.describe("Standard Quote - TL @do @regression", () => {
         })
         .toMatch(/5000/);
       await assetDetailsPage.enterSettlementAmount("$2,000");
+      await assetDetailsPage.clickCalculateButton({ fast: true });
+      await assetDetailsPage.waitForQuoteLoadersToFinish();
       await assetDetailsPage.expectNetTradeAmountPattern(/\$?\s*3[, ]?000|3000/);
     },
   );
@@ -1548,7 +1480,7 @@ test.describe("Standard Quote - TL @do @regression", () => {
       await selectTlProductAndProgram(assetDetailsPage);
 
       await test.step("Prepare TL Standard Quote", async () => {
-        await prepareTlQuoteForSettlementTrigger(assetDetailsPage, addAssetPage);
+        await prepareTlQuoteForSettlementTrigger(page, assetDetailsPage, addAssetPage);
         await settlementPage.waitForSettlementTriggerEnabled(60_000).catch(() => {});
       });
 

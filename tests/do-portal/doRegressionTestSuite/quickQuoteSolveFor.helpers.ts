@@ -132,11 +132,40 @@ export async function calculateInDepositMode(quickQuotePage: DOQuickQuotePage): 
   await quickQuotePage.expectCreateQuoteVisible();
 }
 
-export async function calculateInBalloonMode(quickQuotePage: DOQuickQuotePage): Promise<void> {
+/** Re-commit inputs after switching to Balloon — Angular often keeps displayed values but blocks Calculate until fields are touched. */
+async function commitBalloonModeInputsBeforeCalculate(
+  quickQuotePage: DOQuickQuotePage,
+): Promise<void> {
+  await quickQuotePage.dismissQuickQuoteDropdownOverlays();
+
+  const cash = (await quickQuotePage.readCashPriceDisplayValue()).trim();
+  if (!DOQuickQuotePage.isBlankCurrencyDisplay(cash)) {
+    await quickQuotePage.enterCashPrice(cash);
+  }
+
+  const depositPct = (await quickQuotePage.readDepositPercentDisplayValue()).trim();
+  const depositUsd = (await quickQuotePage.readDepositDollarDisplayValue()).trim();
+  if (!DOQuickQuotePage.isBlankPercentDisplay(depositPct)) {
+    await quickQuotePage.enterDepositPercent(depositPct);
+  } else if (!DOQuickQuotePage.isBlankCurrencyDisplay(depositUsd)) {
+    await quickQuotePage.enterDepositDollars(depositUsd);
+  }
+
+  const payment = (await quickQuotePage.readPaymentDisplayValue()).trim();
+  if (!DOQuickQuotePage.isBlankCurrencyDisplay(payment)) {
+    await quickQuotePage.enterPaymentAmount(payment);
+  }
+
   await quickQuotePage.enterInterestRatePercent("9");
   await quickQuotePage.enterTermsMonths("36");
   await quickQuotePage.selectFrequency("Monthly");
+  await quickQuotePage.interestRatePercentInput.press("Tab").catch(() => {});
+}
+
+export async function calculateInBalloonMode(quickQuotePage: DOQuickQuotePage): Promise<void> {
+  await commitBalloonModeInputsBeforeCalculate(quickQuotePage);
   await quickQuotePage.clickCalculate();
+  await expectBalloonCalculated(quickQuotePage);
   await quickQuotePage.expectCreateQuoteVisible();
 }
 
